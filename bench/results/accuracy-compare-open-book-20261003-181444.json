@@ -1,0 +1,857 @@
+{
+  "bench": "accuracy",
+  "recorded_at": "2026-10-03T18:14:44.863813+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "quiz": "warroom/kb/quiz/factory_quiz.jsonl",
+  "n_items": 44,
+  "think": false,
+  "open_book": true,
+  "cite": false,
+  "points_per_item": 2.27,
+  "results": [
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+        "kind": "ollama",
+        "ollama_version": "0.33.2",
+        "ollama_details": {
+          "format": "safetensors",
+          "family": "nemotron_h",
+          "parameter_size": "32.9B",
+          "quantization_level": "nvfp4"
+        }
+      },
+      "n": 44,
+      "correct": 38,
+      "score_points": 86.36,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 23.18,
+          "error": null
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 42.912,
+          "error": null
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 20.5,
+          "error": null
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 6.642,
+          "error": null
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 43.887,
+          "error": null
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 50.276,
+          "error": null
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 102.131,
+          "error": null
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 106.142,
+          "error": null
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 24.228,
+          "error": null
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 8.593,
+          "error": null
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.546,
+          "error": null
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.284,
+          "error": null
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 9.2,
+          "error": null
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 9.12,
+          "error": null
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.984,
+          "error": null
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.072,
+          "error": null
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 3.389,
+          "error": null
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 3.551,
+          "error": null
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 47.522,
+          "error": null
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 50.541,
+          "error": null
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 43.433,
+          "error": null
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 40.857,
+          "error": null
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 35.201,
+          "error": null
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 34.793,
+          "error": null
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 9.84,
+          "error": null
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 9.565,
+          "error": null
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 6.574,
+          "error": null
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 6.564,
+          "error": null
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.324,
+          "error": null
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 2.277,
+          "error": null
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.898,
+          "error": null
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.895,
+          "error": null
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.45,
+          "error": null
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.448,
+          "error": null
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.338,
+          "error": null
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.323,
+          "error": null
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.305,
+          "error": null
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.307,
+          "error": null
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.331,
+          "error": null
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.334,
+          "error": null
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.449,
+          "error": null
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.455,
+          "error": null
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.459,
+          "error": null
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.455,
+          "error": null
+        }
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-mxfp8",
+        "kind": "ollama",
+        "ollama_version": "0.33.2"
+      },
+      "n": 44,
+      "correct": 40,
+      "score_points": 90.91,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 220.897,
+          "error": null
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 234.178,
+          "error": null
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 23.918,
+          "error": null
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 14.694,
+          "error": null
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 10.423,
+          "error": null
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 7.276,
+          "error": null
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 2.813,
+          "error": null
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.572,
+          "error": null
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.286,
+          "error": null
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.529,
+          "error": null
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 6.834,
+          "error": null
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 14.457,
+          "error": null
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 13.016,
+          "error": null
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.086,
+          "error": null
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 6.159,
+          "error": null
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 6.191,
+          "error": null
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 6.892,
+          "error": null
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 29.088,
+          "error": null
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 42.395,
+          "error": null
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 21.256,
+          "error": null
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 14.318,
+          "error": null
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 14.089,
+          "error": null
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 4.501,
+          "error": null
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 9.181,
+          "error": null
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 15.418,
+          "error": null
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 17.741,
+          "error": null
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 15.441,
+          "error": null
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 7.5,
+          "error": null
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.236,
+          "error": null
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 8.399,
+          "error": null
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 11.051,
+          "error": null
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 6.966,
+          "error": null
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 5.849,
+          "error": null
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.97,
+          "error": null
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.361,
+          "error": null
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 5.054,
+          "error": null
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 12.705,
+          "error": null
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 14.648,
+          "error": null
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 20.651,
+          "error": null
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 24.27,
+          "error": null
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 29.527,
+          "error": null
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 20.535,
+          "error": null
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 4.046,
+          "error": null
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 31.715,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "gap_points": 4.55,
+  "verdicts": [
+    {
+      "name": "nvfp4_vs_fp8_gap",
+      "target": "≤ 3.0 points",
+      "measured": 4.55,
+      "passed": false,
+      "note": "nemotron-3.5-lightning:30b-a3b-nvfp4=86.36 vs nemotron-3.5-lightning:30b-a3b-mxfp8=90.91 on n=44",
+      "extra": {}
+    }
+  ]
+}

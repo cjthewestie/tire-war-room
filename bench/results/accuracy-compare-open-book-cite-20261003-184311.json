@@ -1,0 +1,5192 @@
+{
+  "bench": "accuracy",
+  "recorded_at": "2026-10-03T18:43:11.548519+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "quiz": "warroom/kb/quiz/factory_quiz.jsonl, bench/quiz/factory_quiz_generated.jsonl",
+  "quiz_files": [
+    "warroom/kb/quiz/factory_quiz.jsonl",
+    "bench/quiz/factory_quiz_generated.jsonl"
+  ],
+  "n_items": 254,
+  "think": false,
+  "open_book": true,
+  "mode": "open-book (headline)",
+  "cite": true,
+  "points_per_item": 0.39,
+  "results": [
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+        "kind": "ollama",
+        "ollama_version": "0.33.2",
+        "ollama_details": {
+          "format": "safetensors",
+          "family": "nemotron_h",
+          "parameter_size": "32.9B",
+          "quantization_level": "nvfp4"
+        }
+      },
+      "quant": "nvfp4",
+      "n": 254,
+      "correct": 229,
+      "score_points": 90.16,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 93.789,
+          "error": null,
+          "evidence": "每台硫化機每週產量（模擬，小／中／大）現況：6／5／3"
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 111.286,
+          "error": null,
+          "evidence": "大胎 34.0 h"
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 38.439,
+          "error": null,
+          "evidence": "正常窗 120～130°C"
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 27.148,
+          "error": null,
+          "evidence": "合模液壓 20 kgf/cm²，洩漏測試 10 分鐘壓降不得超過 1 kgf/cm²。"
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 13.192,
+          "error": null,
+          "evidence": "11 台硫化機（CURE-01～CURE-11）"
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 9.806,
+          "error": null,
+          "evidence": "中、大胎固定機台（7～10 號共用機）"
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.515,
+          "error": null,
+          "evidence": "煉膠停機 ≥120°C"
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.965,
+          "error": null,
+          "evidence": "已加硫化劑的膠料 ≥110°C：安全核心直接停機（焦燒防護）"
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.55,
+          "error": null,
+          "evidence": "低於 120°C：安全核心已依規則 CURE_HOLD，不等 AI"
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 2.355,
+          "error": null,
+          "evidence": "安全核心（PLC 規則）獨立運作，你不能呼叫或覆寫它。"
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.588,
+          "error": null,
+          "evidence": "112°C 且上升中的未加硫膠料：尚未達 120°C 停機線，但需處置冷卻與投料"
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 14.266,
+          "error": null,
+          "evidence": "以等效硫化公式重算硫化時間：剩餘時間 × exp(Ea/R × (1/T實際 − 1/T參考))。例：中胎 128°C 需 28 小時，已進行 10 小時，剩 18 小時；降到 122°C 時反應速率約 0.679，剩餘需 26.5 小時，"
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 13.346,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.133,
+          "error": null,
+          "evidence": "活化能 85.0 kJ/mol（假設值）"
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.37,
+          "error": null,
+          "evidence": "活化能 85.0 kJ/mol（假設值）"
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.893,
+          "error": null,
+          "evidence": "先排出模時刻 T，再往前推投料與人力"
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 3.548,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分"
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.717,
+          "error": null,
+          "evidence": "A 線投料：小胎 T−1 時 40 分；中胎 T−2 時 30 分；大胎 T−3 時 30 分。"
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 22.381,
+          "error": null,
+          "evidence": "大胎：胎側膠 10 片／鋼絲圈 10 個"
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 21.629,
+          "error": null,
+          "evidence": "每換一次模約停機 8 小時"
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 6.784,
+          "error": null,
+          "evidence": "週末不斷火：週六晚班送最後一輪，週一清晨出模，免重新預熱。"
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 16.959,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 51.488,
+          "error": null,
+          "evidence": "每台硫化機每週產量（模擬，小／中／大） - 現況：6／5／3"
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 58.071,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 23.43,
+          "error": null,
+          "evidence": "班表（優化前提） - 硫化機組 早班 06:00–15:00 人數 2；中班 14:00–23:00 人數 2"
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 10.072,
+          "error": null,
+          "evidence": "胎體／胎面膠組 夜班 20:00–05:00，兼做出模、入模。"
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.553,
+          "error": null,
+          "evidence": "每換一次模約停機 8 小時，是硫化機產能最大的損失之一。"
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.213,
+          "error": null,
+          "evidence": "貼合組負荷不均（前段 87%、後段 35%）"
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.368,
+          "error": null,
+          "evidence": "同管線多台同時下降 → 鍋爐或主管路問題，改走 SOP-ST-01 蒸汽壓不足處置，暫停新胎入模。"
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.737,
+          "error": null,
+          "evidence": "低於 115°C 超過 30 分鐘：該模硫化度不確定，出模後必須破壞抽驗。"
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.61,
+          "error": null,
+          "evidence": "同管線其他機台溫度正常 → 單機問題：該機蒸汽閥、加熱板、疏水閥洩漏，或感測器漂移。例：7 號機異常時對照 6、8 號機（同 H2 管線）。"
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 3.158,
+          "error": null,
+          "evidence": "同管線多台同時下降 → 鍋爐或主管路問題，改走 SOP-ST-01 蒸汽壓不足處置。"
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.636,
+          "error": null,
+          "evidence": "主管可核准、修改或拒絕；拒絕跨組調人時改走加班。"
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 3.544,
+          "error": null,
+          "evidence": "大開煉機膠溫正常 90～100°C；超過 100°C 且持續上升即開事件。"
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.907,
+          "error": null,
+          "evidence": "進出水溫差小於 1°C：代表水沒有帶走熱，水路可能堵塞或閥門未開"
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.092,
+          "error": null,
+          "evidence": "跨組調人：R3，主管核准並記錄選項與理由。"
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 4.424,
+          "error": null,
+          "evidence": "R0：讀取與計算；R1：通知維修；R2：設定硫化時間建議值、確認新排程、夜班加班；R3：放慢或暫停投料、跨組調人、機台停用；不在白名單的動作一律攔截並寫入稽核日誌；系統沒有任何直接寫入 PLC 或致動器的權限。"
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.621,
+          "error": null,
+          "evidence": "不在白名單的動作一律攔截並寫入稽核日誌；系統沒有任何直接寫入 PLC 或致動器的權限。"
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.605,
+          "error": null,
+          "evidence": "SOP-EV-01 3.4：求解器逾時改用備援求解器；連續 2 次失敗則保留原排程並安全停止。"
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.459,
+          "error": null,
+          "evidence": "連續 2 次失敗則保留原排程並安全停止"
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.179,
+          "error": null,
+          "evidence": "工具失敗重試 1 次，仍失敗改走 SOP 路徑"
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.27,
+          "error": null,
+          "evidence": "區網斷：改用現場觸控屏與警示燈，依本 SOP 人工處置"
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.093,
+          "error": null,
+          "evidence": "1 分鐘內發現異常"
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.776,
+          "error": null,
+          "evidence": "1 分鐘內發現異常"
+        },
+        {
+          "id": "GQ-LINE-A-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.993,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.22,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.266,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.37,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-OPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.409,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.34,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.371,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.76,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-BIGOPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.847,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.771,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 15.745,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 33.093,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 47.223,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 48.407,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 39.275,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-COOL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 26.8,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-NAME-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 10.116,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-PROC-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 11.465,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-LINE-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 24.417,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-NAME-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 235.52,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-PROC-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 223.834,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-LINE-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 48.533,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 48.31,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-B-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 6.259,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 25.302,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 40.731,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 18.384,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 30.26,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 29.959,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形"
+        },
+        {
+          "id": "GQ-PROC-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 11.119,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 11.345,
+          "error": null,
+          "evidence": "B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-NAME-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.329,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-PROC-B-ASSY",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.086,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-LINE-C-PAYOFF",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.057,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-NAME-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.058,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-PROC-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.028,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-LINE-C-EXTR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 7.133,
+          "error": null,
+          "evidence": "C-EXTR｜C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 7.243,
+          "error": null,
+          "evidence": "C-EXTR｜C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-C-EXTR",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.524,
+          "error": null,
+          "evidence": "C-EXTR｜C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-C-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 2.462,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-NAME-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 16.365,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-PROC-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 16.347,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-LINE-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 10.253,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-NAME-C-WRAP",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 10.223,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-PROC-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.335,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-LINE-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.342,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-NAME-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.706,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-PROC-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.689,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-LINE-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 13.687,
+          "error": null,
+          "evidence": "BOND-01｜貼合｜油壓機｜製程 貼合"
+        },
+        {
+          "id": "GQ-NAME-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 13.706,
+          "error": null,
+          "evidence": "BOND-01｜貼合｜油壓機｜製程 貼合"
+        },
+        {
+          "id": "GQ-PROC-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 8.955,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-LINE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 9.08,
+          "error": null,
+          "evidence": "CURE-01 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-01",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 4.151,
+          "error": null,
+          "evidence": "CURE-01｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 3.959,
+          "error": null,
+          "evidence": "CURE-01...硫化...製程 硫化"
+        },
+        {
+          "id": "GQ-LINE-CURE-02",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.833,
+          "error": null,
+          "evidence": "CURE-02 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-02",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 2.191,
+          "error": null,
+          "evidence": "CURE-02｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-02",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 6.551,
+          "error": null,
+          "evidence": "CURE-02 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 6.4,
+          "error": null,
+          "evidence": "CURE-03 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 7.445,
+          "error": null,
+          "evidence": "CURE-03｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 7.449,
+          "error": null,
+          "evidence": "CURE-03 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-04",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.041,
+          "error": null,
+          "evidence": "CURE-04｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.06,
+          "error": null,
+          "evidence": "CURE-04｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-04",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.333,
+          "error": null,
+          "evidence": "CURE-04｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.135,
+          "error": null,
+          "evidence": "CURE-05...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-05",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.139,
+          "error": null,
+          "evidence": "CURE-05｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.332,
+          "error": null,
+          "evidence": "CURE-05｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.299,
+          "error": null,
+          "evidence": "CURE-06 硫化 硫化機 製程 硫化 蒸汽管線 H2 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.298,
+          "error": null,
+          "evidence": "CURE-06：硫化｜硫化機｜製程 硫化｜蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.311,
+          "error": null,
+          "evidence": "CURE-06：硫化｜硫化機｜製程 硫化｜蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.188,
+          "error": null,
+          "evidence": "CURE-07 硫化機，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-07",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.145,
+          "error": null,
+          "evidence": "CURE-07：硫化機，製程 硫化，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.128,
+          "error": null,
+          "evidence": "CURE-07...硫化...蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-08",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.176,
+          "error": null,
+          "evidence": "CURE-08 硫化 硫化機 製程 硫化 蒸汽管線 H2 中/大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.344,
+          "error": null,
+          "evidence": "CURE-08｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.373,
+          "error": null,
+          "evidence": "CURE-08 硫化 硫化機 製程 硫化 蒸汽管線 H2 中大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.327,
+          "error": null,
+          "evidence": "CURE-09 硫化 硫化機 製程 硫化 蒸汽管線 H3 中/大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.325,
+          "error": null,
+          "evidence": "CURE-09｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.378,
+          "error": null,
+          "evidence": "CURE-09｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.217,
+          "error": null,
+          "evidence": "CURE-10...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.28,
+          "error": null,
+          "evidence": "CURE-10｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.43,
+          "error": null,
+          "evidence": "CURE-10：硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.192,
+          "error": null,
+          "evidence": "CURE-11 硫化機，蒸汽管線 H3，僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.198,
+          "error": null,
+          "evidence": "CURE-11｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.308,
+          "error": null,
+          "evidence": "CURE-11 硫化 硫化機 製程 硫化 蒸汽管線 H3 僅小胎"
+        },
+        {
+          "id": "GQ-ONLINE-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.259,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.247,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.292,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.351,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-CAL",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.272,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.127,
+          "error": null,
+          "evidence": "A-COOL：A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-ONLINE-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.1,
+          "error": null,
+          "evidence": "A-WIND：A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-ONLINE-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.158,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.192,
+          "error": null,
+          "evidence": "B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.167,
+          "error": null,
+          "evidence": "B-FORM：B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.091,
+          "error": null,
+          "evidence": "B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-C-PAYOFF",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.05,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-ONLINE-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.152,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.145,
+          "error": null,
+          "evidence": "C-WIND：C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-ONLINE-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.095,
+          "error": null,
+          "evidence": "C-WRAP 為 C 鋼絲圈 氣囊 製程 包布"
+        },
+        {
+          "id": "GQ-ONLINE-D-CUT",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.064,
+          "error": null,
+          "evidence": "D-CUT：D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-ONLINE-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.927,
+          "error": null,
+          "evidence": "BOND-01 是貼合油壓機"
+        },
+        {
+          "id": "GQ-WHO-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 9.667,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 9.868,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.283,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.647,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.706,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.305,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-WHO-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.198,
+          "error": null,
+          "evidence": "A-WIND：A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-WHO-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.218,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.142,
+          "error": null,
+          "evidence": "B-FORM：B 胎側膠｜油壓機｜製程 成形"
+        },
+        {
+          "id": "GQ-WHO-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.145,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-B-ASSY",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.293,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-WHO-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.256,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-WHO-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.222,
+          "error": null,
+          "evidence": "C-EXTR｜C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.178,
+          "error": null,
+          "evidence": "C-WIND：C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-WHO-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.064,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-WHO-D-CUT",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.043,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-WHO-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.417,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-CMPD-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.555,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-CMPD-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.286,
+          "error": null,
+          "evidence": "A-OPEN：A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-CMPD-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.196,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-CMPD-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.998,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C 停機"
+        },
+        {
+          "id": "GQ-CMPD-A-CAL",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.513,
+          "error": null,
+          "evidence": "含膠料：A-CAL、A-OPEN、A-BIGOPEN、A-SMALLOPEN、A-WIND、B-MIX、B-OPEN、B-FORM、B-ASSY、C-PAYOFF、C-EXTR、C-WIND、C-WRAP、D-CUT、BOND-01、C-0"
+        },
+        {
+          "id": "GQ-CMPD-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.54,
+          "error": null,
+          "evidence": "B-MIX：密煉機，製程混煉，含膠料"
+        },
+        {
+          "id": "GQ-CMPD-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.893,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C 停機"
+        },
+        {
+          "id": "GQ-CMPD-B-FORM",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.992,
+          "error": null,
+          "evidence": "B-FORM：B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-CMPD-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.256,
+          "error": null,
+          "evidence": "CURE-02 為硫化機，屬硫化製程，含膠料，受安全核心煉膠溫度規則保護"
+        },
+        {
+          "id": "GQ-NOCMPD-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.083,
+          "error": null,
+          "evidence": "A-COOL：製程 冷卻"
+        },
+        {
+          "id": "GQ-NOCMPD-A-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.005,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-B-ASSY",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.241,
+          "error": null,
+          "evidence": "A-BIGOPEN：A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.128,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-NOCMPD-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.046,
+          "error": null,
+          "evidence": "C-WIND 屬於 C 鋼絲圈，製程為纏繞，不含膠料。"
+        },
+        {
+          "id": "GQ-NOCMPD-C-WRAP",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.949,
+          "error": null,
+          "evidence": "C-WRAP 氣囊 製程 包布"
+        },
+        {
+          "id": "GQ-NOCMPD-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.796,
+          "error": null,
+          "evidence": "D-CUT 製程 裁切"
+        },
+        {
+          "id": "GQ-NOCMPD-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.969,
+          "error": null,
+          "evidence": "B-OPEN：B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-HDR-CURE-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.044,
+          "error": null,
+          "evidence": "CURE-01~H5 為 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.116,
+          "error": null,
+          "evidence": "CURE-07、CURE-08 中/大胎共用；CURE-01～CURE-05 僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.198,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-02",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.044,
+          "error": null,
+          "evidence": "CURE-02...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.145,
+          "error": null,
+          "evidence": "CURE-02：硫化機，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-02",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.946,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎；CURE-06：蒸汽管線 H1，僅小胎；CURE-07～CURE-10：蒸汽管線 H2，中/大胎共用；CURE-11：蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.865,
+          "error": null,
+          "evidence": "CURE-03：硫化機｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.268,
+          "error": null,
+          "evidence": "CURE-03｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-03",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.312,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.118,
+          "error": null,
+          "evidence": "CURE-04...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-04",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.14,
+          "error": null,
+          "evidence": "CURE-04：硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 2.152,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎；CURE-06：蒸汽管線 H1，僅小胎；CURE-07～CURE-08：蒸汽管線 H2，中/大胎共用；CURE-09～CURE-10：蒸汽管線 H3，中/大胎共用；CURE-11：蒸汽"
+        },
+        {
+          "id": "GQ-HDR-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 2.025,
+          "error": null,
+          "evidence": "CURE-05 蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.192,
+          "error": null,
+          "evidence": "CURE-05｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 13.912,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 13.75,
+          "error": null,
+          "evidence": "CURE-06 硫化機...蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.061,
+          "error": null,
+          "evidence": "CURE-06：硫化機，蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.325,
+          "error": null,
+          "evidence": "CURE-06、CURE-07、CURE-08 接 H2；CURE-09、CURE-10 接 H3；CURE-01～CURE-05 接 H1"
+        },
+        {
+          "id": "GQ-HDR-CURE-07",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.276,
+          "error": null,
+          "evidence": "CURE-07 蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.041,
+          "error": null,
+          "evidence": "CURE-07：硫化機，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.052,
+          "error": null,
+          "evidence": "CURE-07、CURE-08 為 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-HDR-CURE-08",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.993,
+          "error": null,
+          "evidence": "CURE-07, CURE-08 為 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 12.169,
+          "error": null,
+          "evidence": "CURE-08：硫化機，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-08",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 12.315,
+          "error": null,
+          "evidence": "CURE-07、CURE-08、CURE-09、CURE-10 為 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-HDR-CURE-09",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.202,
+          "error": null,
+          "evidence": "CURE-09 硫化機...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-09",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.001,
+          "error": null,
+          "evidence": "CURE-09...中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.99,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 中/大胎共用，蒸汽管線 H3"
+        },
+        {
+          "id": "GQ-HDR-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.079,
+          "error": null,
+          "evidence": "CURE-10...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.067,
+          "error": null,
+          "evidence": "CURE-10...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.268,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 中/大胎共用 H3，CURE-04、CURE-05 僅小胎 H1"
+        },
+        {
+          "id": "GQ-HDR-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.228,
+          "error": null,
+          "evidence": "CURE-11 蒸汽管線 H3，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-11",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.934,
+          "error": null,
+          "evidence": "CURE-11...僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.055,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 中/大胎共用 H3；CURE-11 僅小胎 H3"
+        },
+        {
+          "id": "GQ-CURE-S",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.004,
+          "error": null,
+          "evidence": "小胎 24.0 h"
+        },
+        {
+          "id": "GQ-CURE-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 10.632,
+          "error": null,
+          "evidence": "中胎 28.0 h"
+        },
+        {
+          "id": "GQ-CURE-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 10.658,
+          "error": null,
+          "evidence": "大胎 34.0 h"
+        },
+        {
+          "id": "GQ-CURE-TEMP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.899,
+          "error": null,
+          "evidence": "正常窗 120～130°C"
+        },
+        {
+          "id": "GQ-CURE-PRESS",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.89,
+          "error": null,
+          "evidence": "液壓 20 kgf/cm²"
+        },
+        {
+          "id": "GQ-CURE-EA",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.854,
+          "error": null,
+          "evidence": "活化能 85.0 kJ/mol（假設值）"
+        },
+        {
+          "id": "GQ-SAFE-CMPD",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.874,
+          "error": null,
+          "evidence": "煉膠 ≥120°C 停機"
+        },
+        {
+          "id": "GQ-SAFE-CUR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.986,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C：安全核心直接停機（焦燒防護）"
+        },
+        {
+          "id": "GQ-SAFE-LOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.977,
+          "error": null,
+          "evidence": "硫化機 <120°C 保持"
+        },
+        {
+          "id": "GQ-NPRESS",
+          "ok": true,
+          "got": "A",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.822,
+          "error": null,
+          "evidence": "工廠模型（28 台機台）"
+        },
+        {
+          "id": "GQ-NMACH",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.821,
+          "error": null,
+          "evidence": "工廠模型（28 台機台）"
+        },
+        {
+          "id": "GQ-NML",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 10.212,
+          "error": null,
+          "evidence": "CURE-07、CURE-08、CURE-09、CURE-10 四台中/大胎共用硫化機"
+        },
+        {
+          "id": "GQ-BP-BOND-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 10.247,
+          "error": null,
+          "evidence": "小胎：開始貼合 T−40 分"
+        },
+        {
+          "id": "GQ-BP-FEED-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.173,
+          "error": null,
+          "evidence": "每台硫化機每週產量（模擬，小／中／大）... A 線投料：小胎 T−1 時 40 分"
+        },
+        {
+          "id": "GQ-BP-PCS-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.263,
+          "error": null,
+          "evidence": "小胎：胎側膠／鋼絲圈各 6 片"
+        },
+        {
+          "id": "GQ-BP-BOND-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.99,
+          "error": null,
+          "evidence": "中胎：開始貼合 T−1 時"
+        },
+        {
+          "id": "GQ-BP-FEED-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.48,
+          "error": null,
+          "evidence": "每台硫化機每週產量（模擬，小／中／大）... 中胎：開始貼合 T−1 時；A 線投料 T−2 時 30 分；胎側膠／鋼絲圈各 8 片"
+        },
+        {
+          "id": "GQ-BP-PCS-M",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.816,
+          "error": null,
+          "evidence": "中胎：開始貼合 T−1 時；A 線投料 T−2 時 30 分；胎側膠／鋼絲圈各 8 片"
+        },
+        {
+          "id": "GQ-BP-BOND-L",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.291,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分"
+        },
+        {
+          "id": "GQ-BP-FEED-L",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.143,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分；A 線投料 T−3 時 30 分"
+        },
+        {
+          "id": "GQ-BP-PCS-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.427,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分；A 線投料 T−3 時 30 分；胎側膠／鋼絲圈各 10 片"
+        },
+        {
+          "id": "GQ-CAP-現況-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 10.837,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-現況-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 10.524,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-現況-L",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.11,
+          "error": null,
+          "evidence": "每台硫化機每週產量（模擬，小／中／大） - 現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.031,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.868,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.913,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-S",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.884,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-M",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.894,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.88,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-LT-ML-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 7.255,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-ML-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 7.539,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-S-NOW",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 3.753,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-S-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 3.765,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-SHIFT-curing-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 25.326,
+          "error": null,
+          "evidence": "班表（優化前提）硫化機組 早班 06:00–15:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-curing-中班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 25.143,
+          "error": null,
+          "evidence": "硫化機組 中班 14:00–23:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-body-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 12.01,
+          "error": null,
+          "evidence": "胎體／胎面膠組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-body-夜班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 12.018,
+          "error": null,
+          "evidence": "胎體／胎面膠組 夜班 20:00–05:00"
+        },
+        {
+          "id": "GQ-SHIFT-side-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.45,
+          "error": null,
+          "evidence": "胎側膠組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bead_nylon-早班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 4.495,
+          "error": null,
+          "evidence": "鋼絲／尼龍組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bigopen-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.865,
+          "error": null,
+          "evidence": "大開煉機組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bond-早班",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.858,
+          "error": null,
+          "evidence": "胎體／胎面膠組 早班 08:00–17:00 人數 2"
+        }
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-mxfp8",
+        "kind": "ollama",
+        "ollama_version": "0.33.2",
+        "ollama_details": {
+          "format": "safetensors",
+          "family": "nemotron_h",
+          "parameter_size": "32.9B",
+          "quantization_level": "mxfp8"
+        }
+      },
+      "quant": "mxfp8",
+      "n": 254,
+      "correct": 230,
+      "score_points": 90.55,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 205.86,
+          "error": null,
+          "evidence": "中胎 28.0 h"
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 201.039,
+          "error": null,
+          "evidence": "大胎 34.0 h"
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 5.339,
+          "error": null,
+          "evidence": "正常窗 120～130°C"
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.031,
+          "error": null,
+          "evidence": "合模液壓 20 kgf/cm²"
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.084,
+          "error": null,
+          "evidence": "11 台硫化機（CURE-01～CURE-11）"
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.369,
+          "error": null,
+          "evidence": "先排瓶頸：4 台（7～10 號）只做中、大胎，小胎用其餘 7 台。"
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.342,
+          "error": null,
+          "evidence": "煉膠（未加硫）停機線 120°C"
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.246,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C：安全核心直接停機（焦燒防護）。"
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.367,
+          "error": null,
+          "evidence": "低於 120°C：安全核心已依規則 CURE_HOLD，不等 AI。"
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.358,
+          "error": null,
+          "evidence": "安全核心（PLC 規則）獨立運作，你不能呼叫或覆寫它。"
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.535,
+          "error": null,
+          "evidence": "112°C 且上升中的未加硫膠料：尚未達 120°C 停機線，但需處置冷卻與投料"
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 2.23,
+          "error": null,
+          "evidence": "例：中胎 128°C 需 28 小時，已進行 10 小時，剩 18 小時；降到 122°C 時反應速率約 0.679，剩餘需 26.5 小時，總硫化 36.5 小時，延長 8.5 小時。"
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.905,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.065,
+          "error": null,
+          "evidence": "活化能 85.0 kJ/mol（假設值）"
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.516,
+          "error": null,
+          "evidence": "例：中胎 128°C 需 28 小時，已進行 10 小時，剩 18 小時；降到 122°C 時反應速率比約 0.679"
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.522,
+          "error": null,
+          "evidence": "先排出模時刻 T，再往前推投料與人力"
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.094,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分"
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.109,
+          "error": null,
+          "evidence": "中胎：A 線投料 T−2 時 30 分"
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.513,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分；A 線投料 T−3 時 30 分；胎側膠／鋼絲圈各 10 片"
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.437,
+          "error": null,
+          "evidence": "每換一次模約停機 8 小時"
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 5.507,
+          "error": null,
+          "evidence": "週末不斷火：週六晚班送最後一輪，週一清晨出模，免重新預熱"
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 5.563,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.977,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.301,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.788,
+          "error": null,
+          "evidence": "硫化機組 早班 06:00–15:00 人數 2；硫化機組 中班 14:00–23:00 人數 2"
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.674,
+          "error": null,
+          "evidence": "胎體／胎面膠組 夜班 20:00–05:00，兼做出模、入模。"
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.422,
+          "error": null,
+          "evidence": "每換一次模約停機 8 小時，是硫化機產能最大的損失之一。"
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.271,
+          "error": null,
+          "evidence": "貼合組負荷不均（前段 87%、後段 35%）"
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.848,
+          "error": null,
+          "evidence": "SOP-CP-02 2. 觸發條件：事件偵測發現硫化機溫度較設定值（中胎 128°C）下降 3°C 以上，且預測會穩定在某一值（例：128→122°C）。"
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 2.071,
+          "error": null,
+          "evidence": "低於 115°C 超過 30 分鐘：該模硫化度不確定，出模後必須破壞抽驗。"
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.117,
+          "error": null,
+          "evidence": "同管線其他機台溫度正常 → 單機問題：該機蒸汽閥、加熱板、疏水閥洩漏，或感測器漂移。例：7 號機異常時對照 6、8 號機（同 H2 管線）。"
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 2.104,
+          "error": null,
+          "evidence": "同管線多台同時下降 → 鍋爐或主管路問題，改走 SOP-ST-01 蒸汽壓不足處置。"
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.322,
+          "error": null,
+          "evidence": "夜班加班：R2，主管核准。"
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.263,
+          "error": null,
+          "evidence": "水流低：檢查進水閥開度、過濾網堵塞、冷卻水塔水位與水泵。"
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.52,
+          "error": null,
+          "evidence": "進出水溫差小於 1°C：代表水沒有帶走熱，水路可能堵塞或閥門未開。"
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.387,
+          "error": null,
+          "evidence": "跨組調人：R3，需主管核准並記錄選項與理由。"
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.943,
+          "error": null,
+          "evidence": "R0：讀取與計算；R1：通知維修；R2：設定硫化時間建議值、確認新排程、夜班加班；R3：放慢或暫停投料、跨組調人、機台停用；不在白名單的動作一律攔截並寫入稽核日誌"
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.154,
+          "error": null,
+          "evidence": "不在白名單的動作一律攔截並寫入稽核日誌；系統沒有任何直接寫入 PLC 或致動器的權限。"
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.537,
+          "error": null,
+          "evidence": "求解器逾時改用備援求解器；連續 2 次失敗則保留原排程並安全停止"
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.264,
+          "error": null,
+          "evidence": "連續 2 次失敗則保留原排程並安全停止"
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.549,
+          "error": null,
+          "evidence": "工具失敗重試 1 次，仍失敗改走 SOP 路徑；求解器逾時改用備援求解器；連續 2 次失敗則保留原排程並安全停止。"
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.666,
+          "error": null,
+          "evidence": "區網斷：改用現場觸控屏與警示燈，依本 SOP 人工處置"
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.679,
+          "error": null,
+          "evidence": "安全核心（PLC 規則）先行：煉膠 ≥120°C 停、已加硫 ≥110°C 停、硫化機低於 120°C 保壓；不等 AI。"
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.742,
+          "error": null,
+          "evidence": "事件偵測（時序異常預測，非 LLM）常駐運行，1 分鐘內發現異常；"
+        },
+        {
+          "id": "GQ-LINE-A-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.478,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.488,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.487,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.513,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-OPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.514,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.481,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.511,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.538,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-BIGOPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.515,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.6,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.686,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.669,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.561,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.449,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.427,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-A-COOL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.382,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-NAME-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.351,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-PROC-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.346,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-LINE-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.358,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-NAME-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.371,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-PROC-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.361,
+          "error": null,
+          "evidence": "A-WIND｜A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-LINE-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.39,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.419,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-B-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.407,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.412,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.422,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.407,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.388,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.364,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.347,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.329,
+          "error": null,
+          "evidence": "B 胎側膠組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-NAME-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.285,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-PROC-B-ASSY",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.254,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-LINE-C-PAYOFF",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.262,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-NAME-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.266,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-PROC-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.247,
+          "error": null,
+          "evidence": "C-PAYOFF｜C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-LINE-C-EXTR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.357,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-NAME-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.475,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-PROC-C-EXTR",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.463,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-LINE-C-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.374,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-NAME-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.287,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-PROC-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.288,
+          "error": null,
+          "evidence": "C-WIND｜C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-LINE-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.27,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-NAME-C-WRAP",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.237,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-PROC-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.22,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-LINE-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.149,
+          "error": null,
+          "evidence": "D 尼龍布 裁切機 製程 裁切"
+        },
+        {
+          "id": "GQ-NAME-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.145,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-PROC-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.142,
+          "error": null,
+          "evidence": "D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-LINE-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.607,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-NAME-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.141,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-PROC-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.126,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-LINE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.743,
+          "error": null,
+          "evidence": "CURE-01 硫化 硫化機 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-01",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.442,
+          "error": null,
+          "evidence": "CURE-01 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.506,
+          "error": null,
+          "evidence": "CURE-01 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-02",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.435,
+          "error": null,
+          "evidence": "CURE-02 硫化 硫化機 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-02",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.439,
+          "error": null,
+          "evidence": "CURE-02 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-02",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.5,
+          "error": null,
+          "evidence": "CURE-02 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.435,
+          "error": null,
+          "evidence": "CURE-03 硫化 硫化機 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.44,
+          "error": null,
+          "evidence": "CURE-03 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.504,
+          "error": null,
+          "evidence": "CURE-03 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-04",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.512,
+          "error": null,
+          "evidence": "CURE-04 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.559,
+          "error": null,
+          "evidence": "CURE-04｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-04",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.541,
+          "error": null,
+          "evidence": "CURE-04 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.414,
+          "error": null,
+          "evidence": "CURE-05 硫化 硫化機 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-05",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.469,
+          "error": null,
+          "evidence": "CURE-05｜硫化｜硫化機｜製程 硫化｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.546,
+          "error": null,
+          "evidence": "CURE-05 硫化 硫化機 製程 硫化 蒸汽管線 H1 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.382,
+          "error": null,
+          "evidence": "CURE-06 硫化  蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.337,
+          "error": null,
+          "evidence": "CURE-06：硫化機，製程 硫化，蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.447,
+          "error": null,
+          "evidence": "CURE-06 硫化 硫化機 製程 硫化 蒸汽管線 H2 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.394,
+          "error": null,
+          "evidence": "CURE-07 硫化機，蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-07",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.406,
+          "error": null,
+          "evidence": "CURE-07 硫化 硫化機 製程 硫化 蒸汽管線 H2 中/大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.508,
+          "error": null,
+          "evidence": "CURE-07 硫化 硫化機 製程 硫化 蒸汽管線 H2 中/大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-08",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.435,
+          "error": null,
+          "evidence": "CURE-08 硫化 硫化機 蒸汽管線 H2 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.428,
+          "error": null,
+          "evidence": "CURE-08 硫化 硫化機 製程 硫化 蒸汽管線 H2 僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.516,
+          "error": null,
+          "evidence": "CURE-08 硫化 硫化機 製程 硫化 蒸汽管線 H2 僅小胎"
+        },
+        {
+          "id": "GQ-LINE-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.52,
+          "error": null,
+          "evidence": "CURE-09 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.496,
+          "error": null,
+          "evidence": "CURE-09 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.496,
+          "error": null,
+          "evidence": "CURE-09 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.519,
+          "error": null,
+          "evidence": "CURE-10 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-NAME-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.521,
+          "error": null,
+          "evidence": "CURE-10 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-PROC-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.499,
+          "error": null,
+          "evidence": "CURE-10 硫化 硫化機 製程 硫化 蒸汽管線 H3 中大胎共用"
+        },
+        {
+          "id": "GQ-LINE-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.418,
+          "error": null,
+          "evidence": "CURE-11 硫化 硫化機 蒸汽管線 H3 僅小胎"
+        },
+        {
+          "id": "GQ-NAME-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.388,
+          "error": null,
+          "evidence": "CURE-11 硫化機 製程 硫化 蒸汽管線 H3 僅小胎"
+        },
+        {
+          "id": "GQ-PROC-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.467,
+          "error": null,
+          "evidence": "CURE-11 硫化 硫化機 製程 硫化 蒸汽管線 H3 僅小胎"
+        },
+        {
+          "id": "GQ-ONLINE-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.508,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.462,
+          "error": null,
+          "evidence": "A-OPEN|A 胎體／胎面膠|開煉機|製程 壓片|含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.442,
+          "error": null,
+          "evidence": "A-BIGOPEN|A 胎體／胎面膠|大開煉機|製程 預熱|含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.548,
+          "error": null,
+          "evidence": "A-SMALLOPEN｜A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-CAL",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.524,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.359,
+          "error": null,
+          "evidence": "A-COOL：A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-ONLINE-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.279,
+          "error": null,
+          "evidence": "A-WIND|A 胎體／胎面膠|捲取設備|製程 捲取"
+        },
+        {
+          "id": "GQ-ONLINE-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.33,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.333,
+          "error": null,
+          "evidence": "B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.253,
+          "error": null,
+          "evidence": "B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.236,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-ONLINE-C-PAYOFF",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.233,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-ONLINE-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.339,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-ONLINE-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.329,
+          "error": null,
+          "evidence": "C-WIND：C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-ONLINE-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.212,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-ONLINE-D-CUT",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.151,
+          "error": null,
+          "evidence": "D-CUT 尼龍布 裁切機 製程 裁切"
+        },
+        {
+          "id": "GQ-ONLINE-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.589,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-WHO-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.786,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.484,
+          "error": null,
+          "evidence": "A-OPEN｜A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.491,
+          "error": null,
+          "evidence": "A-BIGOPEN｜A 胎體／胎面膠｜大開煉機｜製程 預熱｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.563,
+          "error": null,
+          "evidence": "A-SMALLOPEN：A 胎體／胎面膠｜小開煉機｜製程 保溫儲料｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.517,
+          "error": null,
+          "evidence": "A-CAL｜A 胎體／胎面膠｜壓延機｜製程 押出｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.368,
+          "error": null,
+          "evidence": "A-COOL｜A 胎體／胎面膠｜冷卻機｜製程 冷卻"
+        },
+        {
+          "id": "GQ-WHO-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.327,
+          "error": null,
+          "evidence": "A-WIND：A 胎體／胎面膠｜捲取設備｜製程 捲取"
+        },
+        {
+          "id": "GQ-WHO-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.37,
+          "error": null,
+          "evidence": "B-MIX｜B 胎側膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.408,
+          "error": null,
+          "evidence": "B-OPEN｜B 胎側膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.381,
+          "error": null,
+          "evidence": "B-FORM｜B 胎側膠｜油壓機｜製程 成形｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-B-ASSY",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.315,
+          "error": null,
+          "evidence": "B-ASSY｜B 胎側膠｜油壓機｜製程 組裝"
+        },
+        {
+          "id": "GQ-WHO-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.254,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-WHO-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.349,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-WHO-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.361,
+          "error": null,
+          "evidence": "C-WIND：C 鋼絲圈｜纏繞機｜製程 拉圈"
+        },
+        {
+          "id": "GQ-WHO-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.237,
+          "error": null,
+          "evidence": "C-WRAP｜C 鋼絲圈｜氣囊｜製程 包布"
+        },
+        {
+          "id": "GQ-WHO-D-CUT",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.225,
+          "error": null,
+          "evidence": "D-CUT｜D 尼龍布｜裁切機｜製程 裁切"
+        },
+        {
+          "id": "GQ-WHO-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.672,
+          "error": null,
+          "evidence": "貼合是四條線匯流的地方：D 尼龍布包住 C 鋼絲圈，配上 B 胎側膠，再與 A 胎體／胎面膠在油壓機貼合後入硫化機。"
+        },
+        {
+          "id": "GQ-CMPD-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.656,
+          "error": null,
+          "evidence": "A-MIX 含膠料，煉膠 ≥120°C 停機"
+        },
+        {
+          "id": "GQ-CMPD-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.343,
+          "error": null,
+          "evidence": "A-OPEN：A 胎體／胎面膠｜開煉機｜製程 壓片｜含膠料"
+        },
+        {
+          "id": "GQ-CMPD-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.243,
+          "error": null,
+          "evidence": "C-PAYOFF 製程 拉線，含膠料"
+        },
+        {
+          "id": "GQ-CMPD-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.192,
+          "error": null,
+          "evidence": "CURE-01 為硫化機，含膠料，受安全核心煉膠溫度規則保護"
+        },
+        {
+          "id": "GQ-CMPD-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.197,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C 停機"
+        },
+        {
+          "id": "GQ-CMPD-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.039,
+          "error": null,
+          "evidence": "B-MIX：密煉機，製程混煉，含膠料"
+        },
+        {
+          "id": "GQ-CMPD-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.048,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C 停機"
+        },
+        {
+          "id": "GQ-CMPD-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.256,
+          "error": null,
+          "evidence": "CURE-03 為硫化機，屬含膠料製程，受安全核心煉膠溫度規則保護。"
+        },
+        {
+          "id": "GQ-CMPD-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.511,
+          "error": null,
+          "evidence": "CURE-01～CURE-11 硫化機製程 硫化 蒸汽管線 H1/H2/H3，含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.274,
+          "error": null,
+          "evidence": "A-BIGOPEN：製程 預熱 含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-A-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.085,
+          "error": null,
+          "evidence": "A-SMALLOPEN 製程 保溫儲料 含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-B-ASSY",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.298,
+          "error": null,
+          "evidence": "A-MIX｜A 胎體／胎面膠｜密煉機｜製程 混煉｜含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.315,
+          "error": null,
+          "evidence": "C-PAYOFF：C 鋼絲圈｜放線架｜製程 拉線"
+        },
+        {
+          "id": "GQ-NOCMPD-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.21,
+          "error": null,
+          "evidence": "A-OPEN: A 胎體／胎面膠 製程 壓片 含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.11,
+          "error": null,
+          "evidence": "C-WRAP 製程 包布，不含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.995,
+          "error": null,
+          "evidence": "D-CUT 製程 裁切，不含膠料"
+        },
+        {
+          "id": "GQ-NOCMPD-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 1.204,
+          "error": null,
+          "evidence": "C-EXTR：C 鋼絲圈｜押出機｜製程 押出包膠｜含膠料"
+        },
+        {
+          "id": "GQ-HDR-CURE-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.317,
+          "error": null,
+          "evidence": "CURE-01 硫化機蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.326,
+          "error": null,
+          "evidence": "CURE-01 硫化機蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.411,
+          "error": null,
+          "evidence": "CURE-01～CURE-05 為蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.364,
+          "error": null,
+          "evidence": "CURE-02 硫化機...蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.343,
+          "error": null,
+          "evidence": "CURE-02 硫化機｜蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.561,
+          "error": null,
+          "evidence": "CURE-01～CURE-05：蒸汽管線 H1，僅小胎；CURE-06：蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.501,
+          "error": null,
+          "evidence": "CURE-03 硫化機...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.286,
+          "error": null,
+          "evidence": "CURE-03 硫化機｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-03",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.317,
+          "error": null,
+          "evidence": "CURE-01～CURE-05 為蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.265,
+          "error": null,
+          "evidence": "CURE-04 硫化機...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-04",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.26,
+          "error": null,
+          "evidence": "CURE-04 硫化機｜蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.219,
+          "error": null,
+          "evidence": "CURE-01 至 CURE-05 接 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.189,
+          "error": null,
+          "evidence": "CURE-05 硫化機，蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.235,
+          "error": null,
+          "evidence": "CURE-05 硫化機蒸汽管線 H3，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.255,
+          "error": null,
+          "evidence": "CURE-01～CURE-05 為蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-HDR-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.248,
+          "error": null,
+          "evidence": "CURE-06 硫化機...蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.274,
+          "error": null,
+          "evidence": "CURE-06：硫化機，蒸汽管線 H2，僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 2.102,
+          "error": null,
+          "evidence": "CURE-06、CURE-07、CURE-08 為蒸汽管線 H2，僅小胎；CURE-07、CURE-08 為中/大胎共用；CURE-09、CURE-10 為蒸汽管線 H3，中/大胎共用。"
+        },
+        {
+          "id": "GQ-HDR-CURE-07",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 2.099,
+          "error": null,
+          "evidence": "CURE-07 硫化機...蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.327,
+          "error": null,
+          "evidence": "CURE-07 硫化機...蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.28,
+          "error": null,
+          "evidence": "CURE-07、CURE-08 為 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-HDR-CURE-08",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.253,
+          "error": null,
+          "evidence": "CURE-08 硫化機...蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.35,
+          "error": null,
+          "evidence": "CURE-08 硫化機 硫化 蒸汽管線 H2，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-08",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.381,
+          "error": null,
+          "evidence": "CURE-06、CURE-07、CURE-08、CURE-09 為 H2 管線"
+        },
+        {
+          "id": "GQ-HDR-CURE-09",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.322,
+          "error": null,
+          "evidence": "CURE-09 硫化機...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-09",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.317,
+          "error": null,
+          "evidence": "CURE-09 硫化機｜蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.321,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 為蒸汽管線 H3，中大胎共用"
+        },
+        {
+          "id": "GQ-HDR-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.295,
+          "error": null,
+          "evidence": "CURE-10 硫化機蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-USE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.312,
+          "error": null,
+          "evidence": "CURE-10 硫化機...蒸汽管線 H3，中/大胎共用"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.851,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 中/大胎共用 H3；CURE-04、CURE-05 僅小胎 H1；CURE-06、CURE-07 僅小胎 H2；CURE-08 僅小胎 H2"
+        },
+        {
+          "id": "GQ-HDR-CURE-11",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.81,
+          "error": null,
+          "evidence": "CURE-11 硫化機...蒸汽管線 H1，僅小胎"
+        },
+        {
+          "id": "GQ-USE-CURE-11",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.162,
+          "error": null,
+          "evidence": "CURE-11 硫化機...僅小胎"
+        },
+        {
+          "id": "GQ-ONHDR-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.29,
+          "error": null,
+          "evidence": "CURE-09、CURE-10 為中/大胎共用 H3；CURE-11 為僅小胎 H3"
+        },
+        {
+          "id": "GQ-CURE-S",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.206,
+          "error": null,
+          "evidence": "小胎 24.0 h"
+        },
+        {
+          "id": "GQ-CURE-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.923,
+          "error": null,
+          "evidence": "中胎 28.0 h"
+        },
+        {
+          "id": "GQ-CURE-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.914,
+          "error": null,
+          "evidence": "大胎 34 小時"
+        },
+        {
+          "id": "GQ-CURE-TEMP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.952,
+          "error": null,
+          "evidence": "正常窗 120～130°C"
+        },
+        {
+          "id": "GQ-CURE-PRESS",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.973,
+          "error": null,
+          "evidence": "液壓 20 kgf/cm²"
+        },
+        {
+          "id": "GQ-CURE-EA",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.018,
+          "error": null,
+          "evidence": "活化能 85.0 kJ/mol（假設值）"
+        },
+        {
+          "id": "GQ-SAFE-CMPD",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.056,
+          "error": null,
+          "evidence": "煉膠 ≥120°C 停機"
+        },
+        {
+          "id": "GQ-SAFE-CUR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.039,
+          "error": null,
+          "evidence": "已加硫膠料 ≥110°C 停機"
+        },
+        {
+          "id": "GQ-SAFE-LOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.034,
+          "error": null,
+          "evidence": "硫化機 <120°C 保持"
+        },
+        {
+          "id": "GQ-NPRESS",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.129,
+          "error": null,
+          "evidence": "工廠共有 11 台硫化機（CURE-01～CURE-11）"
+        },
+        {
+          "id": "GQ-NMACH",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.102,
+          "error": null,
+          "evidence": "工廠模型（28 台機台）"
+        },
+        {
+          "id": "GQ-NML",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.041,
+          "error": null,
+          "evidence": "CURE-07～CURE-10 為中/大胎共用"
+        },
+        {
+          "id": "GQ-BP-BOND-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.067,
+          "error": null,
+          "evidence": "小胎：開始貼合 T−40 分"
+        },
+        {
+          "id": "GQ-BP-FEED-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.054,
+          "error": null,
+          "evidence": "小胎：A 線投料 T−1 時 40 分"
+        },
+        {
+          "id": "GQ-BP-PCS-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.153,
+          "error": null,
+          "evidence": "小胎：胎側膠／鋼絲圈各 6 片"
+        },
+        {
+          "id": "GQ-BP-BOND-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.097,
+          "error": null,
+          "evidence": "中胎：開始貼合 T−1 時"
+        },
+        {
+          "id": "GQ-BP-FEED-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.068,
+          "error": null,
+          "evidence": "中胎：A 線投料 T−2 時 30 分"
+        },
+        {
+          "id": "GQ-BP-PCS-M",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.179,
+          "error": null,
+          "evidence": "中胎：胎側膠／鋼絲圈各 8 片"
+        },
+        {
+          "id": "GQ-BP-BOND-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.161,
+          "error": null,
+          "evidence": "大胎：開始貼合 T−1 時 30 分"
+        },
+        {
+          "id": "GQ-BP-FEED-L",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.109,
+          "error": null,
+          "evidence": "大胎：A 線投料 T−3 時 30 分"
+        },
+        {
+          "id": "GQ-BP-PCS-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.166,
+          "error": null,
+          "evidence": "大胎：胎側膠／鋼絲圈各 10 片"
+        },
+        {
+          "id": "GQ-CAP-現況-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.046,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-現況-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.876,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-現況-L",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.851,
+          "error": null,
+          "evidence": "現況：6／5／3"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-S",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.936,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.024,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-只延長班表-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.0,
+          "error": null,
+          "evidence": "只延長班表：6／5.9／4.5"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-S",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 1.011,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-M",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 1.031,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.016,
+          "error": null,
+          "evidence": "AI 排出模時刻：7／6／4.9"
+        },
+        {
+          "id": "GQ-LT-ML-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.331,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-ML-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.663,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-S-NOW",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 1.667,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-LT-S-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 1.704,
+          "error": null,
+          "evidence": "交期：中、大胎各 100 條 13.3 → 9.3 週；小胎 2.4 → 2.0 週"
+        },
+        {
+          "id": "GQ-SHIFT-curing-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.519,
+          "error": null,
+          "evidence": "硫化機組 早班 06:00–15:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-curing-中班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.276,
+          "error": null,
+          "evidence": "硫化機組 中班 14:00–23:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-body-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.325,
+          "error": null,
+          "evidence": "胎體／胎面膠組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-body-夜班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.387,
+          "error": null,
+          "evidence": "胎體／胎面膠組 夜班 20:00–05:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-side-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.345,
+          "error": null,
+          "evidence": "胎側膠組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bead_nylon-早班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 1.339,
+          "error": null,
+          "evidence": "鋼絲／尼龍組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bigopen-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 1.327,
+          "error": null,
+          "evidence": "大開煉機組 早班 08:00–17:00 人數 2"
+        },
+        {
+          "id": "GQ-SHIFT-bond-早班",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 1.331,
+          "error": null,
+          "evidence": "胎體／胎面膠組 早班 08:00–17:00 人數 2"
+        }
+      ]
+    }
+  ],
+  "paired": {
+    "n_paired": 254,
+    "both_correct": 222,
+    "only_a_correct": 7,
+    "only_b_correct": 8,
+    "neither_correct": 17,
+    "diff_points": -0.39,
+    "gap_points": 0.39,
+    "ci95_points": [
+      -3.45,
+      2.67
+    ],
+    "ci_method": "Agresti-Min adjusted Wald (paired)",
+    "mcnemar_exact_p": 1.0,
+    "points_per_item": 0.39
+  },
+  "verdicts": [
+    {
+      "name": "nvfp4_vs_mxfp8_gap",
+      "target": "≤ 3.0 points",
+      "measured": 0.39,
+      "passed": true,
+      "note": "open-book (headline); nemotron-3.5-lightning:30b-a3b-nvfp4 [NVFP4]=90.16 vs nemotron-3.5-lightning:30b-a3b-mxfp8 [MXFP8]=90.55 on n=254 (1 item = 0.39 pts); MXFP8 (Ollama/MLX 8-bit microscaling) is a Mac stand-in, not the page-10 FP8 control; run vLLM QUANT=fp8 on the Spark (bench/spark_ablation.sh) for the real control",
+      "extra": {
+        "diff_points": -0.39,
+        "ci95_points": [
+          -3.45,
+          2.67
+        ],
+        "mcnemar_exact_p": 1.0
+      }
+    },
+    {
+      "name": "nvfp4_vs_mxfp8_noninferiority_ci95",
+      "target": "95% CI of nvfp4−mxfp8 > −3.0 points",
+      "measured": [
+        -3.45,
+        2.67
+      ],
+      "passed": null,
+      "note": "diff -0.39 pts, discordant 7/8, McNemar p=1.0; inconclusive: CI straddles −3, needs more items",
+      "extra": {}
+    }
+  ],
+  "gap_points": 0.39
+}

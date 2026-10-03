@@ -1,0 +1,4684 @@
+{
+  "bench": "accuracy",
+  "recorded_at": "2026-10-03T19:21:47.157443+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "quiz": "warroom/kb/quiz/factory_quiz.jsonl, bench/quiz/factory_quiz_generated.jsonl",
+  "quiz_files": [
+    "warroom/kb/quiz/factory_quiz.jsonl",
+    "bench/quiz/factory_quiz_generated.jsonl"
+  ],
+  "n_items": 254,
+  "think": false,
+  "open_book": true,
+  "mode": "open-book (headline)",
+  "cite": false,
+  "points_per_item": 0.39,
+  "results": [
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+        "kind": "ollama",
+        "ollama_version": "0.33.2",
+        "ollama_details": {
+          "format": "safetensors",
+          "family": "nemotron_h",
+          "parameter_size": "32.9B",
+          "quantization_level": "nvfp4"
+        }
+      },
+      "quant": "nvfp4",
+      "n": 254,
+      "correct": 221,
+      "score_points": 87.01,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 9.299,
+          "error": null
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 13.443,
+          "error": null
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.375,
+          "error": null
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.441,
+          "error": null
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.453,
+          "error": null
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.445,
+          "error": null
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.413,
+          "error": null
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.423,
+          "error": null
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.438,
+          "error": null
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.475,
+          "error": null
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.446,
+          "error": null
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.423,
+          "error": null
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.428,
+          "error": null
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.422,
+          "error": null
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.43,
+          "error": null
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.429,
+          "error": null
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.428,
+          "error": null
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.46,
+          "error": null
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.395,
+          "error": null
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.377,
+          "error": null
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.457,
+          "error": null
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.464,
+          "error": null
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.471,
+          "error": null
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.458,
+          "error": null
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.429,
+          "error": null
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.442,
+          "error": null
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.449,
+          "error": null
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.448,
+          "error": null
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.421,
+          "error": null
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.427,
+          "error": null
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.427,
+          "error": null
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.436,
+          "error": null
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.411,
+          "error": null
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.408,
+          "error": null
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.412,
+          "error": null
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.418,
+          "error": null
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.429,
+          "error": null
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.419,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.439,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.46,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.443,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-OPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.47,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.438,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.442,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-BIGOPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.42,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.467,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.511,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-COOL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.461,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.507,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.457,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.436,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.477,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.454,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.456,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.478,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.457,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.468,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.431,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.46,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-ASSY",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-PAYOFF",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.442,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.47,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-EXTR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.445,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-EXTR",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.496,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.445,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.457,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-WRAP",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.449,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.438,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.452,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.482,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.44,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.411,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.434,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-01",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.443,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-01",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.456,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.483,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-02",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.45,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-02",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.45,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-02",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.471,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.436,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.44,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-04",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.44,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.446,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-04",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.474,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-05",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.49,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.472,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.472,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-07",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.473,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.464,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-08",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.436,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.477,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.477,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.473,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.448,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.476,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.478,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.48,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.446,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.425,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.431,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-CAL",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.428,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.419,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.418,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.417,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.469,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.45,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-PAYOFF",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.446,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.484,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.455,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.422,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-D-CUT",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.445,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.465,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.422,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.41,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.443,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.474,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.48,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.453,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.421,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-ASSY",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.481,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.463,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-D-CUT",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.459,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.452,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.463,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.45,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-BIGOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.428,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.425,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.415,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.421,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-FORM",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.412,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.401,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.461,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-B-ASSY",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.406,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-WRAP",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.41,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.415,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-BOND-01",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.419,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.457,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.455,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.419,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.45,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.415,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.44,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-03",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.425,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.439,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-04",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.441,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.421,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-05",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.436,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.419,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.413,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-07",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.431,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.434,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.453,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-08",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-09",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.456,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-09",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.47,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.454,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.444,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.46,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-11",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.435,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-11",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.418,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-S",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.415,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.412,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.413,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-TEMP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.422,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-PRESS",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.423,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-EA",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.42,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-CMPD",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.423,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-CUR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.42,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-LOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.417,
+          "error": null
+        },
+        {
+          "id": "GQ-NPRESS",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.433,
+          "error": null
+        },
+        {
+          "id": "GQ-NMACH",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.456,
+          "error": null
+        },
+        {
+          "id": "GQ-NML",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.445,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.418,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.42,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.428,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-M",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-L",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.425,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-L",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.424,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-S",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.414,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.413,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-L",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.429,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-S",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.448,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.462,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.459,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-S",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.463,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-M",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-L",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.466,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-ML-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.432,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-ML-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.431,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-S-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.463,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-S-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.449,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-curing-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.437,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-curing-中班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.472,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-body-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.483,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-body-夜班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.485,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-side-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.465,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bead_nylon-早班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.455,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bigopen-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.451,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bond-早班",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.438,
+          "error": null
+        }
+      ]
+    },
+    {
+      "endpoint": {
+        "base_url": "http://localhost:11434/v1",
+        "model": "nemotron-3.5-lightning:30b-a3b-mxfp8",
+        "kind": "ollama",
+        "ollama_version": "0.33.2",
+        "ollama_details": {
+          "format": "safetensors",
+          "family": "nemotron_h",
+          "parameter_size": "32.9B",
+          "quantization_level": "mxfp8"
+        }
+      },
+      "quant": "mxfp8",
+      "n": 254,
+      "correct": 221,
+      "score_points": 87.01,
+      "errors": 0,
+      "items": [
+        {
+          "id": "FQ-001",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 57.366,
+          "error": null
+        },
+        {
+          "id": "FQ-002",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 53.015,
+          "error": null
+        },
+        {
+          "id": "FQ-003",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.588,
+          "error": null
+        },
+        {
+          "id": "FQ-004",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.485,
+          "error": null
+        },
+        {
+          "id": "FQ-005",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.589,
+          "error": null
+        },
+        {
+          "id": "FQ-006",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.588,
+          "error": null
+        },
+        {
+          "id": "FQ-007",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.477,
+          "error": null
+        },
+        {
+          "id": "FQ-008",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.489,
+          "error": null
+        },
+        {
+          "id": "FQ-009",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.508,
+          "error": null
+        },
+        {
+          "id": "FQ-010",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.506,
+          "error": null
+        },
+        {
+          "id": "FQ-011",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.516,
+          "error": null
+        },
+        {
+          "id": "FQ-012",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.54,
+          "error": null
+        },
+        {
+          "id": "FQ-013",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.503,
+          "error": null
+        },
+        {
+          "id": "FQ-014",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.474,
+          "error": null
+        },
+        {
+          "id": "FQ-015",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.483,
+          "error": null
+        },
+        {
+          "id": "FQ-016",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.475,
+          "error": null
+        },
+        {
+          "id": "FQ-017",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.487,
+          "error": null
+        },
+        {
+          "id": "FQ-018",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.49,
+          "error": null
+        },
+        {
+          "id": "FQ-019",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.487,
+          "error": null
+        },
+        {
+          "id": "FQ-020",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.59,
+          "error": null
+        },
+        {
+          "id": "FQ-021",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 4.732,
+          "error": null
+        },
+        {
+          "id": "FQ-022",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 4.634,
+          "error": null
+        },
+        {
+          "id": "FQ-023",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.546,
+          "error": null
+        },
+        {
+          "id": "FQ-024",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "FQ-025",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.538,
+          "error": null
+        },
+        {
+          "id": "FQ-026",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.52,
+          "error": null
+        },
+        {
+          "id": "FQ-027",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.494,
+          "error": null
+        },
+        {
+          "id": "FQ-028",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.49,
+          "error": null
+        },
+        {
+          "id": "FQ-029",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.506,
+          "error": null
+        },
+        {
+          "id": "FQ-030",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.509,
+          "error": null
+        },
+        {
+          "id": "FQ-031",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.512,
+          "error": null
+        },
+        {
+          "id": "FQ-032",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.511,
+          "error": null
+        },
+        {
+          "id": "FQ-033",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.484,
+          "error": null
+        },
+        {
+          "id": "FQ-034",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.494,
+          "error": null
+        },
+        {
+          "id": "FQ-035",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.499,
+          "error": null
+        },
+        {
+          "id": "FQ-036",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.49,
+          "error": null
+        },
+        {
+          "id": "FQ-037",
+          "ok": true,
+          "got": "D",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.566,
+          "error": null
+        },
+        {
+          "id": "FQ-038",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "FQ-039",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.475,
+          "error": null
+        },
+        {
+          "id": "FQ-040",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.471,
+          "error": null
+        },
+        {
+          "id": "FQ-041",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.482,
+          "error": null
+        },
+        {
+          "id": "FQ-042",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.497,
+          "error": null
+        },
+        {
+          "id": "FQ-043",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "FQ-044",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.562,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.485,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.536,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.637,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.577,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-OPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.585,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.68,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-BIGOPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.572,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.578,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-BIGOPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.659,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.565,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.483,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.593,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.6,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.584,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.66,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-COOL",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.559,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.579,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-COOL",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.676,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.571,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-A-WIND",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.57,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.679,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.579,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.585,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-MIX",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.676,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.569,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.583,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.674,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.571,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.594,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.68,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.574,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-B-ASSY",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.664,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-PAYOFF",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.568,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.574,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.689,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-EXTR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.596,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.585,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-EXTR",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.69,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.586,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.54,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.65,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.585,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-C-WRAP",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.578,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.672,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.569,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-D-CUT",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.672,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.471,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-BOND-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.559,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-01",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.579,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.678,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-02",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.574,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-02",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.581,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-02",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.67,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.561,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-03",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.569,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.669,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-04",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.57,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.575,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-04",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.667,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.671,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-05",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.685,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-05",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.675,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.569,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.575,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.674,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.679,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-07",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.68,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.664,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-08",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.568,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.57,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.671,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.681,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.673,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.664,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.638,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.671,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.709,
+          "error": null
+        },
+        {
+          "id": "GQ-LINE-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.691,
+          "error": null
+        },
+        {
+          "id": "GQ-NAME-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.696,
+          "error": null
+        },
+        {
+          "id": "GQ-PROC-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.683,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.578,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.482,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.547,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-CAL",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.6,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.587,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.531,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.542,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.643,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-B-ASSY",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.638,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-PAYOFF",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.657,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-EXTR",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.714,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.655,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.6,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-D-CUT",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.637,
+          "error": null
+        },
+        {
+          "id": "GQ-ONLINE-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.671,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.581,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.494,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-BIGOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.482,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-SMALLOPEN",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.471,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-CAL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.584,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.724,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-A-WIND",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.744,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-MIX",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.642,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-OPEN",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.529,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-B-ASSY",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.66,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.596,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-WIND",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.547,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-C-WRAP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.643,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-D-CUT",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-WHO-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.485,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-MIX",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.493,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-OPEN",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.495,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-BIGOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.565,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-SMALLOPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.649,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-A-CAL",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.624,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-MIX",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.585,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-OPEN",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.622,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-B-FORM",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.608,
+          "error": null
+        },
+        {
+          "id": "GQ-CMPD-C-EXTR",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-A-COOL",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.614,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-A-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.661,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-B-ASSY",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.662,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-PAYOFF",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.619,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-WIND",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.574,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-C-WRAP",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.578,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-D-CUT",
+          "ok": true,
+          "got": "D",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-NOCMPD-BOND-01",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.589,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-01",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.653,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-01",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.597,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-01",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.487,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.589,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.59,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-02",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.476,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-03",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.557,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-03",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.56,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-03",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.531,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.613,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-04",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-04",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.533,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.611,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-05",
+          "ok": true,
+          "got": "C",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.559,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-05",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.533,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-06",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.612,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-06",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-06",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.505,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-07",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-07",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.566,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.646,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-08",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.563,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-08",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.568,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-09",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.644,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-09",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.56,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-09",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-10",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.673,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-10",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.594,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-10",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.568,
+          "error": null
+        },
+        {
+          "id": "GQ-HDR-CURE-11",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.659,
+          "error": null
+        },
+        {
+          "id": "GQ-USE-CURE-11",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.578,
+          "error": null
+        },
+        {
+          "id": "GQ-ONHDR-CURE-11",
+          "ok": true,
+          "got": "D",
+          "expected": "B",
+          "correct": false,
+          "latency_s": 0.564,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-S",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.561,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-M",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.485,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.488,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-TEMP",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.5,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-PRESS",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.498,
+          "error": null
+        },
+        {
+          "id": "GQ-CURE-EA",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.486,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-CMPD",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.508,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-CUR",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.508,
+          "error": null
+        },
+        {
+          "id": "GQ-SAFE-LOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.49,
+          "error": null
+        },
+        {
+          "id": "GQ-NPRESS",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.62,
+          "error": null
+        },
+        {
+          "id": "GQ-NMACH",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.749,
+          "error": null
+        },
+        {
+          "id": "GQ-NML",
+          "ok": true,
+          "got": "C",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.72,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.597,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.513,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.518,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.517,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.527,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-M",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.523,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-BOND-L",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.526,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-FEED-L",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.529,
+          "error": null
+        },
+        {
+          "id": "GQ-BP-PCS-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.52,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-S",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.503,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-M",
+          "ok": true,
+          "got": "B",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.492,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-現況-L",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.558,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-S",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.553,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-M",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.582,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-只延長班表-L",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.659,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-S",
+          "ok": true,
+          "got": "A",
+          "expected": "C",
+          "correct": false,
+          "latency_s": 0.664,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-M",
+          "ok": true,
+          "got": "C",
+          "expected": "A",
+          "correct": false,
+          "latency_s": 0.707,
+          "error": null
+        },
+        {
+          "id": "GQ-CAP-AI 排出模時刻-L",
+          "ok": true,
+          "got": "A",
+          "expected": "D",
+          "correct": false,
+          "latency_s": 0.674,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-ML-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.557,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-ML-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.491,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-S-NOW",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.596,
+          "error": null
+        },
+        {
+          "id": "GQ-LT-S-AI",
+          "ok": true,
+          "got": "D",
+          "expected": "D",
+          "correct": true,
+          "latency_s": 0.588,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-curing-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.503,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-curing-中班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.558,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-body-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.57,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-body-夜班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.547,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-side-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.547,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bead_nylon-早班",
+          "ok": true,
+          "got": "A",
+          "expected": "A",
+          "correct": true,
+          "latency_s": 0.546,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bigopen-早班",
+          "ok": true,
+          "got": "B",
+          "expected": "B",
+          "correct": true,
+          "latency_s": 0.528,
+          "error": null
+        },
+        {
+          "id": "GQ-SHIFT-bond-早班",
+          "ok": true,
+          "got": "C",
+          "expected": "C",
+          "correct": true,
+          "latency_s": 0.514,
+          "error": null
+        }
+      ]
+    }
+  ],
+  "paired": {
+    "n_paired": 254,
+    "both_correct": 215,
+    "only_a_correct": 6,
+    "only_b_correct": 6,
+    "neither_correct": 27,
+    "diff_points": 0.0,
+    "gap_points": 0.0,
+    "ci95_points": [
+      -2.76,
+      2.76
+    ],
+    "ci_method": "Agresti-Min adjusted Wald (paired)",
+    "mcnemar_exact_p": 1.0,
+    "points_per_item": 0.39
+  },
+  "verdicts": [
+    {
+      "name": "nvfp4_vs_mxfp8_gap",
+      "target": "≤ 3.0 points",
+      "measured": 0.0,
+      "passed": true,
+      "note": "open-book (headline); nemotron-3.5-lightning:30b-a3b-nvfp4 [NVFP4]=87.01 vs nemotron-3.5-lightning:30b-a3b-mxfp8 [MXFP8]=87.01 on n=254 (1 item = 0.39 pts); MXFP8 (Ollama/MLX 8-bit microscaling) is a Mac stand-in, not the page-10 FP8 control; run vLLM QUANT=fp8 on the Spark (bench/spark_ablation.sh) for the real control",
+      "extra": {
+        "diff_points": 0.0,
+        "ci95_points": [
+          -2.76,
+          2.76
+        ],
+        "mcnemar_exact_p": 1.0
+      }
+    },
+    {
+      "name": "nvfp4_vs_mxfp8_noninferiority_ci95",
+      "target": "95% CI of nvfp4−mxfp8 > −3.0 points",
+      "measured": [
+        -2.76,
+        2.76
+      ],
+      "passed": true,
+      "note": "diff +0.0 pts, discordant 6/6, McNemar p=1.0",
+      "extra": {}
+    }
+  ],
+  "gap_points": 0.0
+}

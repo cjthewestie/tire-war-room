@@ -24,7 +24,18 @@ Steps
     Same-role processes on other ports (a user's own Ollama, another app's qdrant) are listed as ignored.
  4. Internet probe (must fail while blocked), then unblock (always, in finally).
 
+ --sandbox (macOS, no root): re-run this test inside `sandbox-exec` with SANDBOX_PROFILE, which denies every
+    outbound connection except to localhost. The block is real but process-level: it covers this process and
+    everything it starts (with --spawn-app, the whole war-room app), not the model server (Ollama), which the
+    socket watcher still checks. The drop counter is the kernel's own Sandbox log: every
+    `deny(1) network-outbound` line for a process in our tree is one blocked attempt to leave. `log` refuses to
+    run inside a sandbox, so the sandboxed child records its pids and window and the unsandboxed parent reads
+    the log after the child exits, then re-judges and re-saves the result.
+ --spawn-app: start `python -m warroom.api serve` (LLM_MODE=llm against --base-url/--model) on a free
+    localhost port as a child, run the --app-url path against it, watch it, stop it afterwards.
+
   uv run python -m bench.unplug_test --watch 0               # Mac: direct, socket check only
+  uv run python -m bench.unplug_test --sandbox --spawn-app --watch 120   # Mac: app really offline, no root
   sudo -E uv run python -m bench.unplug_test --block --app-url http://127.0.0.1:8000     # Spark, 10 min
 """
 from __future__ import annotations
@@ -39,6 +50,8 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -59,6 +72,84 @@ PF = ROOT / "deploy" / "network" / "pf-warroom.conf"
 NFT_COUNTER = ["inet", "warroom_offline", "dropped_egress"]
 QDRANT_PORTS = (6333, 6334)
 PROBE_HOSTS = ("1.1.1.1", "8.8.8.8")
+SANDBOX_ENV = "WARROOM_UNPLUG_SANDBOXED"
+RESULT_PATH_ENV = "WARROOM_UNPLUG_RESULT_PATH"      # child writes its saved-result path here for the parent
+# Seatbelt profile: everything allowed except outbound network to anything but localhost. Unix sockets
+# (DNS via mDNSResponder, local IPC) stay allowed: resolving a name works, connecting to it does not.
+SANDBOX_PROFILE = """(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
+(allow network-outbound (remote unix-socket))
+"""
+
+
+def sandbox_argv(argv: list[str]) -> list[str]:
+    """Command that re-runs this module under sandbox-exec with the offline profile."""
+    return ["sandbox-exec", "-p", SANDBOX_PROFILE, sys.executable, "-m", "bench.unplug_test", *argv]
+
+
+def in_sandbox() -> bool:
+    return os.environ.get(SANDBOX_ENV) == "1"
+
+
+def parse_sandbox_denies(text: str, pids: set[int], before: str | None = None) -> int:
+    """Count `deny(1) network-outbound` reports in `log show --style compact` output for `pids`
+    ('N duplicate report' adds N). `before` ('YYYY-MM-DD HH:MM:SS.mmm') drops lines at or after it, i.e. the
+    deliberate internet probe that runs after the watch window."""
+    n = 0
+    for ln in text.splitlines():
+        if before and ln[:23] >= before:
+            continue
+        m = re.search(r"Sandbox: \S+\((\d+)\) deny\(1\) network-outbound", ln)
+        if not m or int(m.group(1)) not in pids:
+            continue
+        d = re.search(r"(\d+) duplicate reports? for", ln)
+        n += int(d.group(1)) if d else 1
+    return n
+
+
+def now_ms() -> str:
+    """Local wall time with milliseconds, in `log show --style compact` timestamp format."""
+    t = time.time()
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)) + f".{int(t % 1 * 1000):03d}"
+
+
+def process_tree() -> set[int]:
+    me = psutil.Process()
+    return {me.pid} | {c.pid for c in me.children(recursive=True)}
+
+
+def free_port() -> int:
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def spawn_app(ep: Endpoint, timeout_s: float = 120.0) -> tuple[subprocess.Popen, str, Path]:
+    """Start the real war-room app on localhost with the LLM commander pointed at `ep`."""
+    port = free_port()
+    run_dir = Path(tempfile.mkdtemp(prefix="warroom-unplug-"))
+    env = os.environ | {"LLM_MODE": "llm", "BASE_URL": ep.base_url, "MODEL": ep.model,
+                        "AUDIT_PATH": str(run_dir / "audit.jsonl"), "SCHEDULE_DIR": str(run_dir / "schedules"),
+                        "QDRANT_PATH": str(run_dir / "qdrant"), "HF_HUB_OFFLINE": "1"}
+    log = open(run_dir / "app.log", "w")
+    proc = subprocess.Popen([sys.executable, "-m", "warroom.api", "serve", "--host", "127.0.0.1",
+                             "--port", str(port), "--scenario", "normal", "--llm-mode", "llm"],
+                            cwd=ROOT, env=env, stdout=log, stderr=subprocess.STDOUT)
+    url = f"http://127.0.0.1:{port}"
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            raise RuntimeError(f"app exited with {proc.returncode}; log {run_dir / 'app.log'}")
+        try:
+            if httpx.get(url + "/api/health", timeout=1).status_code == 200:
+                return proc, url, run_dir
+        except httpx.HTTPError:
+            pass
+        time.sleep(0.5)
+    proc.terminate()
+    raise RuntimeError(f"app not healthy after {timeout_s}s; log {run_dir / 'app.log'}")
 
 
 def is_outbound(ip: str, lan: list[ipaddress._BaseNetwork] | None = None) -> bool:
@@ -304,11 +395,17 @@ class EgressEvidence:
         self.flows: set[tuple[str, str, int]] = set()
         self.conntrack_snapshots = 0
         self.notes: list[str] = []
+        self.sandbox = in_sandbox()
+        self.sandbox_pids: set[int] = set()
+        self._since = time.strftime("%Y-%m-%d %H:%M:%S")
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._loop, daemon=True)
 
     def counter(self) -> int | None:
         if not self.block_applied:
+            return None
+        if self.sandbox:            # `log` cannot run sandboxed: record pids, the parent counts afterwards
+            self.sandbox_pids |= process_tree()
             return None
         if self.system == "Linux":
             ok, txt = _run(["nft", "list", "counter", *NFT_COUNTER])
@@ -355,12 +452,15 @@ class EgressEvidence:
         self._t.join(timeout=10)
         self.snapshot()
         self.end_count = self.counter()
+        self._until = now_ms()
 
     def report(self) -> dict[str, Any]:
         dropped = None
         if self.start_count is not None and self.end_count is not None:
             dropped = self.end_count - self.start_count
-        return {"firewall_dropped_packets": dropped, "conntrack_available": self.conntrack_ok,
+        extra = ({"sandbox_pids": sorted(self.sandbox_pids), "window": [self._since, self._until]}
+                 if self.sandbox else {})
+        return {**extra, "firewall_dropped_packets": dropped, "conntrack_available": self.conntrack_ok,
                 "conntrack_snapshots": self.conntrack_snapshots,
                 "conntrack_outbound_flows": [{"proto": p, "dst": d, "dport": n} for p, d, n in sorted(self.flows)],
                 "notes": self.notes}
@@ -502,14 +602,24 @@ async def main_async(args) -> dict[str, Any]:
     ep = Endpoint.from_env(args.base_url, args.model)
     out: dict[str, Any] = {"platform": platform.platform(), "is_root": os.geteuid() == 0, "watch_s": args.watch}
     blk, unblk = block_commands(args.block_cmd, args.unblock_cmd)
-    out["block"] = {"requested": args.block, "applied": False}
-    if args.block:
+    out["block"] = {"requested": args.block or args.sandbox, "applied": False}
+    if in_sandbox():
+        out["block"].update(applied=True, method="sandbox-exec", scope=(
+            "process-level: bench" + (" + spawned war-room app" if args.spawn_app else "")
+            + "; outbound allowed to localhost only; model server is outside the sandbox (socket-watched)"),
+            profile=SANDBOX_PROFILE)
+    elif args.block:
         ok, msg = apply(blk)
         out["block"].update(applied=ok, cmd=" ".join(blk), msg=msg)
     applied = out["block"]["applied"]
     alert_s = None
+    app_proc = None
     try:
         await stream_chat(ep, [{"role": "user", "content": "hi"}], max_tokens=1)   # model resident
+        if args.spawn_app:
+            app_proc, args.app_url, run_dir = spawn_app(ep)
+            out["spawned_app"] = {"pid": app_proc.pid, "url": args.app_url, "run_dir": str(run_dir)}
+            args.pid = (args.pid or []) + [app_proc.pid]
         ports = watch_ports(ep.base_url, args.app_url, args.watch_port)
         t0 = time.monotonic()
         with EgressEvidence(applied, lan) as egress, \
@@ -532,11 +642,44 @@ async def main_async(args) -> dict[str, Any]:
         # probe AFTER the window so its own packets are not counted as the stack's egress
         out["internet_reachable_during_test"] = internet_reachable()
     finally:
-        if args.block and applied:
+        if app_proc is not None:
+            app_proc.terminate()
+            try:
+                app_proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                app_proc.kill()
+        if args.block and applied and not in_sandbox():
             ok, msg = apply(unblk)
             out["block"]["unblocked"] = ok
     out["verdicts"] = verdicts(out, alert_s, bool(args.app_url))
     out["saved_to"] = str(save_result("unplug", ep, out, args.out_dir))
+    if in_sandbox() and os.environ.get(RESULT_PATH_ENV):
+        Path(os.environ[RESULT_PATH_ENV]).write_text(out["saved_to"], encoding="utf-8")
+    return out
+
+
+def count_sandbox_denies(pids: set[int], since: str, until: str) -> tuple[int | None, str]:
+    """Blocked outbound attempts by `pids` from `since` up to (not incl.) `until` ('...HH:MM:SS.mmm', the moment
+    the internet probe starts), from the kernel Sandbox log. Must run unsandboxed."""
+    end = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.mktime(time.strptime(until[:19], "%Y-%m-%d %H:%M:%S")) + 1))
+    ok, txt = _run(["/usr/bin/log", "show", "--style", "compact", "--start", since, "--end", end,
+                    "--predicate", 'eventMessage CONTAINS "network-outbound"'], timeout=120)
+    return (parse_sandbox_denies(txt, pids, before=until), "") if ok else (None, txt[:200])
+
+
+def finalize_sandboxed(path: Path) -> dict[str, Any]:
+    """Parent side of --sandbox: fill the deny count into the child's result, re-judge, re-save in place."""
+    out = json.loads(path.read_text(encoding="utf-8"))
+    eg = out["egress"]
+    n, err = count_sandbox_denies(set(eg.get("sandbox_pids", [])), *eg["window"])
+    eg["firewall_dropped_packets"] = n
+    eg["counter_source"] = "kernel Sandbox log: deny(1) network-outbound for the sandboxed pids"
+    if err:
+        eg.setdefault("notes", []).append(f"sandbox log unreadable: {err}")
+    out["saved_to"] = str(path)
+    alert = next((v for v in out["verdicts"] if v["name"] == "alert_offline"), {})
+    out["verdicts"] = verdicts(out, alert.get("measured"), "app" in out)
+    path.write_text(json.dumps(out, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return out
 
 
@@ -576,7 +719,10 @@ def verdicts(out: dict[str, Any], alert_s: float | None, via_app: bool) -> list[
         passed, note = None, "block applied but firewall counter unreadable; socket samples only"
     else:
         passed = socks == 0 and dropped == 0 and (flows in (None, 0))
-        note = "firewall drop counter + socket samples" + (" + conntrack" if flows is not None else "")
+        sandboxed = out["block"].get("method") == "sandbox-exec"
+        note = (("sandbox-exec deny log (process-level; model server socket-watched only)" if sandboxed
+                 else "firewall drop counter") + " + socket samples"
+                + (" + conntrack" if flows is not None else ""))
     measured = socks + (dropped or 0) + (flows or 0)
     vs.append(Verdict("outbound_connections", "0", measured, passed, note=note, extra=evidence).__dict__)
     if applied:
@@ -590,6 +736,8 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     p.add_argument("--base-url")
     p.add_argument("--model")
     p.add_argument("--block", action="store_true")
+    p.add_argument("--sandbox", action="store_true", help="macOS, no root: run inside sandbox-exec, offline")
+    p.add_argument("--spawn-app", action="store_true", help="start the war-room app as a child and test it")
     p.add_argument("--block-cmd")
     p.add_argument("--unblock-cmd")
     p.add_argument("--app-url")
@@ -604,7 +752,20 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     p.add_argument("--watch-port", type=int, action="append", help="extra listen port marking a stack process")
     p.add_argument("--lan-cidr", action="append")
     p.add_argument("--out-dir", type=Path)
-    out = run(main_async(p.parse_args(argv)))
+    args = p.parse_args(argv)
+    if args.sandbox and not in_sandbox():
+        if platform.system() != "Darwin" or not shutil.which("sandbox-exec"):
+            p.error("--sandbox needs macOS sandbox-exec; on Linux use --block")
+        with tempfile.NamedTemporaryFile("r", suffix=".path") as f:
+            env = os.environ | {SANDBOX_ENV: "1", RESULT_PATH_ENV: f.name}
+            r = subprocess.run(sandbox_argv(sys.argv[1:] if argv is None else list(argv)), env=env)
+            saved = Path(f.name).read_text(encoding="utf-8").strip()
+        if r.returncode != 0 or not saved:
+            raise SystemExit(f"sandboxed run failed (exit {r.returncode})")
+        out = finalize_sandboxed(Path(saved))
+        print("-- after reading the Sandbox deny log outside the sandbox:")
+    else:
+        out = run(main_async(args))
     for v in out["verdicts"]:
         print(f"{v['name']:<22} target {v['target']:<8} measured {v['measured']}  pass={v['passed']}  {v['note']}")
     print("block:", out["block"], " watched pids:", out["sockets"]["watched_pids"],

@@ -113,6 +113,14 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
                 out.append(f"**Unplug block is process-level (Mac).** {d['_file']} ran under sandbox-exec: the bench "
                            "and the war-room app were offline; the model server (Ollama) was outside the sandbox and "
                            "only socket-watched. The physical cable pull with the nftables block is still a Spark run.")
+                eg = d.get("egress") or {}
+                n = eg.get("firewall_dropped_packets")
+                if n:
+                    out.append(f"**The app tried to leave the factory {n} time(s)** in {d['_file']} (kernel Sandbox "
+                               f"log, `deny(1) network-outbound` to port 443 by pids {eg.get('sandbox_pids')}). Every "
+                               "attempt was blocked, so nothing left, but '0 outbound attempts' is not met. Not from "
+                               "Python-level sockets (an audit hook on socket.connect saw none) and not reproduced by "
+                               "the headless `warroom.api demo`; the source is a native library, still unidentified.")
     return out
 
 
