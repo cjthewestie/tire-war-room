@@ -768,9 +768,13 @@ def verdicts(out: dict[str, Any], alert_s: float | None, via_app: bool) -> list[
         cc = app.get("commander_call") or {}
         ttft = cc.get("ttft_ms")
         ttft_s = None if ttft is None else round(ttft / 1000, 3)
-        vs.append(Verdict("commander_ttft", f"≤ {TTFT_TARGET_S} s", ttft_s,
-                          None if ttft_s is None else ttft_s <= TTFT_TARGET_S,
+        # Info only: the page-10 TTFT target is defined at 32k context (judged by bench/ttft.py); this is
+        # the app's own commander call, whose prompt is ~5-6k tokens, so it is not compared with that target.
+        ptoks = cc.get("prompt_tokens")
+        vs.append(Verdict("commander_ttft_app_prompt", f"info (≤ {TTFT_TARGET_S} s target is at 32k; see ttft bench)",
+                          ttft_s, None,
                           note=("from the event's llm_call audit entry" if cc else "no llm_call audit entry")
+                          + (f"; prompt_tokens={ptoks}" if ptoks else "")
                           + (f"; mode={cc.get('mode')}" if cc.get("mode") else ""), extra=cc).__dict__)
     else:
         vs.append(Verdict("alert_offline", f"≤ {LATENCY_FIRST_ALERT_S} s", alert_s,

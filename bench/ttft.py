@@ -186,10 +186,18 @@ async def main_async(args) -> dict[str, Any]:
         lc = await long_context_runs(ep, args.context_tokens, args.runs)
         out["long_context"] = lc
         reached = lc["prompt_tokens_measured"] >= 0.9 * args.context_tokens
-        verdicts.append(Verdict("ttft_warm_32k_p50", f"≤ {TTFT_TARGET_S} s", lc["warm_ttft_s"].get("p50"),
-                                _le(lc["warm_ttft_s"].get("p50"), TTFT_TARGET_S) if reached else None,
-                                note=f"prompt_tokens={lc['prompt_tokens_measured']}"
-                                     + ("" if reached else " (context did not reach target: server truncated)")))
+        ws, cs = lc["warm_ttft_s"], lc["cold_ttft_s"]
+        short = "" if reached else " (context did not reach target: server truncated)"
+        # Judged on p90 over every warm call, like the other latency targets: one warm request in six
+        # missing the target must not hide behind the median. Cold 32k is published beside it.
+        verdicts.append(Verdict("ttft_warm_32k_p90", f"≤ {TTFT_TARGET_S} s", ws.get("p90"),
+                                _le(ws.get("p90"), TTFT_TARGET_S) if reached else None,
+                                note=f"prefix-cache hit, n={ws.get('n', 0)}, p50={ws.get('p50')}, "
+                                     f"max={ws.get('max')}, prompt_tokens={lc['prompt_tokens_measured']}" + short,
+                                extra={"warm": ws}))
+        verdicts.append(Verdict("ttft_cold_32k_p50", "info (target judged warm, prefix cache)", cs.get("p50"),
+                                None, note=f"no prefix cache: full 32k prefill, n={cs.get('n', 0)}, "
+                                           f"max={cs.get('max')}" + short, extra={"cold": cs}))
     out["verdicts"] = [v.__dict__ for v in verdicts]
     path = save_result("ttft", ep, out, args.out_dir)
     out["saved_to"] = str(path)

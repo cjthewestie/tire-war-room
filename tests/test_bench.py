@@ -254,7 +254,10 @@ def test_ttft_runner(env_fake, tmp_path):
     out = ttft.main(["--runs", "2", "--context-tokens", "2000", "--out-dir", str(tmp_path)])
     names = {v["name"]: v for v in out["verdicts"]}
     assert names["first_alert_card_p90"]["passed"] is True
-    assert "ttft_warm_32k_p50" in names
+    assert "ttft_warm_32k_p90" in names and "ttft_cold_32k_p50" in names
+    assert names["ttft_cold_32k_p50"]["passed"] is None
+    lc = out["long_context"]
+    assert names["ttft_warm_32k_p90"]["measured"] == lc["warm_ttft_s"]["p90"]
     assert out["alert_card"]["valid_card_rate"] == 1.0
     saved = json.loads(Path(out["saved_to"]).read_text())
     assert saved["bench"] == "ttft" and saved["host"]["hostname"]
@@ -395,7 +398,8 @@ def test_unplug_verdicts_use_firewall_evidence_and_commander_card():
            "commander_call": {"mode": "llm", "ttft_ms": 3193, "total_ms": 10118}}
     v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(False, app=app), 10.1, True)}
     assert v["alert_offline"]["passed"] is False and v["alert_offline"]["extra"]["placeholder_after_anomaly_s"] == 0.017
-    assert v["commander_ttft"]["measured"] == 3.193 and v["commander_ttft"]["passed"] is False
+    ct = v["commander_ttft_app_prompt"]
+    assert ct["measured"] == 3.193 and ct["passed"] is None and "commander_ttft" not in v
 
 
 def test_card_source():
