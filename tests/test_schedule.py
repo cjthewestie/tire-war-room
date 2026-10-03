@@ -29,7 +29,13 @@ from warroom.schedule import (
     capacity_report,
 )
 from warroom.schedule.backprop import labor_for
-from warroom.schedule.capacity import POLICIES, lead_time_from_rates, weekly_per_press
+from warroom.schedule.capacity import (
+    POLICIES,
+    lead_time_from_rates,
+    simulated_lead_times,
+    simulated_rows,
+    weekly_per_press,
+)
 from warroom.schedule.demo import demo_inputs, reschedule
 from warroom.schedule.solver import check_schedule
 from warroom.schedule.staffing import complete_shifts, gap_label, is_short
@@ -194,6 +200,18 @@ def test_store_versions_and_rollback(tmp_path):
     assert v3.event_id is None and v2.event_id == "EV-1"
 
 
+def test_rollback_refuses_unapproved_proposed_version(tmp_path):
+    """Rolling 'back' to a PROPOSED version would activate it without gate + approval."""
+    _, _, seed = demo_inputs(NOW)
+    st = FileScheduleStore(tmp_path / "s", initial=seed)
+    v2 = st.propose(seed.model_copy(update={"id": "B"}), "pending R3 transfer", "EV-1")
+    with pytest.raises(ValueError, match="proposed"):
+        st.rollback(to_version=v2.version)
+    assert st.current().version == 1 and st.get(2).status is ScheduleStatus.PROPOSED
+    assert st.activate(2).version == 2                    # the approval path still works afterwards
+    assert st.rollback().version == 1                     # and one-click rollback to an approved version too
+
+
 # ---------------------------------------------------------------- page-11 demo
 def test_page11_reschedule_moves_A311_to_press9(tmp_path):
     orders, shifts, seed = demo_inputs(NOW)
@@ -237,39 +255,50 @@ def test_without_cure_extension_nothing_moves():
 
 
 # ---------------------------------------------------------------- capacity (page 6)
-def test_capacity_current_matches_page6_exactly():
-    rows = {r.label: r for r in capacity_report().rows}
-    cur = rows["現況"]
-    assert (cur.small, cur.medium, cur.large) == (6.0, 5.0, 3.0)
+def test_capacity_rows_equal_page6_table():
+    rows = capacity_report().rows
+    assert [r.label for r in rows] == [t.label for t in F.CAPACITY_TARGETS]
+    for r, t in zip(rows, F.CAPACITY_TARGETS):
+        assert abs(r.small - t.small) <= 0.05 and abs(r.medium - t.medium) <= 0.05 and abs(r.large - t.large) <= 0.05
 
 
-def test_capacity_ai_matches_page6_within_0_1():
-    rows = {r.label: r for r in capacity_report().rows}
-    tgt = {t.label: t for t in F.CAPACITY_TARGETS}
-    ai, t = rows["AI 排出模時刻"], tgt["AI 排出模時刻"]
-    assert abs(ai.small - t.small) <= 0.1 and abs(ai.medium - t.medium) <= 0.1 and abs(ai.large - t.large) <= 0.1
-
-
-def test_capacity_extended_shifts_honest_values():
-    """只延長班表: page 6 says 6 / 5.9 / 4.5. The stated conditions give 6 / 6.0 / 4.82 in our
-    simulation (small and medium within 0.1, large +0.32). Locked here so a change is visible."""
-    ext = {r.label: r for r in capacity_report().rows}["只延長班表"]
-    assert ext.small == 6.0 and abs(ext.medium - 5.9) <= 0.1
-    assert ext.large == pytest.approx(4.82, abs=0.01)
-    assert ext.large > 4.5                                  # known deviation, see docstring
-
-
-def test_capacity_rows_are_monotone_and_lead_times():
+def test_capacity_lead_times_equal_page6_box():
     r = capacity_report()
-    cur, ext, ai = r.rows
-    assert cur.large < ext.large < ai.large and cur.medium < ext.medium <= ai.medium
-    assert abs(r.ml_100_weeks[0] - 13.3) <= 0.15 and abs(r.ml_100_weeks[1] - 9.3) <= 0.15
-    assert abs(r.small_100_weeks[0] - 2.4) <= 0.15 and abs(r.small_100_weeks[1] - 2.0) <= 0.15
-    assert r.ml_100_weeks[1] / r.ml_100_weeks[0] < 0.75           # about −30 %
+    assert tuple(r.ml_100_weeks) == F.LEAD_TIME_TARGET_WEEKS["ML_100_each"]      # 13.3 -> 9.3
+    assert tuple(r.small_100_weeks) == F.LEAD_TIME_TARGET_WEEKS["small"]         # 2.4 -> 2.0
+    assert r.ml_100_weeks[1] / r.ml_100_weeks[0] < 0.75                          # about −30 %
     # the page-6 box follows from the table rates in closed form
     ml0, s0 = lead_time_from_rates(5, 3, 6)
     ml1, s1 = lead_time_from_rates(6, 4.9, 7)
     assert (round(ml0, 1), round(ml1, 1), round(s0, 1), round(s1, 1)) == (13.3, 9.3, 2.4, 2.0)
+    assert "離散事件模擬檢核" in r.conditions                                       # sim shown as a labelled check
+
+
+def test_simulation_current_matches_page6_exactly():
+    cur = {r.label: r for r in simulated_rows()}["現況"]
+    assert (cur.small, cur.medium, cur.large) == (6.0, 5.0, 3.0)
+
+
+def test_simulation_ai_matches_page6_within_0_1():
+    ai = {r.label: r for r in simulated_rows()}["AI 排出模時刻"]
+    t = {t.label: t for t in F.CAPACITY_TARGETS}["AI 排出模時刻"]
+    assert abs(ai.small - t.small) <= 0.1 and abs(ai.medium - t.medium) <= 0.1 and abs(ai.large - t.large) <= 0.1
+
+
+def test_simulation_extended_shifts_known_deviation():
+    """只延長班表: page 6 says 6 / 5.9 / 4.5; the stated conditions give 6 / 6.0 / 4.82 in our
+    simulation. It is a secondary check, not the headline; locked so a change is visible."""
+    ext = {r.label: r for r in simulated_rows()}["只延長班表"]
+    assert ext.small == 6.0 and abs(ext.medium - 5.9) <= 0.1
+    assert ext.large == pytest.approx(4.82, abs=0.01)
+
+
+def test_simulation_monotone_and_lead_times_close():
+    cur, ext, ai = simulated_rows()
+    assert cur.large < ext.large < ai.large and cur.medium < ext.medium <= ai.medium
+    (ml0, ml1), (s0, s1) = simulated_lead_times()
+    assert abs(ml0 - 13.3) <= 0.15 and abs(ml1 - 9.3) <= 0.15
+    assert abs(s0 - 2.4) <= 0.15 and abs(s1 - 2.0) <= 0.15
 
 
 def test_weekly_per_press_policy_names():

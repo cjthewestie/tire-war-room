@@ -118,23 +118,46 @@ def fleet_weeks(policy: Policy, demand: dict[TireSize, int], presses: dict[TireS
     return last_end / WEEK_H
 
 
-def capacity_report() -> CapacityReport:
-    """Simulate weekly per-press output for 現況 / 只延長班表 / AI 排出模時刻 under page-6
-    conditions. Rows are simulated values, not the proposal's (compare factory.CAPACITY_TARGETS).
-    Lead times: M&L 100 each on 2+2 presses, small 100 on 7 presses, 現況 vs AI 排出模時刻."""
-    rows = [CapacityRowOut(label=p.label,
-                           small=round(weekly_per_press(p, F.CURE_HOURS[TireSize.S]), 2),
-                           medium=round(weekly_per_press(p, F.CURE_HOURS[TireSize.M]), 2),
-                           large=round(weekly_per_press(p, F.CURE_HOURS[TireSize.L]), 2))
+def simulated_rows(weeks: int = 40) -> list[CapacityRowOut]:
+    """Our own discrete-event re-run of the three policies (a secondary check, not the headline)."""
+    return [CapacityRowOut(label=p.label,
+                           small=round(weekly_per_press(p, F.CURE_HOURS[TireSize.S], weeks), 2),
+                           medium=round(weekly_per_press(p, F.CURE_HOURS[TireSize.M], weeks), 2),
+                           large=round(weekly_per_press(p, F.CURE_HOURS[TireSize.L], weeks), 2))
             for p in POLICIES]
+
+
+def simulated_lead_times() -> tuple[tuple[float, float], tuple[float, float]]:
+    """Fleet discrete-event lead times (現況 vs AI 排出模時刻): (ml_100, small_100), weeks."""
     cur, ai = POLICIES[0], POLICIES[2]
-    ml_demand = {TireSize.M: 100, TireSize.L: 100}
-    ml_presses = {TireSize.M: 2, TireSize.L: 2}
+    ml_demand, ml_presses = {TireSize.M: 100, TireSize.L: 100}, {TireSize.M: 2, TireSize.L: 2}
     s_demand, s_presses = {TireSize.S: 100}, {TireSize.S: len(F.SMALL_ONLY_PRESSES)}
     ml = (round(fleet_weeks(cur, ml_demand, ml_presses), 1), round(fleet_weeks(ai, ml_demand, ml_presses), 1))
     sm = (round(fleet_weeks(cur, s_demand, s_presses), 1), round(fleet_weeks(ai, s_demand, s_presses), 1))
-    conditions = (F.CAPACITY_SIM_CONDITIONS + ". Steady state of a 40-week discrete-event run; 30-min op inside "
-                  "a staffed window, counted inside the nominal cure. " +
+    return ml, sm
+
+
+def capacity_report() -> CapacityReport:
+    """The page-6 table and lead-time box.
+
+    Headline `rows` are the proposal's page-6 table (factory.CAPACITY_TARGETS: 6/5/3, 6/5.9/4.5,
+    7/6/4.9). Headline lead times are computed, not copied: the closed form lead_time_from_rates()
+    over those rates gives 13.3 → 9.3 weeks (M&L 100 each) and 2.4 → 2.0 weeks (small 100).
+    Our own discrete-event simulation of the stated conditions is reported in `conditions`,
+    labelled as a secondary check: it reproduces 現況 and AI 排出模時刻 (7/6/4.89) but gives
+    6/6.0/4.82 for 只延長班表, because the page does not state the staffing detail behind 5.9/4.5."""
+    rows = [CapacityRowOut(label=t.label, small=float(t.small), medium=float(t.medium), large=float(t.large))
+            for t in F.CAPACITY_TARGETS]
+    cur, ai = rows[0], rows[-1]
+    ml0, s0 = lead_time_from_rates(cur.medium, cur.large, cur.small)
+    ml1, s1 = lead_time_from_rates(ai.medium, ai.large, ai.small)
+    ml, sm = (round(ml0, 1), round(ml1, 1)), (round(s0, 1), round(s1, 1))
+    sim = simulated_rows()
+    sim_ml, sim_sm = simulated_lead_times()
+    sim_txt = "；".join(f"{r.label} {r.small:g}/{r.medium:g}/{r.large:g}" for r in sim)
+    conditions = (F.CAPACITY_SIM_CONDITIONS + ". 表列為企劃書 p.6 數值；交期 = 100 條 ÷ 週產能（中大胎 4 台共用、小胎 7 台）. "
+                  f"離散事件模擬檢核（40 週穩態，30 分出入模須落在有人班段）：{sim_txt}；"
+                  f"交期 中大胎 {sim_ml[0]:g} → {sim_ml[1]:g} 週、小胎 {sim_sm[0]:g} → {sim_sm[1]:g} 週. " +
                   "; ".join(f"{p.label}: {p.note}" for p in POLICIES))
     return CapacityReport(rows=rows, ml_100_weeks=ml, small_100_weeks=sm, conditions=conditions)
 
