@@ -83,6 +83,24 @@ class FileScheduleStore:
             self._write(v)
             return v
 
+    def amend_proposed(self, version: int, schedule: Schedule | None = None,
+                       reason: str | None = None) -> ScheduleVersion:
+        """Rewrite a still-PROPOSED version before it is activated (the supervisor approved it with a
+        modification, e.g. picked overtime instead of the solver's cross-team move). Active and older
+        versions are never touched."""
+        with self._lock:
+            target = self.get(version)
+            if target.status is not ScheduleStatus.PROPOSED:
+                raise ValueError(f"version {version} is {target.status.value}; only PROPOSED can be amended")
+            upd: dict = {}
+            if schedule is not None:
+                upd["schedule"] = schedule
+            if reason is not None:
+                upd["reason"] = reason
+            new = target.model_copy(update=upd)
+            self._write(new)
+            return new
+
     def activate(self, version: int) -> ScheduleVersion:
         with self._lock:
             target = self.get(version)

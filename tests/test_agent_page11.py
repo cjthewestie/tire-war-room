@@ -157,8 +157,21 @@ async def test_page11_timeline(tmp_path):
     # executed writes: round 2 sent overtime, not a staff move; press 7 out of service
     notifies = [c.args["kind"] for c in tools.calls_of(ToolName.NOTIFY_TEAMS)]
     # round 1: chosen transfer (B) then S5 info (waits for S4's approval); round 2: machine out + overtime (A)
+    # round 2 then withdraws the round-1 transfer with an info notice, so only overtime stands
     assert notifies == [NotifyKind.STAFF_MOVE.value, NotifyKind.INFO.value,
-                        NotifyKind.MACHINE_OUT.value, NotifyKind.OVERTIME.value]
+                        NotifyKind.MACHINE_OUT.value, NotifyKind.OVERTIME.value, NotifyKind.INFO.value]
+    revoke = tools.calls_of(ToolName.NOTIFY_TEAMS)[-1]
+    assert revoke.args["message"].startswith("撤回：") and "夜班加班" in revoke.args["message"]
+    assert revoke.args["teams"] == tools.calls_of(ToolName.NOTIFY_TEAMS)[0].args["teams"]   # same teams as the move
+    _find(tl, "系統", "撤回先前已執行的「從 2 線調 1 人」")
+    _find(tl, "系統", "排程 v3 人力依主管決定改為「夜班加班」", "取代「從 2 線調 1 人」")
+    # the outcome and the live schedule carry the supervisor's decision, not the solver's transfer
+    assert "從 2 線調 1 人" not in ev.outcome.replace("撤回從 2 線調 1 人", "")
+    assert "夜班加班" in ev.outcome and "撤回從 2 線調 1 人" in ev.outcome
+    live = store.get(3).schedule.staffing_changes
+    assert [(c.kind, c.label) for c in live] == [("overtime", "夜班加班")]
+    assert "夜班加班" in store.get(3).reason
+    assert [(c.kind, c.label) for c in store.get(2).schedule.staffing_changes] == [("transfer", "從 2 線調 1 人")]
     assert sim.status["CURE-07"] is MachineStatus.OUT_OF_SERVICE
     assert store.active == 3                                # second solve's version is live
 

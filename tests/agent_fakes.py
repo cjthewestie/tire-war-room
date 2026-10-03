@@ -112,6 +112,11 @@ class FakeStore:
                                      created_at=self.clock.now(), reason=reason, event_id=event_id, schedule=schedule)
         return self.vs[v]
 
+    def amend_proposed(self, v, schedule=None, reason=None):
+        upd = {k: x for k, x in (("schedule", schedule), ("reason", reason)) if x is not None}
+        self.vs[v] = self.vs[v].model_copy(update=upd)
+        return self.vs[v]
+
     def activate(self, v):
         self.active = v
         return self.vs[v]

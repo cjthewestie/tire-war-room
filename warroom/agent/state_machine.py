@@ -78,6 +78,8 @@ from warroom.contracts import (
     PlanStep,
     RiskLevel,
     SafetyAction,
+    ScheduleStatus,
+    StaffingChange,
     StepRun,
     TimelineItem,
     ToolCall,
@@ -173,6 +175,10 @@ class _Run:
     context_tools: list[str] = field(default_factory=list)   # phrases for the commander timeline row
     replan_tools: list[str] = field(default_factory=list)
     base_context: dict[str, Any] = field(default_factory=dict)
+    option_changes: dict[str, dict[str, Any]] = field(default_factory=dict)  # option id -> solver StaffingChange
+    step_changes: dict[str, dict[str, Any]] = field(default_factory=dict)    # option step id -> StaffingChange
+    staffing_done: list[dict[str, Any]] = field(default_factory=list)        # executed staffing notifies
+    revocations: dict[str, dict[str, Any]] = field(default_factory=dict)     # revoke step id -> staffing_done entry
 
 
 class StateMachine:
@@ -439,8 +445,14 @@ class StateMachine:
                         return
                     continue
                 chosen = self._chosen_steps(run, needs, options, res) + deferred
+                change = self._chosen_change(run, chosen)
+                if change is not None:
+                    chosen = self._dedupe_staffing(run, chosen, change)
+                    self._amend_schedule_staffing(run, chosen, change, res)
                 self._to(ev, EventState.EXECUTE, f"approved by {res.decision.decided_by}")
                 await self._execute(run, chosen, auto_tag=False)
+                if change is not None:
+                    await self._execute(run, self._revoke_steps(run, change, res), auto_tag=False)
             elif not auto:
                 self._to(ev, EventState.EXECUTE, "no write steps")
 
@@ -804,6 +816,7 @@ class StateMachine:
                 for c in (res.data.get("schedule") or {}).get("staffing_changes") or []:
                     chosen_labels.add(c.get("label"))
         opts: list[ApprovalOption] = []
+        run.option_changes = {}
         if staffing:
             seen = set()
             staffing.sort(key=lambda c: 0 if c.get("kind") == "overtime" else 1)
@@ -826,6 +839,7 @@ class StateMachine:
                 else:
                     args = {"teams": [c.get("to_team")], "kind": NotifyKind.OVERTIME.value,
                             "message": f"{when}{staffing_label(c)}（{c.get('people', 1)} 人）"}
+                run.option_changes[oid] = dict(c)
                 opts.append(ApprovalOption(id=oid, label=c.get("label") or args["message"],
                                            tool=ToolName.NOTIFY_TEAMS, args=args,
                                            recommended=c.get("label") in chosen_labels))
@@ -1068,6 +1082,8 @@ class StateMachine:
         if is_staff_option and opt is not None:
             args = {**opt.args, **(d.modified_args or {})}
             step = PlanStep(id=f"{req.id}-{opt.id}", tool=opt.tool, args=args, purpose=f"{opt.id} {opt.label}")
+            if opt.id in run.option_changes:
+                run.step_changes[step.id] = run.option_changes[opt.id]
             gd = self.gate.check(step, EventState.EXECUTE, run.feasible)
             sr = StepRun(step=step, state="pending", gate=gd)
             run.ev.steps.append(sr)
@@ -1085,6 +1101,112 @@ class StateMachine:
                     self._log_reject(run, sr.step, gd)
                     chosen.remove(sr)
         return chosen
+
+    # ------------------------------------------------------------------ staffing decision follow-through
+    def _chosen_change(self, run: _Run, chosen: list[StepRun]) -> dict[str, Any] | None:
+        """The solver StaffingChange behind the staffing option the supervisor picked, if any."""
+        for sr in chosen:
+            c = run.step_changes.get(sr.step.id)
+            if c is not None:
+                return c
+        return None
+
+    def _dedupe_staffing(self, run: _Run, chosen: list[StepRun], change: dict[str, Any]) -> list[StepRun]:
+        """Picking the same staffing again (same shift, same choice) does not notify the teams twice."""
+        same = any(p["key"] == _staff_key(change) and p["kind"] == change.get("kind")
+                   and p["label"] == change.get("label") and not p["revoked"] for p in run.staffing_done)
+        if not same:
+            return chosen
+        out = []
+        for sr in chosen:
+            if run.step_changes.get(sr.step.id) is change:
+                sr.state = "skipped"
+                self._note(run.ev, "系統", f"人力沿用先前已執行的「{change.get('label')}」，不重複通知", "info")
+                continue
+            out.append(sr)
+        return out
+
+    def _amend_schedule_staffing(self, run: _Run, chosen: list[StepRun], change: dict[str, Any],
+                                 req: ApprovalRequest) -> None:
+        """The schedule about to be confirmed must carry the staffing the supervisor actually chose,
+        not the solver's own pick (page 11 02:31:30: 否決跨組調人，改選夜班加班)."""
+        store = self.store if self.store is not None else getattr(getattr(self.tools, "ctx", None), "store", None)
+        if store is None:
+            return
+        try:
+            new_c = StaffingChange.model_validate(change)
+        except Exception:  # noqa: BLE001 - malformed solver output: leave the schedule as proposed
+            return
+        for sr in chosen:
+            if sr.step.tool is not ToolName.CONFIRM_SCHEDULE:
+                continue
+            v = sr.step.args.get("schedule_version")
+            try:
+                ver = store.get(int(v))
+            except Exception:  # noqa: BLE001
+                continue
+            if ver.status is not ScheduleStatus.PROPOSED:
+                continue
+            old = list(ver.schedule.staffing_changes)
+            same_gap = [c for c in old if (c.shift_date, c.shift_name, c.to_team)
+                        == (new_c.shift_date, new_c.shift_name, new_c.to_team)]
+            if any(c.kind == new_c.kind and c.label == new_c.label for c in same_gap) and len(same_gap) == 1:
+                continue                                   # the proposal already has the chosen staffing
+            staffing = [c for c in old if c not in same_gap] + [new_c]
+            reason = ver.reason
+            for c in same_gap:
+                reason = reason.replace(f"→{c.label}", f"→{new_c.label}")
+            if new_c.label not in reason:
+                reason = f"{reason}；{new_c.shift_date:%m/%d} {new_c.shift_name}→{new_c.label}"
+            sched = ver.schedule.model_copy(update={"staffing_changes": staffing})
+            amend = getattr(store, "amend_proposed", None)
+            if callable(amend):
+                amend(ver.version, schedule=sched, reason=reason)
+                target = ver.version
+            else:                                          # store without amend: propose a corrected version
+                target = store.propose(sched, reason, run.ev.id).version
+                sr.step = sr.step.model_copy(update={"args": {**sr.step.args, "schedule_version": target}})
+                for r in run.results.values():
+                    if r.tool is ToolName.SOLVE_SCHEDULE and r.data.get("schedule_version") == ver.version:
+                        r.data["schedule_version"] = target
+            replaced = "、".join(c.label for c in same_gap)
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"schedule_amended": target, "from_version": ver.version,
+                               "staffing": [c.model_dump(mode="json") for c in staffing],
+                               "replaced": [c.model_dump(mode="json") for c in same_gap],
+                               "approval_id": req.id, "decision_reason": req.decision.reason if req.decision else None},
+                              event_id=run.ev.id)
+            self._note(run.ev, "系統", f"排程 v{target} 人力依主管決定改為「{new_c.label}」"
+                       + (f"（取代「{replaced}」）" if replaced else ""), "dynamic")
+
+    def _revoke_steps(self, run: _Run, change: dict[str, Any], req: ApprovalRequest) -> list[StepRun]:
+        """An earlier round's staffing for the same shift that the supervisor has now replaced is
+        withdrawn with a compensating notice (R1 info), so only the decision actually taken stands."""
+        key, out = _staff_key(change), []
+        new_done = any(p["key"] == key and p["kind"] == change.get("kind") and p["label"] == change.get("label")
+                       and not p["revoked"] for p in run.staffing_done)
+        if not new_done:
+            return out                                     # the new choice did not run: keep the old one
+        for prev in run.staffing_done:
+            if prev["revoked"] or prev["key"] != key or (prev["kind"], prev["label"]) == (change.get("kind"),
+                                                                                      change.get("label")):
+                continue
+            n = len(run.revocations) + 1
+            args = {"teams": list(prev["args"].get("teams") or []), "kind": NotifyKind.INFO.value,
+                    "message": f"撤回：{prev['args'].get('message') or prev['label']}（主管改選{change.get('label')}）"}
+            step = PlanStep(id=f"{req.id}-revoke-{n}", tool=ToolName.NOTIFY_TEAMS, args=args,
+                            purpose=f"撤回{prev['label']}")
+            gd = self.gate.check(step, EventState.EXECUTE, run.feasible)
+            sr = StepRun(step=step, state="pending", gate=gd)
+            run.ev.steps.append(sr)
+            if gd.verdict is GateVerdict.REJECT:
+                sr.state = "rejected"
+                self._log_reject(run, step, gd)
+                continue
+            run.revocations[step.id] = prev
+            self._note(run.ev, "系統", f"主管改選「{change.get('label')}」→ 撤回先前已執行的「{prev['label']}」", "dynamic")
+            out.append(sr)
+        return out
 
     # ------------------------------------------------------------------ EXECUTE
     async def _execute(self, run: _Run, steps: list[StepRun], auto_tag: bool) -> None:
@@ -1130,7 +1252,18 @@ class StateMachine:
                 self._set_status(mid, MachineStatus.OUT_OF_SERVICE, f"{machine_label(mid)}停用")
                 run.executed.append(f"{machine_label(mid)}停用")
             elif kind in STAFFING_KINDS:
-                run.executed.append(step.purpose.split(" ", 1)[-1])
+                label = step.purpose.split(" ", 1)[-1]
+                run.executed.append(label)
+                change = run.step_changes.get(step.id)
+                if change is not None:
+                    run.staffing_done.append({"key": _staff_key(change), "kind": change.get("kind"),
+                                              "label": change.get("label") or label, "args": dict(step.args),
+                                              "step_id": step.id, "executed_label": label, "revoked": False})
+            elif step.id in run.revocations:
+                prev = run.revocations[step.id]
+                prev["revoked"] = True
+                run.executed = [x for x in run.executed if x != prev["executed_label"]]
+                run.executed.append(f"撤回{prev['label']}")
             elif kind == NotifyKind.MAINTENANCE.value:
                 run.done.append("已通知維修")
                 run.executed.append("已通知維修")
@@ -1266,6 +1399,11 @@ class StateMachine:
         self._to(ev, EventState.SAFE_STOP, reason)
         ev.closed_at = self._now()
         self._note(ev, "系統", ev.outcome, "dynamic")
+
+
+def _staff_key(c: dict[str, Any]) -> tuple[str, str, str]:
+    """Which staffing gap a change fills: (shift date, shift name, receiving team)."""
+    return (str(c.get("shift_date") or ""), str(c.get("shift_name") or ""), str(c.get("to_team") or ""))
 
 
 def _press_no(machine_id: str) -> int | None:
