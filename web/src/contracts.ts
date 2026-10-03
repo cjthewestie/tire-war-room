@@ -428,8 +428,8 @@ export interface OrderProgress {
   done: number
   total: number
   remaining_h: number
-}
   note?: string | null
+}
 
 export interface MachineTile {
   machine_id: string
@@ -445,6 +445,7 @@ export interface HeaderStatus {
   factory_time: ISODate
   llm_mode: LLMMode
   network: "online" | "wan_down" | "lan_down"
+  warning_light?: boolean   // page 9: LAN down -> on-site touch screen + warning light
 }
 
 export interface DashboardSnapshot {

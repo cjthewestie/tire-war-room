@@ -163,7 +163,11 @@ class ComponentBuilder:
         return self._t("capacity", real, lambda: FB.fallback_capacity_report)
 
     # --- per run ---
-    def build(self, scenario: ScenarioName, sleep: Callable[[float], Any] | None = None) -> Components:
+    def build(self, scenario: ScenarioName, sleep: Callable[[float], Any] | None = None,
+              fresh_store: bool = True) -> Components:
+        """fresh_store=False (process start) reopens the persisted schedule store of the same
+        scenario, so a watchdog restart or an offline update keeps approved versions and the
+        rollback history (page 10). An explicit scenario load or reset starts a fresh store."""
         for k in self.PER_RUN:
             self.degraded.pop(k, None)
         clock, bus = self.clock, self.bus
@@ -186,7 +190,7 @@ class ComponentBuilder:
             return RuleSafetyCore(clock=clock)
         safety = self._t("safety", safety_real, lambda: FB.FallbackSafetyCore(clock=clock))
 
-        store = self._store(sim)
+        store = self._store(sim, scenario, fresh_store)
 
         def appr_real():
             from warroom.agent import ApprovalBrokerImpl
@@ -222,14 +226,27 @@ class ComponentBuilder:
                           tools=tools, gate=gate, commander=self.commander, capacity=self.capacity,
                           degraded=self.degraded)
 
-    def _store(self, sim):
+    def _store(self, sim, scenario: ScenarioName | None = None, fresh: bool = True):
         root = self.s.schedule_dir / "live"
+        marker = root / "scenario.txt"
 
         def real():
             from warroom.schedule import FileScheduleStore
+            if not fresh and scenario is not None and any(root.glob("v*.json")) and marker.is_file() and \
+                    marker.read_text(encoding="utf-8").strip() == scenario.value:
+                try:
+                    store = FileScheduleStore(root)
+                    self.reopened_store = True
+                    return store
+                except Exception as e:  # noqa: BLE001 - corrupt store: start fresh, say why
+                    log.warning("schedule store %s unreadable (%s); starting fresh", root, e)
+            self.reopened_store = False
             shutil.rmtree(root, ignore_errors=True)
             root.mkdir(parents=True, exist_ok=True)
-            return FileScheduleStore(root, initial=self._initial_schedule(sim))
+            store = FileScheduleStore(root, initial=self._initial_schedule(sim))
+            if scenario is not None:
+                marker.write_text(scenario.value, encoding="utf-8")
+            return store
         return self._t("store", real, lambda: FB.MemoryScheduleStore(None, initial=None, clock=self.clock))
 
     def _initial_schedule(self, sim):
@@ -251,6 +268,17 @@ class ComponentBuilder:
         return None
 
 
+class _NullAudit:
+    """Swallows what a cancelled event task writes during shutdown (it was already audited as
+    interrupted; a cancellation is not a factory decision)."""
+
+    def append(self, *a, **k):
+        return None
+
+    def __getattr__(self, name):
+        return lambda *a, **k: None
+
+
 class Runtime:
     """Owns the components, the background loop and every read model the API serves."""
 
@@ -265,7 +293,9 @@ class Runtime:
             self.scenario = ScenarioName.NORMAL
         self._sleepers: list[tuple[datetime, int, asyncio.Future]] = []
         self._sleeper_seq = itertools.count()
-        self.c: Components = components or self.builder.build(self.scenario, sleep=self.sim_sleep)
+        self.c: Components = components or self.builder.build(self.scenario, sleep=self.sim_sleep, fresh_store=False)
+        from warroom.api.ingest import IngestPipeline
+        self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -323,14 +353,41 @@ class Runtime:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
             self._loop_task = None
-        await self._cancel_events()
+        await self._cancel_events(shutdown=True)
 
-    async def _cancel_events(self) -> None:
+    async def _cancel_events(self, shutdown: bool = False) -> None:
+        """shutdown=True (process stop / watchdog restart): open events are recorded as INTERRUPTED
+        in the audit and left as they were. The schedule store and audit are detached from the state
+        machine first, so cancelling the tasks cannot safe-stop the events or roll back an approved
+        schedule. A scenario load (shutdown=False) cancels them normally."""
         tasks = [t for t in self._tasks.values() if not t.done()]
+        if shutdown and tasks:
+            open_evs = [e for e in self.events() if e.state not in TERMINAL_STATES]
+            cur = None
+            try:
+                cur = self.c.store.current().version if self.c.store is not None else None
+            except Exception:  # noqa: BLE001
+                pass
+            for ev in open_evs:
+                self.audit.append(AuditKind.SYSTEM, "system",
+                                  {"msg": "event interrupted by shutdown", "state": ev.state.value,
+                                   "schedule_version_kept": cur}, event_id=ev.id)
+        saved: dict[str, Any] = {}
+        sm = self.state_machine
+        if shutdown and tasks:
+            for attr, stand_in in (("store", None), ("audit", _NullAudit())):
+                if hasattr(sm, attr):
+                    try:
+                        saved[attr] = getattr(sm, attr)
+                        setattr(sm, attr, stand_in)
+                    except Exception:  # noqa: BLE001
+                        saved.pop(attr, None)
         for t in tasks:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        for attr, v in saved.items():
+            setattr(sm, attr, v)
         self._tasks.clear()
 
     async def _loop(self) -> None:
@@ -343,7 +400,9 @@ class Runtime:
             if self.paused:
                 continue
             if self.speed > 1 and self.compute_busy():
-                # accelerated demo: the plant waits for the LLM / solver (wall time is not owed)
+                # accelerated demo: the simulated plant's clock waits for the LLM / solver (wall time
+                # is not owed). No sim second passes, so no reading goes unchecked: every reading the
+                # sim produces still goes through tick() -> safety_pass() first.
                 self._publish_periodic()
                 continue
             owed += wall * self.speed
@@ -362,6 +421,11 @@ class Runtime:
 
     def _publish_periodic(self, force: bool = False) -> None:
         now = time.monotonic()
+        if self.network == "lan_down" or getattr(self, "_light_on", False):
+            try:
+                self.sync_warning_light()
+            except Exception:  # noqa: BLE001 - the light must never break the loop
+                log.exception("warning light")
         if force or now - self._last_machines_pub >= 0.5:
             self._last_machines_pub = now
             self.bus.publish(WsType.MACHINES, {"machines": [t.model_dump(mode="json") for t in self.machine_tiles()]})
@@ -376,22 +440,44 @@ class Runtime:
         return getattr(self.state_machine, "compute_inflight", 0) > 0 or getattr(self.c.tools, "inflight", 0) > 0
 
     async def tick(self, dt_s: float = 1.0, *, publish: bool = True, hold_compute: bool = True) -> None:
-        """One sim step. hold_compute: while the LLM or solver is running, sim time waits for it, so
-        an accelerated demo (or a test driving tick() flat out) keeps the page-11 beats: decisions
-        land seconds after detection instead of the plant racing ahead during a 3 s solve."""
-        if hold_compute:
-            waited = 0.0
-            while self.compute_busy() and waited < self.compute_hold_max_s:
-                await asyncio.sleep(0.01)
-                waited += 0.01
+        """One sim step: readings -> RED path (safety core, synchronous) -> MQTT hop + validation +
+        time-series DB -> detection -> wake events.
+
+        hold_compute: while the LLM or solver is running, the NEXT sim second waits for it, so an
+        accelerated demo (or a test driving tick() flat out) keeps the page-11 beats. The wait sits
+        at the END of the tick, after this second's readings went through the safety core: the red
+        path never waits on the LLM (page 5); only the simulated plant's clock does."""
         before = self.clock.now()
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
             self.clock.advance(dt_s)
         self.ticks += 1
-        # RED path: deterministic and synchronous, before any detection or LLM work.
+        self.safety_pass(readings)              # RED path first: nothing below can delay it
+        readings = self.ingest.transport(readings)
+        self.ingest.record(readings)
+        self._track_baseline(readings)
+        for an in self.c.detector.ingest(readings):
+            self._on_anomaly(an)
+        self._wake_sleepers()
+        if publish:
+            self._publish_periodic(force=True)
+        await asyncio.sleep(0)                   # let event tasks progress between sim seconds
+        if hold_compute:
+            await self._hold_for_compute()
+
+    async def _hold_for_compute(self) -> float:
+        """The sim plant's clock waits (wall time, bounded) while the commander or solver works."""
+        t0 = time.monotonic()
+        while self.compute_busy() and time.monotonic() - t0 < self.compute_hold_max_s:
+            await asyncio.sleep(0.01)
+        return time.monotonic() - t0
+
+    def safety_pass(self, readings: list[SensorReading]) -> list[SafetyAction]:
+        """RED path: deterministic and synchronous, never awaits. Runs on every batch of readings
+        before any hold, MQTT hop, detection or LLM work (page 5: acts directly, not via the LLM)."""
         states = {m.machine_id: m for m in self.sim.machines()}
-        for a in self.c.safety.check(readings, states):
+        acts = list(self.c.safety.check(readings, states))
+        for a in acts:
             self.sim.apply_safety_action(a)
             self.safety_log.append(a)
             del self.safety_log[:-100]
@@ -402,13 +488,7 @@ class Runtime:
                 self.audit.append(AuditKind.SAFETY_ACTION, "safety", a.model_dump(mode="json"),
                                   self._open_event_id(a.machine_id))
             self.bus.publish(WsType.SAFETY_ACTION, a)
-        self._track_baseline(readings)
-        for an in self.c.detector.ingest(readings):
-            self._on_anomaly(an)
-        self._wake_sleepers()
-        if publish:
-            self._publish_periodic(force=True)
-        await asyncio.sleep(0)                   # let event tasks progress between sim seconds
+        return acts
 
     def _on_anomaly(self, an: Anomaly) -> None:
         if an.detection_latency_s is None:
@@ -501,7 +581,8 @@ class Runtime:
         await self._cancel_events()
         self._wake_sleepers(cancel=True)
         self.scenario = ScenarioName(name)
-        self.c = self.builder.build(self.scenario, sleep=self.sim_sleep)
+        self.c = self.builder.build(self.scenario, sleep=self.sim_sleep, fresh_store=True)
+        self.ingest.reset()
         self.safety_log.clear()
         self.anomalies.clear()
         self._baseline.clear()
@@ -672,7 +753,7 @@ class Runtime:
         title = f"異常：{where}　{KIND_TEXT.get(ev.anomaly.kind.value, ev.anomaly.kind.value)}"
         hyp = next((h for h in reversed(ev.hypotheses) if h.status.value in ("active", "confirmed")), None) or \
             (ev.plan.hypothesis if ev.plan else None)
-        detail = ev.anomaly.message
+        detail = self._live_detail(ev, m, where)
         if m.compound_stage is not CompoundStage.NONE:
             detail += f"（未加硫上限 {F.COMPOUND_STOP_C:.0f}°C；已加硫另設 {F.CURATIVE_STOP_C:.0f}°C 防焦燒）"
         elif d.line.value == "CURE":
@@ -683,6 +764,57 @@ class Runtime:
         return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=title, detail=detail,
                           tiles=self.tiles_for(m, ev), auto_done=auto_done, pending=pending,
                           schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline)
+
+    def _live_detail(self, ev: Event, m: MachineState, where: str) -> str:
+        """Centre-panel sentence built from the LIVE reading at render time (page 2: 膠溫 112°C 且持續
+        上升), not the frozen detection-time message. The forecast comes from the detector's
+        prediction and stays consistent with it: a rise that settles below the limit says so."""
+        r = m.last_reading
+        if ev.anomaly.channel is not Channel.TEMP or r is None or r.temp_c is None or ev.state in TERMINAL_STATES:
+            return ev.anomaly.message
+        d = F.MACHINE_BY_ID[m.machine_id]
+        is_press = d.line.value == "CURE"
+        label = "膠溫" if m.compound_stage is not CompoundStage.NONE else ("硫化溫度" if is_press else "溫度")
+        t = r.temp_c
+        try:
+            pred = self.c.detector.predict(m.machine_id, Channel.TEMP, 1800)
+        except Exception:  # noqa: BLE001 - not enough data yet
+            pred = None
+        slope = pred.trend_per_min if pred is not None else 0.0
+        if slope > 0.1:
+            trend = f"且持續上升（+{slope:.1f}°C/分）"
+        elif slope < -0.1:
+            trend = f"持續下降（{slope:.1f}°C/分）"
+        else:
+            trend = "已趨穩定"
+        parts = [f"{where} {label} {t:.0f}°C {trend}"]
+        base = self._baseline.get(m.machine_id, {})
+        wf, wf0 = r.water_flow_lpm, base.get(Channel.WATER_FLOW.value)
+        if wf is not None and wf0 and wf < 0.85 * wf0:
+            parts[0] += f"，水流偏低 {wf:.0f} L/min（基準 {wf0:.0f}）"
+        st, st0 = r.steam_kgf_cm2, base.get(Channel.STEAM.value)
+        if is_press and st is not None and st0 and st < 0.85 * st0:
+            parts[0] += f"，蒸汽壓偏低 {st:.1f} kgf/cm²（基準 {st0:.1f}）"
+        if pred is not None:
+            if m.compound_stage is CompoundStage.CURATIVE_ADDED:
+                hi = F.CURATIVE_STOP_C
+            elif m.compound_stage is CompoundStage.UNVULCANIZED:
+                hi = F.COMPOUND_STOP_C
+            else:
+                hi = None
+            p = pred.predicted_value
+            if hi is not None and slope > 0.1:
+                if p >= hi and t < hi:
+                    parts.append(f"預測約 {max(1, round((hi - t) / slope))} 分後達 {hi:.0f}°C 上限")
+                elif t < hi:
+                    parts.append(f"預測 30 分內穩定於約 {p:.0f}°C，未達 {hi:.0f}°C 上限")
+            elif is_press and m.cure_job is not None and slope < -0.1:
+                lo = F.CURE_LOW_STOP_C
+                if p < lo <= t:
+                    parts.append(f"預測約 {max(1, round((t - lo) / -slope))} 分後低於 {lo:.0f}°C 下限")
+                elif t >= lo:
+                    parts.append(f"預測 30 分內穩定於約 {p:.0f}°C")
+        return "；".join(parts)
 
     def _actions_for(self, ev: Event) -> tuple[list[str], list[PendingAction]]:
         auto: list[str] = []
@@ -744,7 +876,25 @@ class Runtime:
         tiles = self.machine_tiles()
         normal = sum(1 for t in tiles if t.status in NORMAL_STATUSES)
         return HeaderStatus(normal_count=normal, abnormal_count=len(tiles) - normal, factory_time=self.clock.now(),
-                            llm_mode=self.llm_mode, network=self.network)
+                            llm_mode=self.llm_mode, network=self.network, warning_light=self.warning_light())
+
+    def warning_light(self) -> bool:
+        """Page 9 tier 3: with the LAN down the phone cannot be reached, so the on-site warning light
+        calls a person to the touch screen whenever an approval is waiting or an event is open."""
+        if self.network != "lan_down":
+            return False
+        if list(self.approvals.pending()):
+            return True
+        return any(e.state not in TERMINAL_STATES for e in self.events())
+
+    def sync_warning_light(self) -> bool:
+        """Publish + audit a change of the warning-light state (called from the loop and the API)."""
+        on = self.warning_light()
+        if on != getattr(self, "_light_on", False):
+            self._light_on = on
+            self.audit.append(AuditKind.SYSTEM, "system", {"msg": "warning light", "on": on, "network": self.network})
+            self.bus.publish(WsType.SNAPSHOT, self.snapshot())
+        return on
 
     def snapshot(self) -> DashboardSnapshot:
         evs = sorted(self.events(), key=lambda e: e.opened_at, reverse=True)
@@ -759,30 +909,154 @@ class Runtime:
                                  pending_approvals=list(self.approvals.pending()),
                                  safety_actions=list(reversed(self.safety_log[-20:])))
 
+    def _active_schedule(self):
+        if self.c.store is None:
+            return None
+        try:
+            return self.c.store.current().schedule
+        except Exception:  # noqa: BLE001
+            return None
+
+    def effective_shifts(self) -> list[Any]:
+        """The sim's shifts with the ACTIVE schedule's staffing changes applied (approved overtime or
+        transfer: 夜班加班 adds the person to that shift; a transfer also takes one from the source
+        team's shift that day, when it has one). This is what /api/shifts and the 缺 N 人 marks use."""
+        shifts = list(self.sim.shifts())
+        sched = self._active_schedule()
+        changes = list(getattr(sched, "staffing_changes", None) or [])
+        if not changes:
+            return shifts
+        out = []
+        for sh in shifts:
+            add = 0
+            for c in changes:
+                if c.shift_date == sh.start.date() and c.shift_name == sh.name:
+                    if c.to_team == sh.team:
+                        add += c.people
+                    elif c.kind == "transfer" and c.from_team == sh.team:
+                        add -= c.people
+            out.append(sh.model_copy(update={"headcount": max(0, sh.headcount + add)}) if add else sh)
+        return out
+
+    def staffing_gap_rows(self, shifts: list[Any] | None = None) -> list[tuple[Any, int, int]]:
+        """[(shift, ops, people_short)] by the SAME rule the solver reports gaps with
+        (warroom.schedule.staffing.staffing_gaps over the active schedule's de-mold / mold-in ops),
+        on the effective shifts. Only shifts that have not ended yet."""
+        sched = self._active_schedule()
+        shifts = shifts if shifts is not None else self.effective_shifts()
+        if sched is None or not sched.jobs:
+            return []
+        try:
+            from warroom.schedule.staffing import complete_shifts, op_windows, shift_for_op, staffing_gaps
+        except Exception:  # noqa: BLE001 - schedule module unavailable
+            return []
+        now = self.clock.now()
+        full = complete_shifts(shifts, min(sched.horizon_start, now) - timedelta(days=1),
+                               max(sched.horizon_end, now) + timedelta(days=1))
+        windows = op_windows(full)
+        ops: list[tuple[str, str, datetime]] = []
+        for j in sched.jobs:
+            if not j.frozen:
+                ops.append(("mold_in", j.press_id, j.mold_in))
+            t = j.demold
+            if j.frozen and shift_for_op(t, full) is None:
+                # in-progress cure: the de-mold waits for the next staffed window (solver: release)
+                nxt = next((w.start for w in windows if w.start >= t), None)
+                t = nxt or t
+            ops.append(("demold", j.press_id, t))
+        return [(sh, n, short) for sh, n, short in staffing_gaps(ops, full) if sh.end > now]
+
+    # ------------------------------------------------------------------ schedule rollback (gated)
+    ROLLBACK_BLOCKING = (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED, MachineStatus.OFFLINE)
+
+    def rollback_target(self, version: int | None) -> Any:
+        """The version a rollback would re-activate. Raises KeyError (unknown) or ValueError (none)."""
+        store = self.c.store
+        cur = store.current()
+        if version is None:
+            log_ = list(getattr(store, "_activation_log", []) or [])
+            prior = [v for v in log_ if v != cur.version]
+            if not prior:
+                prior = [v.version for v in store.versions()
+                         if v.version < cur.version and v.status.value in ("superseded", "rolled_back")]
+            if not prior:
+                raise ValueError("no earlier active version to roll back to")
+            version = prior[-1]
+        return store.get(version)
+
+    def rollback_preview(self, version: int | None = None) -> dict[str, Any]:
+        """Deterministic gate for a schedule rollback (page 7 一鍵回復): only a version that was
+        approved and ACTIVE before may come back, and only if it does not load a press that is now
+        out of service / stopped / offline or a press under the safety core's cure hold with new
+        mold-ins. Returns the diff the supervisor confirms against."""
+        store = self.c.store
+        cur = store.current()
+        target = self.rollback_target(version)
+        now = self.clock.now()
+        reasons: list[str] = []
+        if target.version == cur.version:
+            reasons.append(f"v{target.version} 已是生效中的排程")
+        elif target.status.value not in ("superseded", "rolled_back"):
+            reasons.append(f"v{target.version} 狀態為 {target.status.value}，從未核准生效；只能回復曾生效的版本")
+        blocked: dict[str, str] = {}
+        for m in self.sim.machines():
+            if m.machine_id not in F.CURE_PRESS_IDS:
+                continue
+            if m.status in self.ROLLBACK_BLOCKING:      # safety-core CURE_HOLD shows as STOPPED
+                blocked[m.machine_id] = m.status.value
+        from warroom.agent.narrate import machine_label
+        hits: dict[str, int] = {}
+        for j in target.schedule.jobs:
+            if j.press_id in blocked and not j.frozen and j.mold_in >= now:
+                hits[j.press_id] = hits.get(j.press_id, 0) + 1
+        for pid, n in sorted(hits.items()):
+            why = {"out_of_service": "停用", "stopped": "安全核心停機／扣模", "offline": "離線"}.get(blocked[pid], blocked[pid])
+            reasons.append(f"{machine_label(pid)}目前{why}，v{target.version} 仍排了 {n} 模新入模")
+        cur_jobs = {j.id: j for j in cur.schedule.jobs}
+        tgt_jobs = {j.id: j for j in target.schedule.jobs}
+        moved = []
+        for jid, tj in tgt_jobs.items():
+            cj = cur_jobs.get(jid)
+            if cj is not None and (cj.press_id != tj.press_id or cj.mold_in != tj.mold_in) and tj.mold_in >= now:
+                moved.append({"job_id": jid, "order_id": tj.order_id, "from_press": cj.press_id,
+                              "to_press": tj.press_id, "to_mold_in": tj.mold_in.isoformat()})
+        cross = any(c.kind == "transfer" for c in target.schedule.staffing_changes)
+        risk = RiskLevel.R3_CRITICAL if cross else RiskLevel.R2_CHANGE
+        return {"from_version": cur.version, "to_version": target.version, "target_status": target.status.value,
+                "target_reason": target.reason, "feasible": not reasons, "reasons": reasons, "risk": risk.value,
+                "moved": moved[:20], "moved_count": len(moved),
+                "added": len(set(tgt_jobs) - set(cur_jobs)), "removed": len(set(cur_jobs) - set(tgt_jobs)),
+                "staffing_changes": [c.label for c in target.schedule.staffing_changes],
+                "blocked_presses": blocked}
+
     def labor_view(self) -> dict[str, Any]:
-        """Schedule & labor (page 6): shifts, labor needs of the active schedule, per-shift load and gaps."""
-        shifts = self.sim.shifts()
-        jobs, needs = [], []
-        if self.c.store is not None:
-            try:
-                jobs = self.c.store.current().schedule.jobs
-                needs = [n for j in jobs for n in j.labor]
-            except Exception:  # noqa: BLE001
-                pass
+        """Schedule & labor (page 6): shifts (with approved staffing changes applied), labor needs of
+        the active schedule, per-shift load and the gaps by the solver's own rule."""
+        shifts = self.effective_shifts()
+        sched = self._active_schedule()
+        jobs = list(sched.jobs) if sched is not None else []
+        needs = [n for j in jobs for n in j.labor]
+        gap_rows = self.staffing_gap_rows(shifts)
+        short_by_id = {sh.id: short for sh, _, short in gap_rows}
         load = []
         for sh in shifts:
             inside = [n for n in needs if n.team == sh.team and sh.start <= n.start < sh.end]
-            peak = max((sum(x.people for x in inside if x.start <= n.start < x.end) for n in inside), default=0)
-            req = max(sh.required or 0, peak)
+            gap = short_by_id.get(sh.id, 0)
             load.append({"shift_id": sh.id, "team": sh.team.value, "team_label": F.TEAM_LABELS[sh.team],
                          "name": sh.name, "start": sh.start.isoformat(), "end": sh.end.isoformat(),
-                         "headcount": sh.headcount, "required": req, "tasks": len(inside),
-                         "gap": max(0, req - sh.headcount)})
+                         "headcount": sh.headcount, "required": sh.headcount + gap, "tasks": len(inside),
+                         "gap": gap})
+        try:
+            from warroom.schedule.staffing import gap_label
+        except Exception:  # noqa: BLE001
+            def gap_label(sh, n):
+                return f"{sh.start:%m/%d} {sh.name}缺 {n} 人"
         demolds = [{"job_id": j.id, "order_id": j.order_id, "press_id": j.press_id, "size": j.size.value,
                     "mold_in": j.mold_in.isoformat(), "demold": j.demold.isoformat()} for j in jobs]
         return {"shifts": [s.model_dump(mode="json") for s in shifts],
                 "needs": [n.model_dump(mode="json") for n in needs], "load": load, "demolds": demolds,
-                "gaps": [f"{x['team_label']} {x['name']} 缺 {x['gap']} 人" for x in load if x["gap"]]}
+                "staffing_changes": [c.model_dump(mode="json") for c in (sched.staffing_changes if sched else [])],
+                "gaps": [f"{F.TEAM_LABELS[sh.team]} {gap_label(sh, short)}" for sh, _, short in gap_rows]}
 
     # ------------------------------------------------------------------ health
     def kb_ok(self) -> bool:

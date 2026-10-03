@@ -198,11 +198,13 @@ def test_schedule_versions_and_rollback(client, rt):
     assert client.get("/api/schedule").json()["version"] == 2
     assert len(client.get("/api/schedule/versions").json()) == 2
     r = client.post("/api/schedule/rollback", json={})
+    assert r.status_code == 428 and r.json()["detail"]["to_version"] == 1     # needs an explicit confirm
+    r = client.post("/api/schedule/rollback", json={"confirm": True})
     assert r.status_code == 200 and r.json()["version"] == 1
     assert client.get("/api/schedule").json()["version"] == 1
-    assert client.post("/api/schedule/rollback", json={"version": 99}).status_code == 404
-    assert client.get("/api/audit", params={"kind": "rollback"}).json()[0]["payload"] == \
-        {"from_version": 2, "to_version": 1}
+    assert client.post("/api/schedule/rollback", json={"version": 99, "confirm": True}).status_code == 404
+    payload = client.get("/api/audit", params={"kind": "rollback"}).json()[0]["payload"]
+    assert (payload["from_version"], payload["to_version"]) == (2, 1) and payload["approval_id"].startswith("AP-RB-")
 
 
 def test_capacity_orders_shifts_labor(client):
@@ -213,7 +215,8 @@ def test_capacity_orders_shifts_labor(client):
     shifts = client.get("/api/shifts").json()
     assert {s["team"] for s in shifts} >= {"curing", "body"}
     lab = client.get("/api/labor").json()
-    assert set(lab) == {"shifts", "needs", "load", "demolds", "gaps"} and len(lab["load"]) == len(shifts)
+    assert set(lab) == {"shifts", "needs", "load", "demolds", "gaps", "staffing_changes"} and \
+        len(lab["load"]) == len(shifts)
 
 
 # ---------------------------------------------------------------- audit, sop

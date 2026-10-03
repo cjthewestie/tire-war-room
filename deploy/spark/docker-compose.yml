@@ -92,6 +92,13 @@ services:
       timeout: 3s
       retries: 5
 
+  mqtt:                           # page 10: Modbus/OPC UA gateway -> MQTT -> app (validation + time-series DB)
+    image: ${MQTT_IMAGE:-eclipse-mosquitto:2}
+    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
+    ports: ["${MQTT_BIND:-127.0.0.1}:1883:1883"]   # the plant gateway publishes here; LAN-bind only behind the nft allow-list
+    networks: [core, edge]
+    restart: unless-stopped
+
   app:
     image: ${APP_IMAGE:-warroom-app:latest}
     build:
@@ -110,6 +117,11 @@ services:
       SIM_SPEED: ${SIM_SPEED:-1.0}
       HOST: 0.0.0.0
       PORT: "8000"
+      WARROOM_INGEST: ${WARROOM_INGEST:-mqtt}            # readings go sim/gateway -> mosquitto -> app; broker down = direct + counted
+      WARROOM_MQTT_URL: mqtt://mqtt:1883
+      WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:-}  # REQUIRED for phone approvals over the LAN (X-Supervisor-Pin / ?pin=)
+      WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
+      WARROOM_LOCAL_HOSTS: ${WARROOM_LOCAL_HOSTS:-}        # e.g. the edge bridge gateway, so the on-box touch screen counts as local
     volumes:
       - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
     mem_limit: 6g                 # page 9: scheduling + app 6 GB
@@ -118,6 +130,7 @@ services:
     depends_on:
       qdrant: { condition: service_healthy }
       vllm: { condition: service_started }      # app starts in mock fallback while the model loads
+      mqtt: { condition: service_started }
     restart: unless-stopped
 
 networks:

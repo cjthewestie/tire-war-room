@@ -921,8 +921,8 @@ class OrderProgress(_M):
     done: int
     total: int
     remaining_h: float
-
     note: str | None = None           # why remaining_h moved, e.g. "7 號機停用：可用硫化機 3/4 台…"
+
 
 class MachineTile(_M):
     machine_id: str
@@ -938,6 +938,7 @@ class HeaderStatus(_M):
     factory_time: datetime
     llm_mode: LLMMode
     network: Literal["online", "wan_down", "lan_down"] = "online"
+    warning_light: bool = False       # page 9: LAN down -> on-site touch screen + warning light (on while something needs a person)
 
 
 class DashboardSnapshot(_M):

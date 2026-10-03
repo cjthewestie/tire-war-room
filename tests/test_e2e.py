@@ -132,9 +132,11 @@ async def test_page11_press7_full_timeline(tmp_path):
             assert k.value in kinds, k
         assert "不跨組調人" in (tmp_path / "audit.jsonl").read_text()
 
-        # one-click rollback keeps the previous version
-        r = await client.post("/api/schedule/rollback", json={})
-        assert r.status_code == 200 and r.json()["version"] == 2
+        # one-click rollback keeps the previous version, but goes through the gate: v2 still loads
+        # press 7, which is now out of service, so it is refused with the reason and v3 stays active
+        r = await client.post("/api/schedule/rollback", json={"confirm": True})
+        assert r.status_code == 409 and "停用" in r.json()["detail"]["message"], r.text
+        assert (await client.get("/api/schedule")).json()["version"] == 3
     finally:
         await client.aclose()
         await rt.stop()
