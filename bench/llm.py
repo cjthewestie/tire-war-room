@@ -261,7 +261,9 @@ def save_result(name: str, ep: Endpoint | None, data: dict[str, Any], out_dir: P
     now = datetime.now(timezone.utc).astimezone()
     tag = slug(tag) if tag else (slug(ep.model) if ep else "local")
     path = out / f"{name}-{tag}-{now:%Y%m%d-%H%M%S}.json"
-    payload = {"bench": name, "recorded_at": now.isoformat(), "host": host_info(), **data}
+    from bench.provenance import code_stamp as _code_stamp
+    payload = {"bench": name, "recorded_at": now.isoformat(), "host": host_info(), "code": _code_stamp(name),
+               "host_load_avg_1_5_15": [round(x, 2) for x in os.getloadavg()], **data}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
     return path
 

@@ -51,9 +51,13 @@ def test_cite_schema_puts_evidence_before_answer():
 
 def test_parse_sandbox_denies_counts_only_our_pids():
     log = ("2026 E kernel[0:1] (Sandbox) Sandbox: Python(9175) deny(1) network-outbound remote:*:443\n"
-           "2026 E kernel[0:1] (Sandbox) 3 duplicate reports for Sandbox: Python(9175) deny(1) network-outbound\n"
+           "2026 E kernel[0:1] (Sandbox) 3 duplicate reports for Sandbox: Python(9175) deny(1) network-outbound "
+           "remote:*:443\n"
+           "2026 E kernel[0:1] (Sandbox) Sandbox: Python(9175) deny(1) network-outbound\n"      # no remote: local
+           "2026 E kernel[0:1] (Sandbox) 2 duplicate reports for Sandbox: Python(9175) deny(1) network-outbound\n"
            "2026 E kernel[0:1] (Sandbox) Sandbox: curl(42) deny(1) network-outbound remote:*:80\n")
     assert unplug_test.parse_sandbox_denies(log, {9175}) == 4
+    assert unplug_test.sandbox_deny_detail(log, {9175})["no_remote_by_pid"] == {9175: 3}
     assert unplug_test.parse_sandbox_denies(log, {1}) == 0
 
 
@@ -116,7 +120,7 @@ def test_finalize_sandboxed_fills_deny_count_and_rejudges(tmp_path, monkeypatch)
     path.write_text(json.dumps(res), encoding="utf-8")
     seen = {}
 
-    def fake_count(pids, since, until):
+    def fake_count(pids, since, until, detail=None):
         seen["args"] = (pids, since, until)
         return 0, ""
     monkeypatch.setattr(unplug_test, "count_sandbox_denies", fake_count)
@@ -125,7 +129,7 @@ def test_finalize_sandboxed_fills_deny_count_and_rejudges(tmp_path, monkeypatch)
     v = {x["name"]: x for x in out["verdicts"]}
     assert v["outbound_connections"]["passed"] is True and v["alert_offline"]["passed"] is True
     assert json.loads(path.read_text())["egress"]["firewall_dropped_packets"] == 0
-    monkeypatch.setattr(unplug_test, "count_sandbox_denies", lambda *a: (2, ""))
+    monkeypatch.setattr(unplug_test, "count_sandbox_denies", lambda *a, **k: (2, ""))
     v = {x["name"]: x for x in unplug_test.finalize_sandboxed(path)["verdicts"]}
     assert v["outbound_connections"]["passed"] is False and v["outbound_connections"]["measured"] == 2
 
@@ -135,4 +139,66 @@ def test_report_names_blocked_attempts_from_sandbox_run(tmp_path):
            "endpoint": {"model": "m", "kind": "ollama"}, "block": {"applied": True, "method": "sandbox-exec"},
            "egress": {"firewall_dropped_packets": 2, "sandbox_pids": [5, 6]}})
     text = report.build(tmp_path)
-    assert "tried to leave the factory 2 time(s)" in text and "[5, 6]" in text
+    assert "tried to leave the factory 2 time(s)" in text and "not broken down" in text
+
+
+def test_sandbox_deny_detail_names_only_the_pids_that_tried():
+    log = ("2026-10-03 18:48:12.100 E kernel[0:1] (Sandbox) Sandbox: Python(9621) deny(1) network-outbound "
+           "remote:*:443\n"
+           "2026-10-03 18:48:36.200 E kernel[0:1] (Sandbox) Sandbox: Python(9621) deny(1) network-outbound "
+           "remote:*:443\n"
+           "2026-10-03 18:49:50.000 E kernel[0:1] (Sandbox) Sandbox: Python(9618) deny(1) network-outbound "
+           "1.1.1.1:443\n")
+    d = unplug_test.sandbox_deny_detail(log, {9618, 9621}, before="2026-10-03 18:49:00.000")
+    assert d["by_pid"] == {9621: 2} and d["remotes"] == ["remote:*:443"]     # the probe after the window is not counted
+
+
+def test_report_attributes_denies_per_pid(tmp_path):
+    _write(tmp_path, "unplug-x-1.json", {"bench": "unplug", "host": {"hostname": "mac"}, "recorded_at": "1",
+           "endpoint": {"model": "m", "kind": "ollama"}, "block": {"applied": True, "method": "sandbox-exec"},
+           "egress": {"firewall_dropped_packets": 2, "sandbox_pids": [9618, 9621], "denies_by_pid": {"9621": 2},
+                      "pid_roles": {"9618": "bench", "9621": "war-room app"}}})
+    text = report.build(tmp_path)
+    assert "pid 9621 (war-room app) x2" in text and "9618" not in text
+
+
+def test_report_marks_old_schema_and_changed_code_stale(tmp_path, monkeypatch):
+    host = {"hostname": "mac"}
+    ep = {"model": "m", "kind": "ollama"}
+    v = [{"name": "first_alert_card_p90", "target": "≤ 2.0 s", "measured": 1.19, "passed": True, "note": ""}]
+    _write(tmp_path, "ttft-x-1.json", {"bench": "ttft", "host": host, "recorded_at": "1", "endpoint": ep,
+           "alert_card": {"total_s": {}}, "verdicts": v})
+    _write(tmp_path, "concurrent-x-1.json", {"bench": "concurrent", "host": host, "recorded_at": "1",
+           "endpoint": ep, "verdicts": [dict(v[0], name="concurrent_3_worst_alert")]})
+    text = report.build(tmp_path)
+    assert "STALE, not counted (was PASS): old ttft schema" in text
+    assert "STALE, not counted (was PASS): old concurrent schema" in text
+    # stamped result: current while the bench files are unchanged, stale once they differ
+    from bench.provenance import code_stamp
+    _write(tmp_path, "ttft-x-1.json", {"bench": "ttft", "host": host, "recorded_at": "1", "endpoint": ep,
+           "code": code_stamp("ttft"), "alert_card": {"cold": {}}, "verdicts": v})
+    assert "| ttft | first_alert_card_p90 | ≤ 2.0 s | 1.190 | PASS |" in report.build(tmp_path)
+    monkeypatch.setattr(report, "code_fingerprint", lambda b: "different")
+    assert "STALE, not counted (was PASS): bench code changed" in report.build(tmp_path)
+
+
+def test_warroom_import_turns_onnxruntime_telemetry_off_before_it_loads():
+    """onnxruntime's POSIX telemetry dials :443 from native code; importing warroom must switch it off first."""
+    code = ("import os, sys; os.environ.pop('ORT_DISABLE_TELEMETRY', None); import warroom; "
+            "assert 'onnxruntime' not in sys.modules; print(os.environ.get('ORT_DISABLE_TELEMETRY'))")
+    env = {k: v for k, v in __import__("os").environ.items() if k != "ORT_DISABLE_TELEMETRY"}
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=env, timeout=60)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout.strip() == "1"
+
+
+def test_internet_probe_runs_in_its_own_pid_inside_the_sandbox(monkeypatch):
+    seen = {}
+
+    def fake_run(argv, **kw):
+        seen["argv"] = argv
+        return subprocess.CompletedProcess(argv, 1)
+    monkeypatch.setenv(unplug_test.SANDBOX_ENV, "1")
+    monkeypatch.setattr(unplug_test.subprocess, "run", fake_run)
+    assert unplug_test.internet_reachable(0.1) is False
+    assert seen["argv"][0] == sys.executable and "_probe" in seen["argv"][-1]

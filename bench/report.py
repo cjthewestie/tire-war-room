@@ -5,10 +5,13 @@
 from __future__ import annotations
 
 import json
+import subprocess
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from bench.llm import RESULTS_DIR
+from bench.provenance import BENCH_DEPS, BENCH_DIR, code_fingerprint
 
 ORDER = ["ttft", "concurrent", "full_event", "full_event-think", "accuracy", "accuracy-open-book",
          "accuracy-open-book-cite", "memory", "unplug", "tokens_per_watt"]
@@ -27,11 +30,86 @@ def latest(results_dir: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
                  + ("-cite" if d.get("cite") else "") + ("-think" if d.get("think") else ""))
         key = (bench, d.get("host", {}).get("hostname", "?"), model)
         if key not in best or d.get("recorded_at", "") >= best[key].get("recorded_at", ""):
-            best[key] = d | {"_file": p.name}
+            best[key] = d | {"_file": p.name, "_stale": freshness(d, p)}
     return best
 
 
+def _git(*a: str) -> str | None:
+    try:
+        r = subprocess.run(["git", *a], cwd=BENCH_DIR.parent, capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() if r.returncode == 0 else None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+# A commit that touches bench code without changing what any bench measures (e.g. adding a field to the
+# saved JSON) carries this trailer, so older unstamped results are not marked stale by it.
+NO_NUMBERS_TRAILER = "Bench-Numbers: unchanged"
+
+
+def schema_problem(d: dict[str, Any]) -> str | None:
+    """A result written by an older version of its bench, in a shape the current bench no longer judges."""
+    b = d.get("bench")
+    if b == "ttft" and not isinstance((d.get("alert_card") or {}).get("cold"), dict):
+        return "old ttft schema: no cold/warm split (alert card judged on repeated, cache-hit prompts)"
+    if b == "concurrent" and "batched" not in d:
+        return "old concurrent schema: no batching check (queued calls could pass)"
+    return None
+
+
+def freshness(d: dict[str, Any], path: Path | None = None) -> str | None:
+    """None when the result was produced by the bench code that is in the tree now, else why it is stale.
+
+    Stamped results (bench.llm.code_stamp) compare the fingerprint of their bench source files with the
+    files on disk. Unstamped (older) results fall back to git: the run must be recorded after the last
+    commit that touched those files, or be committed in that same commit."""
+    prob = schema_problem(d)
+    if prob:
+        return prob
+    b = d.get("bench", "")
+    deps = BENCH_DEPS.get(b)
+    if not deps:
+        return None
+    stamp = d.get("code") or {}
+    if stamp.get("fingerprint"):
+        now = code_fingerprint(b)
+        if stamp["fingerprint"] != now:
+            return (f"bench code changed since this run (ran at {stamp.get('git_sha')}"
+                    f"{' + local edits' if stamp.get('deps_dirty') else ''}; {', '.join(deps)} differ now)")
+        return None
+    files = [f"bench/{f}" for f in deps]
+    log = _git("log", "--format=%H %cI%n%B%x00", "--", *files)
+    last = next((c.strip().split("\n", 1)[0] for c in (log or "").split("\x00")
+                 if c.strip() and NO_NUMBERS_TRAILER not in c), None)
+    if not last:
+        return None                      # no git history here: cannot tell
+    last_sha, last_t = last.split(" ", 1)
+    try:
+        if datetime.fromisoformat(d.get("recorded_at", "")) >= datetime.fromisoformat(last_t):
+            return None
+    except ValueError:
+        pass
+    if path is not None:
+        try:
+            rel = str(path.resolve().relative_to(BENCH_DIR.parent))
+        except ValueError:
+            rel = str(path)
+        added = _git("log", "--diff-filter=A", "--format=%H", "--", rel)
+        if added and added.splitlines()[-1] == last_sha:
+            return None                  # committed together with the bench code that produced it
+    return (f"unstamped run recorded {d.get('recorded_at', '?')[:19]}, before {last_sha[:7]} "
+            f"({last_t[:19]}) changed {', '.join(files)}")
+
+
 def rows(d: dict[str, Any]) -> list[tuple[str, str, str, str]]:
+    out = _rows(d)
+    stale = d.get("_stale")
+    if stale:
+        out = [(n, t, m, f"STALE, not counted (was {v.split(' (')[0]}): {stale}; re-run") for n, t, m, v in out]
+    return out
+
+
+def _rows(d: dict[str, Any]) -> list[tuple[str, str, str, str]]:
     out = []
     for v in d.get("verdicts", []):
         out.append((v["name"], str(v["target"]), _fmt(v["measured"]),
@@ -75,6 +153,10 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
     by = lambda b: [d for (k, _, _), d in best.items() if k == b]          # noqa: E731
     spark = [d for d in ds if (d.get("endpoint") or {}).get("kind") == "vllm"
              or "spark" in str(d.get("host", {}).get("hostname", "")).lower()]
+    for (b, _, _), d in sorted(best.items()):
+        if d.get("_stale"):
+            out.append(f"**Stale result, not counted: {b}** ({d['_file']}): {d['_stale']}. Re-run "
+                       f"`uv run python -m bench.{_module(b)}` and regenerate this summary.")
     if not spark:
         out.append("**No DGX Spark numbers yet.** Every row above is a Mac/Ollama stand-in. The page-10 control "
                    "group (FP8, no prefix cache, no speculative decoding) and the per-optimisation contributions "
@@ -85,8 +167,16 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
             out.append(f"**Full event never ran through the state machine.** {d['_file']} is the scripted 4-call "
                        "pipeline only (synthetic solve, fixed verify reading). Re-run `uv run python -m "
                        "bench.full_event --runs 3`; its headline is the real Runtime.")
+    for (b, _, _), d in sorted(best.items()):
+        la = d.get("host_load_avg_1_5_15")
+        cpus = (d.get("host") or {}).get("cpu_count") or 0
+        if la and cpus and not d.get("_stale") and b.split("-")[0] in ("ttft", "concurrent", "full_event", "unplug"):
+            if max(la[0], la[1]) > cpus / 2:
+                out.append(f"**{b} measured on a busy host** ({d['_file']}: load average {la[0]}/{la[1]}/{la[2]} "
+                           f"on {cpus} cores). Latency is inflated by other work sharing the box and the model "
+                           "server; re-run on an idle machine before quoting it.")
     for d in by("full_event-think"):
-        out.append(f"**Reasoning must stay OFF.** With Nemotron reasoning ON the full event takes "
+        out.append(("(From a stale run.) " if d.get("_stale") else "") + f"**Reasoning must stay OFF.** With Nemotron reasoning ON the full event takes "
                    f"{_fmt(next((v['measured'] for v in d.get('verdicts', []) if v['name'] == 'full_event_p50'), None))}"
                    f" s p50 and plan_valid_rate is {_fmt(d.get('plan_valid_rate'))} ({d['_file']}), so it fails "
                    "both the ≈22 s and the valid-plan targets. The commander forces it off on every call "
@@ -116,12 +206,25 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
                 eg = d.get("egress") or {}
                 n = eg.get("firewall_dropped_packets")
                 if n:
-                    out.append(f"**The app tried to leave the factory {n} time(s)** in {d['_file']} (kernel Sandbox "
-                               f"log, `deny(1) network-outbound` to port 443 by pids {eg.get('sandbox_pids')}). Every "
-                               "attempt was blocked, so nothing left, but '0 outbound attempts' is not met. Not from "
-                               "Python-level sockets (an audit hook on socket.connect saw none) and not reproduced by "
-                               "the headless `warroom.api demo`; the source is a native library, still unidentified.")
+                    by = eg.get("denies_by_pid")
+                    roles = eg.get("pid_roles") or {}
+                    who = (", ".join(f"pid {p} ({roles.get(str(p), roles.get(p, '?'))}) x{c}" for p, c in by.items())
+                           if by else "pids not broken down in this result (pre-fix run)")
+                    out.append(f"**Something tried to leave the factory {n} time(s)** in {d['_file']} (kernel "
+                               f"Sandbox log, `deny(1) network-outbound`: {who}). Every attempt was blocked, so "
+                               "nothing left, but '0 outbound attempts' is not met."
+                               + (f" Remote(s): {', '.join(eg['deny_remotes'])}." if eg.get("deny_remotes") else ""))
+                nr = sum((eg.get("no_remote_denies_by_pid") or {}).values())
+                if nr and not n:
+                    out.append(f"**No attempt to leave the factory** in {d['_file']}: the kernel logged {nr} "
+                               "remote-less network-outbound deny(s), which accompany ordinary localhost sockets "
+                               "and name no destination; they are not counted as egress.")
     return out
+
+
+def _module(bench: str) -> str:
+    base = bench.split("-")[0]
+    return {"memory": "memory_check", "unplug": "unplug_test"}.get(base, base)
 
 
 def build(results_dir: Path = RESULTS_DIR) -> str:
