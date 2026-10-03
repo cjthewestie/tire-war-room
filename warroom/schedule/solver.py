@@ -55,7 +55,7 @@ from warroom.contracts import (
     StaffingChange,
     TireSize,
 )
-from warroom.schedule.backprop import back_propagate, labor_conflicts
+from warroom.schedule.backprop import back_propagate, labor_conflicts, prep_needs
 from warroom.schedule.staffing import (
     HALF_MIN,
     OP_MIN,
@@ -80,6 +80,8 @@ EXTRA_DAYS = 4          # jobs may finish this many days past the horizon
 REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
 STALL_S = 1.5           # or when the best plan has not improved for this long (weak bounds)
 GRID_MIN = 15           # mold-in times on a 15-min wall-clock grid (both solvers)
+MIN_HORIZON_DAYS = 1    # a degenerate horizon is clamped (and CP-SAT is skipped for it)
+MAX_HORIZON_DAYS = 28
 
 
 @dataclass
@@ -118,12 +120,20 @@ class _Ctx:
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
     now_m: int = 0                  # req.now in minutes from the grid origin t0
+    horizon_days: int = 7           # req.horizon_days clamped to [MIN_HORIZON_DAYS, MAX_HORIZON_DAYS]
+    prep_ok: dict[TireSize, list[tuple[int, int]]] = field(default_factory=dict)  # mold-in minutes whose prep is staffed
 
     def m(self, dt: datetime) -> int:
         return math.floor((dt - self.t0).total_seconds() / 60.0)
 
     def dt(self, minutes: int) -> datetime:
         return self.t0 + timedelta(minutes=minutes)
+
+    def mold_in_ranges(self, size: TireSize) -> list[tuple[int, int]]:
+        """Staffed op ranges (incl. short shifts) where the tire's prep can also be staffed."""
+        ops = _merge(self.slot_ranges() + [(a, b) for a, b, _ in self.short_windows])
+        prep = self.prep_ok.get(size)
+        return ops if prep is None else _intersect(ops, prep)
 
     def slot_ranges(self) -> list[tuple[int, int]]:
         """Allowed op start minutes [a, b] (inclusive), op fits before window end."""
@@ -147,8 +157,9 @@ def _eligible(size: TireSize, unavailable: set[str]) -> list[str]:
 def _prepare(req: SolveRequest) -> _Ctx:
     now = req.now.astimezone(F.TZ)
     t0 = now.replace(minute=now.minute - now.minute % GRID_MIN, second=0, microsecond=0)   # grid origin
-    horizon_end = t0 + timedelta(days=req.horizon_days)
-    hmax = int((req.horizon_days + EXTRA_DAYS) * 1440)
+    hdays = min(max(int(req.horizon_days), MIN_HORIZON_DAYS), MAX_HORIZON_DAYS)
+    horizon_end = t0 + timedelta(days=hdays)
+    hmax = int((hdays + EXTRA_DAYS) * 1440)
     shifts = complete_shifts(req.shifts, t0 - timedelta(days=1), t0 + timedelta(minutes=hmax + 1440))
     staffing_ok = req.allow_overtime or req.allow_cross_team
     # shifts that are already short with a single op can only be used if staffing may be added
@@ -157,11 +168,15 @@ def _prepare(req: SolveRequest) -> _Ctx:
     ctx = _Ctx(req=req, t0=t0, hmax=hmax, shifts=shifts, windows=windows, short_windows=[], jobs=[], frozen=[],
                free=[], orders={o.id: o for o in req.orders})
     ctx.now_m = now_m = ctx.m(now)
+    ctx.horizon_days = hdays
+    if hdays != req.horizon_days:
+        ctx.warnings.append(f"排程視窗 {req.horizon_days} 天無效，改用 {hdays} 天")
     for s in shifts:
         if s.id in short_ids and staffing_ok:
             a, b = ctx.m(s.start), ctx.m(s.end) - OP_MIN
             if b >= a:
                 ctx.short_windows.append((a, b, s))
+    ctx.prep_ok = {size: _prep_ranges(ctx, size) for size in TireSize}
     unavailable = set(req.unavailable_presses)
     frozen_ids = set(req.frozen_job_ids)
 
@@ -223,6 +238,45 @@ def _prepare(req: SolveRequest) -> _Ctx:
     return ctx
 
 
+def _prep_ranges(ctx: _Ctx, size: TireSize) -> list[tuple[int, int]]:
+    """Mold-in minutes T whose prep (A feed, side/bead, bonding) has a staffed slot (page 6:
+    back-propagate feed and labor from T). Each prep need is fine if its back-propagated start
+    T - offset falls in a shift of its team, or if a shift of that team has room for it inside
+    [T - L, T]: the press holds one blank (principle 5) and its previous tire went in at least
+    L = the pool's shortest cure ago, so the blank can be made ahead in that window. A team
+    with no shift in the data is not constrained."""
+    lookback = int(min(F.CURE_HOURS[s] for s in ((TireSize.S,) if size is TireSize.S else (TireSize.M, TireSize.L))) * 60)
+    out: list[tuple[int, int]] | None = None
+    for team, off, dur in prep_needs(size):
+        ivs = []
+        for sh in ctx.shifts:
+            if sh.team is not team:
+                continue
+            a, b = ctx.m(sh.start), ctx.m(sh.end)
+            ivs.append((a + off, b + off - 1))            # own start staffed: a <= T - off < b
+            if b - a >= dur and lookback >= dur:
+                ivs.append((a + dur, b + lookback - dur))   # done ahead in [T - L, T]
+        if not ivs:
+            continue
+        team_ok = _merge(ivs)
+        out = team_ok if out is None else _intersect(out, team_ok)
+    return out if out is not None else [(-10**9, 10**9)]
+
+
+def _intersect(xs: list[tuple[int, int]], ys: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Intersection of two sorted lists of inclusive integer ranges."""
+    out, i, k = [], 0, 0
+    while i < len(xs) and k < len(ys):
+        a, b = max(xs[i][0], ys[k][0]), min(xs[i][1], ys[k][1])
+        if a <= b:
+            out.append((a, b))
+        if xs[i][1] < ys[k][1]:
+            i += 1
+        else:
+            k += 1
+    return out
+
+
 def _assign_releases(ctx: _Ctx, jobs: list[_Job], busy: list[tuple[int, int]]) -> None:
     """Earliest staffed de-mold slot ≥ cure end that the crew is free for (appends to busy)."""
     for j in sorted(jobs, key=lambda j: (j.mold_in + j.cure_min, j.press)):
@@ -260,7 +314,8 @@ def _lock_unaffected(ctx: _Ctx, affected: set[str]) -> None:
     keep, lock = [], []
     for j in ctx.free:
         ok = (j.orig_press is not None and j.orig_press not in touched and j.orig_press in j.eligible
-              and j.orig_mold_in is not None and j.orig_mold_in >= j.lb and _in_ranges(j.orig_mold_in, ranges)
+              and j.orig_mold_in is not None and j.orig_mold_in >= j.lb
+              and _in_ranges(j.orig_mold_in, ctx.mold_in_ranges(j.size))
               and _in_ranges(j.orig_mold_in + j.cure_min, ranges))
         if ok:
             mine = ((j.orig_mold_in + HALF_MIN, j.orig_mold_in + OP_MIN),
@@ -290,11 +345,15 @@ def _generate_jobs(ctx: _Ctx, unavailable: set[str], due_min, prio, horizon_end:
         min_cure = min(F.CURE_HOURS[s] for s in sizes)
         # Mon–Sat staffing and waits for staffed de-molds: ~85 % of back-to-back cures
         cap = len(presses) * max(1, int(horizon_h / min_cure * 0.85))
-        orders = sorted((o for o in ctx.req.orders if o.size in sizes and o.qty > o.done),
+        # tires already curing (frozen) count toward the order: generate only what is left
+        curing: dict[str, int] = {}
+        for fj in ctx.frozen:
+            curing[fj.order_id] = curing.get(fj.order_id, 0) + 1
+        orders = sorted((o for o in ctx.req.orders if o.size in sizes and o.qty > o.done + curing.get(o.id, 0)),
                         key=lambda o: (o.due, -o.priority, o.id))
         # earliest due first (EDD); tires beyond what the presses can cure are left for later
         for o in orders:
-            for k in range(1, o.qty - o.done + 1):
+            for k in range(1, o.qty - o.done - curing.get(o.id, 0) + 1):
                 if cap <= 0:
                     break
                 cap -= 1
@@ -390,7 +449,7 @@ def _finalize(ctx: _Ctx, assign: dict[str, tuple[str, int]], solver: SolverName,
     op_times += [("demold", j.press, ctx.dt(j.release)) for j in ctx.frozen]
     op_times += [("demold", sj.press_id, sj.demold) for sj in jobs if not sj.frozen]
     gaps_t = [(s, n, short) for s, n, short in staffing_gaps(op_times, ctx.shifts)
-              if s.end > ctx.t0 and s.start < ctx.dt(req.horizon_days * 1440)]
+              if s.end > ctx.t0 and s.start < ctx.dt(ctx.horizon_days * 1440)]
     gaps = [gap_label(s, short) for s, _, short in gaps_t]
     options: list[StaffingChange] = []
     chosen: list[StaffingChange] = []
@@ -400,11 +459,13 @@ def _finalize(ctx: _Ctx, assign: dict[str, tuple[str, int]], solver: SolverName,
         if opts:
             # solver's pick: transfer if allowed (no overtime cost), else overtime (page 11 02:14:25)
             chosen.append(next((o for o in opts if o.kind == "transfer"), opts[0]))
-    prep = labor_conflicts(jobs, ctx.shifts)
+    # prep outside its team's shift is normal (done ahead, one blank per press); warn only for
+    # prep that no shift can cover before the mold-in, within the visible horizon
+    prep = labor_conflicts(jobs, ctx.shifts, horizon_end=ctx.dt(ctx.horizon_days * 1440))
     if prep:
-        warnings.append(f"{len(prep)} 項備料／貼合在該組班表外，需提前備妥胎胚（每台 1 顆，不堆料）")
+        warnings.append(f"{len(prep)} 項備料／貼合無班可提前備妥：{prep[0]}" + (" 等" if len(prep) > 1 else ""))
     sched = Schedule(id=f"SCH-{ctx.t0:%Y%m%d-%H%M}-{solver.value}", created_at=req.now, horizon_start=ctx.t0,
-                     horizon_end=ctx.t0 + timedelta(days=req.horizon_days), jobs=jobs, staffing_changes=chosen,
+                     horizon_end=ctx.t0 + timedelta(days=ctx.horizon_days), jobs=jobs, staffing_changes=chosen,
                      solver=solver, objective=objective, warnings=warnings)
     errors = check_schedule(sched, req, ctx)
     if errors:
@@ -457,6 +518,8 @@ def check_schedule(sched: Schedule, req: SolveRequest, ctx: _Ctx | None = None) 
             errs.append(f"{j.id} 小胎佔用中大胎機 {j.press_id}")
         if not _in_ranges(ctx.m(j.mold_in), ranges):
             errs.append(f"{j.id} 入模 {j.mold_in:%m/%d %H:%M} 不在有人時段")
+        elif not _in_ranges(ctx.m(j.mold_in), ctx.mold_in_ranges(j.size)):
+            errs.append(f"{j.id} 入模 {j.mold_in:%m/%d %H:%M} 前無班可備料／貼合")
         if not _in_ranges(ctx.m(j.demold), ranges):
             errs.append(f"{j.id} 出模 {j.demold:%m/%d %H:%M} 不在有人時段")
     for p, js in by_press.items():
@@ -506,8 +569,9 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
                                             j.orig_mold_in if j.orig_mold_in is not None else 10**9, j.id))
     for j in order:
         best = None
+        mi_ranges = ctx.mold_in_ranges(j.size)
         for p in j.eligible:
-            t = _first_feasible(ranges, max(free_at[p], j.lb), j.cure_min, busy, ctx.hmax, press_busy[p])
+            t = _first_feasible(ranges, max(free_at[p], j.lb), j.cure_min, busy, ctx.hmax, press_busy[p], mi_ranges)
             if t is None:
                 continue
             cost = W_DEMOLD * (t + j.cure_min)
@@ -533,10 +597,12 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
     return assign
 
 
-def _first_feasible(ranges, t, cure_min, busy, hmax, press_busy=()) -> int | None:
-    """First grid t' >= t with mold-in and de-mold (t'+cure) both in staffed ranges and no op clash."""
+def _first_feasible(ranges, t, cure_min, busy, hmax, press_busy=(), mi_ranges=None) -> int | None:
+    """First grid t' >= t with mold-in (in mi_ranges: staffed op + staffed prep) and de-mold
+    (t'+cure, in staffed op ranges) and no op clash."""
+    mi_ranges = ranges if mi_ranges is None else mi_ranges
     while t <= hmax:
-        nt = _next_slot_r(ranges, -(-t // GRID_MIN) * GRID_MIN)
+        nt = _next_slot_r(mi_ranges, -(-t // GRID_MIN) * GRID_MIN)
         if nt is None:
             return None
         if nt % GRID_MIN:
@@ -589,6 +655,11 @@ class CpSatScheduler:
         except Exception as e:  # noqa: BLE001
             return SolveResult(status=SolveStatus.ERROR, solver=SolverName.CP_SAT, solve_ms=0.0, schedule=None,
                                feasible=False, deliveries_met=False, gaps=[f"ortools unavailable: {e}"])
+        bad = _bad_request(req)
+        if bad:   # never hand OR-Tools a degenerate model: the backup solver takes it (page 7)
+            return SolveResult(status=SolveStatus.ERROR, solver=SolverName.CP_SAT,
+                               solve_ms=round((_time.perf_counter() - t_start) * 1000, 1), schedule=None,
+                               feasible=False, deliveries_met=False, gaps=[f"cp-sat skipped: {bad}"])
         try:
             ctx = _prepare(req)
             if not ctx.free:
@@ -603,9 +674,15 @@ class CpSatScheduler:
             dom = Domain.FromIntervals([[a, b] for a, b in ranges])
             # hint: the previous plan where it still fits (repair, not re-plan), else greedy
             hint = greedy_assign(ctx)
+            # OR-Tools 9.15 aborts the whole process (SIGABRT in QuickSolveWithHint) when a model
+            # with hints turns out infeasible, e.g. a short horizon that cannot hold every job of
+            # the previous plan. Hint only when greedy placed every job: the hint is then a
+            # complete feasible solution, so the model is feasible. Otherwise solve unhinted.
+            use_hint = all(j.id in hint for j in ctx.free)
             for j in ctx.free:
                 if (j.orig_press in j.eligible and j.orig_mold_in is not None and j.orig_mold_in >= j.lb
-                        and _in_ranges(j.orig_mold_in, ranges) and _in_ranges(j.orig_mold_in + j.cure_min, ranges)):
+                        and _in_ranges(j.orig_mold_in, ctx.mold_in_ranges(j.size))
+                        and _in_ranges(j.orig_mold_in + j.cure_min, ranges)):
                     hint[j.id] = (j.orig_press, j.orig_mold_in)
             obj = []
             press_iv: dict[str, list] = {p: [] for p in F.CURE_PRESS_IDS}
@@ -623,7 +700,7 @@ class CpSatScheduler:
             xs: dict[tuple[str, str], object] = {}
             mi_vars = {}
             for j in ctx.free:
-                gr = [[-(-max(a, j.lb) // GRID_MIN), min(b, ctx.hmax) // GRID_MIN] for a, b in ranges]
+                gr = [[-(-max(a, j.lb) // GRID_MIN), min(b, ctx.hmax) // GRID_MIN] for a, b in ctx.mold_in_ranges(j.size)]
                 gr = [x for x in gr if x[0] <= x[1]]
                 if not gr or not j.eligible:
                     continue
@@ -668,11 +745,15 @@ class CpSatScheduler:
                         m.AddImplication(inw, ge)
                         m.AddImplication(inw, le)
                         obj.append(PEN_SHORT_OP * inw)
-                if j.id in hint:
+                if use_hint and j.id in hint:
                     hp, ht = hint[j.id]
-                    m.AddHint(gi, -(-ht // GRID_MIN))
-                    for p in j.eligible:
-                        m.AddHint(xs[(j.id, p)], 1 if p == hp else 0)
+                    hg = -(-ht // GRID_MIN)
+                    # a hint outside the variable's domain (e.g. a previous slot beyond a short
+                    # horizon) aborts OR-Tools inside QuickSolveWithHint: hint only valid values
+                    if hp in j.eligible and any(lo <= hg <= hi for lo, hi in gr):
+                        m.AddHint(gi, hg)
+                        for p in j.eligible:
+                            m.AddHint(xs[(j.id, p)], 1 if p == hp else 0)
             for p, ivs in press_iv.items():
                 if len(ivs) > 1:
                     m.AddNoOverlap(ivs)
@@ -706,6 +787,17 @@ class CpSatScheduler:
             return SolveResult(status=SolveStatus.ERROR, solver=SolverName.CP_SAT,
                                solve_ms=round((_time.perf_counter() - t_start) * 1000, 1), schedule=None,
                                feasible=False, deliveries_met=False, gaps=[f"cp-sat error: {e}"])
+
+
+def _bad_request(req: SolveRequest) -> str | None:
+    if not MIN_HORIZON_DAYS <= req.horizon_days <= MAX_HORIZON_DAYS:
+        return f"horizon_days={req.horizon_days} outside [{MIN_HORIZON_DAYS}, {MAX_HORIZON_DAYS}]"
+    if not math.isfinite(req.time_limit_s) or req.time_limit_s <= 0:
+        return f"time_limit_s={req.time_limit_s} must be > 0"
+    for p, h in req.cure_overrides_h.items():
+        if not math.isfinite(h) or not 0 < h <= 96:
+            return f"cure override {p}={h} h outside (0, 96]"
+    return None
 
 
 def _solve_with_stall_stop(cp_model, solver, model, stall_s: float | None):

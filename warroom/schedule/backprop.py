@@ -56,19 +56,47 @@ def labor_for(job: ScheduleJob, shifts: list[Shift] | None = None) -> list[Labor
     return needs
 
 
-def labor_conflicts(jobs: list[ScheduleJob], shifts: list[Shift]) -> list[str]:
-    """Labor needs that fall outside every shift of their team (e.g. bonding at 03:00 when the
-    bonding team only works 08–17). Used as a soft check / warning for back-propagated feed."""
+def prep_needs(size: TireSize) -> list[tuple[TeamId, int, int]]:
+    """(team, start offset before T in min, duration in min) of each prep need, as in labor_for."""
+    bp = F.BACKPROP[size]
+    a, b = bp["a_feed_min"], bp["bond_start_min"]
+    return [(TeamId.BODY, a, a - b), (TeamId.SIDE, a, a - b), (TeamId.BEAD_NYLON, a, a - b), (TeamId.BOND, b, b)]
+
+
+def labor_conflicts(jobs: list[ScheduleJob], shifts: list[Shift], horizon_end: datetime | None = None) -> list[str]:
+    """Labor needs that no shift of their team can cover, even done ahead.
+
+    Mold-in / de-mold must happen at their time, inside a shift of the team doing them.
+    Prep work (A-line feed, side rubber / bead, bonding) is fine when its back-propagated start
+    is staffed, or when it can be done ahead (page 6 principle 5: 「每台只備 1 顆胎胚，不堆料」):
+    the press's single blank slot frees when its previous tire goes in, so the prep fits if a
+    shift of that team has room for it between the press's previous mold-in and this mold-in.
+    E.g. a Monday 06:00 mold-in is bonded on the Saturday day shift and waits as the press's one
+    blank. Only jobs that mold in before `horizon_end` (the visible horizon) are checked."""
     out = []
+    by_press: dict[str, list[ScheduleJob]] = {}
     for j in jobs:
-        if j.frozen:
+        by_press.setdefault(j.press_id, []).append(j)
+    prev_mold_in: dict[str, datetime | None] = {}
+    for js in by_press.values():
+        js.sort(key=lambda x: x.mold_in)
+        for a, b in zip([None, *js], js):
+            prev_mold_in[b.id] = a.mold_in if a is not None else None
+    for j in jobs:
+        if j.frozen or (horizon_end is not None and j.mold_in >= horizon_end):
             continue
+        free_from = prev_mold_in.get(j.id)
         for n in j.labor:
             if n.task in ("mold_in", "demold"):
                 ok = any(s.team is n.team and s.start <= n.start and n.end <= s.end for s in shifts)
             else:
-                # prep work may span shifts of the same team; require the start to be staffed
+                # prep may span shifts of the same team; a staffed start is enough
                 ok = any(s.team is n.team and s.start <= n.start < s.end for s in shifts)
+                if not ok:   # or done ahead, in the press's one-blank buffer window
+                    need = n.end - n.start
+                    ok = any(s.team is n.team
+                             and min(s.end, j.mold_in) - max(s.start, free_from or s.start) >= need
+                             for s in shifts)
             if not ok:
                 out.append(f"{j.id} {n.task} {n.start:%m/%d %H:%M} {F.TEAM_LABELS[n.team]}無人")
     return out

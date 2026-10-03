@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any, AsyncIterator, Literal, Protocol, runtime_checkable
+from typing import Annotated, Any, AsyncIterator, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -571,9 +571,10 @@ class SopHit(_M):
 
 class SolveScheduleArgs(_M):
     unavailable_presses: list[str] = Field(default_factory=list)   # e.g. ["CURE-07"] out of service
-    cure_overrides_h: dict[str, float] = Field(default_factory=dict)  # press_id -> new total cure h
-    horizon_days: int = 7
-    time_limit_s: float = 10.0
+    # press_id -> new total cure h; bounded so a malformed plan fails the gate's format check
+    cure_overrides_h: dict[str, Annotated[float, Field(gt=0, le=96)]] = Field(default_factory=dict)
+    horizon_days: int = Field(default=7, ge=1, le=14)
+    time_limit_s: float = Field(default=10.0, gt=0, le=30)
     allow_overtime: bool = True
     allow_cross_team: bool = True
 

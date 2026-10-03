@@ -329,3 +329,106 @@ def test_page11_against_factory_sim(tmp_path):
     assert "10/03 夜班缺 1 人" in res.gaps
     assert {o.label for o in res.staffing_options} >= {"夜班加班", "從 2 線調 1 人"}
     assert res.solve_ms < 10_000
+
+
+# ---------------------------------------------------------------- review fixes (r2)
+def _sim_seed():
+    sim_mod = pytest.importorskip("warroom.sim")
+    from warroom.clock import SimClock
+    from warroom.contracts import ScenarioName
+    from warroom.schedule import seed_schedule
+    clock = SimClock(start=datetime(2026, 10, 3, 2, 14, 20, tzinfo=F.TZ), manual=True)
+    sim = sim_mod.Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
+    seed = seed_schedule(clock.now(), sim.orders(), sim.shifts(), sim.machines(), next_on={"CURE-07": "#A-311"})
+    return clock, sim, seed
+
+
+def test_solve_schedule_args_bounded_so_gate_rejects_bad_values():
+    from pydantic import ValidationError
+
+    from warroom.agent import RuleGate
+    from warroom.contracts import EventState, GateVerdict, PlanStep, SolveScheduleArgs, ToolName
+    for bad in ({"horizon_days": 0}, {"horizon_days": -3}, {"horizon_days": 15}, {"time_limit_s": -1},
+                {"time_limit_s": 0}, {"cure_overrides_h": {"CURE-07": -5}}, {"cure_overrides_h": {"CURE-07": 500}}):
+        with pytest.raises(ValidationError):
+            SolveScheduleArgs.model_validate(bad)
+        d = RuleGate().check(PlanStep(id="S3", tool=ToolName.SOLVE_SCHEDULE, args=bad, purpose="x"),
+                             EventState.SIMULATE, True)
+        assert d.verdict is not GateVerdict.ALLOW, bad
+    ok = RuleGate().check(PlanStep(id="S3", tool=ToolName.SOLVE_SCHEDULE, args={"cure_overrides_h": {"CURE-07": 36.5}},
+                                   purpose="x"), EventState.SIMULATE, True)
+    assert ok.verdict is GateVerdict.ALLOW
+
+
+def test_cpsat_skips_degenerate_request_and_fallback_answers():
+    now = datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ)
+    orders, shifts, seed = demo_inputs(now)
+    for kw in ({"horizon_days": 0}, {"horizon_days": -3}, {"time_limit_s": -1.0}):
+        req = SolveRequest(now=now, orders=orders, shifts=shifts, previous=seed, **kw)
+        assert CpSatScheduler().solve(req).status is SolveStatus.ERROR
+        res = FallbackScheduler().solve(req)
+        assert res.fell_back and res.schedule is not None and res.solver is SolverName.HEURISTIC
+
+
+_SHORT_HORIZON_CHILD = r"""
+import tempfile, sys
+from pathlib import Path
+from datetime import datetime
+from warroom import factory as F
+from warroom.clock import SimClock
+from warroom.contracts import ScenarioName, SolveRequest
+from warroom.sim import Factory
+from warroom.schedule import CpSatScheduler, FallbackScheduler, seed_schedule
+clock = SimClock(start=datetime(2026, 10, 3, 2, 14, 20, tzinfo=F.TZ), manual=True)
+sim = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
+seed = seed_schedule(clock.now(), sim.orders(), sim.shifts(), sim.machines(), next_on={"CURE-07": "#A-311"})
+for h in (0, 1, 2):
+    req = SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
+                       horizon_days=h, time_limit_s=3)
+    r = FallbackScheduler().solve(req)
+    assert r.schedule is not None, (h, r.status, r.gaps)
+print("OK")
+"""
+
+
+def test_short_horizon_does_not_abort_the_process():
+    """Regression: OR-Tools 9.15 SIGABRTs (QuickSolveWithHint) on an infeasible hinted model —
+    a 0/1/2-day horizon against a 7-day previous plan took the whole server down. Run in a
+    child process so an abort fails the test instead of killing pytest."""
+    import subprocess
+    import sys
+    pytest.importorskip("warroom.sim")
+    p = subprocess.run([sys.executable, "-c", _SHORT_HORIZON_CHILD], capture_output=True, text=True, timeout=180)
+    assert p.returncode == 0 and "OK" in p.stdout, (p.returncode, p.stderr[-800:])
+
+
+def test_seed_counts_curing_tires_and_has_no_baseline_warnings():
+    """Baseline seed: in-progress tires count toward their order (no double counting -> no
+    phantom #S-101 delay) and prep done ahead (one blank per press, p.6 principle 5) is not a
+    warning; every mold-in has a staffed slot for its prep."""
+    _, sim, seed = _sim_seed()
+    s101 = next(o for o in sim.orders() if o.id == "#S-101")
+    assert sum(1 for j in seed.jobs if j.order_id == "#S-101") == s101.qty - s101.done
+    assert not any("既有延遲" in w or "備料" in w for w in seed.warnings), seed.warnings
+    from warroom.schedule.backprop import labor_conflicts
+    from warroom.schedule.staffing import complete_shifts
+    shifts = complete_shifts(sim.shifts(), seed.horizon_start - timedelta(days=1), seed.horizon_end + timedelta(days=5))
+    assert labor_conflicts(seed.jobs, shifts, horizon_end=seed.horizon_end) == []
+
+
+def test_labor_conflicts_prep_ahead_rule():
+    from warroom.schedule.backprop import labor_conflicts
+    from warroom.schedule.staffing import complete_shifts
+    sat = datetime(2026, 10, 3, tzinfo=F.TZ)            # Saturday
+    shifts = complete_shifts([], sat - timedelta(days=2), sat + timedelta(days=4))
+    mon6 = datetime(2026, 10, 5, 6, 0, tzinfo=F.TZ)
+    prev_sat_10 = back_propagate("P1", "#M", TireSize.M, "CURE-08", sat.replace(hour=10), shifts=shifts, frozen=True)
+    nxt = back_propagate("N1", "#M", TireSize.M, "CURE-08", mon6, shifts=shifts)
+    # previous tire went in Sat 10:00: the Sat day shift can bond the Monday blank ahead
+    assert labor_conflicts([prev_sat_10, nxt], shifts) == []
+    # previous tire went in Sat 22:00: no bonding shift between then and Mon 06:00
+    prev_sat_22 = back_propagate("P2", "#M", TireSize.M, "CURE-08", sat.replace(hour=22), shifts=shifts, frozen=True)
+    bad = labor_conflicts([prev_sat_22, nxt], shifts)
+    assert any("bonding" in b for b in bad)
+    # outside the visible horizon: not counted
+    assert labor_conflicts([prev_sat_22, nxt], shifts, horizon_end=mon6) == []
