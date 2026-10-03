@@ -33,7 +33,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl tini && rm
 RUN useradd --system --uid 10001 --home /app warroom
 WORKDIR /app
 COPY --from=py /opt/venv /opt/venv
-COPY --from=py /opt/fastembed /opt/fastembed
+COPY --from=py --chown=10001 /opt/fastembed /opt/fastembed
 COPY --from=py /app/warroom /app/warroom
 COPY --from=web /src/web/dist /app/web/dist
 COPY bench/ /app/bench/
