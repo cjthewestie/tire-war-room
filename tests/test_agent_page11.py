@@ -35,8 +35,10 @@ def press7_temp(mid, now):
         return 128.0
     if now < T0:
         return 128.0
-    if now < at("02:30:30"):
+    if now < at("02:26:00"):
         return 122.0
+    if now < at("02:30:30"):
+        return 120.5          # below the 121 expectation, sustained 5 min -> reject at 02:31:00
     return 119.5
 
 
@@ -68,7 +70,7 @@ def build(tmp_path):
         await asyncio.sleep(0)
 
     sm = StateMachine(MockCommander(), tools, RuleGate(store=store), approvals, audit, sim=sim, bus=bus, clock=clock,
-                      store=store, sleep=sleep)
+                      store=store, sleep=sleep, approval_timeout_s=30)
     holder["sm"] = sm
     return clock, bus, audit, sim, store, tools, approvals, sm
 
@@ -197,12 +199,77 @@ async def test_page11_two_misses_safe_stop_keeps_schedule(tmp_path):
 
 async def test_duplicate_anomaly_attaches_to_open_event(tmp_path):
     clock, bus, audit, sim, store, tools, approvals, sm = build(tmp_path)
+    task = asyncio.create_task(sm.handle(page11_anomaly()))
+    while not approvals.pending():                 # event is open, waiting for round-1 approval
+        await asyncio.sleep(0.001)
+    again = await sm.handle(page11_anomaly().model_copy(update={"id": "AN-2"}))
     sup = asyncio.create_task(supervisor(clock, approvals, [
         ("02:16:40", DecisionKind.APPROVE, None, ""), ("02:31:30", DecisionKind.APPROVE, "A", "")]))
-    task = asyncio.create_task(sm.handle(page11_anomaly()))
-    await asyncio.sleep(0.01)
-    again = await sm.handle(page11_anomaly().model_copy(update={"id": "AN-2"}))
     ev = await asyncio.wait_for(task, 10)
     await sup
     assert again.id == ev.id and len(sm.events()) == 1
     assert any("追加異常" in t.text for t in ev.timeline)
+
+
+async def test_page11_with_real_sim_detector_and_safety(tmp_path):
+    """Integration: real Factory (press7_temp_drop), StreamDetector and RuleSafetyCore drive the
+    state machine; only the tool registry is a fake (reads come from the real sim)."""
+    from warroom.contracts import ScenarioName
+    from warroom.detect import StreamDetector
+    from warroom.safety import RuleSafetyCore
+    from warroom.sim import Factory, get_scenario
+
+    sc = get_scenario(ScenarioName.PRESS7_TEMP_DROP)
+    clock = SimClock(start=sc.start_at, manual=True)
+    plant = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
+    det, safety = StreamDetector(clock=clock), RuleSafetyCore(clock=clock)
+    bus = InProcessBus(clock=clock)
+    audit = JsonlAuditLog(tmp_path / "audit.jsonl", bus=bus, clock=clock)
+    store = FakeStore(clock)
+    tools = FakeRegistry(plant, store)
+    approvals = ApprovalBrokerImpl(bus=bus, audit=audit, clock=clock)
+    holder = {}
+
+    def tick():
+        rs = plant.step(1.0)
+        for act in safety.check(rs, {m.machine_id: m for m in plant.machines()}):
+            plant.apply_safety_action(act)
+            if "sm" in holder:
+                holder["sm"].on_safety_action(act)
+        return det.ingest(rs)
+
+    async def sleep(s):
+        for _ in range(int(s)):
+            tick()
+        await asyncio.sleep(0)
+
+    sm = StateMachine(MockCommander(), tools, RuleGate(store=store), approvals, audit, sim=plant, bus=bus,
+                      clock=clock, store=store, sleep=sleep)
+    holder["sm"] = sm
+
+    anomaly = None
+    while anomaly is None and clock.now() < at("02:20:00"):
+        anomaly = next((a for a in tick() if a.machine_id == "CURE-07"), None)
+    assert anomaly is not None and anomaly.kind is AnomalyKind.TEMP_DROP
+
+    async def sup():
+        for hms, option in (("02:16:40", None), ("02:31:30", "A")):
+            while not approvals.pending():
+                await asyncio.sleep(0.001)
+            while clock.now() < at(hms):
+                tick()
+            approvals.decide(ApprovalDecision(request_id=approvals.pending()[0].id, decision=DecisionKind.APPROVE,
+                                              option_id=option, reason="夜班加班" if option else ""))
+    t = asyncio.create_task(sup())
+    ev = await asyncio.wait_for(sm.handle(anomaly), 20)
+    await t
+    print("\n" + "\n".join(f"{x.ts:%H:%M:%S}  {x.actor:<8} {x.text}" for x in ev.timeline))
+
+    assert ev.state is EventState.CLOSED
+    v = _find(ev.timeline, "驗證（程式）", "H1 不成立")
+    assert at("02:30:00") <= ev.timeline[v].ts <= at("02:32:00")
+    assert ev.hypotheses[0].status is HypothesisStatus.REJECTED and ev.hypotheses[1].cause_code.startswith("steam_leak")
+    assert ev.safety_actions, "safety core should have acted below 120°C before verify"
+    assert tools.calls_of(ToolName.CURE_FORMULA)[0].args["actual_temp_c"] == 122.0
+    assert plant.machine("CURE-07").status is MachineStatus.OUT_OF_SERVICE
+    assert audit.verify_chain()

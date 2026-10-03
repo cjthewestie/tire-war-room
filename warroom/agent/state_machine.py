@@ -183,7 +183,9 @@ class StateMachine:
       sleep              async fn(sim_seconds) used by VERIFY polling; default waits on the clock.
       approval_timeout_s wall seconds to wait for the supervisor before SAFE_STOP.
       verify_poll_s      sim seconds between VERIFY reads.
-      verify_confirm_s   a miss must persist this long (sim s) before the hypothesis is rejected.
+      verify_confirm_s   a miss must persist this long (sim s) before the hypothesis is rejected;
+                         5 min by default so sensor noise around the threshold of a slow thermal
+                         mass does not reject a 30-min hypothesis (hard limits are the safety core's).
       max_replans        hypothesis swaps allowed before SAFE_STOP.
     """
 
@@ -191,7 +193,7 @@ class StateMachine:
                  approvals: ApprovalBroker, audit: AuditLog, sim: FactorySim | None = None,
                  bus: Bus | None = None, clock: Clock | None = None, *, store=None,
                  sleep: Callable[[float], Awaitable[None]] | None = None, approval_timeout_s: float = 600.0,
-                 verify_poll_s: float = 5.0, verify_confirm_s: float = 30.0, max_replans: int = 3,
+                 verify_poll_s: float = 5.0, verify_confirm_s: float = 300.0, max_replans: int = 3,
                  max_events_kept: int = 200):
         self.commander, self.tools, self.gate = commander, tools, gate
         self.approvals, self.audit, self.sim, self.bus = approvals, audit, sim, bus
