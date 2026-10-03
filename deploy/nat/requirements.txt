@@ -1,0 +1,5 @@
+# NeMo Agent Toolkit overlay for the war room. Not in pyproject: nvidia-nat-profiler pins pandas<3
+# and rich<15, which would downgrade the base demo. deploy/nat/run.sh layers it with `uv run --with-requirements`.
+nvidia-nat[eval,profiler]>=1.9,<2
+# nvidia-nat-eval 1.9 imports langchain_core in its step adapter but does not declare it.
+langchain-core>=0.3

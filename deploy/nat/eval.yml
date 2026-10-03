@@ -1,0 +1,24 @@
+# `nat eval` with the NAT profiler (pages 9/10: targets recorded with the NeMo Agent Toolkit profiler).
+# Output: standardized_data_all.csv (every TOOL/LLM step with timestamps and tokens),
+# workflow_profiling_report.txt and inference_optimization.json under data/runtime/nat/ (gitignored).
+workflow:
+  _type: tire_war_room_event
+  llm_mode: mock
+  default_scenario: press7_temp_drop
+  supervisor: scripted
+
+eval:
+  general:
+    max_concurrency: 1
+    output:
+      dir: ./data/runtime/nat/
+      cleanup: true
+    dataset:
+      _type: json
+      file_path: ./deploy/nat/dataset.json
+    profiler:
+      base_metrics: true
+      compute_llm_metrics: true
+      csv_exclude_io_text: true
+      bottleneck_analysis:
+        enable_simple_stack: true

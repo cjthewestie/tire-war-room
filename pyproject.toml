@@ -24,6 +24,14 @@ dependencies = [
     "orjson>=3.10",
 ]
 
+# NeMo Agent Toolkit plugin (pages 5, 9, 10, 12): registers the event workflow (tool and commander calls traced) with
+# NAT so `nat run` / `nat eval` (profiler) drive the real state machine. NAT itself is NOT a project
+# dependency: nvidia-nat-profiler pins pandas<3 and rich<15, which would downgrade the whole demo. It runs
+# as an overlay instead (deploy/nat/requirements.txt, deploy/nat/run.sh):
+#   uv run --with-requirements deploy/nat/requirements.txt nat eval --config_file deploy/nat/eval.yml
+[project.entry-points."nat.components"]
+warroom = "warroom.natkit.register"
+
 [dependency-groups]
 dev = [
     "pytest>=8.2",

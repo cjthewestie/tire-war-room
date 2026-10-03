@@ -1,0 +1,7 @@
+# NeMo Agent Toolkit workflow: the war-room event state machine (page 5). Mock commander by default,
+# so it runs with no model. On the Spark, run.sh switches it to vLLM via --override.
+workflow:
+  _type: tire_war_room_event
+  llm_mode: mock
+  default_scenario: press7_temp_drop
+  supervisor: scripted

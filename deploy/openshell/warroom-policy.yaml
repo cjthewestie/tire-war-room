@@ -1,0 +1,61 @@
+# OpenShell sandbox policy for the war-room app (page 5: 「NemoClaw（OpenShell 沙箱）」, no internet,
+# no PLC writes, allow-listed tools only). Schema: https://docs.nvidia.com/openshell/latest/how-it-works/policies/schema
+#
+# What is used: OpenShell itself, the runtime that NemoClaw is built on. NemoClaw is NVIDIA's bundle of
+# the OpenClaw agent on OpenShell; the war room runs its own agent (warroom.agent state machine), so
+# the app goes straight into an OpenShell sandbox with this policy. Tool allow-listing stays in the
+# Action Gate (warroom.agent.gate); this file is the kernel/network layer under it.
+#
+# ${SPARK_HOST} is filled in by run_sandboxed.sh (the Spark's own address as seen from the sandbox).
+version: 1
+
+landlock:
+  compatibility: hard_requirement      # refuse to start rather than run without kernel confinement
+
+process:
+  run_as_user: "10001"                 # the image's `warroom` user (deploy/Dockerfile)
+  run_as_group: "10001"
+
+filesystem_policy:
+  include_workdir: false
+  read_only: [/usr, /lib, /etc, /opt/venv, /opt/fastembed, /app/warroom, /app/web, /app/bench, /app/data]
+  read_write: [/app/data/runtime, /tmp]  # audit log, schedule versions, Qdrant local data
+
+# Only three destinations, all on the Spark itself, and only the app's Python may reach them.
+# No public host, no Modbus (502) or OPC UA (4840): the app never talks to a PLC; readings arrive by MQTT
+# from the plant data gateway (page 10), and there is no write path back.
+network_policies:
+  commander_llm:
+    name: vLLM Nemotron commander
+    endpoints:
+      - host: ${SPARK_HOST}
+        port: 8001
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: {method: POST, path: /v1/chat/completions}
+          - allow: {method: GET, path: /v1/models}
+          - allow: {method: GET, path: /health}
+        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    binaries:
+      - path: /opt/venv/bin/python*
+  sop_kb:
+    name: Qdrant SOP knowledge base
+    endpoints:
+      - host: ${SPARK_HOST}
+        port: 6333
+        protocol: rest
+        enforcement: enforce
+        access: read-write
+        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    binaries:
+      - path: /opt/venv/bin/python*
+  sensor_mqtt:
+    name: MQTT sensor feed from the plant data gateway
+    endpoints:
+      - host: ${SPARK_HOST}
+        port: 1883
+        protocol: tcp
+        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+    binaries:
+      - path: /opt/venv/bin/python*
