@@ -10,12 +10,18 @@
 # Model id verified on Hugging Face 2026-10-03: nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4
 # (+ ...-NVFP4-DSpark draft, ...-BF16 reference). Flags and sources: deploy/spark/vllm-serve.sh.
 #
-# Networks: `core` is internal (no route out of the host) and carries vllm <-> app <-> qdrant.
-# `edge` is a normal bridge, needed only because Docker cannot publish ports from an internal network:
-# app on the factory LAN (phone + touchscreen), vLLM and Qdrant on 127.0.0.1 only (bench + ops).
-# Because `edge` could route out, egress is enforced on the host by deploy/network/nftables-warroom.nft
-# (output + forward hooks, so container traffic is covered too), and every image runs with
-# HF / telemetry offline switches so nothing even tries.
+# Networks: vLLM, Qdrant and MQTT sit on `core` (internal, no route out of the host) plus `edge`, a normal
+# bridge needed only because Docker cannot publish ports from an internal network; all three publish on
+# 127.0.0.1 only. The app runs with `network_mode: host` and reaches them on those loopback ports.
+# Why host networking for the app: the write guard (warroom/api/app.py) treats loopback as the on-box
+# touchscreen seat and makes every LAN client (the supervisor phone) send WARROOM_SUPERVISOR_PIN. Docker's
+# port publishing rewrites the client source address (Linux: the edge bridge gateway 172.x.0.1, Docker
+# Desktop: 192.168.65.1), so behind `ports:` nothing is loopback, the touchscreen got 403 on every
+# approval, and trusting the bridge gateway instead would also trust everything docker-proxy forwards.
+# On the host network the app sees the real address: 127.0.0.1 = touchscreen, LAN IP = phone + PIN.
+# Egress is enforced on the host by deploy/network/nftables-warroom.nft (output hook covers the host-
+# networked app, forward hook the bridged containers), and every image runs with HF / telemetry offline
+# switches so nothing even tries.
 
 name: warroom
 
@@ -110,26 +116,25 @@ services:
     environment:
       <<: *offline-env
       LLM_MODE: ${LLM_MODE:-llm}
-      BASE_URL: http://vllm:8000/v1
+      BASE_URL: http://${VLLM_BIND:-127.0.0.1}:8001/v1    # host network: the ports vllm/qdrant/mqtt publish
       MODEL: nemotron
       LLM_FALLBACK_TO_MOCK: "true"       # model down -> deterministic commander, logged in audit
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: http://${QDRANT_BIND:-127.0.0.1}:6333
       AUDIT_PATH: /app/data/runtime/audit.jsonl
       SCHEDULE_DIR: /app/data/runtime/schedules
       SCENARIO: ${SCENARIO:-normal}
       SIM_SPEED: ${SIM_SPEED:-1.0}
-      HOST: 0.0.0.0
+      HOST: 0.0.0.0                       # all host interfaces: 127.0.0.1 for the touchscreen, LAN for the phone
       PORT: "8000"
       WARROOM_INGEST: ${WARROOM_INGEST:-mqtt}            # readings go sim/gateway -> mosquitto -> app; broker down = direct + counted
-      WARROOM_MQTT_URL: mqtt://mqtt:1883
-      WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:-}  # REQUIRED for phone approvals over the LAN (X-Supervisor-Pin header; use 8+ random chars)
+      WARROOM_MQTT_URL: mqtt://${MQTT_BIND:-127.0.0.1}:1883
+      # REQUIRED: the supervisor phone sends it as X-Supervisor-Pin over the LAN. compose refuses to start without it.
+      WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:?set WARROOM_SUPERVISOR_PIN (8+ random chars) in deploy/spark/.env}
       WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
-      WARROOM_LOCAL_HOSTS: ${WARROOM_LOCAL_HOSTS:-}        # e.g. the edge bridge gateway, so the on-box touch screen counts as local
     volumes:
       - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
     mem_limit: 6g                 # page 9: scheduling + app 6 GB
-    ports: ["${LAN_BIND:-0.0.0.0}:8000:8000"]   # supervisor phone + touchscreen over the factory LAN
-    networks: [core, edge]
+    network_mode: host            # real client addresses; see the header. No `ports:` / `networks:` here.
     depends_on:
       qdrant: { condition: service_healthy }
       vllm: { condition: service_started }      # app starts in mock fallback while the model loads

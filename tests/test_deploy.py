@@ -19,6 +19,7 @@ from warroom.factory import MEMORY_BUDGET_GB
 ROOT = Path(__file__).resolve().parent.parent
 DEPLOY = ROOT / "deploy"
 SCRIPTS = sorted(list(DEPLOY.rglob("*.sh")) + list((ROOT / "bench").glob("*.sh")))
+TEST_PIN = "t3st-pin-9876"
 
 
 # ---------------------------------------------------------------- helpers
@@ -49,6 +50,7 @@ def healthy_url():
 
 def sh(cmd: list[str], env: dict[str, str] | None = None, check: bool = True, timeout: float = 60):
     e = os.environ.copy()
+    e["WARROOM_SUPERVISOR_PIN"] = TEST_PIN   # install_spark.sh refuses to finish without one
     e.update(env or {})
     r = subprocess.run(cmd, capture_output=True, text=True, env=e, timeout=timeout)
     if check and r.returncode != 0:
@@ -76,8 +78,9 @@ def test_spark_compose_structure():
     assert s["qdrant"]["mem_limit"] == f"{MEMORY_BUDGET_GB['qdrant']}g"
     assert s["app"]["mem_limit"] == f"{MEMORY_BUDGET_GB['sched_app']}g"
     env = s["app"]["environment"]
-    assert env["BASE_URL"] == "http://vllm:8000/v1" and env["MODEL"] == "nemotron"
-    assert env["QDRANT_URL"] == "http://qdrant:6333"
+    # app is on the host network (real client addresses for the write guard): services via their published ports
+    assert env["BASE_URL"] == "http://${VLLM_BIND:-127.0.0.1}:8001/v1" and env["MODEL"] == "nemotron"
+    assert env["QDRANT_URL"] == "http://${QDRANT_BIND:-127.0.0.1}:6333"
     assert env["LLM_FALLBACK_TO_MOCK"] == "true"
     assert s["vllm-fp8"]["profiles"] == ["control"]
     assert s["vllm-fp8"]["environment"]["QUANT"] == "fp8" and s["vllm-fp8"]["environment"]["SPEC"] == "off"
@@ -386,3 +389,69 @@ def test_install_script_layout(tmp_path):
         assert (root / d).is_dir()
     assert (root / "current" / "deploy" / "spark" / ".env").exists()
     assert {p.name for p in sysd.iterdir()} >= {"warroom-stack.service", "warroom-watchdog.service"}
+
+
+# ---------------------------------------------------------------- write access on the Spark stack
+def test_spark_app_on_host_network_so_the_touchscreen_is_loopback():
+    """Docker port publishing rewrites the client address (bridge gateway / 192.168.65.1), so behind `ports:`
+    the on-box touchscreen was never loopback and got 403 on every approval. Host network keeps real addresses."""
+    app = yaml.safe_load((DEPLOY / "spark" / "docker-compose.yml").read_text())["services"]["app"]
+    assert app["network_mode"] == "host"
+    assert "ports" not in app and "networks" not in app
+    env = app["environment"]
+    assert "WARROOM_LOCAL_HOSTS" not in env                 # never trust a rewritten source IP as "local"
+    assert env["WARROOM_SUPERVISOR_PIN"].startswith("${WARROOM_SUPERVISOR_PIN:?")   # compose refuses to start without it
+    assert env["WARROOM_MQTT_URL"] == "mqtt://${MQTT_BIND:-127.0.0.1}:1883"
+    assert "vllm:8000" not in (DEPLOY / "bin" / "preload.sh").read_text()   # service names do not resolve on host net
+    assert re.search(r"^WARROOM_SUPERVISOR_PIN=$", (DEPLOY / "spark" / ".env.example").read_text(), re.M)
+
+
+def _install(tmp_path: Path, **env: str):
+    root, sysd = tmp_path / "opt", tmp_path / "systemd"
+    sysd.mkdir(exist_ok=True)
+    return root, sysd, sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+                          env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1",
+                               "NO_IMAGES": "1", "NO_MODELS": "1", **env}, check=False, timeout=120)
+
+
+@pytest.mark.parametrize("pin", ["", "short7x", "has space1", "dollar$sign"])
+def test_install_refuses_without_a_usable_supervisor_pin(tmp_path, pin):
+    root, sysd, r = _install(tmp_path, WARROOM_SUPERVISOR_PIN=pin)
+    assert r.returncode != 0 and "WARROOM_SUPERVISOR_PIN" in r.stderr and "install aborted" in r.stderr
+    assert not (root / "current").exists() and not list(sysd.iterdir())
+
+
+def test_install_writes_the_given_pin_into_env_and_keeps_it(tmp_path):
+    root, _, r = _install(tmp_path, WARROOM_SUPERVISOR_PIN="Abc123xyz9")
+    assert r.returncode == 0, r.stderr
+    envf = root / "current" / "deploy" / "spark" / ".env"
+    lines = [ln for ln in envf.read_text().splitlines() if ln.startswith("WARROOM_SUPERVISOR_PIN=")]
+    assert lines == ["WARROOM_SUPERVISOR_PIN=Abc123xyz9"]
+    assert envf.stat().st_mode & 0o077 == 0                  # secret: owner-only
+    _, _, r2 = _install(tmp_path, WARROOM_SUPERVISOR_PIN="")  # rerun without the env var: .env's PIN is kept
+    assert r2.returncode == 0, r2.stderr
+
+
+@pytest.mark.skipif(os.environ.get("WARROOM_DOCKER_TESTS") != "1", reason="set WARROOM_DOCKER_TESTS=1 (needs docker + an app image)")
+def test_live_compose_app_touchscreen_and_phone_can_approve(tmp_path):
+    """Brings up the Spark compose `app` service itself (no vLLM: mock commander), then runs
+    deploy/spark/smoke_access.sh from a host-network container: loopback approves a real pending request
+    with no PIN, the LAN IP gets 401 without the PIN and through with it. APP_IMAGE picks the image."""
+    image = os.environ.get("APP_IMAGE", "warroom-app:latest")
+    data = tmp_path / "data"
+    data.mkdir()
+    data.chmod(0o777)
+    env = {"WARROOM_SUPERVISOR_PIN": TEST_PIN, "APP_IMAGE": image, "APP_DATA": str(data), "LLM_MODE": "mock",
+           "SCENARIO": "open_mill_overheat"}
+    compose = ["docker", "compose", "-p", "warroom-accesstest", "--project-directory", str(DEPLOY / "spark")]
+    try:
+        sh([*compose, "up", "-d", "--no-deps", "--no-build", "app"], env=env, timeout=180)
+        r = sh(["docker", "run", "--rm", "--network", "host", "-v", f"{DEPLOY / 'spark' / 'smoke_access.sh'}:/smoke.sh:ro",
+                "-e", f"WARROOM_SUPERVISOR_PIN={TEST_PIN}", "-e", "APPROVE=1", "-e", "WAIT_S=120",
+                "--entrypoint", "bash", image, "/smoke.sh"], check=False, timeout=300)
+        assert r.returncode == 0, r.stdout + r.stderr
+        assert "ok   touchscreen 127.0.0.1, no PIN: 404" in r.stdout
+        assert re.search(r"ok   phone \S+, no PIN: 401", r.stdout)
+        assert re.search(r"ok   touchscreen approves \S+: 200", r.stdout)
+    finally:
+        sh([*compose, "down"], env=env, check=False, timeout=120)
