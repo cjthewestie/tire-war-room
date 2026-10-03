@@ -28,11 +28,13 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
 }
 
 # Page 11 timing. The steam drop starts at 02:13:15; the detector confirms it ~45 s later
-# (02:14:00) with "穩定在 122±1"; the leak starts 02:22:45 so CURE-07 crosses 120 °C near
-# 02:29 (safety core holds it) and reads ~119.5 °C at 02:31:00 (verify rejects H1).
+# (02:14:00) with "穩定在 122±1"; the leak starts 02:22:55 at 1/3 °C/min so CURE-07 crosses
+# 120 °C at ~02:28:50 (safety core holds it). Verify (state machine) compares a 30-s mean on a
+# 5-s sim grid against ">= 121"; that mean first misses at 02:26:30 and the miss is confirmed
+# 270 s later, at 02:31:00 = 02:14:00 + 17 min, when it reads 119.50 °C (page 11: 119.5 °C).
 P11_STEAM_DROP_OFFSET_S = 75.0
-P11_LEAK_OFFSET_S = 645.0
-P11_LEAK_RATE_C_PER_MIN = 0.3125
+P11_LEAK_OFFSET_S = 655.0
+P11_LEAK_RATE_C_PER_MIN = 1.0 / 3.0
 # Page 2: cooling water fails 14:20:15; compound reaches ~112 °C near 14:26 and levels ~117.6.
 P2_FLOW_DROP_OFFSET_S = 135.0
 
@@ -59,7 +61,7 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
             expected=[
                 "02:14:00 事件偵測：7 號 128 → 122°C，預測穩定在 122±1°C → 喚醒指揮官",
                 "02:14:01 安全核心：仍在 120–130°C，不停機",
-                "~02:29 安全核心：7 號 < 120°C → CURE_HOLD（不等 AI）",
+                "~02:28:50 安全核心：7 號 < 120°C → CURE_HOLD（不等 AI）",
                 "02:31:00 驗證：7 號 119.5°C → H1 不成立",
                 "6、8 號同管線 (H2) 微降 ~0.4°C → 支持洩壓而非感測器漂移",
             ])

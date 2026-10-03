@@ -133,7 +133,8 @@ class RuleSafetyCore:
     def _action(self, rule: SafetyRule, r: SensorReading, v: float, t0: float) -> SafetyAction:
         lab = _label(r.machine_id)
         if rule.action is SafetyActionKind.CURE_HOLD:
-            msg = f"{lab} {v:.1f}°C < {rule.threshold:.0f}°C：安全核心停用並扣模"
+            shown = math.floor(v * 10.0) / 10.0      # 119.97 must not print as "120.0 < 120"
+            msg = f"{lab} {shown:.1f}°C < {rule.threshold:.0f}°C：安全核心停用並扣模"
         elif rule.action is SafetyActionKind.ALARM_ONLY:
             msg = f"{lab} {v:.1f}°C ≥ {rule.threshold:.0f}°C：超出硫化溫度 120–130°C，警示"
         elif rule.compound_stage is CompoundStage.CURATIVE_ADDED:

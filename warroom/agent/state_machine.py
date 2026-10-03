@@ -1363,6 +1363,11 @@ class StateMachine:
         violated_since: datetime | None = None
         last: float | None = None
         use_sim = self.sim is not None
+        # Reads land on a fixed sim-clock grid (whole multiples of verify_poll_s), so the verdict time does
+        # not depend on when the supervisor happened to approve (page 11: 02:31:00 = 02:14:00 + 17 min).
+        wait = self._grid_wait()
+        if wait > 0:
+            await self._sleep(wait)
         while True:
             now = self._now()
             v = self._read_value(exp.machine_id, exp.channel) if use_sim else \
@@ -1378,7 +1383,15 @@ class StateMachine:
             if now >= deadline:
                 ok = violated_since is None and last is not None
                 return self._verify_result(run, h, exp, ok, last)
-            await self._sleep(self.verify_poll_s)
+            await self._sleep(self._grid_wait() or self.verify_poll_s)
+
+    def _grid_wait(self) -> float:
+        """Sim seconds to the next whole multiple of verify_poll_s (0 when already on it)."""
+        p = self.verify_poll_s
+        if p <= 0:
+            return 0.0
+        rem = self._now().timestamp() % p
+        return 0.0 if rem < 1e-6 or p - rem < 1e-6 else p - rem
 
     def _verify_result(self, run: _Run, h: Hypothesis, exp, ok: bool, v: float | None) -> tuple[bool, float | None]:
         ev = run.ev

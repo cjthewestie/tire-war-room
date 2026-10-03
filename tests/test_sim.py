@@ -138,6 +138,24 @@ def test_press7_timeline_page11():
         assert abs(f.true_temp(p) - 128.0) < 0.05
 
 
+def _mean30(f: Factory, mid: str) -> float:
+    h = f.history(mid, 0.5)
+    return round(sum(r.temp_c for r in h) / len(h), 2)
+
+
+def test_press7_verify_mean_page11():
+    """The state machine's verify reads a 30-s mean on a 5-s grid against >= 121 and confirms a
+    miss after 270 s. Pin the trajectory so that first miss is 02:26:30 and the verdict at
+    02:31:00 (02:14:00 + 17 min) quotes page 11's 119.5 °C."""
+    f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    run_until(f, "02:26:25")
+    assert _mean30(f, "CURE-07") >= 121.0
+    run_until(f, "02:26:30")
+    assert _mean30(f, "CURE-07") < 121.0
+    run_until(f, "02:31:00")
+    assert f"{_mean30(f, 'CURE-07'):.1f}" == "119.5"
+
+
 def test_open_mill_overheat_page2():
     f = Factory(scenario=ScenarioName.OPEN_MILL_OVERHEAT, backfill_min=0)
     at = run_until(f, "14:26:00")
