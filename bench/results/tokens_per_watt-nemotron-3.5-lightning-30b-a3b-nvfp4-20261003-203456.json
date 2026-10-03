@@ -1,0 +1,55 @@
+{
+  "bench": "tokens_per_watt",
+  "recorded_at": "2026-10-03T20:34:56.065305+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "e0caf3a1c57b",
+    "deps": [
+      "tokens_per_watt.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "e7abb0ab653f599e"
+  },
+  "host_load_avg_1_5_15": [
+    3.7,
+    5.33,
+    16.13
+  ],
+  "endpoint": {
+    "base_url": "http://localhost:11434/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "concurrency": 3,
+  "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), plan + replan rounds",
+  "window_unix": [
+    1791030823.3790421,
+    1791030896.0553632
+  ],
+  "calls": 10,
+  "errors": 0,
+  "plug": {
+    "tokens": 7252,
+    "seconds": 72.676,
+    "tokens_per_s": 99.786,
+    "avg_watts": null,
+    "idle_watts": null
+  },
+  "power_source": "none (tokens/W not computed)"
+}

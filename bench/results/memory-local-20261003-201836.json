@@ -1,0 +1,83 @@
+{
+  "bench": "memory",
+  "recorded_at": "2026-10-03T20:18:36.051045+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "d80016697cb7",
+    "deps": [
+      "memory_check.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "7d0ade111183b6d7"
+  },
+  "host_load_avg_1_5_15": [
+    7.21,
+    22.42,
+    38.84
+  ],
+  "total_ram_gb": 64.0,
+  "used_gb": 39.94,
+  "stack_gb": 29.24,
+  "budget_total_gb": 49.0,
+  "band_gb": [
+    36.0,
+    50.0
+  ],
+  "roles": {
+    "model_server": {
+      "measured_gb": 29.21,
+      "budget_gb": 30,
+      "rss_gb": 0.18,
+      "container_gb": 0.0,
+      "gpu_gb": 0.0,
+      "pids": [
+        978,
+        15262
+      ],
+      "ollama_ps": [
+        {
+          "server": "http://127.0.0.1:11434",
+          "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+          "gb": 29.21,
+          "context": 16384
+        }
+      ],
+      "within_budget": true
+    },
+    "qdrant": {
+      "measured_gb": 0.03,
+      "budget_gb": 3,
+      "rss_gb": 0.03,
+      "container_gb": 0.0,
+      "gpu_gb": 0.0,
+      "pids": [
+        2141
+      ],
+      "within_budget": true
+    },
+    "app": {
+      "measured_gb": 0.0,
+      "budget_gb": 6,
+      "rss_gb": 0.0,
+      "container_gb": 0.0,
+      "gpu_gb": 0,
+      "pids": [],
+      "within_budget": true
+    },
+    "os_and_other": {
+      "measured_gb": 10.7,
+      "budget_gb": 10,
+      "within_budget": true,
+      "note": "everything not matched to a role (on a dev Mac this includes the desktop)"
+    }
+  },
+  "stack_within_band": true,
+  "headroom_gb": 24.06
+}

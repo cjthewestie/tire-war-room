@@ -1,0 +1,190 @@
+{
+  "bench": "unplug",
+  "recorded_at": "2026-10-03T20:40:14.202804+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "e0caf3a1c57b",
+    "deps": [
+      "unplug_test.py",
+      "llm.py",
+      "prompts.py",
+      "memory_check.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "6e4d0460098017c9"
+  },
+  "host_load_avg_1_5_15": [
+    5.13,
+    4.83,
+    12.53
+  ],
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "is_root": false,
+  "watch_s": 300.0,
+  "block": {
+    "requested": true,
+    "applied": true,
+    "method": "sandbox-exec",
+    "scope": "process-level: bench + spawned war-room app; outbound allowed to localhost only; model server is outside the sandbox (socket-watched)",
+    "profile": "(version 1)\n(allow default)\n(deny network-outbound)\n(allow network-outbound (remote ip \"localhost:*\"))\n(allow network-outbound (remote unix-socket))\n"
+  },
+  "spawned_app": {
+    "pid": 75961,
+    "url": "http://127.0.0.1:54306",
+    "run_dir": "/var/folders/yh/d4l5fnn57p94pbpll9k6n9s00000gn/T/warroom-unplug-5py18npw"
+  },
+  "endpoint": {
+    "base_url": "http://localhost:11434/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "app": {
+    "health": {
+      "ok": true,
+      "llm_mode": "llm",
+      "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+      "llm_reachable": true,
+      "qdrant_ok": false,
+      "sim_running": true,
+      "factory_time": "2026-10-03T08:00:00+08:00",
+      "uptime_s": 0.4335300840320997
+    },
+    "phone_page_status": 200,
+    "anomaly": "7 號 128 → 122°C，預測穩定在 122±1°C",
+    "event_id": "EV-20261003-021400-CURE-07",
+    "source_flag_present": true,
+    "placeholder_after_anomaly_s": 0.0004,
+    "placeholder_card": {
+      "title": "7 號機異常",
+      "summary": "7 號 128 → 122°C，預測穩定在 122±1°C"
+    },
+    "alert_after_anomaly_s": 1.4411,
+    "card": {
+      "title": "CURE-07 溫度下降",
+      "summary": "128→122°C，預測穩定在 122±1°C"
+    },
+    "commander_call": {
+      "mode": "llm",
+      "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+      "ttft_ms": 459.5825840369798,
+      "total_ms": 6979.995166999288,
+      "prompt_tokens": 5174,
+      "completion_tokens": 800,
+      "valid_json": true,
+      "fell_back_to_mock": false
+    }
+  },
+  "watched_for_s": 300.3,
+  "watch_ports": [
+    6333,
+    6334,
+    11434,
+    54306
+  ],
+  "sockets": {
+    "samples": 2757,
+    "interval_s": 0.1,
+    "watched_pids": [
+      978,
+      2141,
+      72722,
+      75961
+    ],
+    "ignored_pids": {},
+    "outbound_connections": 0,
+    "outbound": [],
+    "errors": []
+  },
+  "egress": {
+    "sandbox_pids": [
+      75958,
+      75961
+    ],
+    "bench_pid": 75958,
+    "window": [
+      "2026-10-03 20:35:13",
+      "2026-10-03 20:40:13.702"
+    ],
+    "firewall_dropped_packets": 0,
+    "conntrack_available": false,
+    "conntrack_snapshots": 0,
+    "conntrack_outbound_flows": [],
+    "notes": [],
+    "denies_by_pid": {},
+    "deny_remotes": [],
+    "no_remote_denies_by_pid": {
+      "75958": 2,
+      "75961": 5
+    },
+    "pid_roles": {
+      "75958": "bench",
+      "75961": "war-room app"
+    },
+    "counter_source": "kernel Sandbox log: deny(1) network-outbound for the sandboxed pids"
+  },
+  "internet_reachable_during_test": false,
+  "verdicts": [
+    {
+      "name": "alert_offline",
+      "target": "≤ 2.0 s",
+      "measured": 1.4411,
+      "passed": true,
+      "note": "anomaly -> first COMMANDER (LLM) card on /ws",
+      "extra": {
+        "placeholder_after_anomaly_s": 0.0004
+      }
+    },
+    {
+      "name": "commander_ttft",
+      "target": "≤ 0.5 s",
+      "measured": 0.46,
+      "passed": true,
+      "note": "from the event's llm_call audit entry; mode=llm",
+      "extra": {
+        "mode": "llm",
+        "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+        "ttft_ms": 459.5825840369798,
+        "total_ms": 6979.995166999288,
+        "prompt_tokens": 5174,
+        "completion_tokens": 800,
+        "valid_json": true,
+        "fell_back_to_mock": false
+      }
+    },
+    {
+      "name": "outbound_connections",
+      "target": "0",
+      "measured": 0,
+      "passed": true,
+      "note": "sandbox-exec deny log (process-level; model server socket-watched only) + socket samples",
+      "extra": {
+        "socket_samples": 0,
+        "firewall_dropped_packets": 0,
+        "conntrack_outbound_flows": null
+      }
+    },
+    {
+      "name": "internet_blocked",
+      "target": "unreachable",
+      "measured": false,
+      "passed": true,
+      "note": "",
+      "extra": {}
+    }
+  ],
+  "saved_to": "/Users/cjthewestie/Documents/CJ-project-vault/tire-war-room/bench/results/unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json"
+}

@@ -1,0 +1,651 @@
+{
+  "bench": "full_event",
+  "recorded_at": "2026-10-03T20:33:42.668072+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "e0caf3a1c57b",
+    "deps": [
+      "full_event.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "24aa5ca61fd610a8"
+  },
+  "host_load_avg_1_5_15": [
+    4.27,
+    5.85,
+    17.29
+  ],
+  "endpoint": {
+    "base_url": "http://localhost:11434/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "target_s": 22.0,
+  "think": false,
+  "mode": "both",
+  "loadavg_at_start": [
+    3.13427734375,
+    6.46875,
+    19.21240234375
+  ],
+  "state_machine": {
+    "runs": [
+      {
+        "final_state": "closed",
+        "closed": true,
+        "compute_s": 22.496,
+        "llm_s": 18.819,
+        "tools_s": 3.677,
+        "solve_s": 3.629,
+        "held_wall_s": 22.547,
+        "wall_s_incl_sim_ticks": 24.1,
+        "sim_span": "02:14:00->02:31:35",
+        "replans": 1,
+        "hypotheses": [
+          {
+            "id": "H1",
+            "cause": "steam_pressure_low",
+            "status": "rejected"
+          },
+          {
+            "id": "H2",
+            "cause": "steam_leak_or_sensor_drift",
+            "status": "active"
+          }
+        ],
+        "llm_calls": [
+          {
+            "phase": "plan",
+            "ttft_ms": 3520.920833980199,
+            "total_ms": 10078.854917024728,
+            "prompt_tokens": 5174,
+            "completion_tokens": 800,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3",
+              "S4",
+              "S5",
+              "S6"
+            ],
+            "safe_stop": false
+          },
+          {
+            "phase": "replan",
+            "ttft_ms": 3578.027583018411,
+            "total_ms": 8740.08562497329,
+            "prompt_tokens": 5362,
+            "completion_tokens": 636,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3"
+            ],
+            "safe_stop": false
+          }
+        ],
+        "llm_fell_back": false,
+        "tool_calls": 16,
+        "tools_failed": 0,
+        "decisions": [
+          {
+            "at": "02:16:40",
+            "title": "CURE-07 溫度下降",
+            "decision": "approve",
+            "option": "從 2 線調 1 人",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          },
+          {
+            "at": "02:31:30",
+            "title": "CURE-07溫度持續下降",
+            "decision": "modify",
+            "option": "夜班加班",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          }
+        ],
+        "page11_checks": {
+          "h1_rejected": true,
+          "cure_36_5h": true,
+          "a311_to_press9": true,
+          "press7_out_of_service": true,
+          "audit_chain_ok": true
+        },
+        "workdir": "/var/folders/yh/d4l5fnn57p94pbpll9k6n9s00000gn/T/bench-full-event-rccy4pmg"
+      },
+      {
+        "final_state": "closed",
+        "closed": true,
+        "compute_s": 15.561,
+        "llm_s": 11.965,
+        "tools_s": 3.596,
+        "solve_s": 3.56,
+        "held_wall_s": 15.61,
+        "wall_s_incl_sim_ticks": 17.14,
+        "sim_span": "02:14:00->02:31:35",
+        "replans": 1,
+        "hypotheses": [
+          {
+            "id": "H1",
+            "cause": "steam_pressure_low",
+            "status": "rejected"
+          },
+          {
+            "id": "H2",
+            "cause": "steam_leak_or_sensor_drift",
+            "status": "active"
+          }
+        ],
+        "llm_calls": [
+          {
+            "phase": "plan",
+            "ttft_ms": 426.1075000395067,
+            "total_ms": 6928.321583021898,
+            "prompt_tokens": 5174,
+            "completion_tokens": 800,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3",
+              "S4",
+              "S5",
+              "S6"
+            ],
+            "safe_stop": false
+          },
+          {
+            "phase": "replan",
+            "ttft_ms": 380.08745899423957,
+            "total_ms": 5037.079125002492,
+            "prompt_tokens": 5362,
+            "completion_tokens": 571,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3"
+            ],
+            "safe_stop": false
+          }
+        ],
+        "llm_fell_back": false,
+        "tool_calls": 16,
+        "tools_failed": 0,
+        "decisions": [
+          {
+            "at": "02:16:40",
+            "title": "CURE-07 溫度下降",
+            "decision": "approve",
+            "option": "從 2 線調 1 人",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          },
+          {
+            "at": "02:31:30",
+            "title": "CURE-07溫度持續下降",
+            "decision": "modify",
+            "option": "夜班加班",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          }
+        ],
+        "page11_checks": {
+          "h1_rejected": true,
+          "cure_36_5h": true,
+          "a311_to_press9": true,
+          "press7_out_of_service": true,
+          "audit_chain_ok": true
+        },
+        "workdir": "/var/folders/yh/d4l5fnn57p94pbpll9k6n9s00000gn/T/bench-full-event-qb0cbi8f"
+      },
+      {
+        "final_state": "closed",
+        "closed": true,
+        "compute_s": 16.22,
+        "llm_s": 12.555,
+        "tools_s": 3.666,
+        "solve_s": 3.63,
+        "held_wall_s": 16.282,
+        "wall_s_incl_sim_ticks": 17.916,
+        "sim_span": "02:14:00->02:31:35",
+        "replans": 1,
+        "hypotheses": [
+          {
+            "id": "H1",
+            "cause": "steam_pressure_low",
+            "status": "rejected"
+          },
+          {
+            "id": "H2",
+            "cause": "steam_leak_or_sensor_drift",
+            "status": "active"
+          }
+        ],
+        "llm_calls": [
+          {
+            "phase": "plan",
+            "ttft_ms": 446.4818330015987,
+            "total_ms": 7167.819583031815,
+            "prompt_tokens": 5174,
+            "completion_tokens": 800,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3",
+              "S4",
+              "S5",
+              "S6"
+            ],
+            "safe_stop": false
+          },
+          {
+            "phase": "replan",
+            "ttft_ms": 400.2620420069434,
+            "total_ms": 5386.688250000589,
+            "prompt_tokens": 5362,
+            "completion_tokens": 595,
+            "valid_json": true,
+            "fell_back_to_mock": false,
+            "error": null,
+            "hypothesis": "H1",
+            "steps": [
+              "S1",
+              "S2",
+              "S3"
+            ],
+            "safe_stop": false
+          }
+        ],
+        "llm_fell_back": false,
+        "tool_calls": 16,
+        "tools_failed": 0,
+        "decisions": [
+          {
+            "at": "02:16:40",
+            "title": "CURE-07 溫度下降",
+            "decision": "approve",
+            "option": "從 2 線調 1 人",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          },
+          {
+            "at": "02:31:30",
+            "title": "CURE-07溫度持續下降",
+            "decision": "modify",
+            "option": "夜班加班",
+            "offered": [
+              "夜班加班",
+              "從 2 線調 1 人"
+            ]
+          }
+        ],
+        "page11_checks": {
+          "h1_rejected": true,
+          "cure_36_5h": true,
+          "a311_to_press9": true,
+          "press7_out_of_service": true,
+          "audit_chain_ok": true
+        },
+        "workdir": "/var/folders/yh/d4l5fnn57p94pbpll9k6n9s00000gn/T/bench-full-event-myf5x3yz"
+      }
+    ],
+    "compute_s": {
+      "n": 3,
+      "min": 15.561,
+      "p50": 16.22,
+      "p90": 21.2408,
+      "max": 22.496,
+      "mean": 18.0923
+    },
+    "compute_s_all_runs": {
+      "n": 3,
+      "min": 15.561,
+      "p50": 16.22,
+      "p90": 21.2408,
+      "max": 22.496,
+      "mean": 18.0923
+    },
+    "llm_s": {
+      "n": 3,
+      "min": 11.965,
+      "p50": 12.555,
+      "p90": 17.5662,
+      "max": 18.819,
+      "mean": 14.4463
+    },
+    "closed_rate": 1.0
+  },
+  "runs": [
+    {
+      "total_s": 14.072,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "derived_from": "R2_plan",
+          "alert_card_s": 1.794089958013501,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "溫度降至 122°C，預測穩定在 122±1°C，中胎已硫化 10 h／28 h。"
+          },
+          "note": "no separate call: the alert card leads the R2 plan stream"
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 1.29227020801045,
+          "ttft_any_s": 1.29227020801045,
+          "total_s": 7.993303499999456,
+          "prompt_tokens": 5642,
+          "completion_tokens": 811,
+          "text": "{\"alert_card\":{\"title\":\"7 號機溫度下降\",\"summary\":\"溫度降至 122°C，預測穩定在 122±1°C，中胎已硫化 10 h／28 h。\"},\"goal\":\"7 號溫度穩定，中胎不延誤\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"蒸汽壓不足，溫度會穩定\",\"cause_code\":\"steam_pressure_low\",\"expectation\":{\"machine_id\":\"CURE-07\",\"channel\":\"temp_c\",\"op\":\">=\",\"value\":121.0,\"within_min\":30.0},\"status\":\"active\",\"evidence\":[\"30 分鐘溫度 122.4→122°C，預測穩定在 122±1°C\",\"仍在 120–130°C，安全核心未觸發\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"cure_formula\",\"args\":{\"size\":\"M\",\"ref_temp_c\":128.0,\"actual_temp_c\":122.4,\"elapsed_h\":10.0,\"ref_cure_h\":28.0,\"activation_energy_kj_mol\":85.0},\"depends_on\":[],\"purpose\":\"以 Arrhenius 計算降溫後所需總硫化時間\"},{\"id\":\"S2\",\"tool\":\"query_orders_shifts\",\"args\":{\"press_ids\":[\"CURE-07\"]},\"depends_on\":[],\"purpose\":\"查下一模訂單交期與班表缺口\"},{\"id\":\"S3\",\"tool\":\"solve_schedule\",\"args\":{\"cure_overrides_h\":{\"CURE-07\":\"$S1.total_cure_h\"},\"time_limit_s\":10.0},\"depends_on\":[\"S1\",\"S2\"],\"purpose\":\"延長硫化後重排，保中胎交期\"},{\"id\":\"S4\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S3.schedule_version\",\"reason\":\"7 號機溫度下降，延長硫化至 ${S1.total_cure_h} h 後重排\"},\"depends_on\":[\"S3\"],\"purpose\":\"確認新排程（需主管核准）\"},{\"id\":\"S5\",\"tool\":\"set_cure_time\",\"args\":{\"press_id\":\"CURE-07\",\"total_cure_h\":\"$S1.total_cure_h\",\"reason\":\"7 號機溫度下降至 122°C，Arrhenius 等效硫化\"},\"depends_on\":[\"S1\",\"S3\"],\"purpose\":\"設定7 號機硫化時間為公式值（需主管核准）\"},{\"id\":\"S6\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\"],\"kind\":\"info\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模\"},\"depends_on\":[\"S4\",\"S5\"],\"purpose\":\"通知硫化組與夜班新排程\"}],\"safe_stop\":false,\"rationale\":\"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 750,
+          "alert_card_s": 1.794089958013501,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "溫度降至 122°C，預測穩定在 122±1°C，中胎已硫化 10 h／28 h。"
+          },
+          "stopped_early": false,
+          "decode_tps": 121.03,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0041,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.0046
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 1.5654222500161268,
+          "ttft_any_s": 1.5654222500161268,
+          "total_s": 6.0716565839829855,
+          "prompt_tokens": 6008,
+          "completion_tokens": 545,
+          "text": "{\"alert_card\":{\"title\":\"7 號機溫度下降\",\"summary\":\"溫度續降至 119.5°C，低於 120°C 安全核心停機\"},\"goal\":\"7 號機溫度穩定，M 型胎不延誤\",\"hypothesis\":{\"id\":\"H2\",\"statement\":\"持續洩壓或感測器漂移\",\"cause_code\":\"steam_leak_or_sensor_drift\",\"status\":\"active\",\"evidence\":[\"H1 不成立：溫度續降至 119.5°C\",\"同管線 CURE-06、CURE-08 溫度正常（127.8/127.9°C）→ 問題侷限 CURE-07（排除總管蒸汽不足）\",\"依 SOP-CP-01/02：溫度低於 120°C，判定為持續洩壓或感測器漂移\"]},\"rejected_hypothesis_ids\":[\"H1\"],\"steps\":[{\"id\":\"S1\",\"tool\":\"solve_schedule\",\"args\":{\"unavailable_presses\":[\"CURE-07\"],\"time_limit_s\":10.0},\"depends_on\":[],\"purpose\":\"7 號機停用，重排其模次\"},{\"id\":\"S2\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S1.schedule_version\",\"reason\":\"7 號機持續降溫，停用重排\"},\"depends_on\":[\"S1\"],\"purpose\":\"確認重排（需主管核准）\"},{\"id\":\"S3\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"maintenance\",\"qc\"],\"kind\":\"machine_out\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管\"},\"depends_on\":[\"S2\"],\"purpose\":\"通知7 號機停用\"}],\"safe_stop\":false,\"rationale\":\"同管線其他機台正常，排除總管蒸汽不足；依 SOP-CP-01 停用該機並重排。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 494,
+          "alert_card_s": 1.9532127089914866,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "溫度續降至 119.5°C，低於 120°C 安全核心停機"
+          },
+          "stopped_early": false,
+          "decode_tps": 120.94,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "derived_from": "R3_replan",
+          "alert_card_s": 1.9532127089914866,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "溫度續降至 119.5°C，低於 120°C 安全核心停機"
+          },
+          "note": "no separate call: the phone card is the R3 replan's alert card"
+        }
+      },
+      "tokens_out": 1356
+    },
+    {
+      "total_s": 14.172,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "derived_from": "R2_plan",
+          "alert_card_s": 1.7501929170102812,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "溫度穩定 122±1°C，中胎，已硫化 10 h／28 h。"
+          },
+          "note": "no separate call: the alert card leads the R2 plan stream"
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 1.2652916249935515,
+          "ttft_any_s": 1.2652916249935515,
+          "total_s": 8.017459042021073,
+          "prompt_tokens": 5648,
+          "completion_tokens": 818,
+          "text": "{\"alert_card\":{\"title\":\"7 號機溫度下降 128→122°C\",\"summary\":\"溫度穩定 122±1°C，中胎，已硫化 10 h／28 h。\"},\"goal\":\"7 號溫度穩定，中胎不延誤\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"蒸汽壓不足，溫度會穩定\",\"cause_code\":\"steam_pressure_low\",\"expectation\":{\"machine_id\":\"CURE-07\",\"channel\":\"temp_c\",\"op\":\">=\",\"value\":121.0,\"within_min\":30.0},\"status\":\"active\",\"evidence\":[\"30 分鐘溫度 121.9→121.5°C，預測穩定在 121±1°C\",\"仍在 120–130°C，安全核心未觸發\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"cure_formula\",\"args\":{\"size\":\"M\",\"ref_temp_c\":128.0,\"actual_temp_c\":121.9,\"elapsed_h\":10.0,\"ref_cure_h\":28.0,\"activation_energy_kj_mol\":85.0},\"depends_on\":[],\"purpose\":\"以 Arrhenius 計算降溫後所需總硫化時間\"},{\"id\":\"S2\",\"tool\":\"query_orders_shifts\",\"args\":{\"order_ids\":[\"#B-207\"]},\"depends_on\":[],\"purpose\":\"查訂單 #B-207 交期與班表缺口\"},{\"id\":\"S3\",\"tool\":\"solve_schedule\",\"args\":{\"cure_overrides_h\":{\"CURE-07\":\"$S1.total_cure_h\"},\"time_limit_s\":10.0},\"depends_on\":[\"S1\",\"S2\"],\"purpose\":\"延長硫化後重排，保中胎交期\"},{\"id\":\"S4\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S3.schedule_version\",\"reason\":\"7 號機溫度下降，延長硫化至 ${S1.total_cure_h} h 後重排\"},\"depends_on\":[\"S3\"],\"purpose\":\"確認新排程（需主管核准）\"},{\"id\":\"S5\",\"tool\":\"set_cure_time\",\"args\":{\"press_id\":\"CURE-07\",\"total_cure_h\":\"$S1.total_cure_h\",\"reason\":\"7 號機溫度下降至 121.9°C，Arrhenius 等效硫化\"},\"depends_on\":[\"S1\",\"S3\"],\"purpose\":\"設定7 號機硫化時間為公式值（需主管核准）\"},{\"id\":\"S6\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\"],\"kind\":\"info\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模\"},\"depends_on\":[\"S4\",\"S5\"],\"purpose\":\"通知硫化組與夜班新排程\"}],\"safe_stop\":false,\"rationale\":\"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 757,
+          "alert_card_s": 1.7501929170102812,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "溫度穩定 122±1°C，中胎，已硫化 10 h／28 h。"
+          },
+          "stopped_early": false,
+          "decode_tps": 121.15,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0034,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.0038
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 1.5630072909989394,
+          "ttft_any_s": 1.5630072909989394,
+          "total_s": 6.147715165978298,
+          "prompt_tokens": 6014,
+          "completion_tokens": 556,
+          "text": "{\"alert_card\":{\"title\":\"7 號機溫度下降 128→122°C\",\"summary\":\"溫度續降至 119.5°C，H1 蒸汽壓不足被推翻，改判感測器或蒸汽問題\"},\"goal\":\"7 號溫度穩定，M 型中胎不延誤交期\",\"hypothesis\":{\"id\":\"H2\",\"statement\":\"持續洩壓或感測器漂移\",\"cause_code\":\"steam_leak_or_sensor_drift\",\"status\":\"active\",\"evidence\":[\"H1 不成立：溫度續降至 119.5°C\",\"同管線 CURE-06、CURE-08 正常（127.8/127.9°C）→ 問題侷限 CURE-07（排除總管蒸汽不足）\",\"依 SOP-CP-01/02：溫度下降且未回升，建議停用並重排\"]},\"rejected_hypothesis_ids\":[\"H1\"],\"steps\":[{\"id\":\"S1\",\"tool\":\"solve_schedule\",\"args\":{\"unavailable_presses\":[\"CURE-07\"],\"time_limit_s\":10.0},\"depends_on\":[],\"purpose\":\"7 號機停用，重排其模次\"},{\"id\":\"S2\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S1.schedule_version\",\"reason\":\"7 號機持續降溫，停用重排\"},\"depends_on\":[\"S1\"],\"purpose\":\"確認重排（需主管核准）\"},{\"id\":\"S3\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"maintenance\",\"qc\"],\"kind\":\"machine_out\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管\"},\"depends_on\":[\"S2\"],\"purpose\":\"通知7 號機停用\"}],\"safe_stop\":false,\"rationale\":\"同管線其他機台正常，排除總管蒸汽不足；依 SOP-CP-01 停用該機並重排。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 504,
+          "alert_card_s": 2.1219700410147198,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "溫度續降至 119.5°C，H1 蒸汽壓不足被推翻，改判感測器或蒸汽問題"
+          },
+          "stopped_early": false,
+          "decode_tps": 121.27,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "derived_from": "R3_replan",
+          "alert_card_s": 2.1219700410147198,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "溫度續降至 119.5°C，H1 蒸汽壓不足被推翻，改判感測器或蒸汽問題"
+          },
+          "note": "no separate call: the phone card is the R3 replan's alert card"
+        }
+      },
+      "tokens_out": 1374
+    },
+    {
+      "total_s": 14.39,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "derived_from": "R2_plan",
+          "alert_card_s": 1.7404064580332488,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "128→122°C，預測穩定在 122±1°C，中胎，已硫化 10 h／28 h"
+          },
+          "note": "no separate call: the alert card leads the R2 plan stream"
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 1.258952833013609,
+          "ttft_any_s": 1.258952833013609,
+          "total_s": 7.956729666038882,
+          "prompt_tokens": 5644,
+          "completion_tokens": 811,
+          "text": "{\"alert_card\":{\"title\":\"7 號機溫度下降\",\"summary\":\"128→122°C，預測穩定在 122±1°C，中胎，已硫化 10 h／28 h\"},\"goal\":\"7 號溫度穩定，中胎不延誤\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"蒸汽壓不足，溫度會穩定\",\"cause_code\":\"steam_pressure_low\",\"expectation\":{\"machine_id\":\"CURE-07\",\"channel\":\"temp_c\",\"op\":\">=\",\"value\":121.0,\"within_min\":30.0},\"status\":\"active\",\"evidence\":[\"30 分鐘溫度 122.2→122°C，預測穩定在 122±1°C\",\"仍在 120–130°C，安全核心未觸發\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"cure_formula\",\"args\":{\"size\":\"M\",\"ref_temp_c\":128.0,\"actual_temp_c\":122.2,\"elapsed_h\":10.0,\"ref_cure_h\":28.0,\"activation_energy_kj_mol\":85.0},\"depends_on\":[],\"purpose\":\"以 Arrhenius 計算降溫後所需總硫化時間\"},{\"id\":\"S2\",\"tool\":\"query_orders_shifts\",\"args\":{\"press_ids\":[\"CURE-07\"]},\"depends_on\":[],\"purpose\":\"查下一模訂單交期與班表缺口\"},{\"id\":\"S3\",\"tool\":\"solve_schedule\",\"args\":{\"cure_overrides_h\":{\"CURE-07\":\"$S1.total_cure_h\"},\"time_limit_s\":10.0},\"depends_on\":[\"S1\",\"S2\"],\"purpose\":\"延長硫化後重排，保中胎交期\"},{\"id\":\"S4\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S3.schedule_version\",\"reason\":\"7 號機溫度下降，延長硫化至 ${S1.total_cure_h} h 後重排\"},\"depends_on\":[\"S3\"],\"purpose\":\"確認新排程（需主管核准）\"},{\"id\":\"S5\",\"tool\":\"set_cure_time\",\"args\":{\"press_id\":\"CURE-07\",\"total_cure_h\":\"$S1.total_cure_h\",\"reason\":\"7 號機溫度下降至 122.2°C，Arrhenius 等效硫化\"},\"depends_on\":[\"S1\",\"S3\"],\"purpose\":\"設定7 號機硫化時間為公式值（需主管核准）\"},{\"id\":\"S6\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\"],\"kind\":\"info\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模\"},\"depends_on\":[\"S4\",\"S5\"],\"purpose\":\"通知硫化組與夜班新排程\"}],\"safe_stop\":false,\"rationale\":\"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 752,
+          "alert_card_s": 1.7404064580332488,
+          "alert_card": {
+            "title": "7 號機溫度下降",
+            "summary": "128→122°C，預測穩定在 122±1°C，中胎，已硫化 10 h／28 h"
+          },
+          "stopped_early": false,
+          "decode_tps": 121.08,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0033,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.0037
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 1.5646835410152562,
+          "ttft_any_s": 1.5646835410152562,
+          "total_s": 6.426795958017465,
+          "prompt_tokens": 6010,
+          "completion_tokens": 586,
+          "text": "{\"alert_card\":{\"title\":\"7 號硫化機溫度下降\",\"summary\":\"溫度續降至 119.5°C，低於 120°C 安全核心阈值\"},\"goal\":\"7 號降溫，中胎不能延誤\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"持續洩壓或感測器漂移\",\"cause_code\":\"steam_leak_or_sensor_drift\",\"expectation\":{\"machine_id\":\"CURE-07\",\"channel\":\"temp_c\",\"op\":\"<=\",\"value\":119.0,\"within_min\":30.0},\"status\":\"active\",\"evidence\":[\"溫度續降至 119.5°C\",\"同管線 CURE-06、CURE-08 正常（127.8/127.9°C），問題侷限 7 號\",\"依 SOP-CP-01/02：溫度低於 120°C，判定為持續洩壓或感測器漂移\"]},\"rejected_hypothesis_ids\":[\"H1\"],\"steps\":[{\"id\":\"S1\",\"tool\":\"solve_schedule\",\"args\":{\"unavailable_presses\":[\"CURE-07\"],\"time_limit_s\":10.0},\"depends_on\":[],\"purpose\":\"7 號機停用，重排其模次\"},{\"id\":\"S2\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S1.schedule_version\",\"reason\":\"7 號機持續降溫，停用重排\"},\"depends_on\":[\"S1\"],\"purpose\":\"確認重排（需主管核准）\"},{\"id\":\"S3\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"maintenance\",\"qc\"],\"kind\":\"machine_out\",\"machine_id\":\"CURE-07\",\"message\":\"7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管\"},\"depends_on\":[\"S2\"],\"purpose\":\"通知7 號機停用\"}],\"safe_stop\":false,\"rationale\":\"溫度已低於 120°C 安全核心阈值，依 SOP-CP-01 判定為持續洩壓或感測器漂移，需停用該機並重排以保護後續模次交期。\"}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 531,
+          "alert_card_s": 1.9848256249679253,
+          "alert_card": {
+            "title": "7 號硫化機溫度下降",
+            "summary": "溫度續降至 119.5°C，低於 120°C 安全核心阈值"
+          },
+          "stopped_early": false,
+          "decode_tps": 120.52,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "derived_from": "R3_replan",
+          "alert_card_s": 1.9848256249679253,
+          "alert_card": {
+            "title": "7 號硫化機溫度下降",
+            "summary": "溫度續降至 119.5°C，低於 120°C 安全核心阈值"
+          },
+          "note": "no separate call: the phone card is the R3 replan's alert card"
+        }
+      },
+      "tokens_out": 1397
+    }
+  ],
+  "total_s": {
+    "n": 3,
+    "min": 14.072,
+    "p50": 14.172,
+    "p90": 14.3464,
+    "max": 14.39,
+    "mean": 14.2113
+  },
+  "plan_valid_rate": 1.0,
+  "verdicts": [
+    {
+      "name": "full_event_p50",
+      "target": "≈ 22.0 s (≤ target), event CLOSED",
+      "measured": 16.22,
+      "passed": true,
+      "note": "real state machine, 3/3 closed",
+      "extra": {}
+    },
+    {
+      "name": "pipeline_p50",
+      "target": "≈ 22.0 s (≤ target)",
+      "measured": 14.172,
+      "passed": true,
+      "note": "scripted breakdown (commander plan + replan calls), synthetic solve; not the state machine",
+      "extra": {}
+    }
+  ]
+}
