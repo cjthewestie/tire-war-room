@@ -6,8 +6,10 @@ copy so it can run before, and independently of, the agent module.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -52,6 +54,29 @@ def factory_context() -> str:
     return "\n".join(lines)
 
 
+def schedule_facts_context() -> str:
+    """Page-6 scheduling numbers (back-propagation table, per-press capacity, lead times) from warroom.factory.
+    In production these come back from the scheduling solver / orders DB tools; the open-book quiz gives
+    them to the model the same way so every quiz item has its source in the prompt."""
+    size = {"S": "小胎", "M": "中胎", "L": "大胎"}
+
+    def hm(minutes: int) -> str:
+        h, m = divmod(minutes, 60)
+        return f"T−{h} 時" + (f" {m} 分" if m else "") if h else f"T−{m} 分"
+
+    lines = ["# 排程倒推（page 6，由入硫化機時刻 T 往前推）"]
+    for k, b in F.BACKPROP.items():
+        lines.append(f"- {size[str(getattr(k, 'value', k))]}：開始貼合 {hm(b['bond_start_min'])}；A 線投料 "
+                     f"{hm(b['a_feed_min'])}；胎側膠／鋼絲圈各 {b['side_pieces']} 片")
+    lines.append("# 每台硫化機每週產量（模擬，小／中／大）")
+    for r in F.CAPACITY_TARGETS:
+        lines.append(f"- {r.label}：{r.small:g}／{r.medium:g}／{r.large:g}")
+    ml, sm = F.LEAD_TIME_TARGET_WEEKS["ML_100_each"], F.LEAD_TIME_TARGET_WEEKS["small"]
+    lines.append(f"# 交期：中、大胎各 100 條 {ml[0]} → {ml[1]} 週；小胎 {sm[0]} → {sm[1]} 週")
+    lines.append(f"# 模擬條件：{F.CAPACITY_SIM_CONDITIONS}")
+    return "\n".join(lines)
+
+
 def sop_context() -> str:
     parts = []
     for p in sorted(SOP_DIR.glob("*.md")):
@@ -91,10 +116,31 @@ ANOMALIES: list[dict[str, Any]] = [
 ]
 
 
+def live_anomaly(a: dict[str, Any], nonce: str | None = None) -> dict[str, Any]:
+    """A fresh copy of anomaly `a` as a new detection would deliver it: unique event id, its own
+    detection time and live sensor values (deterministic jitter derived from the nonce).
+
+    Every alert-card benchmark call uses one of these so the model must prefill the anomaly block cold;
+    only the shared system prefix (commander role + factory model) can come from the prefix cache, which
+    is the real situation on the edge box. Repeating one fixed prompt measures a cache hit instead."""
+    nonce = nonce or uuid.uuid4().hex[:12]
+    h = int(hashlib.sha256(nonce.encode()).hexdigest()[:8], 16)
+    j1 = ((h & 0xFF) / 255 - 0.5) * 0.8            # ±0.4 on the reported value
+    j2 = (((h >> 8) & 0xFF) / 255 - 0.5) * 0.8     # ±0.4 on the window start
+    t_end = datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ) + timedelta(seconds=(h >> 16) % 3600)
+    out = dict(a)
+    out["value"] = round(float(a["value"]) + j1, 1)
+    out["window"] = (round(a["window"][0] + j2, 1), round(a["window"][1] + j1, 1))
+    out["t_end"] = t_end
+    out["event_id"] = f"EVT-{nonce}"
+    return out
+
+
 def anomaly_block(a: dict[str, Any]) -> str:
-    return (f"異常：{a['message']}\n機台 {a['machine_id']}，種類 {a['kind']}，通道 {a['channel']}，"
+    head = (f"事件 {a['event_id']}｜偵測時間 {a['t_end']:%Y-%m-%d %H:%M:%S}\n") if a.get("event_id") else ""
+    return (head + f"異常：{a['message']}\n機台 {a['machine_id']}，種類 {a['kind']}，通道 {a['channel']}，"
             f"現值 {a['value']}，基準 {a['baseline']}\n近 30 分鐘感測值：\n"
-            f"{sensor_window(a['machine_id'], *a['window'])}")
+            f"{sensor_window(a['machine_id'], *a['window'], t_end=a.get('t_end'))}")
 
 
 def alert_card_messages(a: dict[str, Any], prefix: str = "") -> list[dict[str, str]]:

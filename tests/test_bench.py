@@ -391,3 +391,50 @@ def test_report_builds_table(env_fake, tmp_path):
     memory_check.main(["--out-dir", str(tmp_path)])
     text = report.build(tmp_path)
     assert "| ttft | first_alert_card_p90 |" in text and "| memory | stack_gb |" in text
+
+
+# ---------------------------------------------------------------- cold vs warm, batching vs queuing
+def test_live_anomaly_makes_every_alert_prompt_unique_but_keeps_system_prefix():
+    from bench.prompts import ANOMALIES, alert_card_messages, live_anomaly
+    msgs = [alert_card_messages(live_anomaly(ANOMALIES[0])) for _ in range(5)]
+    assert len({m[1]["content"] for m in msgs}) == 5                 # anomaly block differs every call
+    assert len({m[0]["content"] for m in msgs}) == 1                 # shared system prefix stays cacheable
+    assert all(m[1]["content"].startswith("事件 EVT-") for m in msgs)  # nonce leads the user block
+    a = live_anomaly(ANOMALIES[0], nonce="x")
+    assert a == live_anomaly(ANOMALIES[0], nonce="x")                 # deterministic per nonce
+    assert abs(a["value"] - ANOMALIES[0]["value"]) <= 0.4
+
+
+def test_ttft_alert_card_judged_on_cold_unique_prompts(env_fake, tmp_path):
+    _, state = env_fake
+    before = len(state.setdefault("bodies", []))
+    out = ttft.main(["--runs", "3", "--skip-long", "--out-dir", str(tmp_path)])
+    ac = out["alert_card"]
+    assert ac["cold"]["total_s"]["n"] == 3 and ac["warm"]["total_s"]["n"] == 3
+    ids = ac["cold_event_ids"]
+    assert len(set(ids)) == 3
+    users = [json.dumps(b["messages"][1], ensure_ascii=False) for b in state["bodies"][before:]
+             if len(b["messages"]) == 2 and "告警卡" in b["messages"][1]["content"]]
+    for i in ids:                                                   # each cold call carried its own event id
+        assert sum(i in u for u in users) == 1
+    v = {x["name"]: x for x in out["verdicts"]}
+    assert v["first_alert_card_p90"]["measured"] == ac["cold"]["total_s"]["p90"]
+    assert v["first_alert_card_warm_p90"]["passed"] is None          # warm is info only
+
+
+def test_batching_detects_queued_calls():
+    def e(mid, ft, end):
+        return {"machine_id": mid, "alert": {"ok": True}, "send_off_s": 0.0, "first_token_off_s": ft,
+                "end_off_s": end}
+    batched = concurrent.batching([e("a", 0.9, 1.5), e("b", 1.0, 1.6), e("c", 1.1, 1.7)])
+    assert batched["batched"] is True and batched["serialized_pairs"] == []
+    queued = concurrent.batching([e("a", 0.6, 1.2), e("b", 1.3, 1.9), e("c", 2.0, 2.6)])  # page-10 failure shape
+    assert queued["batched"] is False and ("a", "b") in queued["serialized_pairs"]
+
+
+def test_concurrent_runner_reports_batching(env_fake, tmp_path):
+    out = concurrent.main(["--runs", "1", "--out-dir", str(tmp_path)])
+    v = {x["name"]: x for x in out["verdicts"]}
+    assert "concurrent_batched" in v
+    ids = [e["event_id"] for r in out["rounds"] for e in r["each"]]
+    assert len(set(ids)) == len(ids) == F.CONCURRENT_ANOMALIES

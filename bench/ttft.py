@@ -6,8 +6,13 @@ first alert card (≤100 tokens) on screen ≤ 2 s.
   uv run python -m bench.ttft                                   # Ollama defaults
   BASE_URL=http://spark:8000/v1 MODEL=nemotron uv run python -m bench.ttft --runs 10
 
-Cold = unique nonce at the start of the prompt (defeats prefix cache). Warm = identical 32k prefix,
-different final question (what the commander sees on every tool round of one event).
+First alert card: judged on COLD calls -- each call is a new detection with its own event id and live
+sensor values, so only the shared system prefix can be cached (the real situation). WARM (one identical
+prompt repeated, full cache hit) is reported beside it as info only.
+
+32k TTFT: cold = unique nonce ahead of the 32k block (defeats its cache). Warm = identical 32k prefix,
+different final question (what the commander sees on every tool round of one event); the page-10 target
+says "with prefix cache", so that one is judged warm.
 """
 from __future__ import annotations
 
@@ -18,26 +23,54 @@ from typing import Any
 
 from bench.llm import Endpoint, Verdict, endpoint_info, json_schema_format, parse_json, run, save_result, \
     stream_chat, summarize
-from bench.prompts import ANOMALIES, alert_card_messages, card_schema, long_prefix
+from bench.prompts import ANOMALIES, alert_card_messages, card_schema, live_anomaly, long_prefix
 from warroom.factory import ALERT_CARD_MAX_TOKENS, LATENCY_FIRST_ALERT_S, TTFT_TARGET_S
 
 
+def _card_call(r) -> dict[str, Any]:
+    d = r.to_dict()
+    card = parse_json(r.text)
+    d["valid_card"] = isinstance(card, dict) and {"title", "summary"} <= set(card)
+    return d
+
+
+def _stats(calls: list[dict[str, Any]]) -> dict[str, Any]:
+    ok = [c for c in calls if c["ok"]]
+    return {"total_s": summarize([c["total_s"] for c in ok]), "ttft_s": summarize([c["ttft_s"] for c in ok]),
+            "valid_card_rate": round(sum(c["valid_card"] for c in calls) / max(len(calls), 1), 3)}
+
+
 async def alert_card_runs(ep: Endpoint, runs: int) -> dict[str, Any]:
+    """First alert card, cold and warm, reported separately.
+
+    cold (judged): every call is a new detection -- unique event id + live sensor values in the anomaly
+      block (prompts.live_anomaly), so only the shared system prefix can hit the prefix cache.
+    warm (info only): one identical prompt repeated; a full prefix-cache hit, which never happens for a
+      real new anomaly. Kept to show how much of the cold time is prefill.
+    The system prefix is primed once first (what bench.preload / boot self-start does in production)."""
     fmt = json_schema_format("AlertCard", card_schema())
-    calls = []
     cli = ep.client()
+    prime = await stream_chat(ep, alert_card_messages(live_anomaly(ANOMALIES[0])),
+                              max_tokens=ALERT_CARD_MAX_TOKENS, response_format=fmt, client=cli)
+    cold, nonces = [], []
     for i in range(runs):
-        a = ANOMALIES[i % 2]
+        a = live_anomaly(ANOMALIES[i % 2])
+        nonces.append(a["event_id"])
         r = await stream_chat(ep, alert_card_messages(a), max_tokens=ALERT_CARD_MAX_TOKENS,
                               response_format=fmt, client=cli)
-        d = r.to_dict()
-        d["valid_card"] = isinstance(parse_json(r.text), dict) and {"title", "summary"} <= set(parse_json(r.text))
-        calls.append(d)
+        cold.append(_card_call(r))
+    fixed = alert_card_messages(live_anomaly(ANOMALIES[0], nonce="warm-fixed"))
+    await stream_chat(ep, fixed, max_tokens=ALERT_CARD_MAX_TOKENS, response_format=fmt, client=cli)  # fill cache
+    warm = []
+    for _ in range(runs):
+        r = await stream_chat(ep, fixed, max_tokens=ALERT_CARD_MAX_TOKENS, response_format=fmt, client=cli)
+        warm.append(_card_call(r))
     await cli.close()
-    ok = [c for c in calls if c["ok"]]
-    return {"calls": calls, "total_s": summarize([c["total_s"] for c in ok]),
-            "ttft_s": summarize([c["ttft_s"] for c in ok]),
-            "valid_card_rate": round(sum(c["valid_card"] for c in calls) / max(len(calls), 1), 3)}
+    cs, ws = _stats(cold), _stats(warm)
+    return {"prime": prime.to_dict(), "cold_event_ids": nonces,
+            "cold": {"calls": cold, **cs}, "warm": {"calls": warm, **ws},
+            # top-level keys = the judged (cold) numbers, so older readers keep working
+            "total_s": cs["total_s"], "ttft_s": cs["ttft_s"], "valid_card_rate": cs["valid_card_rate"]}
 
 
 async def calibrate_chars_per_token(ep: Endpoint, cli) -> float:
@@ -84,9 +117,14 @@ async def main_async(args) -> dict[str, Any]:
                                                           "first_alert_s": LATENCY_FIRST_ALERT_S}}
     await stream_chat(ep, [{"role": "user", "content": "hi"}], max_tokens=1)   # load / warm the model
     out["alert_card"] = await alert_card_runs(ep, args.runs)
-    verdicts = [Verdict("first_alert_card_p90", f"≤ {LATENCY_FIRST_ALERT_S} s",
-                        out["alert_card"]["total_s"].get("p90"),
-                        _le(out["alert_card"]["total_s"].get("p90"), LATENCY_FIRST_ALERT_S))]
+    ac = out["alert_card"]
+    cold_p90 = ac["cold"]["total_s"].get("p90")
+    warm_p90 = ac["warm"]["total_s"].get("p90")
+    verdicts = [Verdict("first_alert_card_p90", f"≤ {LATENCY_FIRST_ALERT_S} s", cold_p90,
+                        _le(cold_p90, LATENCY_FIRST_ALERT_S),
+                        note=f"cold: unique event per call, n={ac['cold']['total_s'].get('n', 0)}"),
+                Verdict("first_alert_card_warm_p90", "info (target judged cold)", warm_p90, None,
+                        note="warm: identical prompt repeated, full prefix-cache hit")]
     if not args.skip_long:
         lc = await long_context_runs(ep, args.context_tokens, args.runs)
         out["long_context"] = lc
