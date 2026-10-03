@@ -1,0 +1,210 @@
+{"id": "GQ-LINE-A-MIX", "category": "機台", "question": "機台 A-MIX 屬於哪條產線？", "choices": ["B 胎側膠", "A 胎體／胎面膠", "貼合", "D 尼龍布"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-MIX", "category": "機台", "question": "機台 A-MIX 是什麼設備？", "choices": ["油壓機", "裁切機", "大開煉機", "密煉機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-MIX", "category": "製程", "question": "機台 A-MIX 負責哪一道製程？", "choices": ["混煉", "押出包膠", "裁切", "成形"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-OPEN", "category": "機台", "question": "機台 A-OPEN 屬於哪條產線？", "choices": ["B 胎側膠", "A 胎體／胎面膠", "貼合", "D 尼龍布"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-OPEN", "category": "機台", "question": "機台 A-OPEN 是什麼設備？", "choices": ["開煉機", "油壓機", "硫化機", "冷卻機"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-OPEN", "category": "製程", "question": "機台 A-OPEN 負責哪一道製程？", "choices": ["拉線", "組裝", "壓片", "保溫儲料"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-BIGOPEN", "category": "機台", "question": "機台 A-BIGOPEN 屬於哪條產線？", "choices": ["貼合", "B 胎側膠", "A 胎體／胎面膠", "D 尼龍布"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-BIGOPEN", "category": "機台", "question": "機台 A-BIGOPEN 是什麼設備？", "choices": ["大開煉機", "裁切機", "油壓機", "押出機"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-BIGOPEN", "category": "製程", "question": "機台 A-BIGOPEN 負責哪一道製程？", "choices": ["壓片", "預熱", "成形", "押出"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-SMALLOPEN", "category": "機台", "question": "機台 A-SMALLOPEN 屬於哪條產線？", "choices": ["A 胎體／胎面膠", "D 尼龍布", "C 鋼絲圈", "硫化"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-SMALLOPEN", "category": "機台", "question": "機台 A-SMALLOPEN 是什麼設備？", "choices": ["開煉機", "硫化機", "纏繞機", "小開煉機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-SMALLOPEN", "category": "製程", "question": "機台 A-SMALLOPEN 負責哪一道製程？", "choices": ["壓片", "拉圈", "押出包膠", "保溫儲料"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-CAL", "category": "機台", "question": "機台 A-CAL 屬於哪條產線？", "choices": ["硫化", "貼合", "C 鋼絲圈", "A 胎體／胎面膠"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-CAL", "category": "機台", "question": "機台 A-CAL 是什麼設備？", "choices": ["大開煉機", "壓延機", "密煉機", "押出機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-CAL", "category": "製程", "question": "機台 A-CAL 負責哪一道製程？", "choices": ["成形", "押出", "貼合", "裁切"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-COOL", "category": "機台", "question": "機台 A-COOL 屬於哪條產線？", "choices": ["貼合", "硫化", "D 尼龍布", "A 胎體／胎面膠"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-COOL", "category": "機台", "question": "機台 A-COOL 是什麼設備？", "choices": ["冷卻機", "壓延機", "開煉機", "捲取設備"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-COOL", "category": "製程", "question": "機台 A-COOL 負責哪一道製程？", "choices": ["冷卻", "混煉", "壓片", "押出包膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-A-WIND", "category": "機台", "question": "機台 A-WIND 屬於哪條產線？", "choices": ["硫化", "A 胎體／胎面膠", "B 胎側膠", "C 鋼絲圈"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-A-WIND", "category": "機台", "question": "機台 A-WIND 是什麼設備？", "choices": ["冷卻機", "捲取設備", "放線架", "氣囊"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-A-WIND", "category": "製程", "question": "機台 A-WIND 負責哪一道製程？", "choices": ["包布", "冷卻", "保溫儲料", "捲取"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-B-MIX", "category": "機台", "question": "機台 B-MIX 屬於哪條產線？", "choices": ["B 胎側膠", "貼合", "D 尼龍布", "A 胎體／胎面膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-B-MIX", "category": "機台", "question": "機台 B-MIX 是什麼設備？", "choices": ["裁切機", "硫化機", "密煉機", "開煉機"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-B-MIX", "category": "製程", "question": "機台 B-MIX 負責哪一道製程？", "choices": ["成形", "混煉", "拉線", "硫化"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-B-OPEN", "category": "機台", "question": "機台 B-OPEN 屬於哪條產線？", "choices": ["C 鋼絲圈", "A 胎體／胎面膠", "D 尼龍布", "B 胎側膠"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-B-OPEN", "category": "機台", "question": "機台 B-OPEN 是什麼設備？", "choices": ["壓延機", "小開煉機", "大開煉機", "開煉機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-B-OPEN", "category": "製程", "question": "機台 B-OPEN 負責哪一道製程？", "choices": ["拉圈", "拉線", "壓片", "押出包膠"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-B-FORM", "category": "機台", "question": "機台 B-FORM 屬於哪條產線？", "choices": ["B 胎側膠", "硫化", "D 尼龍布", "C 鋼絲圈"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-B-FORM", "category": "機台", "question": "機台 B-FORM 是什麼設備？", "choices": ["油壓機", "裁切機", "押出機", "放線架"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-B-FORM", "category": "製程", "question": "機台 B-FORM 負責哪一道製程？", "choices": ["成形", "壓片", "混煉", "拉線"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-B-ASSY", "category": "機台", "question": "機台 B-ASSY 屬於哪條產線？", "choices": ["A 胎體／胎面膠", "硫化", "D 尼龍布", "B 胎側膠"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-B-ASSY", "category": "機台", "question": "機台 B-ASSY 是什麼設備？", "choices": ["硫化機", "氣囊", "放線架", "油壓機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-B-ASSY", "category": "製程", "question": "機台 B-ASSY 負責哪一道製程？", "choices": ["拉線", "押出", "組裝", "捲取"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-C-PAYOFF", "category": "機台", "question": "機台 C-PAYOFF 屬於哪條產線？", "choices": ["C 鋼絲圈", "貼合", "A 胎體／胎面膠", "B 胎側膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-C-PAYOFF", "category": "機台", "question": "機台 C-PAYOFF 是什麼設備？", "choices": ["壓延機", "放線架", "油壓機", "硫化機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-C-PAYOFF", "category": "製程", "question": "機台 C-PAYOFF 負責哪一道製程？", "choices": ["押出包膠", "拉線", "冷卻", "拉圈"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-C-EXTR", "category": "機台", "question": "機台 C-EXTR 屬於哪條產線？", "choices": ["A 胎體／胎面膠", "D 尼龍布", "貼合", "C 鋼絲圈"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-C-EXTR", "category": "機台", "question": "機台 C-EXTR 是什麼設備？", "choices": ["押出機", "壓延機", "裁切機", "大開煉機"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-C-EXTR", "category": "製程", "question": "機台 C-EXTR 負責哪一道製程？", "choices": ["組裝", "押出包膠", "裁切", "硫化"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-C-WIND", "category": "機台", "question": "機台 C-WIND 屬於哪條產線？", "choices": ["貼合", "A 胎體／胎面膠", "B 胎側膠", "C 鋼絲圈"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-C-WIND", "category": "機台", "question": "機台 C-WIND 是什麼設備？", "choices": ["捲取設備", "裁切機", "纏繞機", "小開煉機"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-C-WIND", "category": "製程", "question": "機台 C-WIND 負責哪一道製程？", "choices": ["拉圈", "押出包膠", "保溫儲料", "冷卻"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-C-WRAP", "category": "機台", "question": "機台 C-WRAP 屬於哪條產線？", "choices": ["D 尼龍布", "B 胎側膠", "硫化", "C 鋼絲圈"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-C-WRAP", "category": "機台", "question": "機台 C-WRAP 是什麼設備？", "choices": ["密煉機", "氣囊", "壓延機", "硫化機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-C-WRAP", "category": "製程", "question": "機台 C-WRAP 負責哪一道製程？", "choices": ["成形", "裁切", "包布", "押出包膠"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-D-CUT", "category": "機台", "question": "機台 D-CUT 屬於哪條產線？", "choices": ["B 胎側膠", "貼合", "D 尼龍布", "A 胎體／胎面膠"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-D-CUT", "category": "機台", "question": "機台 D-CUT 是什麼設備？", "choices": ["捲取設備", "押出機", "裁切機", "氣囊"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-D-CUT", "category": "製程", "question": "機台 D-CUT 負責哪一道製程？", "choices": ["拉線", "壓片", "組裝", "裁切"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-BOND-01", "category": "機台", "question": "機台 BOND-01 屬於哪條產線？", "choices": ["D 尼龍布", "貼合", "硫化", "A 胎體／胎面膠"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-BOND-01", "category": "機台", "question": "機台 BOND-01 是什麼設備？", "choices": ["捲取設備", "油壓機", "纏繞機", "冷卻機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-BOND-01", "category": "製程", "question": "機台 BOND-01 負責哪一道製程？", "choices": ["預熱", "貼合", "硫化", "拉圈"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-01", "category": "機台", "question": "機台 CURE-01 屬於哪條產線？", "choices": ["硫化", "D 尼龍布", "貼合", "A 胎體／胎面膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-01", "category": "機台", "question": "機台 CURE-01 是什麼設備？", "choices": ["油壓機", "冷卻機", "放線架", "硫化機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-01", "category": "製程", "question": "機台 CURE-01 負責哪一道製程？", "choices": ["押出包膠", "包布", "硫化", "混煉"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-02", "category": "機台", "question": "機台 CURE-02 屬於哪條產線？", "choices": ["A 胎體／胎面膠", "D 尼龍布", "硫化", "B 胎側膠"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-02", "category": "機台", "question": "機台 CURE-02 是什麼設備？", "choices": ["硫化機", "開煉機", "冷卻機", "捲取設備"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-02", "category": "製程", "question": "機台 CURE-02 負責哪一道製程？", "choices": ["貼合", "拉圈", "裁切", "硫化"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-03", "category": "機台", "question": "機台 CURE-03 屬於哪條產線？", "choices": ["貼合", "A 胎體／胎面膠", "硫化", "B 胎側膠"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-03", "category": "機台", "question": "機台 CURE-03 是什麼設備？", "choices": ["小開煉機", "硫化機", "放線架", "裁切機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-03", "category": "製程", "question": "機台 CURE-03 負責哪一道製程？", "choices": ["拉線", "保溫儲料", "硫化", "包布"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-04", "category": "機台", "question": "機台 CURE-04 屬於哪條產線？", "choices": ["貼合", "硫化", "B 胎側膠", "A 胎體／胎面膠"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-04", "category": "機台", "question": "機台 CURE-04 是什麼設備？", "choices": ["油壓機", "密煉機", "硫化機", "纏繞機"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-04", "category": "製程", "question": "機台 CURE-04 負責哪一道製程？", "choices": ["押出", "裁切", "包布", "硫化"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-05", "category": "機台", "question": "機台 CURE-05 屬於哪條產線？", "choices": ["硫化", "D 尼龍布", "C 鋼絲圈", "貼合"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-05", "category": "機台", "question": "機台 CURE-05 是什麼設備？", "choices": ["油壓機", "小開煉機", "裁切機", "硫化機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-05", "category": "製程", "question": "機台 CURE-05 負責哪一道製程？", "choices": ["硫化", "成形", "捲取", "押出包膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-06", "category": "機台", "question": "機台 CURE-06 屬於哪條產線？", "choices": ["D 尼龍布", "硫化", "A 胎體／胎面膠", "貼合"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-06", "category": "機台", "question": "機台 CURE-06 是什麼設備？", "choices": ["壓延機", "捲取設備", "開煉機", "硫化機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-06", "category": "製程", "question": "機台 CURE-06 負責哪一道製程？", "choices": ["混煉", "組裝", "冷卻", "硫化"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-07", "category": "機台", "question": "機台 CURE-07 屬於哪條產線？", "choices": ["D 尼龍布", "B 胎側膠", "硫化", "貼合"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-07", "category": "機台", "question": "機台 CURE-07 是什麼設備？", "choices": ["冷卻機", "大開煉機", "放線架", "硫化機"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-07", "category": "製程", "question": "機台 CURE-07 負責哪一道製程？", "choices": ["預熱", "押出", "硫化", "冷卻"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-08", "category": "機台", "question": "機台 CURE-08 屬於哪條產線？", "choices": ["D 尼龍布", "B 胎側膠", "C 鋼絲圈", "硫化"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-08", "category": "機台", "question": "機台 CURE-08 是什麼設備？", "choices": ["油壓機", "硫化機", "小開煉機", "壓延機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-08", "category": "製程", "question": "機台 CURE-08 負責哪一道製程？", "choices": ["保溫儲料", "硫化", "壓片", "拉線"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-09", "category": "機台", "question": "機台 CURE-09 屬於哪條產線？", "choices": ["貼合", "硫化", "B 胎側膠", "D 尼龍布"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-09", "category": "機台", "question": "機台 CURE-09 是什麼設備？", "choices": ["放線架", "硫化機", "押出機", "大開煉機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-09", "category": "製程", "question": "機台 CURE-09 負責哪一道製程？", "choices": ["成形", "硫化", "冷卻", "押出包膠"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-10", "category": "機台", "question": "機台 CURE-10 屬於哪條產線？", "choices": ["硫化", "D 尼龍布", "C 鋼絲圈", "A 胎體／胎面膠"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-10", "category": "機台", "question": "機台 CURE-10 是什麼設備？", "choices": ["開煉機", "硫化機", "大開煉機", "密煉機"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-10", "category": "製程", "question": "機台 CURE-10 負責哪一道製程？", "choices": ["裁切", "冷卻", "硫化", "捲取"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-LINE-CURE-11", "category": "機台", "question": "機台 CURE-11 屬於哪條產線？", "choices": ["貼合", "硫化", "D 尼龍布", "C 鋼絲圈"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NAME-CURE-11", "category": "機台", "question": "機台 CURE-11 是什麼設備？", "choices": ["密煉機", "捲取設備", "硫化機", "大開煉機"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-PROC-CURE-11", "category": "製程", "question": "機台 CURE-11 負責哪一道製程？", "choices": ["押出", "押出包膠", "硫化", "組裝"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-MIX", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["C-WRAP", "B-FORM", "A-MIX", "CURE-04"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-OPEN", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["CURE-01", "CURE-06", "CURE-11", "A-OPEN"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-BIGOPEN", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["A-BIGOPEN", "C-WIND", "B-FORM", "B-OPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-SMALLOPEN", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["B-FORM", "CURE-03", "CURE-05", "A-SMALLOPEN"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-CAL", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["B-OPEN", "CURE-02", "A-CAL", "CURE-11"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-COOL", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["CURE-01", "A-COOL", "C-EXTR", "CURE-05"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-A-WIND", "category": "機台", "question": "下列哪台機台屬於「A 胎體／胎面膠」產線？", "choices": ["C-EXTR", "CURE-05", "CURE-04", "A-WIND"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-B-MIX", "category": "機台", "question": "下列哪台機台屬於「B 胎側膠」產線？", "choices": ["CURE-10", "C-WIND", "D-CUT", "B-MIX"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-B-OPEN", "category": "機台", "question": "下列哪台機台屬於「B 胎側膠」產線？", "choices": ["CURE-04", "B-OPEN", "CURE-08", "CURE-02"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-B-FORM", "category": "機台", "question": "下列哪台機台屬於「B 胎側膠」產線？", "choices": ["B-FORM", "C-PAYOFF", "CURE-04", "A-OPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-B-ASSY", "category": "機台", "question": "下列哪台機台屬於「B 胎側膠」產線？", "choices": ["C-WRAP", "CURE-09", "A-COOL", "B-ASSY"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-C-PAYOFF", "category": "機台", "question": "下列哪台機台屬於「C 鋼絲圈」產線？", "choices": ["B-FORM", "A-SMALLOPEN", "C-PAYOFF", "A-COOL"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-C-EXTR", "category": "機台", "question": "下列哪台機台屬於「C 鋼絲圈」產線？", "choices": ["C-EXTR", "CURE-07", "CURE-09", "A-OPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-C-WIND", "category": "機台", "question": "下列哪台機台屬於「C 鋼絲圈」產線？", "choices": ["C-WIND", "CURE-09", "CURE-08", "CURE-04"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-C-WRAP", "category": "機台", "question": "下列哪台機台屬於「C 鋼絲圈」產線？", "choices": ["B-ASSY", "CURE-07", "C-WRAP", "CURE-11"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-D-CUT", "category": "機台", "question": "下列哪台機台屬於「D 尼龍布」產線？", "choices": ["D-CUT", "A-OPEN", "B-OPEN", "CURE-04"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONLINE-BOND-01", "category": "機台", "question": "下列哪台機台屬於「貼合」產線？", "choices": ["CURE-04", "D-CUT", "BOND-01", "B-MIX"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-MIX", "category": "製程", "question": "「A 胎體／胎面膠」產線的「混煉」製程由哪台機台負責？", "choices": ["A-SMALLOPEN", "B-OPEN", "A-MIX", "B-FORM"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-OPEN", "category": "製程", "question": "「A 胎體／胎面膠」產線的「壓片」製程由哪台機台負責？", "choices": ["B-ASSY", "A-OPEN", "C-PAYOFF", "A-COOL"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-BIGOPEN", "category": "製程", "question": "「A 胎體／胎面膠」產線的「預熱」製程由哪台機台負責？", "choices": ["A-BIGOPEN", "C-PAYOFF", "B-MIX", "A-SMALLOPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-SMALLOPEN", "category": "製程", "question": "「A 胎體／胎面膠」產線的「保溫儲料」製程由哪台機台負責？", "choices": ["A-SMALLOPEN", "D-CUT", "B-ASSY", "C-WRAP"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-CAL", "category": "製程", "question": "「A 胎體／胎面膠」產線的「押出」製程由哪台機台負責？", "choices": ["C-WIND", "A-CAL", "B-FORM", "C-EXTR"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-COOL", "category": "製程", "question": "「A 胎體／胎面膠」產線的「冷卻」製程由哪台機台負責？", "choices": ["B-MIX", "A-COOL", "A-CAL", "B-FORM"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-A-WIND", "category": "製程", "question": "「A 胎體／胎面膠」產線的「捲取」製程由哪台機台負責？", "choices": ["A-BIGOPEN", "C-EXTR", "B-MIX", "A-WIND"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-B-MIX", "category": "製程", "question": "「B 胎側膠」產線的「混煉」製程由哪台機台負責？", "choices": ["B-FORM", "A-OPEN", "A-CAL", "B-MIX"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-B-OPEN", "category": "製程", "question": "「B 胎側膠」產線的「壓片」製程由哪台機台負責？", "choices": ["B-ASSY", "B-OPEN", "B-FORM", "C-PAYOFF"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-B-FORM", "category": "製程", "question": "「B 胎側膠」產線的「成形」製程由哪台機台負責？", "choices": ["B-FORM", "A-BIGOPEN", "BOND-01", "D-CUT"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-B-ASSY", "category": "製程", "question": "「B 胎側膠」產線的「組裝」製程由哪台機台負責？", "choices": ["B-ASSY", "C-WIND", "B-OPEN", "C-WRAP"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-C-PAYOFF", "category": "製程", "question": "「C 鋼絲圈」產線的「拉線」製程由哪台機台負責？", "choices": ["C-EXTR", "C-PAYOFF", "B-MIX", "D-CUT"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-C-EXTR", "category": "製程", "question": "「C 鋼絲圈」產線的「押出包膠」製程由哪台機台負責？", "choices": ["A-COOL", "C-PAYOFF", "C-EXTR", "C-WIND"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-C-WIND", "category": "製程", "question": "「C 鋼絲圈」產線的「拉圈」製程由哪台機台負責？", "choices": ["C-WIND", "C-WRAP", "A-OPEN", "A-SMALLOPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-C-WRAP", "category": "製程", "question": "「C 鋼絲圈」產線的「包布」製程由哪台機台負責？", "choices": ["D-CUT", "C-EXTR", "A-MIX", "C-WRAP"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-D-CUT", "category": "製程", "question": "「D 尼龍布」產線的「裁切」製程由哪台機台負責？", "choices": ["A-CAL", "D-CUT", "B-OPEN", "A-MIX"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-WHO-BOND-01", "category": "製程", "question": "「貼合」產線的「貼合」製程由哪台機台負責？", "choices": ["A-BIGOPEN", "B-MIX", "BOND-01", "B-ASSY"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-A-MIX", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["D-CUT", "A-WIND", "A-MIX", "CURE-05"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-A-OPEN", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["A-COOL", "A-OPEN", "A-WIND", "D-CUT"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-A-BIGOPEN", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["C-WIND", "CURE-08", "C-PAYOFF", "A-BIGOPEN"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-A-SMALLOPEN", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["CURE-01", "A-SMALLOPEN", "C-WIND", "CURE-04"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-A-CAL", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["A-CAL", "D-CUT", "CURE-05", "CURE-01"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-B-MIX", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["B-MIX", "A-WIND", "CURE-07", "CURE-04"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-B-OPEN", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["CURE-07", "CURE-04", "CURE-02", "B-OPEN"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-B-FORM", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["CURE-03", "C-PAYOFF", "C-WRAP", "B-FORM"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CMPD-C-EXTR", "category": "安全", "question": "下列哪台機台處理含膠料（受安全核心煉膠溫度規則保護）？", "choices": ["CURE-07", "C-WRAP", "CURE-02", "C-EXTR"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-A-COOL", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["A-BIGOPEN", "A-COOL", "C-EXTR", "A-MIX"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-A-WIND", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["A-SMALLOPEN", "B-MIX", "C-EXTR", "A-WIND"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-B-ASSY", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["B-ASSY", "A-CAL", "A-BIGOPEN", "A-MIX"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-C-PAYOFF", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["A-BIGOPEN", "C-PAYOFF", "B-MIX", "A-CAL"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-C-WIND", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["A-OPEN", "A-CAL", "C-WIND", "C-EXTR"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-C-WRAP", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["C-WRAP", "B-OPEN", "A-MIX", "A-SMALLOPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-D-CUT", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["D-CUT", "B-MIX", "B-OPEN", "A-OPEN"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NOCMPD-BOND-01", "category": "安全", "question": "下列哪台機台不處理含膠料？", "choices": ["B-OPEN", "A-BIGOPEN", "C-EXTR", "BOND-01"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-01", "category": "硫化", "question": "硫化機 CURE-01 接在哪一條蒸汽管線？", "choices": ["H3", "H1", "H4", "H0"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-01", "category": "硫化", "question": "硫化機 CURE-01 可以硫化哪些尺寸？", "choices": ["中/大胎共用", "僅大胎", "僅小胎", "僅中胎"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-01", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H1？", "choices": ["CURE-08", "CURE-11", "CURE-01", "CURE-10"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-02", "category": "硫化", "question": "硫化機 CURE-02 接在哪一條蒸汽管線？", "choices": ["H1", "H2", "H4", "H3"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-02", "category": "硫化", "question": "硫化機 CURE-02 可以硫化哪些尺寸？", "choices": ["僅大胎", "中/大胎共用", "僅小胎", "僅中胎"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-02", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H1？", "choices": ["CURE-07", "CURE-02", "CURE-06", "CURE-11"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-03", "category": "硫化", "question": "硫化機 CURE-03 接在哪一條蒸汽管線？", "choices": ["H4", "H1", "H0", "H2"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-03", "category": "硫化", "question": "硫化機 CURE-03 可以硫化哪些尺寸？", "choices": ["僅中胎", "僅小胎", "中/大胎共用", "僅大胎"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-03", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H1？", "choices": ["CURE-08", "CURE-11", "CURE-10", "CURE-03"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-04", "category": "硫化", "question": "硫化機 CURE-04 接在哪一條蒸汽管線？", "choices": ["H0", "H3", "H1", "H4"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-04", "category": "硫化", "question": "硫化機 CURE-04 可以硫化哪些尺寸？", "choices": ["僅小胎", "中/大胎共用", "僅大胎", "僅中胎"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-04", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H1？", "choices": ["CURE-06", "CURE-07", "CURE-04", "CURE-10"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-05", "category": "硫化", "question": "硫化機 CURE-05 接在哪一條蒸汽管線？", "choices": ["H1", "H3", "H4", "H2"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-05", "category": "硫化", "question": "硫化機 CURE-05 可以硫化哪些尺寸？", "choices": ["僅中胎", "僅小胎", "中/大胎共用", "僅大胎"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-05", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H1？", "choices": ["CURE-07", "CURE-05", "CURE-06", "CURE-08"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-06", "category": "硫化", "question": "硫化機 CURE-06 接在哪一條蒸汽管線？", "choices": ["H1", "H3", "H0", "H2"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-06", "category": "硫化", "question": "硫化機 CURE-06 可以硫化哪些尺寸？", "choices": ["僅小胎", "中/大胎共用", "僅中胎", "僅大胎"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-06", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H2？", "choices": ["CURE-06", "CURE-05", "CURE-01", "CURE-09"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-07", "category": "硫化", "question": "硫化機 CURE-07 接在哪一條蒸汽管線？", "choices": ["H4", "H2", "H1", "H0"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-07", "category": "硫化", "question": "硫化機 CURE-07 可以硫化哪些尺寸？", "choices": ["僅小胎", "僅大胎", "中/大胎共用", "僅中胎"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-07", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H2？", "choices": ["CURE-02", "CURE-03", "CURE-07", "CURE-11"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-08", "category": "硫化", "question": "硫化機 CURE-08 接在哪一條蒸汽管線？", "choices": ["H2", "H3", "H4", "H1"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-08", "category": "硫化", "question": "硫化機 CURE-08 可以硫化哪些尺寸？", "choices": ["僅大胎", "中/大胎共用", "僅中胎", "僅小胎"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-08", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H2？", "choices": ["CURE-10", "CURE-05", "CURE-08", "CURE-11"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-09", "category": "硫化", "question": "硫化機 CURE-09 接在哪一條蒸汽管線？", "choices": ["H2", "H4", "H1", "H3"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-09", "category": "硫化", "question": "硫化機 CURE-09 可以硫化哪些尺寸？", "choices": ["中/大胎共用", "僅小胎", "僅中胎", "僅大胎"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-09", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H3？", "choices": ["CURE-01", "CURE-09", "CURE-02", "CURE-04"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-10", "category": "硫化", "question": "硫化機 CURE-10 接在哪一條蒸汽管線？", "choices": ["H0", "H3", "H1", "H4"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-10", "category": "硫化", "question": "硫化機 CURE-10 可以硫化哪些尺寸？", "choices": ["中/大胎共用", "僅大胎", "僅小胎", "僅中胎"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-10", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H3？", "choices": ["CURE-04", "CURE-06", "CURE-10", "CURE-08"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-HDR-CURE-11", "category": "硫化", "question": "硫化機 CURE-11 接在哪一條蒸汽管線？", "choices": ["H4", "H3", "H2", "H1"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-USE-CURE-11", "category": "硫化", "question": "硫化機 CURE-11 可以硫化哪些尺寸？", "choices": ["僅小胎", "僅中胎", "中/大胎共用", "僅大胎"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-ONHDR-CURE-11", "category": "硫化", "question": "下列哪台硫化機接在蒸汽管線 H3？", "choices": ["CURE-01", "CURE-11", "CURE-02", "CURE-03"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-S", "category": "硫化", "question": "小胎的標準硫化時間是多少？", "choices": ["48 小時", "28 小時", "12 小時", "24 小時"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-M", "category": "硫化", "question": "中胎的標準硫化時間是多少？", "choices": ["40 小時", "12 小時", "36.5 小時", "28 小時"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-L", "category": "硫化", "question": "大胎的標準硫化時間是多少？", "choices": ["28 小時", "36.5 小時", "40 小時", "34 小時"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-TEMP", "category": "硫化", "question": "硫化機的正常溫度範圍是？", "choices": ["130–140°C", "110–120°C", "100–110°C", "120–130°C"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-PRESS", "category": "硫化", "question": "硫化時的壓力是？", "choices": ["35 kgf/cm²", "5 kgf/cm²", "20 kgf/cm²", "50 kgf/cm²"], "answer": "C", "source": "warroom.factory (page 3)"}
+{"id": "GQ-CURE-EA", "category": "硫化", "question": "硫化公式採用的活化能（假設值）是？", "choices": ["65 kJ/mol", "85 kJ/mol", "45 kJ/mol", "105 kJ/mol"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-SAFE-CMPD", "category": "安全", "question": "安全核心：未加硫的煉膠達到幾度就停機？", "choices": ["120°C", "110°C", "130°C", "115°C"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-SAFE-CUR", "category": "安全", "question": "安全核心：已加硫的膠料達到幾度就停機？", "choices": ["105°C", "130°C", "100°C", "110°C"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-SAFE-LOW", "category": "安全", "question": "安全核心：硫化機溫度低於幾度就保持（hold）？", "choices": ["100°C", "120°C", "130°C", "115°C"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NPRESS", "category": "硫化", "question": "工廠共有幾台硫化機？", "choices": ["28", "11", "7", "10"], "answer": "B", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NMACH", "category": "機台", "question": "工廠模型共有幾台機台？", "choices": ["28", "24", "32", "11"], "answer": "A", "source": "warroom.factory (page 3)"}
+{"id": "GQ-NML", "category": "硫化", "question": "中/大胎共用的硫化機有幾台？", "choices": ["7", "3", "5", "4"], "answer": "D", "source": "warroom.factory (page 3)"}
+{"id": "GQ-BP-BOND-S", "category": "排程", "question": "小胎：入硫化機時刻為 T，應在何時開始貼合？", "choices": ["T−3 時", "T−2 時", "T−40 分", "T−3 時 30 分"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-FEED-S", "category": "排程", "question": "小胎：入硫化機時刻為 T，A 線應在何時投料？", "choices": ["T−2 時", "T−1 時 40 分", "T−1 時", "T−3 時"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-PCS-S", "category": "排程", "question": "小胎：胎側膠／鋼絲圈各需幾片？", "choices": ["12 片", "4 片", "6 片", "8 片"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-BOND-M", "category": "排程", "question": "中胎：入硫化機時刻為 T，應在何時開始貼合？", "choices": ["T−3 時", "T−1 時 30 分", "T−2 時", "T−1 時"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-FEED-M", "category": "排程", "question": "中胎：入硫化機時刻為 T，A 線應在何時投料？", "choices": ["T−1 時 40 分", "T−2 時 30 分", "T−2 時", "T−3 時"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-PCS-M", "category": "排程", "question": "中胎：胎側膠／鋼絲圈各需幾片？", "choices": ["10 片", "6 片", "8 片", "12 片"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-BOND-L", "category": "排程", "question": "大胎：入硫化機時刻為 T，應在何時開始貼合？", "choices": ["T−3 時 30 分", "T−40 分", "T−2 時 30 分", "T−1 時 30 分"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-FEED-L", "category": "排程", "question": "大胎：入硫化機時刻為 T，A 線應在何時投料？", "choices": ["T−40 分", "T−2 時", "T−3 時 30 分", "T−2 時 30 分"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-BP-PCS-L", "category": "排程", "question": "大胎：胎側膠／鋼絲圈各需幾片？", "choices": ["4 片", "6 片", "12 片", "10 片"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-現況-S", "category": "排程", "question": "每台硫化機每週產量（現況），小胎是幾條？", "choices": ["5.5", "6", "5.9", "4"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-現況-M", "category": "排程", "question": "每台硫化機每週產量（現況），中胎是幾條？", "choices": ["5.9", "4.5", "4", "5"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-現況-L", "category": "排程", "question": "每台硫化機每週產量（現況），大胎是幾條？", "choices": ["5.9", "3", "7", "8"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-只延長班表-S", "category": "排程", "question": "每台硫化機每週產量（只延長班表），小胎是幾條？", "choices": ["4.9", "3", "6", "4.5"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-只延長班表-M", "category": "排程", "question": "每台硫化機每週產量（只延長班表），中胎是幾條？", "choices": ["5", "5.9", "4.9", "6"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-只延長班表-L", "category": "排程", "question": "每台硫化機每週產量（只延長班表），大胎是幾條？", "choices": ["7", "5.5", "5", "4.5"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-AI 排出模時刻-S", "category": "排程", "question": "每台硫化機每週產量（AI 排出模時刻），小胎是幾條？", "choices": ["4.9", "6", "7", "5.5"], "answer": "C", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-AI 排出模時刻-M", "category": "排程", "question": "每台硫化機每週產量（AI 排出模時刻），中胎是幾條？", "choices": ["6", "4.5", "4.9", "5.5"], "answer": "A", "source": "warroom.factory (page 6)"}
+{"id": "GQ-CAP-AI 排出模時刻-L", "category": "排程", "question": "每台硫化機每週產量（AI 排出模時刻），大胎是幾條？", "choices": ["3", "7", "8", "4.9"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-LT-ML-NOW", "category": "排程", "question": "中、大胎各 100 條，現況交期是幾週？", "choices": ["3 週", "13.3 週", "1.5 週", "2.4 週"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-LT-ML-AI", "category": "排程", "question": "中、大胎各 100 條，AI 排程後交期是幾週？", "choices": ["2 週", "15 週", "7.5 週", "9.3 週"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-LT-S-NOW", "category": "排程", "question": "小胎現況交期是幾週？", "choices": ["15 週", "2.4 週", "2 週", "9.3 週"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-LT-S-AI", "category": "排程", "question": "小胎 AI 排程後交期是幾週？", "choices": ["3 週", "1.5 週", "2.4 週", "2 週"], "answer": "D", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-curing-早班", "category": "班表", "question": "（優化班表）硫化機組早班的時段是？", "choices": ["08:00–17:00", "06:00–15:00", "07:00–16:00", "12:00–21:00"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-curing-中班", "category": "班表", "question": "（優化班表）硫化機組中班的時段是？", "choices": ["14:00–23:00", "12:00–21:00", "07:00–16:00", "20:00–05:00"], "answer": "A", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-body-早班", "category": "班表", "question": "（優化班表）胎體／胎面膠組早班的時段是？", "choices": ["20:00–05:00", "08:00–17:00", "22:00–07:00", "12:00–21:00"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-body-夜班", "category": "班表", "question": "（優化班表）胎體／胎面膠組夜班的時段是？", "choices": ["08:00–17:00", "20:00–05:00", "18:00–03:00", "22:00–07:00"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-side-早班", "category": "班表", "question": "（優化班表）胎側膠組早班的時段是？", "choices": ["06:00–15:00", "08:00–17:00", "12:00–21:00", "14:00–23:00"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-bead_nylon-早班", "category": "班表", "question": "（優化班表）鋼絲／尼龍組早班的時段是？", "choices": ["08:00–17:00", "14:00–23:00", "06:00–15:00", "12:00–21:00"], "answer": "A", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-bigopen-早班", "category": "班表", "question": "（優化班表）大開煉機組早班的時段是？", "choices": ["07:00–16:00", "08:00–17:00", "18:00–03:00", "20:00–05:00"], "answer": "B", "source": "warroom.factory (page 6)"}
+{"id": "GQ-SHIFT-bond-早班", "category": "班表", "question": "（優化班表）貼合組早班的時段是？", "choices": ["06:00–15:00", "18:00–03:00", "08:00–17:00", "14:00–23:00"], "answer": "C", "source": "warroom.factory (page 6)"}

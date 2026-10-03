@@ -34,8 +34,16 @@ for c in $CONFIGS; do
   uv run python -m bench.concurrent --runs 5 --out-dir "$OUT/$c"
   uv run python -m bench.full_event --runs 3 --out-dir "$OUT/$c"
   uv run python -m bench.memory_check --out-dir "$OUT/$c"
-  uv run python -m bench.accuracy --out-dir "$OUT/$c"
+  uv run python -m bench.accuracy --quant "$q" --out-dir "$OUT/$c"   # open book (headline), kb + generated quiz
 done
 # restore production
 $COMPOSE up -d --force-recreate vllm
-echo "results in $OUT (accuracy per config; gap = full vs control score_points)"
+# Page-10 accuracy gap: NVFP4 (full) vs the real FP8 control, paired per item with a 95% CI.
+fa=$(ls "$OUT"/full/accuracy-*.json 2>/dev/null | head -1 || true)
+fc=$(ls "$OUT"/control/accuracy-*.json 2>/dev/null | head -1 || true)
+if [[ -n "$fa" && -n "$fc" ]]; then
+  uv run python -m bench.accuracy --pair "$fa" "$fc" --out-dir "$OUT"
+else
+  echo "accuracy gap not paired: need both full and control runs" >&2
+fi
+echo "results in $OUT (accuracy per config; paired NVFP4 vs FP8 gap in $OUT/accuracy-compare-*-paired-*.json)"

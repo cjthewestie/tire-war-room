@@ -438,3 +438,77 @@ def test_concurrent_runner_reports_batching(env_fake, tmp_path):
     assert "concurrent_batched" in v
     ids = [e["event_id"] for r in out["rounds"] for e in r["each"]]
     assert len(set(ids)) == len(ids) == F.CONCURRENT_ANOMALIES
+
+
+# ---------------------------------------------------------------- accuracy: open book headline, paired stats
+def test_generated_quiz_is_large_deterministic_and_matches_file():
+    from bench import quiz_gen
+    a, b = quiz_gen.generate(), quiz_gen.generate()
+    assert a == b and len(a) >= 200 and len({i["id"] for i in a}) == len(a)
+    assert all(len(set(i["choices"])) == 4 and i["answer"] in "ABCD" for i in a)
+    on_disk = accuracy.load_quiz(accuracy.GENERATED)
+    assert [i["id"] for i in on_disk] == [i["id"] for i in a]          # committed file is current
+
+
+def test_default_quiz_is_kb_plus_generated():
+    paths = accuracy.find_quizzes()
+    assert paths[-1].name == accuracy.GENERATED.name and len(paths) == 2
+    items = accuracy.load_quizzes(paths)
+    assert len(items) >= 240 and len({i["id"] for i in items}) == len(items)
+    assert accuracy.find_quizzes(generated=False) == paths[:1]
+
+
+def test_quant_labels_mxfp8_is_not_fp8():
+    assert accuracy.quant_of("nemotron-3.5-lightning:30b-a3b-mxfp8") == "mxfp8"
+    assert accuracy.quant_of("nemotron-3.5-lightning:30b-a3b-nvfp4") == "nvfp4"
+    assert accuracy.quant_of("nemotron", "FP8") == "fp8" and accuracy.quant_of("nemotron") == "unknown"
+
+
+def test_paired_gap_reproduces_the_44_item_open_book_run():
+    # 2026-10-03 Mac run: NVFP4 36/44 vs MXFP8 40/44 = 9.09 points. With 4 discordant items all one way the
+    # interval must be wide and the 1-item resolution 2.27 points.
+    a = [{"id": str(i), "correct": i >= 8} for i in range(44)]
+    b = [{"id": str(i), "correct": i >= 4} for i in range(44)]
+    st = accuracy.paired_gap(a, b)
+    assert st["gap_points"] == 9.09 and st["diff_points"] == -9.09 and st["points_per_item"] == 2.27
+    assert (st["only_a_correct"], st["only_b_correct"]) == (0, 4)
+    lo, hi = st["ci95_points"]
+    assert lo < -9.09 < hi and lo < -15 and hi > 0     # wide, and includes 0: not significant at n=44
+    assert st["mcnemar_exact_p"] == 0.125
+    same = accuracy.paired_gap(a, a)
+    assert same["gap_points"] == 0 and same["ci95_points"][0] < 0 < same["ci95_points"][1]   # never zero-width
+
+
+def test_noninferiority_verdict_three_way():
+    def run(model, flags):
+        return {"endpoint": {"model": model}, "quant": accuracy.quant_of(model), "score_points": 0,
+                "items": [{"id": str(i), "correct": f} for i, f in enumerate(flags)]}
+    big_same = [True] * 240 + [False] * 10
+    st, v = accuracy.compare_verdicts(run("m-nvfp4", big_same), run("m-mxfp8", big_same), "open-book (headline)")
+    assert v[0]["name"] == "nvfp4_vs_mxfp8_gap" and v[0]["passed"] is True
+    assert v[1]["name"] == "nvfp4_vs_mxfp8_noninferiority_ci95" and v[1]["passed"] is True
+    assert "MXFP8" in v[0]["note"] and "not the page-10 FP8" in v[0]["note"]
+    small_a, small_b = [i >= 8 for i in range(44)], [i >= 4 for i in range(44)]
+    _, v = accuracy.compare_verdicts(run("m-nvfp4", small_a), run("m-fp8", small_b), "x")
+    assert v[0]["passed"] is False and v[1]["passed"] is None and "inconclusive" in v[1]["note"]
+    worse_a = [i >= 60 for i in range(250)]
+    _, v = accuracy.compare_verdicts(run("m-nvfp4", worse_a), run("m-fp8", [True] * 250), "x")
+    assert v[1]["passed"] is False
+
+
+def test_accuracy_defaults_to_open_book_and_pairs_saved_runs(env_fake, tmp_path):
+    url, state = env_fake
+    one = accuracy.main(["--base-url", url, "--model", "x-nvfp4", "--limit", "6", "--out-dir", str(tmp_path / "a")])
+    assert one["open_book"] is True and one["mode"].startswith("open-book")
+    assert one["results"][0]["quant"] == "nvfp4"
+    assert "SOP 檔案" in state["bodies"][-1]["messages"][0]["content"]           # SOP corpus in the prompt
+    two = accuracy.main(["--base-url", url, "--model", "x", "--quant", "fp8", "--limit", "6",
+                         "--out-dir", str(tmp_path / "b")])
+    assert two["results"][0]["quant"] == "fp8"
+    paired = accuracy.main(["--pair", one["saved_to"], two["saved_to"], "--out-dir", str(tmp_path)])
+    assert paired["paired"]["n_paired"] == 6 and paired["verdicts"][0]["name"] == "nvfp4_vs_fp8_gap"
+    closed = accuracy.main(["--base-url", url, "--model", "x", "--closed-book", "--limit", "2",
+                            "--out-dir", str(tmp_path / "c")])
+    assert closed["open_book"] is False and "SOP 檔案" not in state["bodies"][-1]["messages"][0]["content"]
+    with pytest.raises(SystemExit):
+        accuracy.main(["--pair", one["saved_to"], closed["saved_to"], "--out-dir", str(tmp_path)])
