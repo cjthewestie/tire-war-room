@@ -97,7 +97,7 @@ def test_install_builds_bench_venv_offline_capable(tmp_path):
     uv = _fake_uv(tmp_path / "uvbin" / "uv", log)
     r = run(["bash", str(INSTALL), "t1"],
             env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
-                 "NO_MODELS": "1", "NO_BENCH_VENV": "0", "SKIP_PULL": "1", "WARROOM_SUPERVISOR_PIN": "a1b2c3d4e5", "UV": str(uv)}, timeout=240)
+                 "NO_MODELS": "1", "NO_BENCH_VENV": "0", "NO_NAT_VENV": "1", "SKIP_PULL": "1", "WARROOM_SUPERVISOR_PIN": "a1b2c3d4e5", "UV": str(uv)}, timeout=240)
     assert r.returncode == 0, r.stderr
     cwd, args, venv, cache = log.read_text().strip().split("|")
     assert Path(cwd).resolve() == (root / "releases" / "t1").resolve()
@@ -126,7 +126,7 @@ esac
     docker.chmod(0o755)
     r = run(["bash", str(INSTALL), "t1"],
             env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
-                 "NO_MODELS": "1", "NO_BENCH_VENV": "0", "SKIP_PULL": "1", "WARROOM_SUPERVISOR_PIN": "a1b2c3d4e5", "DOCKER": str(docker),
+                 "NO_MODELS": "1", "NO_BENCH_VENV": "0", "NO_NAT_VENV": "1", "SKIP_PULL": "1", "WARROOM_SUPERVISOR_PIN": "a1b2c3d4e5", "DOCKER": str(docker),
                  "UV": "", "PATH": "/usr/bin:/bin"}, timeout=240)
     assert r.returncode == 0, r.stderr
     calls = (tmp_path / "docker-calls").read_text()
