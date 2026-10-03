@@ -394,3 +394,74 @@ async def test_sim_sleep_wakes_on_exact_sim_second(tmp_path):
     await rt.load_scenario(ScenarioName.NORMAL)
     with pytest.raises(asyncio.CancelledError):
         await t2
+
+
+async def test_real_open_mill_page2_focus(tmp_path):
+    rt = _real_runtime(tmp_path, ScenarioName.OPEN_MILL_OVERHEAT.value)
+    await rt.start()
+    try:
+        focus = None
+        for _ in range(30 * 60):
+            await rt.tick(1.0, publish=False)
+            await asyncio.sleep(0)
+            f = rt.focus_panel()
+            if f and f.machine_id == "A-BIGOPEN" and f.pending:
+                focus = f
+                break
+        assert focus is not None, "no page-2 focus panel with a pending approval"
+        assert focus.title == "異常：A 線大開煉機　溫度過高"
+        assert focus.auto_done, "R1 maintenance notify should show as 已自動"
+        assert focus.schedule_impact.startswith("無")
+        assert not [a for a in rt.safety_log if a.machine_id == "A-BIGOPEN"]
+    finally:
+        await rt.stop()
+
+
+async def test_runtime_drives_real_state_machine_page11(tmp_path, monkeypatch):
+    """Real sim/detector/safety/agent/store through Runtime; while warroom.tools is still a stub the
+    registry is the agent builder's page-11 FakeRegistry (reads come from the real sim)."""
+    import warroom.tools as tools_mod
+    try:
+        tools_mod.build_registry(tools_mod.ToolContext())
+        real_tools = True
+    except NotImplementedError:
+        real_tools = False
+    if not real_tools:
+        from tests.agent_fakes import FakeRegistry
+        monkeypatch.setattr(tools_mod, "build_registry", lambda ctx: FakeRegistry(ctx.sim, ctx.store))
+    rt = Runtime(_settings(tmp_path, scenario="press7_temp_drop"), run_loop=False)
+    missing = {k: v for k, v in rt.degraded.items() if k in REAL_NEEDED}
+    if missing:
+        pytest.skip(f"sibling modules not ready: {missing}")
+    from warroom.contracts import ApprovalDecision, DecisionKind, EventState
+    await rt.start()
+    decided = []
+    try:
+        app = create_app(rt)
+        for _ in range(25 * 60):
+            await rt.tick(1.0, publish=False)
+            await asyncio.sleep(0)
+            for req in rt.approvals.pending():
+                opt = next((o for o in req.options if "夜班" in o.label), None)
+                rt.approvals.decide(ApprovalDecision(
+                    request_id=req.id, decision=DecisionKind.MODIFY if opt else DecisionKind.APPROVE,
+                    option_id=opt.id if opt else None, reason="不跨組調人" if opt else "ok", decided_at=rt.now()))
+                decided.append((rt.now().strftime("%H:%M"), req.title, [o.label for o in req.options]))
+        await rt.wait_events(5)
+        ev = next(e for e in rt.events() if e.machine_id == "CURE-07")
+        texts = " | ".join(t.text for t in ev.timeline)
+        assert decided, "no approval reached the supervisor"
+        assert any(h.status.value == "rejected" for h in ev.hypotheses), texts
+        assert ev.safety_actions or any(a.machine_id == "CURE-07" for a in rt.safety_log)
+        assert ev.state in (EventState.CLOSED, EventState.SAFE_STOP, EventState.VERIFY,
+                            EventState.AWAIT_APPROVAL, EventState.EXECUTE), ev.state
+        # the API serves the same live event
+        with TestClient(app) as c:
+            got = c.get(f"/api/events/{ev.id}").json()
+            assert got["id"] == ev.id and got["timeline"]
+            f = c.get(f"/api/events/{ev.id}/focus").json()
+            assert f["title"].startswith("異常：7 號硫化機")
+        assert rt.audit.verify_chain()
+        print("\nDECIDED", decided, "\nSTATE", ev.state.value, "\nTIMELINE", texts)
+    finally:
+        await rt.stop()

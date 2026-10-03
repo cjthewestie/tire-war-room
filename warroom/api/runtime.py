@@ -198,7 +198,7 @@ class ComponentBuilder:
 
         def gate_real():
             from warroom.agent import RuleGate
-            return RuleGate()
+            return RuleGate(store=store) if "store" in inspect.signature(RuleGate).parameters else RuleGate()
         gate = self._t("gate", gate_real, lambda: None)
 
         def sm_real():
