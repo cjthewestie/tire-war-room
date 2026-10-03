@@ -63,9 +63,17 @@ async def test_stale_confirm_skips_round_and_resolves(tmp_path):
         except RuntimeError as e:
             return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
     tools.call = call
-    sup = asyncio.create_task(auto_approve(approvals, 2))
+    # round 4: the re-solve carries exactly what was approved, so the supervisor's approval is carried
+    # over (recorded as its own approval via "auto") instead of asking a second time
+    sup = asyncio.create_task(auto_approve(approvals, 1))
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
+    reqs = approvals.all()
+    assert len(reqs) == 2 and reqs[1].id == f"{reqs[0].id}-rebased" and reqs[1].decision.via == "auto"
+    assert reqs[0].id in reqs[1].decision.reason
+    assert any("✗ 已核准但未生效" in t.text for t in ev.timeline)
+    assert any(f"沿用核准 {reqs[0].id}" in t.text for t in ev.timeline)
+    assert ev.consecutive_failures == 0                      # a stale schedule is not a plan failure
     sct = _writes(tools, ToolName.SET_CURE_TIME)
     assert len(sct) == 1                                     # only after the re-solved schedule took effect
     infos = [a for a in _writes(tools, ToolName.NOTIFY_TEAMS) if a["kind"] == "info"]

@@ -231,7 +231,7 @@ async def test_mock_commander_page11():
             h.expectation.within_min) == ("H1", "steam_pressure_low", "CURE-07", ">=", 121, 30)
     assert [(s.id, s.tool) for s in plan.steps] == [
         ("S1", ToolName.CURE_FORMULA), ("S2", ToolName.QUERY_ORDERS_SHIFTS), ("S3", ToolName.SOLVE_SCHEDULE),
-        ("S4", ToolName.CONFIRM_SCHEDULE), ("S5", ToolName.SET_CURE_TIME), ("S6", ToolName.NOTIFY_TEAMS)]
+        ("S4", ToolName.CONFIRM_SCHEDULE), ("S4b", ToolName.SET_CURE_TIME), ("S5", ToolName.NOTIFY_TEAMS)]
     assert plan.steps[2].depends_on == ["S1", "S2"]
     assert plan.steps[4].args == {"press_id": "CURE-07", "total_cure_h": "$S1.total_cure_h",
                                   "reason": plan.steps[4].args["reason"]}       # the formula's value, by reference

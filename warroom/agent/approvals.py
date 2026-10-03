@@ -24,7 +24,18 @@ _STATUS_FOR = {DecisionKind.APPROVE: ApprovalStatus.APPROVED, DecisionKind.MODIF
 
 
 class ApprovalError(ValueError):
-    """Bad decision: unknown request, already resolved, or unknown option."""
+    """Bad decision: unknown request, already resolved, unknown option, or an edit of a staffing option."""
+
+
+STAFFING_NOTIFY_KINDS = ("overtime", "staff_move")
+
+
+def staffing_modification(opt, modified_args) -> list[str]:
+    """Keys a MODIFY would change on a staffing option (overtime / staff move). Empty when the option
+    is not a staffing one or modified_args repeats its values."""
+    if opt is None or not modified_args or opt.args.get("kind") not in STAFFING_NOTIFY_KINDS:
+        return []
+    return sorted(k for k, v in modified_args.items() if opt.args.get(k) != v)
 
 
 class ApprovalBrokerImpl:
@@ -78,6 +89,13 @@ class ApprovalBrokerImpl:
                 option_id = rec[0] if rec else ids[0]
             elif option_id not in ids:
                 raise ApprovalError(f"unknown option {option_id!r}; expected one of {ids}")
+            opt = next((o for o in req.options if o.id == option_id), None)
+            changed = staffing_modification(opt, decision.modified_args)
+            if changed:
+                # a staffing option is a solver StaffingChange (team, shift, headcount) that the schedule
+                # records once it is approved: editing who is told or how many would notify one thing
+                # and record another, so it is refused (pick the other option, or reject with a reason)
+                raise ApprovalError(f"人力方案 {option_id} 不可修改（{', '.join(changed)}）：請改選其他方案或否決並說明理由")
         decision = decision.model_copy(update={"option_id": option_id,
                                                "decided_at": decision.decided_at or self._now()})
         req = req.model_copy(update={"status": _STATUS_FOR[decision.decision], "decision": decision})

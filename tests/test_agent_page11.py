@@ -117,8 +117,10 @@ async def test_page11_timeline(tmp_path):
     assert tl[i].ts == at("02:14:01")
     i = _find(tl, "指揮官", "讀 30 分鐘溫度", "查 SOP", "假設 H1：蒸汽壓不足，溫度會穩定", start=i)
     assert tl[i].ts == at("02:14:03")
-    i = _find(tl, "指揮官", "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）、S5 設定硫化時間（需核准）→ S6 通知",
+    # pages 7 and 11 verbatim: S4 確認（需核准）→ S5 通知 (the cure time S4b rides on S4's approval)
+    i = _find(tl, "指揮官", "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知；",
               "預期：30 分內 ≥121°C", start=i)
+    assert tl[i].text == "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知；預期：30 分內 ≥121°C"
     assert tl[i].ts == at("02:14:09")
     i = _find(tl, "工具", "S1：122°C 總需 36.5 h（+8.5 h）", "S2：下一模 #A-311 交期 3 天後", "夜班缺 1 人", start=i)
     assert tl[i].ts == at("02:14:11")
@@ -204,17 +206,26 @@ async def test_page11_timeline(tmp_path):
     assert "7 號機溫度下降 128→122°C" in cards and cards[-1] == "7 號機停用，重排中"
 
 
-async def test_page11_two_misses_safe_stop_keeps_schedule(tmp_path):
-    """Supervisor rejects round 1 and round 2 → 2 consecutive failures → SAFE_STOP, original schedule."""
+async def test_page11_vetoes_replan_then_safe_stop_keeps_schedule(tmp_path):
+    """A supervisor veto is a decision, not a page-7 failure: each one re-plans with the veto as
+    context (round 2 can always ask for another plan). Only the replan budget ends it: SAFE_STOP,
+    original schedule kept, nothing confirmed."""
     clock, bus, audit, sim, store, tools, approvals, sm = build(tmp_path)
     sup = asyncio.create_task(supervisor(clock, approvals, [
         ("02:16:40", DecisionKind.REJECT, None, "不同意"),
         ("02:18:00", DecisionKind.REJECT, None, "仍不同意"),
+        ("02:19:00", DecisionKind.REJECT, None, "再想"),
+        ("02:20:00", DecisionKind.REJECT, None, "不行"),
     ]))
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
     assert ev.state is EventState.SAFE_STOP
-    assert "維持原排程" in ev.outcome
+    assert ev.consecutive_failures == 0                     # vetoes never counted
+    assert len(ev.approvals) == 4 and ev.replans == 3
+    assert "已重新規劃 3 次仍未解決" in ev.outcome and "維持原排程" in ev.outcome
+    assert not any("連續" in t.text and "主管否決" in t.text for t in ev.timeline)
+    vetoes = [e for e in audit.tail(0, 0) if e.payload.get("supervisor_reject")]
+    assert len(vetoes) == 4 and all(e.payload["counted_as_failure"] is False for e in vetoes)
     assert store.active == 1                                 # nothing confirmed, original kept
     assert not tools.calls_of(ToolName.CONFIRM_SCHEDULE)
     assert audit.verify_chain()

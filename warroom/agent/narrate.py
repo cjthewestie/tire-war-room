@@ -4,6 +4,7 @@ Pure formatting: every number shown comes from a tool result (formula / solver /
 from the model. Formatters are defensive (``.get``) because tool payloads are dicts."""
 from __future__ import annotations
 
+import re
 from datetime import date
 from typing import Any
 
@@ -63,13 +64,19 @@ def is_approval_tool(step: PlanStep) -> bool:
     return False
 
 
+_SUB = re.compile(r"^(S\d+)[a-z]$")
+
+
 def decompose_text(steps: list[PlanStep]) -> str:
     """'S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知'."""
+    ids = {s.id for s in steps}
+    # a sub-step ("S4b") belongs to its parent's approval (set_cure_time with S4 確認): not listed apart
+    shown = [s for s in steps if not (_SUB.match(s.id) and _SUB.match(s.id).group(1) in ids)]
     level: dict[str, int] = {}
     for s in steps:   # steps are in dependency order in practice; fall back to 0
         level[s.id] = 1 + max((level.get(d, 0) for d in s.depends_on), default=-1)
     groups: dict[int, list[str]] = {}
-    for s in steps:
+    for s in shown:
         label = f"{s.id} {TOOL_LABELS.get(s.tool, s.tool.value)}"
         if s.tool is ToolName.NOTIFY_TEAMS and s.args.get("kind") not in (None, "info"):
             label = f"{s.id} {NOTIFY_LABELS.get(NotifyKind(s.args['kind']), '通知')}"
@@ -169,15 +176,28 @@ def solver_text(data: dict[str, Any]) -> str:
     sched = data.get("schedule") or {}
     for c in sched.get("staffing_changes") or []:
         bits.append(staffing_label(c))
-    if data.get("deliveries_met"):
+    feasible = bool(data.get("feasible", False))
+    if not feasible:
+        # an infeasible plan meets no delivery: never print 交期全部滿足 next to 不可行. The status
+        # can still read 'feasible' when the solver found a plan the independent check rejected.
+        warns = (data.get("schedule") or {}).get("warnings") or []
+        why = next((str(w).removeprefix("檢核失敗：") for w in warns if str(w).startswith("檢核失敗：")), None)
+        if why is None and status_is_error(data):
+            why = next((g for g in data.get("gaps") or [] if g), None)
+        status = str(data.get("status") or "")
+        bits.append(f"模擬不可行（{why or (status if status and status != 'feasible' else '檢查未通過')}）")
+    elif data.get("deliveries_met"):
         bits.append("交期全部滿足")
     elif data.get("late_orders"):
         bits.append(f"延誤：{'、'.join(data['late_orders'])}")
-    if not data.get("feasible", False):
-        bits.append(f"不可行（{data.get('status', '?')}）")
     if data.get("fell_back"):
         bits.append("求解逾時 → 已切換備援求解器")
     return "、".join(bits) or "排程無需變動"
+
+
+def status_is_error(data: dict[str, Any]) -> bool:
+    """True when the solver itself failed (no plan); its gaps then carry the error, not staffing."""
+    return str(data.get("status") or "") not in ("feasible", "optimal")
 
 
 def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
@@ -208,3 +228,62 @@ def staffing_label(c: dict[str, Any]) -> str:
     if name and name not in label:
         return f"{name}{label}"
     return label
+
+
+_STALE_RE = re.compile(r"schedule v(\d+) is stale: solved against v(\d+), but v(\d+) is active")
+_HELD_RE = re.compile(r"schedule v(\d+) is stale: it loads presses that are held now")
+_NOT_PROPOSED_RE = re.compile(r"schedule v(\d+) is (\w+), not proposed")
+
+
+def tool_label(tool: ToolName) -> str:
+    return TOOL_LABELS.get(tool, tool.value)
+
+
+def tool_error_text(tool: ToolName, error: str | None) -> str:
+    """Judge-facing Chinese for a failed tool call. The raw exception text stays in the audit log only
+    (TOOL_RESULT entries); the timeline never shows a Python error or a truncated English message."""
+    e = error or ""
+    if m := _STALE_RE.search(e):
+        return f"排程 v{m.group(1)} 已過期：求解時依據 v{m.group(2)}，期間 v{m.group(3)} 已生效，需依現行排程重新求解"
+    if m := _HELD_RE.search(e):
+        return f"排程 v{m.group(1)} 已過期：仍排有停機／停用的硫化機，需重新求解"
+    if m := _NOT_PROPOSED_RE.search(e):
+        return f"排程 v{m.group(1)} 已不是待確認版本（{m.group(2)}）"
+    if "not open in" in e:
+        return "此狀態不開放該工具（已攔截並記錄）"
+    if "timeout" in e.lower() or "timed out" in e.lower():
+        return "逾時"
+    if "unavailable in this tool context" in e:
+        return "工具暫時無法使用"
+    if "unknown machine id" in e:
+        return "機台代號不存在"
+    if "is not a curing press" in e:
+        return "不是硫化機"
+    if "out of range" in e:
+        return "數值超出允許範圍"
+    if "ValidationError" in e or "validation error" in e:
+        return "參數格式不符"
+    return "執行錯誤（詳見稽核日誌）"
+
+
+def gate_reason_text(reasons: list[str]) -> str:
+    """Chinese for the gate's refusal reasons on the timeline (the English reasons stay in the audit)."""
+    out: list[str] = []
+    for r in reasons:
+        if "allow-list" in r:
+            out.append("不在允許清單（已攔截）")
+        elif "is not open in state" in r:
+            out.append("此狀態不開放該工具")
+        elif "unresolved $S reference" in r:
+            out.append("引用的前一步結果不存在")
+        elif r.startswith("args invalid"):
+            out.append("參數格式不符")
+        elif r.startswith("unknown machine id"):
+            out.append("機台代號不存在")
+        elif r.startswith("simulation not feasible"):
+            out.append("沒有對應的可行模擬")
+        elif "supervisor approval required" in r:
+            continue
+        else:
+            out.append("未通過規則檢查（詳見稽核日誌）")
+    return "；".join(dict.fromkeys(out)) or "未通過規則檢查"

@@ -18,7 +18,14 @@ One Event per wake-up from the detector. States follow contracts.ALLOWED_TRANSIT
 - A write that fails, is refused by the gate, or is skipped (confirm_schedule goes first in a round;
   if it fails, e.g. stale after another event's activation, nothing else of that round runs) is an
   action miss: counted as a failure, then REPLAN keeps the hypothesis and re-solves against the
-  schedule active now. A supervisor reject or an infeasible solve also keeps the hypothesis.
+  schedule active now. A supervisor reject or an infeasible solve also keeps the hypothesis. A
+  supervisor reject is a decision, not a failure: it re-plans with the veto as context and never
+  counts toward the safe stop; nor does a confirm that went stale because another event's schedule
+  took effect first. An approval whose schedule went stale is carried over (recorded as
+  "<id>-rebased", via auto) only when the re-solve carries exactly what was approved.
+- A cure time (set_cure_time) or a press taken out (machine_out) passes the gate only when the same
+  round confirms the version whose solve carried that change (or the active schedule already does);
+  a confirm that changes nothing asks for no approval.
 - Physics numbers never come from the LLM: cure_formula inputs are taken from the press's live cure
   job and the detector's prediction, and solve_schedule cure overrides take this event's formula
   total for that press; the gate ties set_cure_time and overrides to that press's formula result.
@@ -57,6 +64,9 @@ from warroom.agent.narrate import (
     moves_text,
     result_text,
     staffing_label,
+    gate_reason_text,
+    tool_error_text,
+    tool_label,
 )
 from warroom.contracts import (
     ALLOWED_TRANSITIONS,
@@ -124,8 +134,8 @@ from warroom.factory import (
 UNMEASURED_KINDS = frozenset({"schedule_slip"})
 RISK_ORDER = [RiskLevel.R0_READ, RiskLevel.R1_NOTIFY, RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL]
 STAFFING_KINDS = (NotifyKind.OVERTIME.value, NotifyKind.STAFF_MOVE.value)
-_REF = re.compile(r"^\$(S\d+)\.([\w.\[\]-]+)$")
-_INLINE_REF = re.compile(r"\$\{(S\d+)\.([\w.\[\]-]+)\}")
+_REF = re.compile(r"^\$(S\d+[A-Za-z]?)\.([\w.\[\]-]+)$")          # S4, or a sub-step S4b
+_INLINE_REF = re.compile(r"\$\{(S\d+[A-Za-z]?)\.([\w.\[\]-]+)\}")
 _MISSING = object()
 
 # Edge latency model (pages 10-11). Sim time does not move while the commander or solver runs in an
@@ -231,6 +241,9 @@ class _Run:
     replan_why: str = ""                                     # why the current replan happened (narration)
     newly_rejected: str | None = None                        # hypothesis VERIFY rejected just before this replan
     sop_handoff: bool = False                                # tools failed: the plan hands the event to people (SOP)
+    current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
+    approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
+    stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
 
 
 class StateMachine:
@@ -503,23 +516,33 @@ class StateMachine:
                 self._to(ev, EventState.EXECUTE, "R1 auto writes")
                 await self._execute(run, auto, auto_tag=True)
 
+            reused = self._reuse_stale_approval(run, needs, options) if needs else None
+            run.stale_approval = None
             if needs:
-                self._to(ev, EventState.AWAIT_APPROVAL, f"{req_risk.value} approval")
-                req = self._request_approval(run, needs, options, req_risk)
-                res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
+                if reused is not None:
+                    res = reused
+                else:
+                    self._to(ev, EventState.AWAIT_APPROVAL, f"{req_risk.value} approval")
+                    req = self._request_approval(run, needs, options, req_risk)
+                    res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
                 if res.status is ApprovalStatus.EXPIRED or res.decision is None:
                     self._note(ev, "系統", "主管逾時未回覆 → 不變更，維持原排程", "dynamic")
                     self._safe_stop(run, "核准逾時")
                     return
-                self._note_decision(run, res)
+                if reused is None:
+                    self._note_decision(run, res)
                 if res.decision.decision is DecisionKind.REJECT:
                     for sr in ev.steps:
                         if sr.state == "awaiting_approval":
                             sr.state = "rejected"
                     for sr in deferred:
                         sr.state = "skipped"
-                    if self._fail(run, "主管否決"):
-                        return
+                    # a veto is a decision, not a failure: page 7 counts tool / solve / verify
+                    # failures toward the safe stop. The commander re-plans with the veto as
+                    # context (bounded by max_replans and the approval timeout).
+                    self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                      {"supervisor_reject": res.id, "counted_as_failure": False,
+                                       "consecutive_failures": ev.consecutive_failures}, event_id=ev.id)
                     rej = {"reason": res.decision.reason, "approval_id": res.id,
                            "rejected_options": [o.label for o in res.options]}
                     if not await self._replan(run, {"supervisor_rejected": rej}, "主管否決 → 換方案"):
@@ -532,8 +555,13 @@ class StateMachine:
                 # the schedule put in force carries only staffing that was approved and notified:
                 # the option picked here, or what is already in force (never the solver's own pick)
                 self._amend_schedule_staffing(run, chosen, change, res)
-                self._to(ev, EventState.EXECUTE, f"approved by {res.decision.decided_by}")
+                if ev.state is not EventState.EXECUTE:
+                    self._to(ev, EventState.EXECUTE, f"approved by {res.decision.decided_by}"
+                             + (f" (approval {res.id} reused: same content, rebased)" if reused is not None else ""))
+                run.current_req = res
+                run.approved_sig = self._content_sig(run, chosen, change)
                 await self._execute(run, chosen, auto_tag=False)
+                run.current_req = None
                 if change is not None and not run.round_problems:
                     await self._execute(run, self._revoke_steps(run, change, res), auto_tag=False)
                 if chosen and not run.round_problems and ev.consecutive_failures:
@@ -555,7 +583,16 @@ class StateMachine:
                 # test of the hypothesis: count the failure and re-plan (re-solve against the schedule
                 # that is active now), keeping the hypothesis.
                 self._action_miss(run)
-                if self._fail(run, "動作未完成"):
+                stale_only = run.stale_approval is not None and all(
+                    (p["state"] == "failed" and "is stale" in str(p.get("error", ""))) or p["state"] == "skipped"
+                    for p in run.round_problems)
+                if stale_only:
+                    # another event's schedule took effect first (concurrent anomalies, page 10): not a
+                    # failure of this plan; re-solve against the schedule in force now
+                    self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                      {"stale_schedule": run.stale_approval.get("version"),
+                                       "counted_as_failure": False}, event_id=ev.id)
+                elif self._fail(run, "動作未完成"):
                     return
                 ctx = {"write_failed": {"steps": run.round_problems, "active_version": self._active_version(),
                                         "at": self._now().isoformat()}}
@@ -639,7 +676,8 @@ class StateMachine:
                 await self._pace(started, max(model_s * attempt, res.duration_ms / 1000.0))
                 return res
             if attempt <= MAX_TOOL_RETRIES:
-                self._note(ev, "工具", f"[工具] {tool.value} 失敗（{(res.error or '')[:60]}）→ 重試一次", "dynamic")
+                self._note(ev, "工具", f"[工具] {tool_label(tool)}失敗（{tool_error_text(tool, res.error)}）→ 重試一次",
+                           "dynamic")
         assert res is not None
         await self._pace(started, model_s)
         return res
@@ -969,7 +1007,7 @@ class StateMachine:
         for a new hypothesis. False when the event was safe-stopped."""
         ev = run.ev
         if ev.replans >= self.max_replans:
-            self._safe_stop(run, f"已換 {ev.replans} 次假設仍未解決")
+            self._safe_stop(run, f"已重新規劃 {ev.replans} 次仍未解決")
             return False
         self._to(ev, EventState.REPLAN, why)
         ev.replans += 1
@@ -1039,7 +1077,8 @@ class StateMachine:
             sr.result = res
             if not res.ok:
                 sr.state = "failed"
-                self._note(ev, "工具", f"[工具] {step.id} {step.tool.value} 重試仍失敗 → 走 SOP", "dynamic")
+                self._note(ev, "工具", f"[工具] {step.id} {tool_label(step.tool)}重試仍失敗"
+                           f"（{tool_error_text(step.tool, res.error)}）→ 走 SOP", "dynamic")
                 return {"step_id": step.id, "tool": step.tool.value, "error": res.error}
             sr.state = "ok"
             run.results[step.id] = res
@@ -1060,7 +1099,7 @@ class StateMachine:
         kind = AuditKind.INTERCEPTED if gd.risk is None else AuditKind.GATE
         self.audit.append(kind, "gate", {"step_id": step.id, "tool": step.tool.value, "args": step.args,
                                          "decision": gd.model_dump(mode="json")}, event_id=run.ev.id)
-        self._note(run.ev, "系統", f"動作把關攔截 {step.id} {step.tool.value}：{'；'.join(gd.reasons)[:80]}",
+        self._note(run.ev, "系統", f"動作把關攔截 {step.id} {tool_label(step.tool)}：{gate_reason_text(gd.reasons)}",
                    "dynamic")
 
     # ------------------------------------------------------------------ GATE
@@ -1151,6 +1190,141 @@ class StateMachine:
             if kind in STAFFING_KINDS:
                 return bool(solves), "staffing change with no feasible solve_schedule in this event"
         return True, ""
+
+    # ---- a write and the schedule it needs are one decision (no split-solve bypass) ----
+    def _covering_versions(self, run: _Run, step: PlanStep) -> set[int] | None:
+        """Schedule versions whose solve covers this write: set_cure_time -> a feasible solve with
+        that press's cure override at that value; machine_out of a press -> a feasible solve with the
+        press in unavailable_presses. None: the write is not tied to a schedule."""
+        a, tool = step.args, step.tool
+        if tool is ToolName.SET_CURE_TIME:
+            press, h = a.get("press_id"), a.get("total_cure_h")
+
+            def covers(sa: dict[str, Any]) -> bool:
+                o = (sa.get("cure_overrides_h") or {}).get(press)
+                return isinstance(h, (int, float)) and isinstance(o, (int, float)) and abs(float(o) - float(h)) <= 0.05
+        elif tool is ToolName.NOTIFY_TEAMS and a.get("kind") == NotifyKind.MACHINE_OUT.value \
+                and (a.get("machine_id") or run.ev.machine_id) in CURE_PRESS_IDS:
+            mid = a.get("machine_id") or run.ev.machine_id
+
+            def covers(sa: dict[str, Any]) -> bool:
+                return mid in (sa.get("unavailable_presses") or [])
+        else:
+            return None
+        by_id = {sr.step.id: sr.step for sr in run.ev.steps}
+        out: set[int] = set()
+        for sid, res in run.results.items():
+            if res.ok and res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("feasible") and sid in by_id \
+                    and isinstance(res.data.get("schedule_version"), int) and covers(by_id[sid].args):
+                out.add(int(res.data["schedule_version"]))
+        return out
+
+    def _store(self):
+        return self.store if self.store is not None else getattr(getattr(self.tools, "ctx", None), "store", None)
+
+    def _in_force_covers(self, step: PlanStep) -> bool:
+        """The schedule active now already carries what the write changes: the press's in-mold job at
+        that cure time (set_cure_time), or no future mold-in on the press (machine_out)."""
+        store = self._store()
+        if store is None:
+            return False
+        try:
+            jobs = store.current().schedule.jobs
+        except Exception:  # noqa: BLE001
+            return False
+        a = step.args
+        if step.tool is ToolName.SET_CURE_TIME:
+            h = a.get("total_cure_h")
+            return isinstance(h, (int, float)) and any(
+                j.press_id == a.get("press_id") and j.frozen and abs(float(j.cure_h) - float(h)) <= 0.05 for j in jobs)
+        if step.tool is ToolName.NOTIFY_TEAMS:
+            mid = a.get("machine_id")
+            now = self._now()
+            return mid is not None and not any(j.press_id == mid and j.mold_in > now for j in jobs)
+        return False
+
+    def _enforce_coupling(self, run: _Run, auto: list[StepRun], deferred: list[StepRun],
+                          needs: list[StepRun]) -> None:
+        """Pages 5/7: a write passes only when the simulation behind it is the schedule that goes into
+        force. set_cure_time and taking a press out pass only when THIS round confirms the version
+        whose solve carried that change (or the active schedule already does). A rejected confirm (or
+        none at all) therefore drops them before the card is built; anything that depends on a dropped
+        write is dropped too."""
+        live = auto + deferred + needs
+        confirmed = {sr.step.args.get("schedule_version") for sr in live if sr.step.tool is ToolName.CONFIRM_SCHEDULE}
+        for sr in list(live):
+            cov = self._covering_versions(run, sr.step)
+            if cov is None or (cov & confirmed) or self._in_force_covers(sr.step):
+                continue
+            what = "硫化時間" if sr.step.tool is ToolName.SET_CURE_TIME else "停用機台"
+            why = (f"本輪生效的排程（v{'、v'.join(str(v) for v in sorted(x for x in confirmed if x is not None))}）"
+                   if confirmed else "本輪沒有可生效的排程") + f"不含此{what}的模擬結果"
+            self._drop_write(run, sr, auto, deferred, needs, "rejected", why,
+                             f"write not covered by the schedule confirmed this round (covering solves: "
+                             f"{sorted(cov)}, confirmed: {sorted(x for x in confirmed if isinstance(x, int))})")
+        changed = True
+        while changed:
+            changed = False
+            by_id = {sr.step.id: sr for sr in run.ev.steps}
+            for sr in list(auto + deferred + needs):
+                if any(by_id[d].state in ("rejected", "skipped", "failed") for d in sr.step.depends_on
+                       if d in by_id and by_id[d].step.tool in WRITE_TOOLS):
+                    self._drop_write(run, sr, auto, deferred, needs, "skipped", "依賴的寫入步驟未通過把關",
+                                     "a write it depends on was refused")
+                    changed = True
+
+    def _drop_noop_confirms(self, run: _Run, auto: list[StepRun], deferred: list[StepRun],
+                            needs: list[StepRun]) -> None:
+        """A confirm whose solve changes nothing (no press move or re-time, no staffing change, no cure
+        override, no press taken out) asks the supervisor to approve nothing: it is skipped, with the
+        notices that would announce it, and the schedule in force stays. Not a failure."""
+        noop: set[str] = set()
+        for sr in list(needs + auto + deferred):
+            if sr.step.tool is not ToolName.CONFIRM_SCHEDULE:
+                continue
+            v = sr.step.args.get("schedule_version")
+            src = [(st, d) for st, d in self._solve_steps(run) if d.get("schedule_version") == v]
+            if not src or any(d.get("moves") or (d.get("schedule") or {}).get("staffing_changes")
+                              or st.args.get("cure_overrides_h") or st.args.get("unavailable_presses")
+                              for st, d in src):
+                continue
+            noop.add(sr.step.id)
+            self._remove_quietly(sr, auto, deferred, needs, run)
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"noop_confirm": sr.step.id, "schedule_version": v,
+                               "reason": "solve changed nothing: no approval asked, schedule in force kept"},
+                              event_id=run.ev.id)
+            self._note(run.ev, "系統", f"排程 v{v} 與現行排程相同（無機台異動、無人力調動）→ 不需核准，維持現行排程", "info")
+        changed = bool(noop)
+        while changed:
+            changed = False
+            for sr in list(needs + auto + deferred):
+                if any(d in noop for d in sr.step.depends_on):
+                    noop.add(sr.step.id)
+                    self._remove_quietly(sr, auto, deferred, needs, run)
+                    changed = True
+
+    @staticmethod
+    def _remove_quietly(sr: StepRun, auto: list[StepRun], deferred: list[StepRun], needs: list[StepRun],
+                        run: _Run) -> None:
+        for lst in (auto, deferred, needs):
+            if sr in lst:
+                lst.remove(sr)
+        run.auto_ids.discard(sr.step.id)
+        sr.state = "skipped"
+
+    def _drop_write(self, run: _Run, sr: StepRun, auto: list[StepRun], deferred: list[StepRun],
+                    needs: list[StepRun], state: str, why_zh: str, why_en: str) -> None:
+        for lst in (auto, deferred, needs):
+            if sr in lst:
+                lst.remove(sr)
+        run.auto_ids.discard(sr.step.id)
+        sr.state = state
+        self.audit.append(AuditKind.GATE if state == "rejected" else AuditKind.SYSTEM, "gate",
+                          {"step_id": sr.step.id, "tool": sr.step.tool.value, "args": sr.step.args,
+                           "dropped": state, "reason": why_en}, event_id=run.ev.id)
+        run.round_problems.append({"step_id": sr.step.id, "tool": sr.step.tool.value, "state": state, "why": why_en})
+        self._note(run.ev, "系統", f"動作把關攔截 {sr.step.id}：{why_zh}", "dynamic")
 
     def _cure_temp(self, run: _Run) -> float:
         """The temperature the press is curing at now: the detector's stable prediction (page 11:
@@ -1262,6 +1436,12 @@ class StateMachine:
                 needs.append(sr)
                 if gd.risk is not None and RISK_ORDER.index(gd.risk) > RISK_ORDER.index(risk):
                     risk = gd.risk
+        self._enforce_coupling(run, auto, deferred, needs)
+        self._drop_noop_confirms(run, auto, deferred, needs)
+        risk = RiskLevel.R0_READ
+        for sr in needs:
+            if sr.gate is not None and sr.gate.risk is not None and RISK_ORDER.index(sr.gate.risk) > RISK_ORDER.index(risk):
+                risk = sr.gate.risk
         options = self._options(run, needs) if needs else []
         for o in options:
             od = self._check(run, PlanStep(id=f"opt-{o.id}", tool=o.tool, args=o.args, purpose=o.label))
@@ -1532,6 +1712,9 @@ class StateMachine:
         if d.decision is DecisionKind.REJECT:
             text = (f"[人工] 主管{d.reason}" if d.reason.startswith("退回修改") else
                     "[人工] 主管否決" + (f"：{d.reason}" if d.reason else "")) + "；決定與理由寫入紀錄"
+        elif d.decision is DecisionKind.MODIFY and d.modified_args and \
+                not (opt is not None and opt.args.get("kind") in STAFFING_KINDS):
+            text = f"[人工] 主管修改後核准（{opt.label if opt else ''}）；決定與理由寫入紀錄"
         elif opt is not None and opt.args.get("kind") == NotifyKind.OVERTIME.value and \
                 any(o.args.get("kind") == NotifyKind.STAFF_MOVE.value for o in others):
             text = f"[人工] 否決跨組調人，改選{opt.label}；決定與理由寫入紀錄"
@@ -1564,7 +1747,15 @@ class StateMachine:
                 sr.step = sr.step.model_copy(update={"args": {**sr.step.args, **d.modified_args}})
             chosen.append(sr)
         if is_staff_option and opt is not None:
-            args = {**opt.args, **(d.modified_args or {})}
+            # the broker refuses edits of a staffing option; a broker that does not is not trusted
+            # either: the notice says exactly what the schedule records (team, shift, headcount)
+            from warroom.agent.approvals import staffing_modification
+            ignored = staffing_modification(opt, d.modified_args)
+            if ignored:
+                self.audit.append(AuditKind.INTERCEPTED, "state_machine",
+                                  {"approval_id": req.id, "option_id": opt.id, "ignored_modified_args": ignored,
+                                   "reason": "a staffing option cannot be modified"}, event_id=run.ev.id)
+            args = dict(opt.args)
             step = PlanStep(id=f"{req.id}-{opt.id}", tool=opt.tool, args=args, purpose=f"{opt.id} {opt.label}")
             if opt.id in run.option_changes:
                 run.step_changes[step.id] = run.option_changes[opt.id]
@@ -1576,7 +1767,7 @@ class StateMachine:
                 self._log_reject(run, step, gd)
             else:
                 chosen.append(sr)
-        if d.modified_args:
+        if d.modified_args and not is_staff_option:
             # re-gate modified steps (MODIFY, or APPROVE that carries args): a modification can never
             # widen permissions or replace a formula value
             for sr in list(chosen):
@@ -1586,6 +1777,108 @@ class StateMachine:
                     self._log_reject(run, sr.step, gd)
                     chosen.remove(sr)
         return chosen
+
+    # ------------------------------------------------------------------ stale approval -> rebase
+    def _content_sig(self, run: _Run, steps: list[StepRun], change: dict[str, Any] | None) -> dict[str, Any]:
+        """What an approval puts in force, independent of version numbers: cure overrides and presses
+        taken out that the confirmed solve carried, its press moves, cure times set, presses notified
+        out, other approval-gated notices, and the staffing decision."""
+        solves = self._solve_steps(run)
+        over: set[tuple[str, float]] = set()
+        unavail: set[str] = set()
+        moves: set[tuple[str, str]] = set()
+        cure: set[tuple[str, float]] = set()
+        outs: set[str] = set()
+        notices: set[tuple[str, tuple[str, ...]]] = set()
+        for sr in steps:
+            a = sr.step.args
+            if sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+                for st, d in solves:
+                    if d.get("schedule_version") != a.get("schedule_version"):
+                        continue
+                    over |= {(str(p), round(float(h), 1)) for p, h in (st.args.get("cure_overrides_h") or {}).items()
+                             if isinstance(h, (int, float))}
+                    unavail |= {str(p) for p in st.args.get("unavailable_presses") or []}
+                    moves |= {(str(m.get("job_id")), str(m.get("to_press"))) for m in d.get("moves") or []}
+            elif sr.step.tool is ToolName.SET_CURE_TIME and isinstance(a.get("total_cure_h"), (int, float)):
+                cure.add((str(a.get("press_id")), round(float(a["total_cure_h"]), 1)))
+            elif sr.step.tool is ToolName.NOTIFY_TEAMS:
+                kind = a.get("kind")
+                if kind == NotifyKind.MACHINE_OUT.value:
+                    outs.add(str(a.get("machine_id") or run.ev.machine_id))
+                elif kind not in STAFFING_KINDS and kind not in (NotifyKind.INFO.value, NotifyKind.MAINTENANCE.value):
+                    notices.add((str(kind), tuple(sorted(str(t) for t in a.get("teams") or []))))
+        staff = (change.get("kind"), change.get("label"), _staff_key(change)) if change else None
+        return {"over": over, "unavail": unavail, "moves": moves, "cure": cure, "outs": outs,
+                "notices": notices, "staff": staff}
+
+    def _reuse_stale_approval(self, run: _Run, needs: list[StepRun],
+                              options: list[ApprovalOption]) -> ApprovalRequest | None:
+        """Concurrent events (page 10): the supervisor approved a schedule that went stale before it
+        could be confirmed (another event's version took effect first). The re-solve against the
+        schedule now active is put in force under that same approval ONLY when it carries exactly what
+        was approved (same cure overrides and times, same presses out, same notices, same staffing
+        choice, press moves no more than approved). Anything else gets a new card."""
+        st = run.stale_approval
+        if not st or st.get("sig") is None:
+            return None
+        old: ApprovalRequest = st["req"]
+        d = old.decision
+        if d is None or d.decision is DecisionKind.REJECT:
+            return None
+        old_opt = next((o for o in old.options if o.id == d.option_id), None)
+        new_opt = None
+        if old_opt is not None:
+            new_opt = next((o for o in options if o.label == old_opt.label and o.tool is old_opt.tool), None)
+        if new_opt is None and len(options) == 1 and (old_opt is None or old_opt.args.get("kind") not in STAFFING_KINDS):
+            new_opt = options[0]
+        if new_opt is None:
+            return None
+        change = run.option_changes.get(new_opt.id)
+        is_staff = new_opt.args.get("kind") in STAFFING_KINDS
+        steps = [sr for sr in needs if not (is_staff and sr.step.tool is ToolName.NOTIFY_TEAMS
+                                            and sr.step.args.get("kind") in STAFFING_KINDS)]
+        new_sig = self._content_sig(run, steps, change)
+        old_sig = st["sig"]
+        same = all(new_sig[k] == old_sig[k] for k in ("over", "unavail", "cure", "outs", "notices", "staff")) \
+            and new_sig["moves"] <= old_sig["moves"]
+        new_v = next((sr.step.args.get("schedule_version") for sr in needs
+                      if sr.step.tool is ToolName.CONFIRM_SCHEDULE), None)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"stale_approval": old.id, "stale_version": st.get("version"), "rebased_version": new_v,
+                           "same_content": same, "reused": same}, event_id=run.ev.id)
+        if not same:
+            self._note(run.ev, "系統", f"重新求解的排程 v{new_v} 與主管已核准的內容不同 → 需重新核准", "dynamic")
+            return None
+        # recorded as its own approval (request + decision via "auto", naming the original decider and
+        # the approval it carries over), so the audit log and the ✓ 已核准 list show exactly what ran
+        now = self._now()
+        rid = f"{old.id}-rebased"
+        n = 2
+        while True:
+            try:
+                self.approvals.get(rid)
+            except Exception:  # noqa: BLE001 - free id
+                break
+            rid, n = f"{old.id}-rebased{n}", n + 1
+        req = old.model_copy(update={
+            "id": rid, "step_id": needs[0].step.id, "created_at": now, "options": options,
+            "actions": self._actions(run, needs, options), "status": ApprovalStatus.PENDING, "decision": None,
+            "expires_at": now + timedelta(seconds=self.approval_timeout_s)})
+        self.approvals.request(req)
+        run.ev.approvals.append(rid)
+        from warroom.contracts import ApprovalDecision
+        self.approvals.decide(ApprovalDecision(
+            request_id=rid, decision=d.decision, option_id=new_opt.id, decided_by=d.decided_by, via="auto",
+            reason=f"沿用 {old.id}：排程 v{st.get('version')} 過期後依現行排程重解為 v{new_v}，內容相同", decided_at=now))
+        reused = self.approvals.get(rid)
+        for sr in needs:
+            if sr.state == "awaiting_approval":
+                sr.state = "pending"
+        self._note(run.ev, "系統", f"排程 v{st.get('version')} 已過期 → 依現行排程重新求解為 v{new_v}，"
+                   f"內容與主管已核准（{old_opt.label if old_opt else old.title}）相同 → 沿用核准 {old.id}，直接生效",
+                   "human")
+        return reused
 
     # ------------------------------------------------------------------ staffing decision follow-through
     def _chosen_change(self, run: _Run, chosen: list[StepRun]) -> dict[str, Any] | None:
@@ -1789,6 +2082,15 @@ class StateMachine:
                 run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
                                            "why": "a write it depends on did not run"})
                 continue
+            cov = self._covering_versions(run, step)
+            if cov is not None and not (cov & set(self._confirmed_this_round(run))) and not self._in_force_covers(step):
+                # the schedule carrying this change did not go into force in this round: never put a
+                # cure time / press-out in force against a schedule that does not have it
+                sr.state = "skipped"
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
+                                           "why": "its schedule did not take effect in this round"})
+                self._note(ev, "系統", f"{step.id} 未執行：對應的排程未在本輪生效", "dynamic")
+                continue
             if step.id in run.auto_ids:
                 # an auto (R1) write is checked again right before it runs, against what has actually
                 # executed: a cure-time notice goes out only after its approved set_cure_time ran
@@ -1806,11 +2108,17 @@ class StateMachine:
                 sr.state = "failed"
                 run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "failed",
                                            "error": (res.error or "")[:300]})
-                self._note(ev, "工具", f"[工具] {step.id} {step.tool.value} 執行失敗：{(res.error or '')[:60]}", "dynamic")
+                self._note(ev, "工具", f"[工具] {step.id} {tool_label(step.tool)}未執行成功：{tool_error_text(step.tool, res.error)}",
+                           "dynamic")
                 if step.tool is ToolName.CONFIRM_SCHEDULE:
                     halted = step
                     rest = [x.step.id for x in ordered if x is not sr and x.state not in ("ok", "failed")]
-                    self._note(ev, "系統", f"排程 v{step.args.get('schedule_version')} 未生效 → 本輪其餘動作不執行"
+                    approved = not auto_tag and run.current_req is not None
+                    if approved and "is stale" in (res.error or ""):
+                        run.stale_approval = {"req": run.current_req, "sig": run.approved_sig,
+                                              "version": step.args.get("schedule_version")}
+                    self._note(ev, "系統", ("✗ 已核准但未生效（排程已被另一事件更新）：" if approved else "")
+                               + f"排程 v{step.args.get('schedule_version')} 未生效 → 本輪其餘動作不執行"
                                + (f"（{'、'.join(rest)}）" if rest else "") + "，依現行排程重新求解", "dynamic")
                 continue
             sr.state = "ok"
@@ -1818,6 +2126,15 @@ class StateMachine:
             txt = result_text(step.tool, step.args, res.data)
             self._note(ev, "工具", ("✓ 已自動：" if auto_tag else "[工具] ") + txt, "tool")
             self._after_write(run, step)
+
+    @staticmethod
+    def _confirmed_this_round(run: _Run) -> list[int]:
+        """Versions a confirm_schedule of the current plan round activated."""
+        out = []
+        for res in run.results.values():
+            if res.ok and res.tool is ToolName.CONFIRM_SCHEDULE and isinstance((res.data or {}).get("version"), int):
+                out.append(int(res.data["version"]))
+        return out
 
     def _action_miss(self, run: _Run) -> None:
         ev = run.ev
@@ -1923,7 +2240,8 @@ class StateMachine:
         if exp is None and ev.anomaly.kind.value in UNMEASURED_KINDS:
             self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
                                                              "unmeasured": True}, event_id=ev.id)
-            self._note(ev, "驗證（程式）", f"核准動作已執行完成；{h.id} 無讀值可驗證", "info")
+            self._note(ev, "驗證（程式）", ("核准動作已執行完成" if run.executed else "排程無需變更")
+                       + f"；{h.id} 無讀值可驗證", "info")
             return "unmeasured", None
         if exp is None and run.sop_handoff:
             self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,

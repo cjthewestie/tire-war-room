@@ -3,6 +3,8 @@ cure time or an unsimulated schedule approved, cannot satisfy VERIFY on another 
 smuggle R3 instructions in an R1 notice, and safe stop never undoes approved schedules."""
 from __future__ import annotations
 
+import pytest
+
 import asyncio
 from datetime import timedelta
 
@@ -110,7 +112,7 @@ async def test_page11_plan_sets_cure_time_through_approval(tmp_path):
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
     req = approvals.all()[0]
-    assert any(a.startswith("S5 7 號機硫化總時數 36.5 h（公式 36.5 h）") for a in req.actions), req.actions
+    assert any(a.startswith("S4b 7 號機硫化總時數 36.5 h（公式 36.5 h）") for a in req.actions), req.actions
     sct = [c for c in tools.calls if c.tool is ToolName.SET_CURE_TIME]
     assert len(sct) == 1 and sct[0].args["total_cure_h"] == 36.5 and sct[0].args["press_id"] == "CURE-07"
     gate = next(sr.gate for sr in ev.steps if sr.step.tool is ToolName.SET_CURE_TIME)
@@ -139,8 +141,13 @@ async def test_approve_with_modified_args_is_regated(tmp_path):
         while not approvals.pending():
             await asyncio.sleep(0.001)
         r = approvals.pending()[0]
-        approvals.decide(ApprovalDecision(request_id=r.id, decision=DecisionKind.APPROVE, option_id="A",
-                                          modified_args={"press_id": "CURE-07", "total_cure_h": 30.0}))
+        # A is a staffing option: editing it is refused outright (round-4 finding 2), so a cure-time
+        # value can never ride in on it either; the plain approval then runs the formula's value
+        from warroom.agent.approvals import ApprovalError
+        with pytest.raises(ApprovalError):
+            approvals.decide(ApprovalDecision(request_id=r.id, decision=DecisionKind.APPROVE, option_id="A",
+                                              modified_args={"press_id": "CURE-07", "total_cure_h": 30.0}))
+        approvals.decide(ApprovalDecision(request_id=r.id, decision=DecisionKind.APPROVE, option_id="A"))
     t = asyncio.create_task(sup())
     await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await t

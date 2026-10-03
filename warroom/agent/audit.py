@@ -18,8 +18,11 @@ Opening an existing log verifies it:
 - a torn LAST line (power cut mid-write, the unplug demo) is moved to ``<log>.corrupt``, the file is
   cut back to the last complete entry, the chain continues from there and a SYSTEM entry records
   the recovery;
-- any other break (an edited, deleted or reordered entry, a wrong key, a head anchor the file no
-  longer reaches, a MISSING head anchor beside a non-empty log) archives the whole file as
+- any other break (an edited, deleted or reordered entry, a wrong key, a MISSING head anchor beside a
+  non-empty log, an anchor whose HMAC signature does not verify, or a signed anchor that does not
+  name the log's LAST entry — so neither {"seq":0} nor an earlier entry's seq+hash copied from the
+  log can hide a cut; the one tolerated lag is an anchor exactly one entry behind, which a power cut
+  between the line fsync and the anchor write leaves, and that is recorded) archives the whole file as
   ``<log>.broken-N`` untouched and starts a new chain whose first entry says why. A log that is gone
   while the external anchor still names entries is recorded the same way. The log never silently
   drops to memory and never raises on content.
@@ -127,7 +130,7 @@ class JsonlAuditLog:
             self._open_existing()
         else:
             ext = self._read_anchor(self.anchor_path)
-            if ext is not None and ext["seq"] > 0:
+            if ext is not None and self._anchor_problem("external", ext, []) is not None:
                 self.recovery.append({"msg": "audit log missing although the external anchor names entries; "
                                              "new chain started", "anchor_seq": ext["seq"],
                                       "anchor": str(self.anchor_path)})
@@ -176,19 +179,40 @@ class JsonlAuditLog:
     def _read_head(self) -> dict[str, Any] | None:
         return self._read_anchor(self.head_path)
 
-    @staticmethod
-    def _anchor_problem(name: str, head: dict[str, Any] | None, entries: list[AuditEntry]) -> str | None:
+    def _head_mac(self, seq: int, h: str) -> str:
+        """The anchor is signed with the audit key, so a head cannot be forged or set back by hand."""
+        return hmac.new(self._key, f"audit-head|{int(seq)}|{h}".encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def _anchor_problem(self, name: str, head: dict[str, Any] | None,
+                        entries: list[AuditEntry]) -> str | None:
+        """The anchor must be signed with the key and name exactly the log's last entry (seq 0 + the
+        genesis hash for an empty log). One tolerated lag: a power cut between the fsync'd line and the
+        anchor write leaves the anchor one entry behind; that is accepted and recorded, never silent."""
         last = entries[-1] if entries else None
+        last_seq = last.seq if last else 0
         if head is None:
             # every append writes the anchor, so a non-empty log without one had it removed
-            return (f"{name} anchor missing or unreadable beside a non-empty log (ends at seq {last.seq}): "
+            return (f"{name} anchor missing or unreadable beside a non-empty log (ends at seq {last_seq}): "
                     "entries may have been cut off") if entries else None
-        if head["seq"] > 0:
-            at = entries[head["seq"] - 1] if head["seq"] <= len(entries) else None
-            if at is None or at.hash != head.get("hash"):
-                return (f"{name} anchor seq {head['seq']} not found in the log "
-                        f"(log ends at seq {last.seq if last else 0}): entries were cut off or replaced")
-        return None
+        seq, h, mac = head.get("seq"), head.get("hash"), head.get("mac")
+        if not isinstance(seq, int) or not isinstance(h, str) or not isinstance(mac, str) or \
+                not hmac.compare_digest(self._head_mac(seq, h), mac):
+            return (f"{name} anchor signature missing or invalid (anchor seq {seq}, log ends at seq {last_seq}): "
+                    "the anchor was rewritten without the key")
+
+        def names(s: int) -> bool:
+            if s == 0:
+                return h == GENESIS_HASH
+            return 1 <= s <= len(entries) and entries[s - 1].hash == h
+        if seq == last_seq and names(seq):
+            return None
+        if seq == last_seq - 1 and names(seq):
+            self.recovery.append({"msg": f"{name} anchor was one entry behind the log (power cut between "
+                                         "append and anchor write); anchor re-written", "anchor_seq": seq,
+                                  "log_seq": last_seq})
+            return None
+        return (f"{name} anchor seq {seq} does not name the log's last entry (log ends at seq {last_seq}): "
+                "entries were cut off or replaced")
 
     def _archive(self, why: str, last_seq: int) -> None:
         n = 1
@@ -231,9 +255,11 @@ class JsonlAuditLog:
         self._entries = entries[-self._keep:]
         if entries:
             self._seq, self._last_hash = entries[-1].seq, entries[-1].hash
+        self._write_head()
 
     def _write_head(self) -> None:
-        body = json.dumps({"seq": self._seq, "hash": self._last_hash})
+        body = json.dumps({"seq": self._seq, "hash": self._last_hash,
+                           "mac": self._head_mac(self._seq, self._last_hash)})
         for p in (self.head_path, self.anchor_path):
             if p is None:
                 continue

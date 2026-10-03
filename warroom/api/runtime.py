@@ -1254,6 +1254,7 @@ class Runtime:
         rounds = [r.steps for r in getattr(ev, "prior_rounds", [])] + [ev.steps]
         out: list[ApprovedAction] = []
         used: set[tuple[int, str]] = set()
+        done_ids: set[str] = set()
         ri = 0
         for req in reqs:
             d = req.decision
@@ -1264,7 +1265,11 @@ class Runtime:
                 return sr.step.id.startswith(f"{req.id}-") or (
                     sr.step.id == req.step_id and sr.gate is not None
                     and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL))
-            j = next((k for k in range(ri, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
+            # an approval carried over after a stale schedule (state machine: "<id>-rebased") ran in a
+            # later round than the one it carries over
+            start = ri + 1 if "-rebased" in req.id and req.id.split("-rebased")[0] in done_ids else ri
+            done_ids.add(req.id)
+            j = next((k for k in range(start, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
             ran: list[Any] = []
             if j is not None:
                 ri = j
@@ -1279,8 +1284,14 @@ class Runtime:
             if not ran:
                 opt = next((o for o in req.options if o.id == opt_id), None) or \
                     (req.options[0] if len(req.options) == 1 else None)
+                label = opt.label if opt else req.title
+                if j is not None and any(owns(sr) and sr.state == "failed" and sr.step.tool is ToolName.CONFIRM_SCHEDULE
+                                         for sr in rounds[j]):
+                    # approved, but its schedule went stale before it could take effect (another event's
+                    # version won): never shown as if it were in force
+                    label += "（✗ 未生效：排程已被另一事件更新）"
                 out.append(ApprovedAction(approval_id=req.id, option_id=opt_id,
-                                          label=opt.label if opt else req.title, decided_by=who, status=req.status))
+                                          label=label, decided_by=who, status=req.status))
         return out
 
     @staticmethod

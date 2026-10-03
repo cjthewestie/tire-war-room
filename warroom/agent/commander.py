@@ -383,8 +383,8 @@ def _round_half(x: float) -> float:
 class MockCommander:
     """Deterministic rule commander. Reproduces page 11: plan phase -> H1 steam_pressure_low,
     expectation <press> temp_c >= 121 within 30 min, steps S1 cure_formula, S2 query_orders_shifts,
-    S3 solve_schedule(dep S1,S2), S4 confirm_schedule, S5 set_cure_time ($S1.total_cure_h),
-    S6 notify_teams; replan with H1 rejected ->
+    S3 solve_schedule(dep S1,S2), S4 confirm_schedule with S4b set_cure_time ($S1.total_cure_h) under
+    the same approval, S5 notify_teams (pages 7/11 decomposition S1..S5); replan with H1 rejected ->
     H2 steam_leak_or_sensor_drift (header neighbours compared, SOP 「硫化中斷處置」 in context),
     press out of service, reschedule. Page 2: cooling_insufficient when the water flow really is low
     (else overheat_unknown), notify maintenance (R1, fixed template) + slow_feed (R3). A replan after a
@@ -481,12 +481,13 @@ class MockCommander:
             PlanStep(id="S4", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S3"], purpose="確認新排程（需主管核准）",
                      args={"schedule_version": "$S3.schedule_version",
                            "reason": f"{lbl}降溫，延長硫化至 ${{S1.total_cure_h}} h 後重排"}),
-            # page 5 write tool 設定硫化時間（建議值）: the formula's value, gated R2, approved with S4
-            PlanStep(id="S5", tool=ToolName.SET_CURE_TIME, depends_on=["S1", "S3"],
+            # page 5 write tool 設定硫化時間（建議值）: the formula's value, gated R2. It is part of S4's
+            # approval (pages 7/11: S4 確認（需核准）→ S5 通知), hence the sub-step id S4b
+            PlanStep(id="S4b", tool=ToolName.SET_CURE_TIME, depends_on=["S1", "S3"],
                      purpose=f"設定{lbl}硫化時間為公式值（需主管核准）",
                      args={"press_id": mid, "total_cure_h": "$S1.total_cure_h",
                            "reason": f"{lbl}降溫至 {_fmt(actual)}°C，Arrhenius 等效硫化"}),
-            PlanStep(id="S6", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4", "S5"], purpose="通知硫化組與胎體組新排程",
+            PlanStep(id="S5", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4", "S4b"], purpose="通知硫化組與胎體組新排程",
                      args={"teams": [TeamId.CURING.value, TeamId.BODY.value], "kind": NotifyKind.INFO.value,
                            "machine_id": mid,
                            "message": f"{lbl}延長硫化至 ${{S1.total_cure_h}} h（+${{S1.extra_h}} h），已依新排程調整下一模"}),
@@ -644,6 +645,9 @@ class MockCommander:
     def _schedule_slip(self, req: CommanderRequest, hid: str) -> CommanderPlan:
         a = req.anomaly
         mid, lbl = a.machine_id, machine_label(a.machine_id)
+        status = ((req.context or {}).get("machine") or {}).get("status")
+        if mid in CURE_PRESS_IDS and status in ("stopped", "out_of_service"):
+            return self._held_press_slip(req, hid, status)
         steps = [
             PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查受影響訂單交期與班表缺口",
                      args={"press_ids": [mid]} if mid in CURE_PRESS_IDS else {}),
@@ -664,6 +668,35 @@ class MockCommander:
             steps=steps,
             alert_card=AlertCard(title=f"{lbl}排程延誤 {_fmt(a.value)} 分", summary=a.message[:80]),
             rationale="計畫與實際不符（每分鐘比對）；排程數字由求解器產生，新排程需核准。",
+        )
+
+    def _held_press_slip(self, req: CommanderRequest, hid: str, status: str) -> CommanderPlan:
+        """The plan-vs-actual slip is on a press the safety core holds or a decision took out: the
+        cause is that hold, not people running late. Re-solve without the press so nothing new is
+        loaded on it."""
+        a = req.anomaly
+        mid, lbl = a.machine_id, machine_label(a.machine_id)
+        held = "已停用" if status == "out_of_service" else "安全核心扣模／停機中"
+        steps = [
+            PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查受影響訂單交期與班表缺口",
+                     args={"press_ids": [mid]}),
+            PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"],
+                     purpose=f"{lbl}{held}，排除該機重排", args={"unavailable_presses": [mid], "time_limit_s": 10.0}),
+            PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認新排程（需主管核准）",
+                     args={"schedule_version": "$S2.schedule_version",
+                           "reason": f"{lbl}{held}，排除該機重排"}),
+            PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S3"], purpose="通知相關組別新排程",
+                     args={"teams": [TeamId.CURING.value, TeamId.BOND.value, TeamId.BODY.value],
+                           "kind": NotifyKind.INFO.value, "machine_id": mid,
+                           "message": f"{lbl}{held}，已排除該機重排，請依新排程作業"}),
+        ]
+        return CommanderPlan(
+            goal=f"{lbl}{held}，交期不能延誤",
+            hypothesis=Hypothesis(id=hid, statement=f"{lbl}{held}（非作業落後），排除該機重排",
+                                  cause_code="safety_hold", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+            steps=steps,
+            alert_card=AlertCard(title=f"{lbl}{held}，排程需調整", summary=a.message[:80]),
+            rationale="計畫與實際不符的原因是機台被扣模／停用，不是作業落後；排除該機由求解器重排。",
         )
 
     def _generic(self, req: CommanderRequest, hid: str) -> CommanderPlan:
