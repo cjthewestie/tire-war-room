@@ -592,3 +592,127 @@ def test_accuracy_defaults_to_open_book_and_pairs_saved_runs(env_fake, tmp_path)
     assert closed["open_book"] is False and "SOP 檔案" not in state["bodies"][-1]["messages"][0]["content"]
     with pytest.raises(SystemExit):
         accuracy.main(["--pair", one["saved_to"], closed["saved_to"], "--out-dir", str(tmp_path)])
+
+
+# ---------------------------------------------------------------- unplug: attempts, attributed (not box packets)
+_DROP_LOG = """\
+2026-10-03T02:14:01+0800 spark kernel: warroom-egress-drop host IN= OUT=enP7s7 SRC=192.168.1.20 DST=91.189.91.157 LEN=76 TOS=0x00 PREC=0x00 TTL=64 ID=1 DF PROTO=UDP SPT=51000 DPT=123 LEN=56 UID=998 GID=998
+2026-10-03T02:14:02+0800 spark kernel: warroom-egress-drop host IN= OUT=enP7s7 SRC=192.168.1.20 DST=185.125.188.55 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=2 DF PROTO=TCP SPT=40100 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0 UID=0 GID=0
+2026-10-03T02:14:03+0800 spark kernel: warroom-egress-drop host IN= OUT=enP7s7 SRC=192.168.1.20 DST=185.125.188.55 LEN=60 TOS=0x00 PREC=0x00 TTL=64 ID=3 DF PROTO=TCP SPT=40100 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0 UID=0 GID=0
+2026-10-03T02:14:05+0800 spark kernel: warroom-egress-drop fwd IN=br-edge OUT=enP7s7 SRC=172.19.0.4 DST=1.1.1.1 LEN=60 TOS=0x00 PREC=0x00 TTL=63 ID=4 DF PROTO=TCP SPT=33000 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0
+2026-10-03T02:14:06+0800 spark kernel: warroom-egress-drop fwd IN=br-edge OUT=enP7s7 SRC=172.19.0.4 DST=1.1.1.1 LEN=60 TOS=0x00 PREC=0x00 TTL=63 ID=5 DF PROTO=TCP SPT=33000 DPT=443 WINDOW=64240 RES=0x00 SYN URGP=0
+2026-10-03T02:14:07+0800 spark kernel: some unrelated line
+"""
+
+
+def test_drop_log_counts_attempts_not_packets_and_attributes_os_noise():
+    att = unplug_test.parse_drop_log(_DROP_LOG)
+    assert len(att) == 3                                     # 5 packets: SYN + retransmit share a source port
+    by = {(a["chain"], a["dst"]): a for a in att}
+    assert by[("containers", "1.1.1.1")]["packets"] == 2 and by[("host", "185.125.188.55")]["uid"] == 0
+    assert by[("host", "91.189.91.157")]["uid"] == 998 and by[("host", "91.189.91.157")]["proto"] == "udp"
+    # stack runs in containers; no stack process on the host -> timesyncd (998) and snapd (root) are OS noise
+    stack, other = unplug_test.attribute_drops(att, set())
+    assert [a["dst"] for a in stack] == ["1.1.1.1"] and len(other) == 2
+    # a stack process on the host as uid 998 claims that uid's drop only
+    stack, other = unplug_test.attribute_drops(att, {998})
+    assert {a["dst"] for a in stack} == {"1.1.1.1", "91.189.91.157"}
+    # the host-networked app (uid 10001) leaves through the output hook and is counted
+    app = unplug_test.parse_drop_log("kernel: warroom-egress-drop host IN= OUT=eth0 SRC=10.0.0.2 DST=3.3.3.3 "
+                                     "PROTO=TCP SPT=7 DPT=443 UID=10001 GID=10001")
+    assert unplug_test.attribute_drops(app, {unplug_test.APP_UID})[0] == app
+    # old table (no chain tag) stays conservative: counted
+    old = unplug_test.parse_drop_log("kernel: warroom-egress-drop IN= OUT=eth0 SRC=10.0.0.2 DST=8.8.8.8 PROTO=UDP SPT=5 DPT=53")
+    assert old[0]["chain"] == "box" and unplug_test.attribute_drops(old, set())[0] == old
+
+
+def test_host_ns_uids_excludes_other_namespaces(tmp_path):
+    (tmp_path / "self" / "ns").mkdir(parents=True)
+    os.symlink("net:[1]", tmp_path / "self" / "ns" / "net")
+    me, other = os.getpid(), os.getppid()
+    for pid, ns in ((me, "net:[1]"), (other, "net:[2]")):
+        (tmp_path / str(pid) / "ns").mkdir(parents=True)
+        os.symlink(ns, tmp_path / str(pid) / "ns" / "net")
+    assert unplug_test.host_ns_uids({me, other}, proc=tmp_path) == {os.geteuid()}
+    assert unplug_test.host_ns_uids({me}, proc=tmp_path / "missing") == set()
+
+
+def test_unplug_verdict_ignores_os_drops_and_dedupes_sources():
+    base = {"block": {"applied": True}, "internet_reachable_during_test": False, "app": {}}
+    os_only = {**base, "sockets": {"outbound_connections": 0, "outbound": []},
+               "egress": {"firewall_dropped_packets": 6, "stack_drop_attempts": [],
+                          "host_other_attempts": [{"dst": "91.189.91.157", "dport": 123}] * 3,
+                          "conntrack_available": False, "conntrack_outbound_flows": []}}
+    v = {x["name"]: x for x in unplug_test.verdicts(os_only, 0.5, False)}["outbound_connections"]
+    assert v["passed"] is True and v["measured"] == 0 and v["extra"]["host_other_attempts"] == 3
+    assert v["extra"]["firewall_dropped_packets_box_wide"] == 6
+    # one container connect: 2 packets in the log, also seen as SYN_SENT by the socket watcher -> 1 attempt
+    stack = {**base, "sockets": {"outbound_connections": 1,
+                                 "outbound": [{"pid": 9, "ip": "1.1.1.1", "port": 443, "status": "SYN_SENT"}]},
+             "egress": {"firewall_dropped_packets": 2, "host_other_attempts": [],
+                        "stack_drop_attempts": [{"chain": "containers", "dst": "1.1.1.1", "dport": 443,
+                                                 "packets": 2}],
+                        "conntrack_available": True, "conntrack_outbound_flows": []}}
+    v = {x["name"]: x for x in unplug_test.verdicts(stack, 0.5, False)}["outbound_connections"]
+    assert v["passed"] is False and v["measured"] == 1
+    # kernel log unreadable: container packet counter is the stack evidence, host counter is not
+    ctr = {**base, "sockets": {"outbound_connections": 0},
+           "egress": {"firewall_dropped_packets": 4, "host_dropped_packets": 4, "container_dropped_packets": 0,
+                      "conntrack_available": False, "conntrack_outbound_flows": []}}
+    v = {x["name"]: x for x in unplug_test.verdicts(ctr, 0.5, False)}["outbound_connections"]
+    assert v["passed"] is True and v["measured"] == 0
+
+
+def test_firewall_splits_host_and_container_drops():
+    nft = (unplug_test.NFT).read_text()
+    assert "counter egress_host" in nft and "counter egress_containers" in nft and "counter dropped_egress" in nft
+    assert 'prefix "warroom-egress-drop host " level warn flags skuid' in nft
+    assert 'prefix "warroom-egress-drop fwd "' in nft
+
+
+def test_install_quiets_os_egress(tmp_path):
+    import subprocess
+    etc = tmp_path / "etc"
+    (etc / "default").mkdir(parents=True)
+    (etc / "default" / "motd-news").write_text("ENABLED=1\nURLS=x\n")
+    root = tmp_path / "opt"
+    env = os.environ | {"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(tmp_path), "NO_SYSTEMCTL": "1",
+                        "NO_IMAGES": "1", "NO_MODELS": "1", "NO_BENCH_VENV": "1", "ETC_DIR": str(etc),
+                        "LAN_NTP": "192.168.1.1", "WARROOM_SUPERVISOR_PIN": "test-pin-123"}
+    sh = Path(unplug_test.ROOT) / "deploy" / "bin" / "install_spark.sh"
+    r = subprocess.run(["bash", str(sh), "t1"], env=env, capture_output=True, text=True, timeout=120)
+    assert r.returncode == 0, r.stderr
+    conf = (etc / "systemd" / "timesyncd.conf.d" / "warroom.conf").read_text()
+    assert "NTP=192.168.1.1" in conf and "FallbackNTP=\n" in conf
+    assert (etc / "default" / "motd-news").read_text().startswith("ENABLED=0")
+
+
+def test_egress_evidence_linux_reads_split_counters_and_drop_log(monkeypatch):
+    monkeypatch.setattr(unplug_test.platform, "system", lambda: "Linux")
+    counts = {"dropped_egress": 0, "egress_host": 0, "egress_containers": 0}
+    calls = []
+
+    def fake_run(cmd, timeout=10):
+        calls.append(cmd)
+        if cmd[:3] == ["nft", "reset", "counter"]:
+            counts[cmd[-1]] = 0
+            return True, ""
+        if cmd[:3] == ["nft", "list", "counter"]:
+            return True, f"counter {cmd[-1]} {{\n packets {counts[cmd[-1]]} bytes 0\n}}"
+        if cmd[0] == "journalctl":
+            return True, _DROP_LOG
+        return False, "nope"
+
+    monkeypatch.setattr(unplug_test, "_run", fake_run)
+    with unplug_test.EgressEvidence(True) as eg:
+        counts.update(dropped_egress=5, egress_host=3, egress_containers=2)   # 3 OS packets, 2 container
+    r = eg.report(stack_pids=set())
+    assert r["firewall_dropped_packets"] == 5 and r["host_dropped_packets"] == 3 and r["container_dropped_packets"] == 2
+    assert [a["dst"] for a in r["stack_drop_attempts"]] == ["1.1.1.1"] and len(r["host_other_attempts"]) == 2
+    assert unplug_test.APP_UID in r["stack_host_uids"]
+    jc = next(c for c in calls if c[0] == "journalctl")
+    assert jc[1] == "-k" and jc[jc.index("--since") + 1].startswith("@")
+    v = {x["name"]: x for x in unplug_test.verdicts(
+        {"block": {"applied": True}, "sockets": {"outbound_connections": 0, "outbound": []}, "egress": r,
+         "internet_reachable_during_test": False, "app": {}}, 0.5, False)}["outbound_connections"]
+    assert v["measured"] == 1 and v["passed"] is False and "1 stack attempt" in v["note"]

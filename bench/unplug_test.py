@@ -13,7 +13,15 @@ Steps
                                         /api/health and /phone (LAN path).
       (default)                         direct: alert-card call against the local LLM endpoint
  3. Egress evidence, strongest first:
-      - nft `dropped_egress` counter (Linux, block applied): packets the firewall dropped = attempts to leave
+      - nft drop log (Linux, block applied): kernel log lines with prefix "warroom-egress-drop host|fwd ",
+        read from `journalctl -k` for the window and counted as ATTEMPTS (distinct proto/src/sport/dst/dport;
+        a blocked TCP connect is 2+ packets). `fwd` = a bridged container (vLLM, qdrant, mqtt): counted.
+        `host` = a host-network process, logged with its UID: counted when the UID is the app's (APP_UID,
+        the app runs with network_mode: host) or belongs to a watched stack process in the host network
+        namespace; otherwise it is DGX OS housekeeping (timesyncd, snapd, motd-news) and is reported as
+        host_other_attempts, not counted. Log unreadable -> the per-chain
+        packet counters (egress_containers counted, egress_host reported); old table without them -> the
+        box-wide dropped_egress packet counter, flagged as such.
       - pf block-rule packet counter (macOS, block applied)
       - conntrack snapshots every second (Linux, root, `conntrack` installed): flows to non-LAN addresses
       - socket samples of the watched processes every --interval s. On Linux the sockets are read from
@@ -69,7 +77,11 @@ from warroom.factory import ALERT_CARD_MAX_TOKENS, LATENCY_FIRST_ALERT_S, TTFT_T
 ROOT = Path(__file__).resolve().parent.parent
 NFT = ROOT / "deploy" / "network" / "nftables-warroom.nft"
 PF = ROOT / "deploy" / "network" / "pf-warroom.conf"
-NFT_COUNTER = ["inet", "warroom_offline", "dropped_egress"]
+NFT_COUNTER = ["inet", "warroom_offline", "dropped_egress"]   # box-wide total (packets), kept for old tables
+# Split counters in nftables-warroom.nft: output hook = host processes, forward hook = the containers.
+NFT_SPLIT = {"host": "egress_host", "containers": "egress_containers"}
+DROP_LOG_PREFIX = "warroom-egress-drop"
+APP_UID = 10001          # deploy/Dockerfile `useradd --uid 10001`; the app container is host-networked
 QDRANT_PORTS = (6333, 6334)
 PROBE_HOSTS = ("1.1.1.1", "8.8.8.8")
 SANDBOX_ENV = "WARROOM_UNPLUG_SANDBOXED"
@@ -396,6 +408,63 @@ def parse_conntrack(text: str, lan: list | None = None) -> set[tuple[str, str, i
     return out
 
 
+_DROP_RE = re.compile(DROP_LOG_PREFIX + r" (?:(host|fwd) )?(.*)")
+
+
+def parse_drop_log(text: str) -> list[dict[str, Any]]:
+    """Blocked egress ATTEMPTS in kernel log text: one dict per distinct (chain, proto, src, sport, dst, dport).
+
+    nf_log line: `warroom-egress-drop host IN= OUT=eth0 SRC=.. DST=1.1.1.1 .. PROTO=TCP SPT=40000 DPT=443 ..
+    UID=0 GID=0`. A TCP SYN and its retransmits share the source port, so they are one attempt (`packets`
+    counts them). chain: host (output hook), containers (forward hook), box (old table, no chain tag)."""
+    seen: dict[tuple, dict[str, Any]] = {}
+    for ln in text.splitlines():
+        m = _DROP_RE.search(ln)
+        if not m:
+            continue
+        f = dict(kv.split("=", 1) for kv in m.group(2).split() if "=" in kv)
+        if not f.get("DST"):
+            continue
+        chain = {"host": "host", "fwd": "containers"}.get(m.group(1) or "", "box")
+        sport, dport = int(f.get("SPT") or 0), int(f.get("DPT") or 0)
+        key = (chain, f.get("PROTO", "?").lower(), f.get("SRC", ""), sport, f["DST"], dport)
+        if key in seen:
+            seen[key]["packets"] += 1
+            continue
+        uid = f.get("UID")
+        seen[key] = {"chain": chain, "proto": key[1], "src": key[2], "sport": sport, "dst": f["DST"],
+                     "dport": dport, "uid": int(uid) if uid and uid.isdigit() else None, "packets": 1}
+    return list(seen.values())
+
+
+def host_ns_uids(pids: set[int], proc: Path = Path("/proc")) -> set[int]:
+    """Effective UIDs of the `pids` that share this process's network namespace. Their sockets leave through
+    the output hook, so a `host` drop with one of these UIDs may be the stack's; container processes (own
+    namespace, forward hook) are excluded so their root UID does not claim the OS's root daemons' drops."""
+    try:
+        mine = os.readlink(proc / "self" / "ns" / "net")
+    except OSError:
+        return set()
+    out: set[int] = set()
+    for pid in pids:
+        try:
+            if os.readlink(proc / str(pid) / "ns" / "net") == mine:
+                out.add(psutil.Process(pid).uids().effective)
+        except (OSError, psutil.Error):
+            continue
+    return out
+
+
+def attribute_drops(attempts: list[dict[str, Any]], stack_uids: set[int]) -> tuple[list, list]:
+    """(stack, other). Container and untagged (old table) drops are the stack's; host drops are the stack's
+    only when their UID is a stack UID. A host drop with no UID (no owning socket) is the OS's."""
+    stack, other = [], []
+    for a in attempts:
+        mine = a["chain"] != "host" or (a.get("uid") is not None and a["uid"] in stack_uids)
+        (stack if mine else other).append(a)
+    return stack, other
+
+
 def _run(cmd: list[str], timeout: float = 10) -> tuple[bool, str]:
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
@@ -405,7 +474,7 @@ def _run(cmd: list[str], timeout: float = 10) -> tuple[bool, str]:
 
 
 class EgressEvidence:
-    """Firewall drop counter (zeroed at start) + conntrack snapshots once a second for the whole window."""
+    """Firewall drop log + counters (zeroed at start) + conntrack snapshots once a second for the window."""
 
     def __init__(self, block_applied: bool, lan: list | None = None, conntrack_interval_s: float = 1.0):
         self.system = platform.system()
@@ -419,6 +488,10 @@ class EgressEvidence:
         self.sandbox = in_sandbox()
         self.sandbox_pids: set[int] = set()
         self._since = time.strftime("%Y-%m-%d %H:%M:%S")
+        self._t0 = self._t1 = time.time()
+        self.split_start: dict[str, int | None] = {}
+        self.split_end: dict[str, int | None] = {}
+        self.drop_log: str | None = None
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._loop, daemon=True)
 
@@ -442,11 +515,32 @@ class EgressEvidence:
             return n
         return None
 
+    def split_counts(self) -> dict[str, int | None]:
+        """Per-chain packet counters (host / containers); None each when the loaded table predates them."""
+        if not (self.block_applied and self.system == "Linux") or self.sandbox:
+            return {}
+        out: dict[str, int | None] = {}
+        for k, name in NFT_SPLIT.items():
+            ok, txt = _run(["nft", "list", "counter", *NFT_COUNTER[:2], name])
+            c = parse_nft_counter(txt) if ok else None
+            out[k] = None if c is None else c["packets"]
+        return out
+
+    def read_drop_log(self) -> str | None:
+        """Kernel log lines with the drop prefix inside the window, or None when journalctl cannot be read."""
+        ok, txt = _run(["journalctl", "-k", "-o", "short-iso", "--no-pager", "--since", f"@{int(self._t0)}",
+                        "--until", f"@{int(self._t1) + 1}"], timeout=30)
+        if not ok:
+            self.notes.append(f"kernel log unreadable (journalctl -k): {txt[:200]}")
+            return None
+        return "\n".join(ln for ln in txt.splitlines() if DROP_LOG_PREFIX in ln)
+
     def reset_counter(self) -> None:
         if self.block_applied and self.system == "Linux":
-            ok, txt = _run(["nft", "reset", "counter", *NFT_COUNTER])
-            if not ok:
-                self.notes.append(f"nft reset failed: {txt[:200]}")
+            for name in (NFT_COUNTER[2], *NFT_SPLIT.values()):
+                ok, txt = _run(["nft", "reset", "counter", *NFT_COUNTER[:2], name])
+                if not ok:
+                    self.notes.append(f"nft reset {name} failed: {txt[:200]}")
         # pf: the anchor was just loaded, so its rule counters start at 0
 
     def snapshot(self) -> None:
@@ -464,7 +558,9 @@ class EgressEvidence:
 
     def __enter__(self):
         self.reset_counter()
+        self._t0 = time.time()
         self.start_count = self.counter()
+        self.split_start = self.split_counts()
         self._t.start()
         return self
 
@@ -473,15 +569,36 @@ class EgressEvidence:
         self._t.join(timeout=10)
         self.snapshot()
         self.end_count = self.counter()
+        self.split_end = self.split_counts()
+        self._t1 = time.time()
         self._until = now_ms()
+        if self.block_applied and self.system == "Linux" and not self.sandbox:
+            self.drop_log = self.read_drop_log()
 
-    def report(self) -> dict[str, Any]:
+    def report(self, stack_pids: set[int] | None = None) -> dict[str, Any]:
+        """`stack_pids`: the watched stack processes; host-hook drops count only for their UIDs."""
         dropped = None
         if self.start_count is not None and self.end_count is not None:
             dropped = self.end_count - self.start_count
-        extra = ({"sandbox_pids": sorted(self.sandbox_pids), "bench_pid": os.getpid(),
-                  "window": [self._since, self._until]}
-                 if self.sandbox else {})
+        extra: dict[str, Any] = ({"sandbox_pids": sorted(self.sandbox_pids), "bench_pid": os.getpid(),
+                                  "window": [self._since, self._until]}
+                                 if self.sandbox else {})
+        split = {k: (None if self.split_start.get(k) is None or self.split_end.get(k) is None
+                     else self.split_end[k] - self.split_start[k]) for k in NFT_SPLIT}
+        if self.split_end:
+            extra["host_dropped_packets"] = split["host"]
+            extra["container_dropped_packets"] = split["containers"]
+        if self.drop_log is not None:
+            uids = host_ns_uids(set(stack_pids or ())) | {APP_UID}
+            stack, other = attribute_drops(parse_drop_log(self.drop_log), uids)
+            extra.update(stack_drop_attempts=stack, host_other_attempts=other, stack_host_uids=sorted(uids),
+                         counter_source="kernel log 'warroom-egress-drop': attempts, attributed by chain + UID")
+        elif split.get("containers") is not None:
+            extra["counter_source"] = ("nft egress_containers packet counter (kernel log unreadable; packets, "
+                                       "not attempts; egress_host reported, not counted)")
+        elif dropped is not None and self.system == "Linux":
+            extra["counter_source"] = ("nft dropped_egress packet counter, BOX-WIDE (old table without split "
+                                       "counters): includes DGX OS traffic, not attributed to the stack")
         return {**extra, "firewall_dropped_packets": dropped, "conntrack_available": self.conntrack_ok,
                 "conntrack_snapshots": self.conntrack_snapshots,
                 "conntrack_outbound_flows": [{"proto": p, "dst": d, "dport": n} for p, d, n in sorted(self.flows)],
@@ -692,7 +809,7 @@ async def main_async(args) -> dict[str, Any]:
         out["watched_for_s"] = round(time.monotonic() - t0, 1)
         out["watch_ports"] = sorted(ports)
         out["sockets"] = w.report()
-        out["egress"] = egress.report()
+        out["egress"] = egress.report(stack_pids=w.watched | set(args.pid or []))
         # probe AFTER the window so its own packets are not counted as the stack's egress
         out["internet_reachable_during_test"] = internet_reachable()
     finally:
@@ -780,23 +897,38 @@ def verdicts(out: dict[str, Any], alert_s: float | None, via_app: bool) -> list[
         vs.append(Verdict("alert_offline", f"≤ {LATENCY_FIRST_ALERT_S} s", alert_s,
                           None if alert_s is None else alert_s <= LATENCY_FIRST_ALERT_S,
                           note="direct alert-card call" + ("" if alert_s is not None else ": no card")).__dict__)
-    socks = out["sockets"]["outbound_connections"]
+    sk = out["sockets"]
     eg = out["egress"]
-    dropped = eg["firewall_dropped_packets"]
     flows = len(eg["conntrack_outbound_flows"]) if eg["conntrack_available"] else None
-    evidence = {"socket_samples": socks, "firewall_dropped_packets": dropped, "conntrack_outbound_flows": flows}
+    stack_attempts = eg.get("stack_drop_attempts")          # Linux kernel drop log, attributed
+    if stack_attempts is not None:
+        # Attempts, not packets; one blocked connect seen by several sources is one attempt.
+        sock_att = {("sock", o.get("pid"), o.get("ip"), o.get("port")) for o in sk.get("outbound", [])}
+        drop_dst = {(a["dst"], a["dport"]) for a in stack_attempts}
+        sock_att = {t for t in sock_att if (t[2], t[3]) not in drop_dst}   # SYN_SENT of a dropped connect
+        flow_new = {f for f in eg["conntrack_outbound_flows"] if (f.get("dst"), f.get("dport")) not in drop_dst}
+        dropped = len(stack_attempts)
+        measured = dropped + len(sock_att) + len(flow_new)
+        source = (f"kernel drop log: {dropped} stack attempt(s) (containers + stack-UID host); "
+                  f"{len(eg.get('host_other_attempts') or [])} DGX OS host attempt(s) not counted")
+    else:
+        dropped = eg.get("container_dropped_packets", eg["firewall_dropped_packets"])
+        measured = sk["outbound_connections"] + (dropped or 0) + (flows or 0)
+        source = ("sandbox-exec deny log (process-level; model server socket-watched only)"
+                  if out["block"].get("method") == "sandbox-exec"
+                  else eg.get("counter_source") or "firewall drop counter")
+    evidence = {"socket_samples": sk["outbound_connections"], "stack_dropped": dropped,
+                "firewall_dropped_packets_box_wide": eg["firewall_dropped_packets"],
+                "host_other_attempts": len(eg.get("host_other_attempts") or []),
+                "conntrack_outbound_flows": flows}
     if not applied:
         passed, note = None, ("network NOT blocked (needs root); socket samples only, which miss short "
                               "connections — not evidence of 0 outbound")
     elif dropped is None:
         passed, note = None, "block applied but firewall counter unreadable; socket samples only"
     else:
-        passed = socks == 0 and dropped == 0 and (flows in (None, 0))
-        sandboxed = out["block"].get("method") == "sandbox-exec"
-        note = (("sandbox-exec deny log (process-level; model server socket-watched only)" if sandboxed
-                 else "firewall drop counter") + " + socket samples"
-                + (" + conntrack" if flows is not None else ""))
-    measured = socks + (dropped or 0) + (flows or 0)
+        passed = measured == 0
+        note = source + " + socket samples" + (" + conntrack" if flows is not None else "")
     vs.append(Verdict("outbound_connections", "0", measured, passed, note=note, extra=evidence).__dict__)
     if applied:
         vs.append(Verdict("internet_blocked", "unreachable", out["internet_reachable_during_test"],

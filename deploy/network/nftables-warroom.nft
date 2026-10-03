@@ -4,9 +4,17 @@
 # Remove: sudo nft delete table inet warroom_offline              (only for a planned online update window)
 #
 # Allowed destinations: loopback, the factory LAN / OT networks (RFC1918 + link-local), Docker bridges,
-# multicast for local discovery. Everything else leaving the box -- host processes (output hook) and
-# containers (forward hook) -- is dropped and counted, so `nft list table inet warroom_offline` shows
-# any attempt. Inbound is not restricted here; the app port is published on the LAN by docker compose.
+# multicast for local discovery. Everything else leaving the box is dropped, counted and logged, split by
+# who sent it so the unplug test can tell the war-room stack from DGX OS housekeeping (NTP, snapd, motd):
+#   forward hook = bridged containers (vLLM, qdrant, mqtt)                  -> egress_containers,
+#                  log prefix "warroom-egress-drop fwd "
+#   output hook  = host-network processes: the app (network_mode: host, uid 10001), DGX OS services,
+#                  the bench itself                                         -> egress_host,
+#                  log prefix "warroom-egress-drop host " with the socket's UID (log flags skuid), so the
+#                  app's attempts (UID=10001) are told apart from timesyncd/snapd/motd-news
+#   dropped_egress = both, kept for older readers. Counters count PACKETS (a blocked TCP connect is the SYN
+#   plus its retransmits); bench/unplug_test.py counts ATTEMPTS from the log lines instead.
+# Inbound is not restricted here; the app port is published on the LAN by docker compose.
 # Edit `lan4` if the plant uses public-range addressing internally (rare, but check with factory IT; the
 # OT network is zoned per IEC 62443 and must reach the Spark only through the data gateway, p.10).
 
@@ -21,19 +29,21 @@ table inet warroom_offline {
     }
 
     counter dropped_egress { }
+    counter egress_host { }
+    counter egress_containers { }
 
     chain output {
         type filter hook output priority -10; policy accept;
         oifname "lo" accept
         ip daddr @lan4 accept
         ip6 daddr @lan6 accept
-        counter name dropped_egress log prefix "warroom-egress-drop " level warn drop
+        counter name dropped_egress counter name egress_host log prefix "warroom-egress-drop host " level warn flags skuid drop
     }
 
     chain forward {
         type filter hook forward priority -10; policy accept;
         ip daddr @lan4 accept
         ip6 daddr @lan6 accept
-        counter name dropped_egress log prefix "warroom-egress-drop " level warn drop
+        counter name dropped_egress counter name egress_containers log prefix "warroom-egress-drop fwd " level warn drop
     }
 }
