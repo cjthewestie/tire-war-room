@@ -1,0 +1,207 @@
+{
+  "bench": "full_event",
+  "recorded_at": "2026-10-03T16:44:30.052985+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "target_s": 22.0,
+  "think": true,
+  "runs": [
+    {
+      "total_s": 38.697,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "ttft_s": 0.04343133297516033,
+          "ttft_any_s": 0.04343133297516033,
+          "total_s": 0.6325210419599898,
+          "prompt_tokens": 2498,
+          "completion_tokens": 72,
+          "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 62,
+          "decode_tps": 122.22
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": null,
+          "ttft_any_s": 0.05604887497611344,
+          "total_s": 17.809037500002887,
+          "prompt_tokens": 14727,
+          "completion_tokens": 2000,
+          "text": "",
+          "reasoning_chars": 6222,
+          "error": null,
+          "chunks": 1746,
+          "decode_tps": 112.66,
+          "plan_valid": false
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0045,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.1721
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": null,
+          "ttft_any_s": 0.2572032499592751,
+          "total_s": 17.38636504096212,
+          "prompt_tokens": 14970,
+          "completion_tokens": 2000,
+          "text": "",
+          "reasoning_chars": 6220,
+          "error": null,
+          "chunks": 1833,
+          "decode_tps": 116.76,
+          "plan_valid": false
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "ttft_s": 0.25019399996381253,
+          "ttft_any_s": 0.25019399996381253,
+          "total_s": 2.6936308330041356,
+          "prompt_tokens": 2665,
+          "completion_tokens": 300,
+          "text": "{\n  \"title\": \"硫化機 CURE-07 溫度異常核准卡\",\n  \"reason\": \"CURE-07 溫度下降至 122°C，已硫化 10h/28h（中胎），預測將穩定於 122±1°C，低於正常 128°C 基準。\",\n  \"done\": \"監測近 30 分鐘溫度下降趨勢，確認蒸汽壓力 4.58→4.40 kgf/cm²，已核對安全核心規則（已硫化 ≥110°C 停機），目前機台處於受控降溫狀態。\",\n  \"gap\": \"相較於正常基準 128°C，溫度偏低 6°C；相較於預測穩定值 122±1°C，存在穩定性驗證缺口。\",\n  \"deadline\": \"預計硫化總時長 36.5h，剩餘 18.5h 至完結。\",\n  \"option_A\": \"繼續當前降溫曲線至硫化結束",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 247,
+          "decode_tps": 122.78
+        }
+      },
+      "tokens_out": 4372
+    },
+    {
+      "total_s": 38.758,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "ttft_s": 0.02234945900272578,
+          "ttft_any_s": 0.02234945900272578,
+          "total_s": 0.607438417035155,
+          "prompt_tokens": 2498,
+          "completion_tokens": 72,
+          "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 62,
+          "decode_tps": 123.06
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": null,
+          "ttft_any_s": 0.0386081250035204,
+          "total_s": 17.619389583007433,
+          "prompt_tokens": 14727,
+          "completion_tokens": 2000,
+          "text": "",
+          "reasoning_chars": 6901,
+          "error": null,
+          "chunks": 1828,
+          "decode_tps": 113.76,
+          "plan_valid": false
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0036,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.004
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": null,
+          "ttft_any_s": 0.24647362501127645,
+          "total_s": 17.804298708040733,
+          "prompt_tokens": 14969,
+          "completion_tokens": 2000,
+          "text": "",
+          "reasoning_chars": 6548,
+          "error": null,
+          "chunks": 1818,
+          "decode_tps": 113.91,
+          "plan_valid": false
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "ttft_s": 0.2566248749499209,
+          "ttft_any_s": 0.2566248749499209,
+          "total_s": 2.7191897080047056,
+          "prompt_tokens": 2664,
+          "completion_tokens": 300,
+          "text": "{\n  \"title\": \"硫化機 CURE-07 溫度異常核准卡\",\n  \"reason\": \"CURE-07 溫度下降至 122°C，已硫化 10 h / 28 h（中胎），預測將穩定於 122±1°C，未觸發安全核心停機規則。\",\n  \"done\": \"監測近 30 分鐘溫度下降趨勢，確認蒸汽壓力 4.58–4.80 kgf/cm² 正常，無安全核心衝觸。\",\n  \"gap\": \"溫度相對基準 128°C 下降 6°C，需確認是否影響硫化品質或需調整後續工序排程。\",\n  \"deadline\": \"28 h 總硫化時間已過半，剩餘 18 h 預計於 122°C 完成，交期未延遲。\",\n  \"options\": \"A. 維持現狀繼續硫化至完成，依 122±1°C 穩定預測。\\nB. 若主管要求品質檢驗",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 247,
+          "decode_tps": 121.82
+        }
+      },
+      "tokens_out": 4372
+    }
+  ],
+  "total_s": {
+    "n": 2,
+    "min": 38.697,
+    "p50": 38.7275,
+    "p90": 38.7519,
+    "max": 38.758,
+    "mean": 38.7275
+  },
+  "plan_valid_rate": 0.0,
+  "verdicts": [
+    {
+      "name": "full_event_p50",
+      "target": "≈ 22.0 s (≤ target)",
+      "measured": 38.7275,
+      "passed": false,
+      "note": "",
+      "extra": {}
+    }
+  ]
+}

@@ -10,7 +10,7 @@ from typing import Any
 
 from bench.llm import RESULTS_DIR
 
-ORDER = ["ttft", "concurrent", "full_event", "accuracy", "accuracy-open-book", "memory", "unplug", "tokens_per_watt"]
+ORDER = ["ttft", "concurrent", "full_event", "full_event-think", "accuracy", "accuracy-open-book", "memory", "unplug", "tokens_per_watt"]
 
 
 def latest(results_dir: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
@@ -22,7 +22,8 @@ def latest(results_dir: Path) -> dict[tuple[str, str, str], dict[str, Any]]:
             continue
         model = (d.get("endpoint") or {}).get("model") or "+".join(
             r["endpoint"]["model"] for r in d.get("results", []) if "endpoint" in r) or "-"
-        bench = d.get("bench", p.stem.split("-")[0]) + ("-open-book" if d.get("open_book") else "")
+        bench = (d.get("bench", p.stem.split("-")[0]) + ("-open-book" if d.get("open_book") else "")
+                 + ("-think" if d.get("think") else ""))
         key = (bench, d.get("host", {}).get("hostname", "?"), model)
         if key not in best or d.get("recorded_at", "") >= best[key].get("recorded_at", ""):
             best[key] = d | {"_file": p.name}
@@ -35,6 +36,9 @@ def rows(d: dict[str, Any]) -> list[tuple[str, str, str, str]]:
         out.append((v["name"], str(v["target"]), _fmt(v["measured"]),
                     {True: "PASS", False: "FAIL", None: "n/a"}[v["passed"]] + (f" ({v['note']})" if v.get("note") else "")))
     b = d.get("bench")
+    if b == "full_event":
+        out.append(("plan_valid_rate", "1.0", _fmt(d.get("plan_valid_rate")),
+                    "reasoning ON" if d.get("think") else "reasoning OFF"))
     if b == "memory":
         out.append(("stack_gb", f"≤ {d['band_gb'][1]} GB incl. OS", _fmt(d["stack_gb"]),
                     "PASS" if d["stack_within_band"] else "FAIL"))

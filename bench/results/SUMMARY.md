@@ -23,6 +23,9 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 | ttft | ttft_warm_32k_p50 | ≤ 0.5 s | 0.067 | PASS (prompt_tokens=32621) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-155838.json |
 | concurrent | concurrent_3_worst_alert | each ≤ 4.0 s | 1.902 | PASS | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162624.json |
 | full_event | full_event_p50 | ≈ 22.0 s (≤ target) | 14.382 | PASS | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162709.json |
+| full_event | plan_valid_rate | 1.0 | 1.000 | reasoning OFF | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162709.json |
+| full_event-think | full_event_p50 | ≈ 22.0 s (≤ target) | 38.727 | FAIL | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
+| full_event-think | plan_valid_rate | 1.0 | 0.000 | reasoning ON | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
 | unplug | alert_offline | ≤ 2.0 s | 0.635 | PASS | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-163238.json |
 | unplug | outbound_connections | 0 | 0 | PASS (network NOT blocked (needs root); socket count only) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-163238.json |
 | tokens_per_watt | tokens_per_s | - | 113.463 | measured | tokens_per_watt-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-163356.json |
