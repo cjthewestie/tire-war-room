@@ -13,12 +13,6 @@
 #   PAUSE_FILE=$STATE_DIR/pause  (exists -> probe and log, but restart nothing; bench/spark_ablation.sh
 #                      creates it while it recreates vllm. Ignored once older than PAUSE_MAX_S=14400.)
 #   LOG=/dev/stderr   (journald picks it up under systemd)
-#   APP_SCHEDULE_DIR=$APP_DATA/schedules, APP_DATA=/opt/warroom/data/runtime  (host side of the app SCHEDULE_DIR)
-#
-# Restarting the app sends SIGTERM, and a clean stop removes the app's running.json marker, so on its own
-# the next start would replay the scenario from a fresh store: the approved schedule, the press holds
-# and the factory clock would all be lost. Before `restart app` the watchdog therefore drops
-# $APP_SCHEDULE_DIR/resume.request; the app consumes it at start and resumes (warroom/api/runtime.py).
 set -uo pipefail
 APP_URL="${APP_URL:-http://127.0.0.1:8000/api/health}"
 LLM_URL="${LLM_URL:-http://127.0.0.1:8001/health}"
@@ -32,8 +26,6 @@ LOG="${LOG:-/dev/stderr}"
 DOCKER="${DOCKER:-docker}"
 PAUSE_FILE="${PAUSE_FILE:-$STATE_DIR/pause}"
 PAUSE_MAX_S="${PAUSE_MAX_S:-14400}"
-APP_SCHEDULE_DIR="${APP_SCHEDULE_DIR:-${APP_DATA:-/opt/warroom/data/runtime}/schedules}"   # compose: APP_DATA:/app/data/runtime, SCHEDULE_DIR=/app/data/runtime/schedules
-RESUME_REQUEST="$APP_SCHEDULE_DIR/resume.request"
 mkdir -p "$STATE_DIR"
 
 log() { echo "$(date '+%Y-%m-%dT%H:%M:%S%z') watchdog: $*" >>"$LOG"; }
@@ -84,19 +76,7 @@ check() {   # check <name> <url> <compose-service>
       fi
     fi
     log "restarting $svc"
-    if [[ "$svc" == app ]]; then   # a watchdog restart resumes; only an explicit demo reset starts fresh
-      if mkdir -p "$APP_SCHEDULE_DIR" 2>/dev/null && : >"$RESUME_REQUEST" 2>/dev/null; then
-        chmod 666 "$RESUME_REQUEST" 2>/dev/null || true
-        log "resume requested ($RESUME_REQUEST)"
-      else
-        log "could not write $RESUME_REQUEST: the restarted app will replay the scenario fresh"
-      fi
-    fi
-    if ! $COMPOSE restart "$svc" >>"$LOG" 2>&1; then
-      log "restart $svc FAILED"
-      # no restart happened: a stale request must not make some later, deliberate start resume
-      [[ "$svc" == app ]] && rm -f "$RESUME_REQUEST"
-    fi
+    $COMPOSE restart "$svc" >>"$LOG" 2>&1 || log "restart $svc FAILED"
     echo 0 >"$f"
     date +%s >"$STATE_DIR/$name.restarted"
     echo "$(date +%s) $svc" >>"$STATE_DIR/restarts.log"

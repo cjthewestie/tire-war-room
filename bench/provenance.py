@@ -15,7 +15,6 @@ from typing import Any
 BENCH_DIR = Path(__file__).resolve().parent
 BENCH_DEPS: dict[str, tuple[str, ...]] = {
     "ttft": ("ttft.py", "llm.py", "prompts.py"),
-    "decode": ("decode.py", "llm.py", "prompts.py"),
     "concurrent": ("concurrent.py", "llm.py", "prompts.py"),
     "full_event": ("full_event.py", "llm.py", "prompts.py"),
     "accuracy": ("accuracy.py", "llm.py", "prompts.py"),

@@ -41,6 +41,7 @@ from warroom.contracts import (
     ApprovalStatus,
     ApprovedAction,
     AuditKind,
+    BadDataMark,
     Channel,
     CompoundStage,
     DashboardSnapshot,
@@ -1397,8 +1398,36 @@ class Runtime:
     def header(self) -> HeaderStatus:
         tiles = self.machine_tiles()
         normal = sum(1 for t in tiles if t.status in NORMAL_STATUSES)
+        marks = self.bad_data_marks()
         return HeaderStatus(normal_count=normal, abnormal_count=len(tiles) - normal, factory_time=self.clock.now(),
-                            llm_mode=self.llm_mode, network=self.network, warning_light=self.warning_light())
+                            llm_mode=self.llm_mode, network=self.network, warning_light=self.warning_light(),
+                            bad_data_total=sum(m.count for m in marks), bad_data=marks)
+
+    BAD_DATA_WINDOW_MIN = 30.0
+
+    def bad_data_marks(self) -> list[BadDataMark]:
+        """Page 10: readings the validation layer rejected in the last 30 sim-minutes, per machine
+        (one count per rejected reading, whatever the number of bad channels in it)."""
+        log = getattr(self.c.detector, "bad_data_log", None)
+        if not log:
+            return []
+        since = self.clock.now() - timedelta(minutes=self.BAD_DATA_WINDOW_MIN)
+        seen: set[tuple[Any, str]] = set()
+        agg: dict[str, list[Any]] = {}
+        try:
+            for ts, mid, _ch, q in list(log):
+                if ts < since or (ts, mid) in seen:
+                    continue
+                seen.add((ts, mid))
+                a = agg.setdefault(mid, [0, q, ts])
+                a[0] += 1
+                if ts >= a[2]:
+                    a[1], a[2] = q, ts
+        except Exception:  # noqa: BLE001 - a fallback detector with another log shape shows no marks
+            return []
+        order = {m: i for i, m in enumerate(F.MACHINE_IDS)}
+        return [BadDataMark(machine_id=m, count=a[0], last_quality=a[1], last_at=a[2])
+                for m, a in sorted(agg.items(), key=lambda kv: order.get(kv[0], 99))]
 
     def warning_light(self) -> bool:
         """Page 9 tier 3: with the LAN down the phone cannot be reached, so the on-site warning light

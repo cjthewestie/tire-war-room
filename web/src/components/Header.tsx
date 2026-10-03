@@ -1,4 +1,6 @@
+import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
+import { QUALITY_LABEL } from './common'
 import { useWarRoom } from '../useWarRoom'
 
 export type Tab = 'monitor' | 'schedule'
@@ -23,6 +25,12 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
       <div className="top-right">
         {net !== 'online' && <span className={`chip net ${net}`} title="離線分層（p.9）">{NET_LABEL[net]}</span>}
         {h?.warning_light && <span className="chip bad" data-testid="warning-light" title="LAN 中斷：請至現場觸控螢幕處理"><i className="dot bad" />警示燈亮</span>}
+        {(h?.bad_data_total ?? 0) > 0 && (
+          <span className="chip data" data-testid="chip-bad-data"
+            title={(h?.bad_data ?? []).map((b) => `${machineLabel(b.machine_id)}：${b.count} 筆（${QUALITY_LABEL[b.last_quality] ?? b.last_quality}）`).join('\n') + '\n近 30 分；壞資料不喚醒 AI（p.10）'}>
+            <i className="dot data" />驗證層攔下 {h?.bad_data_total} 筆壞資料（{(h?.bad_data ?? []).map((b) => machineLabel(b.machine_id)).join('、')}・未喚醒 AI）
+          </span>
+        )}
         <span className="chip ok" data-testid="chip-normal"><i className="dot ok" />正常 {h?.normal_count ?? '–'} 台</span>
         <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'muted'}`} data-testid="chip-abnormal"><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
         <span className="clock">{ft ? <><span>{fmtMD(ft)}</span><span>{fmtHM(ft)}</span></> : '—'}</span>

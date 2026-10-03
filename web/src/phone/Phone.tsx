@@ -58,21 +58,30 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const chosen = opt ?? (a.options.length === 1 ? a.options[0].id : null)
+  // What 修改 can actually change: the option (a different staffing choice than the system's).
+  // A free-text note never becomes tool args (every *Args model is extra='forbid'), so a modify that
+  // picks no other option executes nothing: it goes back to the commander as a reject with the note,
+  // and the state machine replans (pages 5/7: 主管 核准／修改／否決; nothing he refused may run).
+  const base = (a.options.find((o) => o.recommended) ?? a.options[0])?.id ?? null
+  const changesOption = chosen != null && chosen !== base
+  const chosenOpt = a.options.find((o) => o.id === chosen)
   const send = async (decision: DecisionKind) => {
     if (!transport) return
     if (decision === 'reject' && !reason.trim()) { setMode('reject'); setErr('駁回需要填寫理由'); return }
     if (decision === 'modify' && !reason.trim()) { setMode('modify'); setErr('修改需要填寫修改內容'); return }
-    if (decision !== 'reject' && !chosen) { setErr('請先選擇方案'); return }
+    if (decision === 'approve' && !chosen) { setErr('請先選擇方案'); return }
+    const note = reason.trim()
+    let d: { decision: DecisionKind; option_id: string | null; reason: string }
+    if (decision === 'modify' && changesOption) {
+      d = { decision: 'modify', option_id: chosen, reason: `修改：改選「${chosenOpt?.label ?? chosen}」；${note}` }
+    } else if (decision === 'modify') {
+      d = { decision: 'reject', option_id: null, reason: `退回修改：${note}（未改選方案，原方案不執行，請依修改內容重排）` }
+    } else {
+      d = { decision, option_id: decision === 'reject' ? null : chosen, reason: note || defaultReason(a, chosen) }
+    }
     setBusy(true); setErr(null)
     try {
-      await transport.decide({
-        request_id: a.id, decision, option_id: decision === 'reject' ? null : chosen,
-        // The note is free text for the audit log, never tool args: every *Args model is extra='forbid',
-        // so merging {note} into the chosen step made the gate reject it and the action was silently dropped.
-        modified_args: null,
-        reason: decision === 'modify' ? `修改：${reason.trim()}` : (reason.trim() || defaultReason(a, chosen)),
-        decided_by: '主管', via: 'phone',
-      })
+      await transport.decide({ request_id: a.id, ...d, modified_args: null, decided_by: '主管', via: 'phone' })
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   return (
@@ -103,10 +112,15 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
       {mode && (
         <textarea className="ph-reason" placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容（必填，寫入稽核日誌）'} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
       )}
+      {mode === 'modify' && (
+        <p className="ph-modify-hint" data-testid="modify-hint">{changesOption
+          ? `送出後執行：${chosen} ${chosenOpt?.label ?? ''}（取代系統建議）＋其餘核准內容。修改內容寫入稽核日誌，不改硫化時間等公式數值。`
+          : '未改選方案：原方案全部不執行，修改內容退回指揮官重新規劃（記為退回）。要換人力方案，請先點選另一個方案。'}</p>
+      )}
       {err && <p className="err">{err}</p>}
       <div className="ph-acts">
         <button className="ph-approve" disabled={disabled || busy || !chosen} onClick={() => send('approve')}>{busy ? '送出中…' : `核准${chosen ? ` ${chosen}` : ''}`}</button>
-        <button className="ph-sec" disabled={disabled || busy} onClick={() => (mode === 'modify' ? send('modify') : setMode('modify'))}>{mode === 'modify' ? '送出修改' : '修改'}</button>
+        <button className="ph-sec" disabled={disabled || busy} onClick={() => (mode === 'modify' ? send('modify') : setMode('modify'))}>{mode === 'modify' ? (changesOption ? `送出修改（改選 ${chosen}）` : '退回重排') : '修改'}</button>
         <button className="ph-sec danger" disabled={disabled || busy} onClick={() => (mode === 'reject' ? send('reject') : setMode('reject'))}>{mode === 'reject' ? '確認駁回' : '駁回'}</button>
       </div>
       <p className="ph-foot">決定與理由會寫入稽核日誌，回到狀態機繼續執行。</p>

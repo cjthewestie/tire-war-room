@@ -5,6 +5,7 @@ import { TOOL_LABEL, resultText, staffingChoice, stepLabel } from '../stepText'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
+import { heldAt } from './MachineDrawer'
 import { MarkedText, Panel, RISK_LABEL, STATE_LABEL, TimelineTable, useWidth } from './common'
 
 const H = 3_600_000
@@ -34,6 +35,13 @@ export function ScheduleTab() {
   const active = versions.find((v) => v.status === 'active') ?? state.schedule ?? null
   const events = state.snapshot?.events ?? []
   const ev = events.find((e) => e.id === eventId) ?? primaryEvent(events)
+  // presses out of service (page 11): their in-mold tire is held for QC, so its bar ends at the stop
+  const outAt: Record<string, number> = {}
+  for (const m of state.snapshot?.machines ?? []) {
+    if (m.line !== 'CURE' || m.status !== 'out_of_service') continue
+    const t = heldAt(state.snapshot?.safety_actions ?? [], events, m.machine_id)
+    outAt[m.machine_id] = t ? ms(t) : now
+  }
   const rollback = async () => {
     if (!transport || !active) return
     setMsg(null)
@@ -66,7 +74,7 @@ export function ScheduleTab() {
       <Panel title="硫化機排程（以出模時刻為中心）" num="⑤" className="gantt-panel"
         right={<VersionBar versions={versions} active={active} onRollback={rollback} />}>
         {msg && <p className="note">{msg}</p>}
-        {active ? <Gantt version={active} shifts={shifts} now={now} focusPress={ev?.machine_id} /> : <p className="muted">等待排程…</p>}
+        {active ? <Gantt version={active} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} /> : <p className="muted">等待排程…</p>}
         {active && (active.schedule.staffing_changes.length > 0 || active.schedule.warnings.length > 0) && (
           <div className="sched-notes">
             {active.schedule.staffing_changes.map((c, i) => <span key={i} className={`pill ${c.kind}`}>{c.kind === 'overtime' ? '加班' : '跨組調人'}：{c.label}</span>)}
@@ -100,7 +108,7 @@ function VersionBar({ versions, active, onRollback }: { versions: ScheduleVersio
 }
 const VSTATUS: Record<ScheduleVersion['status'], string> = { draft: '草稿', proposed: '待核准', active: '生效', superseded: '已取代', rolled_back: '已回復' }
 
-function Gantt({ version, shifts, now, focusPress }: { version: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string }) {
+function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string; outAt?: Record<string, number> }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const t0 = Math.floor((now - 6 * H) / H) * H
   const t1 = t0 + 90 * H
@@ -136,16 +144,32 @@ function Gantt({ version, shifts, now, focusPress }: { version: ScheduleVersion;
         {jobs.map((j) => {
           const i = presses.indexOf(j.press_id)
           if (i < 0) return null
-          const a = Math.max(ms(j.mold_in), t0), b = Math.min(ms(j.demold), t1)
+          const stop = outAt[j.press_id]
+          // out of service: a job not yet in the mold is not drawn; the in-mold one ends at the stop (扣模待 QC)
+          if (stop != null && ms(j.mold_in) >= stop) return null
+          const held = stop != null && ms(j.demold) > stop
+          const end = held ? stop : ms(j.demold)
+          if (end <= t0) return null
+          const a = Math.max(ms(j.mold_in), t0), b = Math.min(end, t1)
           const y = TOP + i * ROW + 3
           const hot = j.order_id === '#A-311'
+          const tip = held
+            ? `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → ${fmtMD(stop)} ${fmtHM(stop)} 停用\n扣模待 QC，無出模時間`
+            : `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → 出模 ${fmtMD(j.demold)} ${fmtHM(j.demold)}（${j.cure_h} h）\n貼合 ${fmtHM(j.bond_start)}・A 線投料 ${fmtHM(j.a_feed_start)}`
           return (
             <g key={j.id}>
-              <rect x={x(a)} y={y} width={Math.max(1, x(b) - x(a))} height={ROW - 7} rx={3} className={`g-job sz-${j.size} ${hot ? 'hot' : ''} ${j.frozen ? 'frozen' : ''}`}>
-                <title>{`${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → 出模 ${fmtMD(j.demold)} ${fmtHM(j.demold)}（${j.cure_h} h）\n貼合 ${fmtHM(j.bond_start)}・A 線投料 ${fmtHM(j.a_feed_start)}`}</title>
+              <rect x={x(a)} y={y} width={Math.max(1, x(b) - x(a))} height={ROW - 7} rx={3} className={`g-job sz-${j.size} ${hot ? 'hot' : ''} ${j.frozen ? 'frozen' : ''} ${held ? 'held' : ''}`}>
+                <title>{tip}</title>
               </rect>
               {x(b) - x(a) > 54 && <text x={x(a) + 4} y={y + 12} className="g-job-t">{j.order_id}</text>}
-              {ms(j.demold) <= t1 && <path d={`M${x(ms(j.demold))},${y - 2} l-4,-5 h8 z`} className="g-demold"><title>{`出模 ${fmtHM(j.demold)}`}</title></path>}
+              {held && stop <= t1 && (
+                <g className="g-held">
+                  <line x1={x(stop)} x2={x(stop)} y1={y - 2} y2={y + ROW - 5} />
+                  <text x={x(stop) + 4} y={y + 12}>■ 停用・扣模待 QC</text>
+                  <title>{tip}</title>
+                </g>
+              )}
+              {!held && ms(j.demold) <= t1 && <path d={`M${x(ms(j.demold))},${y - 2} l-4,-5 h8 z`} className="g-demold"><title>{`出模 ${fmtHM(j.demold)}`}</title></path>}
             </g>
           )
         })}

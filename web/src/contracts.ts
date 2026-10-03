@@ -463,6 +463,15 @@ export interface HeaderStatus {
   llm_mode: LLMMode
   network: "online" | "wan_down" | "lan_down"
   warning_light?: boolean   // page 9: LAN down -> on-site touch screen + warning light
+  bad_data_total?: number   // page 10: readings the validation layer rejected (recent window), never wake the AI
+  bad_data?: BadDataMark[]
+}
+
+export interface BadDataMark {
+  machine_id: string
+  count: number
+  last_quality: DataQuality
+  last_at: ISODate
 }
 
 export interface DashboardSnapshot {

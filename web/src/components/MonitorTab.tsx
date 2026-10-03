@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import type { ApprovalRequest, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
+import type { ApprovalRequest, BadDataMark, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
 import { LINES, LINE_SHORT, machineLabel } from '../factory'
 import { fmtHM, fmtNum } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { Panel, STATE_LABEL, STATUS_LABEL, TimelineTable } from './common'
+import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, TimelineTable } from './common'
 
 export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
   const { state } = useWarRoom()
@@ -18,7 +18,7 @@ export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
         <SemiPanel semi={s.semi_finished} />
       </div>
       <FocusPanelView focus={s.focus} pending={state.pending} lanDown={lanDown} />
-      <MachinesPanel machines={s.machines} onMachine={onMachine} />
+      <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} />
     </div>
   )
 }
@@ -70,6 +70,9 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
         <div className="calm-body">
           <p className="calm-title">全廠正常</p>
           <p className="muted">事件偵測常駐監看 28 台機台（非 LLM、全天候常駐）。異常 1 分鐘內喚醒指揮官。</p>
+          {(state.snapshot?.header.bad_data_total ?? 0) > 0 && (
+            <p className="note dq-note" data-testid="bad-data-note">驗證層攔下 {state.snapshot?.header.bad_data_total} 筆壞資料（近 30 分）：{(state.snapshot?.header.bad_data ?? []).map((b) => `${machineLabel(b.machine_id)} ${b.count} 筆・${QUALITY_LABEL[b.last_quality] ?? b.last_quality}`).join('；')}。壞資料不進預測、不喚醒 AI。</p>
+          )}
           {ev && <p className="muted small">上一事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${ev.outcome}` : ''}</p>}
         </div>
       </Panel>
@@ -136,7 +139,8 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
   )
 }
 
-function MachinesPanel({ machines, onMachine }: { machines: MachineTile[]; onMachine: (id: string) => void }) {
+function MachinesPanel({ machines, bad, onMachine }: { machines: MachineTile[]; bad: BadDataMark[]; onMachine: (id: string) => void }) {
+  const badBy = new Map(bad.map((b) => [b.machine_id, b]))
   return (
     <Panel num="④" title="機台狀態（依產線）" className="machines">
       <div className="mlines">
@@ -144,18 +148,22 @@ function MachinesPanel({ machines, onMachine }: { machines: MachineTile[]; onMac
           <div className="mline" key={ln}>
             <span className={`mline-k ln-${ln}`}>{LINE_SHORT[ln]}</span>
             <div className="mline-items">
-              {machines.filter((m) => m.line === ln).map((m) => (
-                <button key={m.machine_id} className={`mdot st-${m.status}`} onClick={() => onMachine(m.machine_id)}
-                  title={`${machineLabel(m.machine_id)}・${STATUS_LABEL[m.status]}${m.temp_c != null ? `・${m.temp_c}°C` : ''}`}
-                  aria-label={`${machineLabel(m.machine_id)} ${STATUS_LABEL[m.status]}`} data-machine={m.machine_id}>
-                  <i className="dot" />{m.short_name}
-                </button>
-              ))}
+              {machines.filter((m) => m.line === ln).map((m) => {
+                const b = badBy.get(m.machine_id)
+                const dq = b ? `・壞資料 ${b.count} 筆（${QUALITY_LABEL[b.last_quality] ?? b.last_quality}，未喚醒 AI）` : ''
+                return (
+                  <button key={m.machine_id} className={`mdot st-${m.status}${b ? ' dq' : ''}`} onClick={() => onMachine(m.machine_id)}
+                    title={`${machineLabel(m.machine_id)}・${STATUS_LABEL[m.status]}${m.temp_c != null ? `・${m.temp_c}°C` : ''}${dq}`}
+                    aria-label={`${machineLabel(m.machine_id)} ${STATUS_LABEL[m.status]}${dq}`} data-machine={m.machine_id}>
+                    <i className="dot" />{m.short_name}{b && <span className="dq-tag" aria-hidden>資料</span>}
+                  </button>
+                )
+              })}
             </div>
           </div>
         ))}
       </div>
-      <p className="muted small foot">點選機台：看溫度、壓力、時間、水流</p>
+      <p className="muted small foot">點選機台：看溫度、壓力、時間、水流{bad.length > 0 && <>・<span className="dq-tag">資料</span> = 驗證層攔下壞資料</>}</p>
     </Panel>
   )
 }

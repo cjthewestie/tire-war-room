@@ -935,6 +935,7 @@ class FocusPanel(_M):
     state: EventState
     timeline: list[TimelineItem] = Field(default_factory=list)
     approved: list[ApprovedAction] = Field(default_factory=list)  # ✓ 已核准
+    revoked: list[str] = Field(default_factory=list)  # ↺ 已撤回: "從 2 線調 1 人（因主管改選夜班加班）" (a consequence, never an approval)
 
 
 class OrderProgress(_M):
@@ -954,6 +955,15 @@ class MachineTile(_M):
     temp_c: float | None = None
 
 
+class BadDataMark(_M):
+    """Readings the validation layer rejected for one machine in the recent window (page 10:
+    bad data is counted and shown, and never wakes the AI)."""
+    machine_id: str
+    count: int                        # rejected readings in the window
+    last_quality: DataQuality
+    last_at: datetime
+
+
 class HeaderStatus(_M):
     normal_count: int                 # 正常 27 台
     abnormal_count: int               # 異常 1 台
@@ -961,6 +971,8 @@ class HeaderStatus(_M):
     llm_mode: LLMMode
     network: Literal["online", "wan_down", "lan_down"] = "online"
     warning_light: bool = False       # page 9: LAN down -> on-site touch screen + warning light (on while something needs a person)
+    bad_data_total: int = 0           # rejected readings in the last BAD_DATA_WINDOW_MIN sim-minutes, all machines
+    bad_data: list[BadDataMark] = Field(default_factory=list)   # per machine, same window
 
 
 class DashboardSnapshot(_M):

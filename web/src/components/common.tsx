@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { EventState, MachineStatus, RiskLevel, TimelineItem } from '../contracts'
 import { fmtHMS } from '../format'
 
+/** page 10: why the validation layer rejected a reading */
+export const QUALITY_LABEL: Record<string, string> = { out_of_range: '超出範圍', jump: '突跳', stale: '數值凍結', neighbor_mismatch: '與鄰機不符', missing: '缺值' }
+
 export const STATE_LABEL: Record<EventState, string> = {
   detected: '偵測', classify: '分類', plan: '規劃', simulate: '模擬', gate: '把關', await_approval: '待核准',
   execute: '執行', verify: '驗證', replan: '換假設', closed: '結案', safe_stop: '安全停止',

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { LINE_LABELS, type Event, type MachineDetail } from '../contracts'
+import { LINE_LABELS, type Event, type MachineDetail, type SafetyAction } from '../contracts'
 import { COMPOUND_STOP_C, CURATIVE_STOP_C, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD, fmtNum, ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { STATUS_LABEL, Sparkline } from './common'
+import { QUALITY_LABEL, STATUS_LABEL, Sparkline } from './common'
 
 const STAGE_LABEL = { none: '無膠料', unvulcanized: '未加硫', curative_added: '已加硫' } as const
 const MODEL_LABEL: Record<string, string> = { constant: '定值模型', 'linear-trend': '線性趨勢', 'exp-approach': '指數趨近', 'int8-ts': 'INT8 時序模型', 'mock-linear': '線性趨勢（模擬）' }
@@ -19,6 +19,14 @@ function latestCureFormula(events: Event[], pressId: string): number | null {
     }
   }
   return null
+}
+
+/** When the press stopped curing: the safety core's cure hold on it, else the close of the event that took it out. */
+export function heldAt(actions: SafetyAction[], events: Event[], pressId: string): string | null {
+  const hold = actions.filter((a) => a.machine_id === pressId && a.action === 'cure_hold').sort((a, b) => (a.ts < b.ts ? 1 : -1))[0]
+  if (hold) return hold.ts
+  const ev = events.filter((e) => e.machine_id === pressId && e.closed_at).sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0]
+  return ev?.closed_at ?? null
 }
 
 export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void }) {
@@ -43,6 +51,10 @@ export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void
   const h = d?.history ?? []
   const temps = h.map((r) => (r.quality === 'ok' ? r.temp_c : null))
   const job = st?.cure_job ?? null
+  // page 11: a press taken out of service keeps its tire in the mold for QC; there is no de-mold time any more
+  const out = isPress && st?.status === 'out_of_service'
+  const held = out ? heldAt(state.snapshot?.safety_actions ?? [], state.snapshot?.events ?? [], id) : null
+  const bad = (state.snapshot?.header.bad_data ?? []).find((b) => b.machine_id === id)
   // cure_formula result for this press (page 11): suggested total cure; shown next to the recipe value, never replacing it
   const formula = isPress ? latestCureFormula(state.snapshot?.events ?? [], id) : null
   const suggestedH = job && formula && Math.abs(formula - job.cure_required_h) > 0.05 ? formula : null
@@ -66,16 +78,22 @@ export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void
             <div className="drawer-meta">
               <span className={`state-pill ms-${d.state.status}`}>{STATUS_LABEL[d.state.status]}</span>
               {isPress
-                ? <span className="muted small">在模：{job ? `${job.order_id} ${SIZE_LABEL[job.size]}` : '無'}</span>
+                ? <span className="muted small">在模：{job ? `${job.order_id} ${SIZE_LABEL[job.size]}${out ? '・扣模待 QC' : ''}` : '無'}</span>
                 : <span className="muted small">膠料：{STAGE_LABEL[d.state.compound_stage]}</span>}
               {d.state.batch_id && <span className="muted small">批號 {d.state.batch_id}</span>}
               <span className="muted small">更新 {fmtHMS(d.state.last_reading?.ts ?? tick)}</span>
             </div>
             {d.state.note && <p className="note">{d.state.note}</p>}
             <div className="tiles">
-              {d.tiles.map((t) => <div key={t.label} className={`tile ${t.status}`}><span className="tile-l">{t.label}</span><span className="tile-v sm">{t.label === '時間' && job ? `${job.cure_elapsed_h.toFixed(1)} h` : t.value}</span></div>)}
+              {d.tiles.map((t) => <div key={t.label} className={`tile ${t.status}`}><span className="tile-l">{t.label}</span><span className="tile-v sm">{t.label === '時間' && job ? (out ? (held ? `停用時 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h` : '扣模待 QC') : `${job.cure_elapsed_h.toFixed(1)} h`) : t.value}</span></div>)}
             </div>
-            {job && (
+            {job && out && (
+              <div className="cure-job held" data-testid="cure-held">
+                <b>{job.order_id}</b>・{SIZE_LABEL[job.size]}・模具 {job.mold_id}・<b className="alarm-t">扣模待 QC</b>
+                <span className="muted small">入模 {fmtMD(job.mold_in_at)} {fmtHM(job.mold_in_at)}{held ? `・${fmtMD(held)} ${fmtHM(held)} 停用（已硫化約 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h）` : ''}・不排出模時間，由品管判定後處置（SOP 硫化中斷處置）</span>
+              </div>
+            )}
+            {job && !out && (
               <div className="cure-job">
                 <b>{job.order_id}</b>・{SIZE_LABEL[job.size]}・模具 {job.mold_id}・已硫化 {job.cure_elapsed_h.toFixed(1)} / {fmtNum(suggestedH ?? job.cure_required_h)} h
                 <div className="bar"><i style={{ width: `${Math.min(100, (100 * job.cure_elapsed_h) / (suggestedH ?? job.cure_required_h))}%` }} /></div>
@@ -92,7 +110,7 @@ export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void
             {h.some((r) => r.pressure_kgf_cm2 != null) && <Chart label="壓力 kgf/cm²" values={h.map((r) => r.pressure_kgf_cm2)} />}
             {h.some((r) => r.water_flow_lpm != null) && <Chart label="水流 L/min" values={h.map((r) => r.water_flow_lpm)} color="var(--line-b)" />}
             {h.some((r) => r.steam_kgf_cm2 != null) && <Chart label="蒸汽 kgf/cm²" values={h.map((r) => r.steam_kgf_cm2)} color="var(--warn)" />}
-            {h.some((r) => r.quality !== 'ok') && <p className="note">資料品質：{h.filter((r) => r.quality !== 'ok').length} 筆被驗證層攔下（不喚醒 AI）</p>}
+            {bad && <p className="note" data-testid="drawer-bad-data">資料品質：近 30 分 {bad.count} 筆被驗證層攔下（最近一筆 {fmtHMS(bad.last_at)}・{QUALITY_LABEL[bad.last_quality] ?? bad.last_quality}），不進預測、不喚醒 AI</p>}
           </>
         )}
       </aside>

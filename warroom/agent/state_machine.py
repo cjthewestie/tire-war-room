@@ -1530,10 +1530,14 @@ class StateMachine:
         opt = next((o for o in req.options if o.id == d.option_id), None)
         others = [o for o in req.options if opt is None or o.id != opt.id]
         if d.decision is DecisionKind.REJECT:
-            text = "[人工] 主管否決" + (f"：{d.reason}" if d.reason else "") + "；決定與理由寫入紀錄"
+            text = (f"[人工] 主管{d.reason}" if d.reason.startswith("退回修改") else
+                    "[人工] 主管否決" + (f"：{d.reason}" if d.reason else "")) + "；決定與理由寫入紀錄"
         elif opt is not None and opt.args.get("kind") == NotifyKind.OVERTIME.value and \
                 any(o.args.get("kind") == NotifyKind.STAFF_MOVE.value for o in others):
             text = f"[人工] 否決跨組調人，改選{opt.label}；決定與理由寫入紀錄"
+        elif d.decision is DecisionKind.MODIFY and not d.modified_args:
+            # nothing but the option changed: say so, never "修改後核准" of an unchanged plan
+            text = f"[人工] 主管改選{(opt.id + ' ' + opt.label) if opt else '方案'}；決定與理由寫入紀錄"
         elif d.decision is DecisionKind.MODIFY:
             text = f"[人工] 主管修改後核准（{opt.label if opt else ''}）；決定與理由寫入紀錄"
         elif len(req.options) > 1 and opt is not None:
@@ -1836,6 +1840,8 @@ class StateMachine:
             for res in run.results.values():
                 if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("schedule_version") == v:
                     run.done += moves_text(res.data.get("moves"))   # grouped per order; same-press shifts left out
+            # the close summary lists what is in force at the end: a newer version supersedes the older one
+            run.executed = [x for x in run.executed if not (x.startswith("排程 v") and x.endswith(" 生效"))]
             run.executed.append(f"排程 v{v} 生效")
             if isinstance(v, int):
                 run.activated.append(v)
@@ -1846,6 +1852,8 @@ class StateMachine:
             if kind == NotifyKind.MACHINE_OUT.value:
                 mid = step.args.get("machine_id") or ev.machine_id
                 self._set_status(mid, MachineStatus.OUT_OF_SERVICE, f"{machine_label(mid)}停用")
+                # a cure time set earlier for this press no longer runs: the tire is held for QC
+                run.executed = [x for x in run.executed if not x.startswith(f"{machine_label(mid)}硫化 ")]
                 run.executed.append(f"{machine_label(mid)}停用")
             elif kind in STAFFING_KINDS:
                 label = step.purpose.split(" ", 1)[-1]

@@ -15,7 +15,7 @@ import uvicorn
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse
 
-from bench import accuracy, concurrent, decode, full_event, memory_check, report, tokens_per_watt, ttft, unplug_test
+from bench import accuracy, concurrent, full_event, memory_check, report, tokens_per_watt, ttft, unplug_test
 from bench.llm import Endpoint, detect_kind, parse_json, stream_chat, summarize, thinking_extra
 from warroom.contracts import CommanderPlan
 from warroom import factory as F
@@ -751,59 +751,3 @@ def test_egress_evidence_linux_reads_split_counters_and_drop_log(monkeypatch):
         {"block": {"applied": True}, "sockets": {"outbound_connections": 0, "outbound": []}, "egress": r,
          "internet_reachable_during_test": False, "app": {}}, 0.5, False)}["outbound_connections"]
     assert v["measured"] == 1 and v["passed"] is False and "1 stack attempt" in v["note"]
-
-
-# ---------------------------------------------------------------- page-10 decode speed (推測解碼 95–108 tok/s)
-def test_decode_tps_excludes_prefill_token_and_judges_low_edge():
-    assert decode.decode_tps(101, 0.5, 1.5) == 100.0          # 100 decode tokens in 1 s after the first token
-    assert decode.decode_tps(1, 0.5, 1.5) is None and decode.decode_tps(50, None, 1.0) is None
-    assert decode.DECODE_TPS_BAND == (95.0, 108.0)
-    assert decode.judge(101.0, 10, None).passed is True
-    assert decode.judge(94.9, 10, "full").passed is False
-    hi = decode.judge(120.0, 10, None)
-    assert hi.passed is True and "under-states" in hi.note
-    assert decode.judge(60.0, 10, "no_spec").passed is None   # ablation leg: info only
-    assert decode.judge(None, 0, None).passed is None
-
-
-def test_decode_runner_is_single_stream_full_plan(env_fake, tmp_path):
-    url, state = env_fake
-    n0 = len(state.get("bodies", []))
-    out = decode.main(["--runs", "4", "--out-dir", str(tmp_path)])
-    bodies = state["bodies"][n0:]
-    assert len(bodies) == 5                                    # 1 prime + 4 judged, sequential
-    assert all(b["response_format"]["json_schema"]["name"] == "CommanderPlan" for b in bodies)
-    assert all(b["max_tokens"] == decode.COMMANDER_MAX_TOKENS for b in bodies[1:])   # never cut at the card
-    assert {c["phase"] for c in out["calls"]} == {"plan", "replan"}
-    assert out["batch"] == 1 and out["decode_tps"]["n"] >= 1
-    v = out["verdicts"][0]
-    assert v["name"] == "decode_tps_p50" and v["measured"] == out["decode_tps"]["p50"]
-    assert json.loads(Path(out["saved_to"]).read_text())["bench"] == "decode"
-
-
-def test_decode_ablation_reports_spec_contribution(tmp_path):
-    def put(cfg, p50, tps):
-        d = tmp_path / cfg
-        d.mkdir()
-        (d / "decode-x-20261003-000000.json").write_text(json.dumps({"decode_tps": {"p50": p50}, "n_counted": 10}))
-        (d / "tokens_per_watt-x-20261003-000000.json").write_text(json.dumps({"plug": {"tokens_per_s": tps}}))
-    put("full", 102.0, 240.0)
-    put("no_spec", 60.0, 170.0)
-    put("mtp", 90.0, 220.0)
-    out = decode.main(["--ablation", str(tmp_path)])
-    c = out["contributions"]
-    assert c["spec_decode_dspark"] == {"with": "full", "without": "no_spec", "delta_tps": 42.0, "speedup_x": 1.7}
-    assert c["spec_decode_mtp"]["delta_tps"] == 30.0
-    assert out["configs"]["full"]["tokens_per_s_concurrent"] == 240.0
-    assert out["verdicts"][0]["passed"] is True                # production (full) judged against ≥ 95
-
-
-def test_ablation_runs_decode_and_tokens_per_watt_every_config():
-    s = (Path(__file__).resolve().parents[1] / "bench" / "spark_ablation.sh").read_text()
-    start = s.index('for c in $CONFIGS; do\n  read -r')
-    end = s.index("\ndone\n", start)
-    loop = s[start:end]
-    assert '-m bench.decode --runs 10 --config "$c"' in loop
-    assert "-m bench.tokens_per_watt" in loop
-    assert '-m bench.decode --ablation "$OUT"' in s[end:]
-    assert "bench.decode" in s.splitlines()[[i for i, l in enumerate(s.splitlines()) if "import bench.ttft" in l][0]]

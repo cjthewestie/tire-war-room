@@ -1,0 +1,95 @@
+// Round-4 UI review fixes against a live backend:
+//   uv run python -m warroom.api serve --port 8793   then   node web/e2e/r4check.mjs http://localhost:8793
+// 1 phone 修改 never runs an unchanged plan; 2 a stopped press shows 扣模待 QC (drawer, Gantt, outcome);
+// 3 bad data is visible on the main screen (header chip, ③ note, machine marks, drawer).
+import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const require = createRequire(import.meta.url)
+let pw
+for (const id of ['playwright', 'playwright-core', `${homedir()}/.local/lib/node_modules/@playwright/cli/node_modules/playwright-core`]) { try { pw = require(id); break } catch { /* next */ } }
+const BASE = process.argv[2] ?? 'http://localhost:8000'
+const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../../docs/screenshots')
+const results = []
+const check = (n, ok, det = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${det ? `  — ${det}` : ''}`) }
+const errors = []
+const b = await pw.chromium.launch()
+const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Taipei' })
+const d = await ctx.newPage()
+d.on('pageerror', (e) => errors.push(e.message))
+const post = (body) => d.evaluate((b) => fetch('/api/sim/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.ok), body)
+await d.goto(BASE + '/', { waitUntil: 'networkidle' })
+
+// ---- 3 bad data
+await post({ action: 'scenario', scenario: 'bad_data' }); await post({ action: 'speed', speed: 30 })
+await d.waitForSelector('[data-testid=chip-bad-data]', { timeout: 30000 }).catch(() => {})
+await d.waitForTimeout(4000)
+const chip = await d.locator('[data-testid=chip-bad-data]').innerText().catch(() => '')
+check('header chip counts rejected readings', /驗證層攔下 \d+ 筆壞資料/.test(chip) && chip.includes('未喚醒 AI'), chip)
+const note = await d.locator('[data-testid=bad-data-note]').innerText().catch(() => '')
+check('③ names the machines', note.includes('3 號硫化機') || note.includes('A 線'), note)
+const marks = await d.locator('.mdot.dq').count()
+check('machine dots carry a data mark', marks >= 3, `${marks} marked`)
+check('header still 異常 0', (await d.locator('[data-testid=chip-abnormal]').innerText()).includes('0'))
+await d.screenshot({ path: `${OUT}/r4fix-baddata-1440.png` })
+await d.locator('.mdot[data-machine=CURE-03]').click()
+await d.waitForSelector('[data-testid=drawer-bad-data]', { timeout: 5000 }).catch(() => {})
+check('CURE-03 drawer shows rejected count', (await d.locator('[data-testid=drawer-bad-data]').innerText().catch(() => '')).includes('被驗證層攔下'))
+await d.keyboard.press('Escape')
+
+// ---- page 11 with the phone
+await post({ action: 'scenario', scenario: 'press7_temp_drop' }); await post({ action: 'speed', speed: 20 })
+const pctx = await b.newContext({ viewport: { width: 390, height: 844 }, timezoneId: 'Asia/Taipei' })
+const ph = await pctx.newPage()
+ph.on('pageerror', (e) => errors.push(e.message))
+await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
+const waitOpts = async (n = 1) => { for (let i = 0; i < 240; i++) { if ((await ph.locator('.ph-opt').count()) >= n) return true; await ph.waitForTimeout(1000) } return false }
+// round 1: keep the system option, write a note, 修改 → must be 退回重排, nothing runs
+await waitOpts(2)
+await ph.locator('.ph-sec', { hasText: '修改' }).click()
+await ph.fill('.ph-reason', '硫化改 34 h，不要調人')
+const hint = await ph.locator('[data-testid=modify-hint]').innerText()
+check('modify without another option says nothing runs', hint.includes('原方案全部不執行'), hint)
+await ph.screenshot({ path: `${OUT}/r4fix-phone-modify-390.png`, fullPage: true })
+await ph.locator('.ph-sec', { hasText: '退回重排' }).click()
+await ph.waitForTimeout(4000)
+let evs = await d.evaluate(() => fetch('/api/events').then((r) => r.json()))
+let ev = evs.find((e) => e.machine_id === 'CURE-07')
+let tl = (ev?.timeline ?? []).map((x) => x.text).join('\n')
+check('timeline: 退回修改, not 修改後核准', tl.includes('主管退回修改') && !tl.includes('修改後核准'))
+const sv = await d.evaluate(() => fetch('/api/schedule').then((r) => r.json()))
+check('schedule unchanged (v1) after 退回', sv.version === 1, `v${sv.version}`)
+// approve every later round with the first option (overtime) until closed
+for (let i = 0; i < 400; i++) {
+  await d.waitForTimeout(1000)
+  if (await ph.locator('.ph-card .ph-opt').count()) {
+    await ph.locator('.ph-opt').first().click()
+    if (await ph.locator('.ph-approve:enabled').count()) { await ph.locator('.ph-approve:enabled').first().click(); await ph.waitForTimeout(1500) }
+  }
+  evs = await d.evaluate(() => fetch('/api/events').then((r) => r.json()))
+  ev = evs.find((e) => e.machine_id === 'CURE-07')
+  if (ev && ['closed', 'safe_stop'].includes(ev.state)) break
+}
+check('event closed', ev?.state === 'closed', `${ev?.state}: ${ev?.outcome}`)
+const m7 = await d.evaluate(() => fetch('/api/machines/CURE-07').then((r) => r.json()))
+check('press 7 out of service', m7.state.status === 'out_of_service', m7.state.status)
+check('outcome has no superseded cure time', !/硫化 3\d\.\d h/.test(ev?.outcome ?? ''), ev?.outcome)
+const vs = (ev?.outcome ?? '').match(/排程 v\d/g) ?? []
+check('outcome names one schedule version', vs.length <= 1, vs.join(','))
+await d.locator('.mdot[data-machine=CURE-07]').click()
+await d.waitForSelector('[data-testid=cure-held]', { timeout: 6000 }).catch(() => {})
+const dr = await d.locator('.drawer').innerText()
+check('drawer: 扣模待 QC, no de-mold ETA', dr.includes('扣模待 QC') && !dr.includes('預計出模'), dr.split('\n').filter((x) => x.includes('扣模') || x.includes('出模')).join(' | '))
+await d.screenshot({ path: `${OUT}/r4fix-p11-drawer7-1440.png` })
+await d.keyboard.press('Escape')
+await d.locator('.tabs button', { hasText: '排程與人力' }).click()
+await d.waitForTimeout(1500)
+check('Gantt marks press 7 stopped', (await d.locator('.g-held').count()) >= 1)
+await d.screenshot({ path: `${OUT}/r4fix-p11-sched-1440.png`, fullPage: true })
+await ph.screenshot({ path: `${OUT}/r4fix-phone-final-390.png`, fullPage: true })
+check('no page errors', errors.length === 0, errors.join(' | '))
+await b.close()
+console.log(`${results.filter(Boolean).length}/${results.length} passed`)
+process.exit(results.every(Boolean) ? 0 : 1)
