@@ -131,6 +131,7 @@ services:
       # REQUIRED: the supervisor phone sends it as X-Supervisor-Pin over the LAN. compose refuses to start without it.
       WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:?set WARROOM_SUPERVISOR_PIN (8+ random chars) in deploy/spark/.env}
       WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
+      WARROOM_LOOPBACK_LOCAL: "1"   # host network: 127.0.0.1 really is the on-box touchscreen (the app turns loopback off by default inside a NAT'd container)
     volumes:
       - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
     mem_limit: 6g                 # page 9: scheduling + app 6 GB

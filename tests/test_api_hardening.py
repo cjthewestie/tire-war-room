@@ -305,7 +305,7 @@ async def test_page11_overtime_clears_gap_and_restart_keeps_schedule(tmp_path):
     assert not [e for e in after if e.kind is AuditKind.ROLLBACK], [e.payload for e in after]
     assert not [e for e in after if e.kind is AuditKind.STATE_TRANSITION]
     assert any(e.payload.get("msg") == "event interrupted by shutdown" for e in after)
-    rt2 = Runtime(_settings(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value), run_loop=False)
+    rt2 = Runtime(_settings(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value), run_loop=False, resume=True)
     assert rt2.builder.reopened_store is True
     assert [(v.version, v.status) for v in rt2.c.store.versions()] == versions_before
     assert rt2.c.store.current().version == active.version

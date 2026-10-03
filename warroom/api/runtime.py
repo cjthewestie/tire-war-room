@@ -116,6 +116,8 @@ class ComponentBuilder:
         self.commander = self._commander()
         self.scheduler = self._scheduler()
         self.capacity = self._capacity()
+        self.orders_db = self._orders_db()
+        self.reopened_store = False
 
     def _t(self, name: str, real: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
         if not self.use_real:
@@ -167,12 +169,31 @@ class ComponentBuilder:
             return capacity_report
         return self._t("capacity", real, lambda: FB.fallback_capacity_report)
 
+    def _orders_db(self):
+        """Page 10: orders and shifts are imported from Excel (no MES). With Settings.orders_xlsx set,
+        the workbook is loaded into an in-memory OrdersDB and every per-run sim is wrapped so the
+        scheduler, the order panel and the commander's orders/shifts query read the workbook."""
+        path = self.s.orders_xlsx
+        if not path:
+            return None
+
+        def real():
+            from warroom.kb import OrdersDB
+            p = Path(path)
+            if not p.is_file():
+                raise FileNotFoundError(f"ORDERS_XLSX not found: {p}")
+            db = OrdersDB(":memory:", clock=self.clock, seed=False, xlsx=p)
+            if not db.orders():
+                raise ValueError(f"ORDERS_XLSX {p} has no orders sheet rows")
+            return db
+        return self._t("orders_xlsx", real, lambda: None)
+
     # --- per run ---
     def build(self, scenario: ScenarioName, sleep: Callable[[float], Any] | None = None,
               fresh_store: bool = True, staged: bool = False) -> Components:
-        """fresh_store=False (process start) reopens the persisted schedule store of the same
-        scenario, so a watchdog restart or an offline update keeps approved versions and the
-        rollback history (page 10). An explicit scenario load or reset starts a fresh store.
+        """fresh_store=False (a RESUME: crash / watchdog restart, see Runtime._resume_wanted) reopens
+        the persisted schedule store of the same scenario, so approved versions and the rollback
+        history survive (page 10). A plain process start, a scenario load or a reset starts fresh.
 
         staged=True (live scenario switch): the fresh store is built in a staging folder and the
         live folder is left alone; Runtime commits it with commit_store() only after the whole
@@ -185,6 +206,8 @@ class ComponentBuilder:
             from warroom.sim import Factory
             return Factory(clock=clock, seed=7, scenario=ScenarioName.NORMAL)
         sim = self._t("sim", sim_real, lambda: FB.FallbackFactory(clock=clock))
+        if self.orders_db is not None:
+            sim = ImportedPlanSim(sim, self.orders_db)
         sc = sim.load_scenario(scenario)
         if getattr(sc, "start_at", None) and abs((clock.now() - sc.start_at).total_seconds()) > 1:
             clock.reset(sc.start_at)
@@ -317,6 +340,31 @@ class ComponentBuilder:
         return None
 
 
+class ImportedPlanSim:
+    """The plant sim with orders and shifts from the imported Excel workbook (page 10, no MES).
+    Everything else (machines, readings, faults, cures) is the sim's own; only the plan data the
+    scheduler, the order panel and query_orders_shifts read comes from the workbook."""
+
+    def __init__(self, sim: Any, db: Any):
+        object.__setattr__(self, "_sim", sim)
+        object.__setattr__(self, "_db", db)
+
+    def orders(self):
+        return self._db.orders()
+
+    def shifts(self):
+        return self._db.shifts()
+
+    def order_progress(self):
+        return self._db.order_progress()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._sim, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        setattr(self._sim, name, value)
+
+
 class _NoLock:
     def __enter__(self):
         return self
@@ -327,6 +375,11 @@ class _NoLock:
 
 HOLD_STATUSES = (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED)
 HOLDS_FILE = "holds.json"
+PLANT_FILE = "plant.json"            # last factory time, next to the store (same lifecycle)
+RUNNING_MARKER = "running.json"      # in schedule_dir: written by start(), removed by stop()
+RESUME_REQUEST = "resume.request"    # in schedule_dir: a watchdog asks the next start to resume
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
 
 
 class _NullAudit:
@@ -345,7 +398,12 @@ class Runtime:
 
     def __init__(self, settings: Settings | None = None, *, components: Components | None = None,
                  builder: ComponentBuilder | None = None, allow_fallback: bool = True, use_real: bool = True,
-                 tick_wall_s: float = 0.2, max_steps_per_iter: int = 600, run_loop: bool = True):
+                 tick_wall_s: float = 0.2, max_steps_per_iter: int = 600, run_loop: bool = True,
+                 resume: bool | None = None):
+        """resume: None = decide from the environment (see _resume_wanted). A plain process start
+        replays the scenario from its scripted start on a FRESH store with no machine holds; only a
+        resume (crash, kill, watchdog restart) reopens the store, reapplies the holds and continues
+        the factory clock from the last persisted time instead of replaying the script."""
         self.settings = settings or get_settings()
         self.builder = None if components else (builder or ComponentBuilder(self.settings, allow_fallback, use_real))
         try:
@@ -354,7 +412,10 @@ class Runtime:
             self.scenario = ScenarioName.NORMAL
         self._sleepers: list[tuple[datetime, int, asyncio.Future]] = []
         self._sleeper_seq = itertools.count()
-        self.c: Components = components or self.builder.build(self.scenario, sleep=self.sim_sleep, fresh_store=False)
+        self.resumed = False
+        want_resume = False if components is not None else self._resume_wanted(resume)
+        self.c: Components = components or self.builder.build(self.scenario, sleep=self.sim_sleep,
+                                                              fresh_store=not want_resume)
         from warroom.api.ingest import IngestPipeline
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self.speed = float(self.settings.sim_speed)
@@ -379,7 +440,11 @@ class Runtime:
         self._switch_lock: asyncio.Lock | None = None
         self._holds: dict[str, dict[str, Any]] = {}
         self._oob_seen: dict[str, datetime] = {}
-        if components is None and getattr(self.builder, "reopened_store", False):
+        self._safety_unrecorded: list[SafetyAction] = []   # applied, but audit/attach failed: retried
+        self._last_plant_persist = -1e9
+        if components is None and want_resume and getattr(self.builder, "reopened_store", False):
+            self.resumed = True
+            self._restore_plant()                # factory clock continues; the script is not replayed
             self._reapply_holds()                # watchdog restart: press 7 stays out of service
         self._holds = self._sim_holds()
 
@@ -396,11 +461,105 @@ class Runtime:
     def running(self) -> bool:
         return self._loop_task is not None and not self._loop_task.done()
 
+    # ------------------------------------------------------------------ resume vs fresh start
+    def _resume_wanted(self, resume: bool | None) -> bool:
+        """Resume only on a genuine restart: an explicit resume=True, WARROOM_RESUME=1, a
+        resume.request file a watchdog left in schedule_dir (consumed here), or a running.json marker
+        left by a process that never reached stop() (crash, kill -9, power loss). A clean stop removes
+        the marker, so the next start (a re-run before the judges, a boot after a clean shutdown)
+        replays the scenario from a fresh store."""
+        sched_dir = Path(self.settings.schedule_dir)
+        req = sched_dir / RESUME_REQUEST
+        requested = req.is_file()
+        if requested:
+            try:
+                req.unlink()
+            except OSError:
+                pass
+        if resume is not None:
+            return resume
+        env = os.environ.get("WARROOM_RESUME", "").strip().lower()
+        if env in _TRUE:
+            return True
+        if env in _FALSE:
+            return False
+        return requested or (sched_dir / RUNNING_MARKER).is_file()
+
+    def _plant_path(self) -> Path | None:
+        root = getattr(self.c.store, "root", None)
+        return Path(root) / PLANT_FILE if root is not None else None
+
+    def _persist_plant(self, force: bool = False) -> None:
+        now = time.monotonic()
+        if not force and now - self._last_plant_persist < 2.0:
+            return
+        path = self._plant_path()
+        if path is None or not path.parent.is_dir():
+            return
+        self._last_plant_persist = now
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps({"factory_time": self.clock.now().isoformat(), "scenario": self.scenario.value},
+                                  ensure_ascii=False), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def _restore_plant(self) -> None:
+        """Resume: continue the factory clock from the last persisted time. The scripted scenario
+        already played out before the restart, so the plant is reloaded calm (NORMAL) at that time;
+        its faults are not replayed on top of the decisions already taken (press holds, the schedule)."""
+        path = self._plant_path()
+        t: datetime | None = None
+        try:
+            if path is not None and path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if raw.get("scenario") == self.scenario.value:
+                    t = datetime.fromisoformat(raw["factory_time"]).astimezone(F.TZ)
+        except Exception as e:  # noqa: BLE001 - unreadable: keep the scenario start, say why
+            log.warning("plant state %s unreadable: %s", path, e)
+        if t is None:
+            self.audit.append(AuditKind.SYSTEM, "system", {"msg": "resumed after restart; no persisted factory "
+                                                                  "time, scenario start kept"})
+            return
+        load = self.sim.load_scenario
+        try:
+            if "start_at" in inspect.signature(load).parameters:
+                load(ScenarioName.NORMAL, start_at=t)
+            else:
+                load(ScenarioName.NORMAL)
+        except Exception as e:  # noqa: BLE001
+            log.warning("could not reload the plant for resume: %s", e)
+        if abs((self.clock.now() - t).total_seconds()) > 1:
+            self.clock.reset(t)
+        self.audit.append(AuditKind.SYSTEM, "system", {"msg": "resumed after restart", "factory_time": t.isoformat(),
+                                                       "scenario": self.scenario.value,
+                                                       "note": "scripted faults not replayed; plant reloaded calm"})
+
+    def _write_running_marker(self) -> None:
+        d = Path(self.settings.schedule_dir)
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+            (d / RUNNING_MARKER).write_text(json.dumps({"pid": os.getpid(), "scenario": self.scenario.value}),
+                                            encoding="utf-8")
+        except OSError as e:
+            log.warning("running marker not written: %s", e)
+
+    def _clear_running_marker(self) -> None:
+        try:
+            (Path(self.settings.schedule_dir) / RUNNING_MARKER).unlink(missing_ok=True)
+        except OSError as e:
+            log.warning("running marker not removed: %s", e)
+
     # ------------------------------------------------------------------ lifecycle
     async def start(self) -> None:
         self.started_wall = time.monotonic()
+        if self.builder is not None:
+            self._write_running_marker()
+            try:
+                self._persist_plant(force=True)
+            except Exception:  # noqa: BLE001
+                log.exception("persist plant")
         self.audit.append(AuditKind.SYSTEM, "system", {"msg": "runtime start", "scenario": self.scenario.value,
-                                                       "degraded": self.degraded, "llm_mode": self.llm_mode.value})
+                                                       "resumed": self.resumed, "degraded": self.degraded,
+                                                       "llm_mode": self.llm_mode.value})
         if self.c.kb is not None:
             asyncio.get_running_loop().run_in_executor(None, self._ingest_kb)
         if self.run_loop and not self.running:
@@ -416,6 +575,7 @@ class Runtime:
     async def stop(self) -> None:
         try:
             self._sync_holds()
+            self._persist_plant(force=True)
         except Exception:  # noqa: BLE001 - never block a shutdown
             log.exception("persist holds")
         if self._loop_task:
@@ -426,6 +586,8 @@ class Runtime:
                 pass
             self._loop_task = None
         await self._cancel_events(shutdown=True)
+        if self.builder is not None:
+            self._clear_running_marker()         # clean stop: the next start replays fresh
 
     async def _cancel_events(self, shutdown: bool = False) -> None:
         """shutdown=True (process stop / watchdog restart): open events are recorded as INTERRUPTED
@@ -495,9 +657,10 @@ class Runtime:
         now = time.monotonic()
         try:
             self._sync_holds()
+            self._persist_plant()
         except Exception:  # noqa: BLE001 - persistence must never break the loop
             log.exception("persist holds")
-        if self.network == "lan_down" or getattr(self, "_light_on", False):
+        if self.network == "lan_down" or self._safety_unrecorded or getattr(self, "_light_on", False):
             try:
                 self.sync_warning_light()
             except Exception:  # noqa: BLE001 - the light must never break the loop
@@ -554,20 +717,53 @@ class Runtime:
     def safety_pass(self, readings: list[SensorReading]) -> list[SafetyAction]:
         """RED path: deterministic and synchronous, never awaits. Runs on every batch of readings
         before any hold, MQTT hop, detection or LLM work (page 5: acts directly, not via the LLM)."""
+        t0 = time.perf_counter()
         states = {m.machine_id: m for m in self.sim.machines()}
         acts = list(self.c.safety.check(readings, states))
+        applied: list[SafetyAction] = []
+        # 1. act on the plant for EVERY action first. Nothing below (audit disk, bus, event attach)
+        #    can drop or delay an action: the safety core has already latched them all.
         for a in acts:
-            self.sim.apply_safety_action(a)
-            self.safety_log.append(a)
-            del self.safety_log[:-100]
+            try:
+                self.sim.apply_safety_action(a)
+            except Exception:  # noqa: BLE001 - one bad apply must not skip the next machine
+                log.exception("apply safety action %s on %s", a.action.value, a.machine_id)
+            # latency up to the point the plant was acted on (batch received -> applied)
+            applied.append(a.model_copy(update={"latency_ms": round((time.perf_counter() - t0) * 1000.0, 3)}))
+        self.safety_log.extend(applied)
+        del self.safety_log[:-100]
+        # 2. then record. A record that fails is queued, retried every pass, and lights the warning light.
+        self._retry_safety_records()
+        for a in applied:
+            if self._safety_unrecorded or not self._record_safety(a):
+                if a not in self._safety_unrecorded:
+                    self._safety_unrecorded.append(a)
+            try:
+                self.bus.publish(WsType.SAFETY_ACTION, a)
+            except Exception:  # noqa: BLE001
+                log.exception("publish safety action")
+        return applied
+
+    def _record_safety(self, a: SafetyAction) -> bool:
+        """Audit the action and attach it to the open event. Never raises."""
+        try:
             on_safety = getattr(self.state_machine, "on_safety_action", None)
             if callable(on_safety):           # state machine audits it and attaches it to the open event
                 on_safety(a)
             else:
                 self.audit.append(AuditKind.SAFETY_ACTION, "safety", a.model_dump(mode="json"),
                                   self._open_event_id(a.machine_id))
-            self.bus.publish(WsType.SAFETY_ACTION, a)
-        return acts
+            return True
+        except Exception:  # noqa: BLE001 - the plant was already acted on; keep it for retry
+            log.exception("record safety action %s on %s (queued for retry)", a.action.value, a.machine_id)
+            return False
+
+    def _retry_safety_records(self) -> None:
+        """Retry records in order; stop at the first one that still fails (keeps the log in order)."""
+        while self._safety_unrecorded:
+            if not self._record_safety(self._safety_unrecorded[0]):
+                return
+            self._safety_unrecorded.pop(0)
 
     def _on_anomaly(self, an: Anomaly) -> None:
         if an.detection_latency_s is None:
@@ -1086,19 +1282,95 @@ class Runtime:
                                           label=opt.label if opt else req.title, decided_by=who, status=req.status))
         return out
 
-    def schedule_impact(self, ev: Event) -> str:
-        for sr in reversed(ev.steps):
+    @staticmethod
+    def _all_steps(ev: Event) -> list[Any]:
+        """Every StepRun of the event, oldest round first (a replan moves earlier rounds' steps to
+        ev.prior_rounds when the event model carries them)."""
+        out: list[Any] = []
+        for rnd in getattr(ev, "prior_rounds", None) or []:
+            out += list(getattr(rnd, "steps", None) or [])
+        return out + list(ev.steps)
+
+    @staticmethod
+    def _confirm_version(sr: Any, before: list[Any]) -> int | None:
+        """The schedule version a confirm_schedule step activates ("$S3.schedule_version" resolved
+        against the closest earlier step with that id)."""
+        v = sr.result.data.get("version") if sr.result and sr.result.ok and sr.result.data else None
+        if isinstance(v, int):
+            return v
+        v = sr.step.args.get("schedule_version")
+        if isinstance(v, str) and v.startswith("$"):
+            ref, _, path = v[1:].partition(".")
+            src = next((b for b in reversed(before) if b.step.id == ref and b.result and b.result.ok), None)
+            v = (src.result.data or {}).get(path or "schedule_version") if src else None
+        return v if isinstance(v, int) else None
+
+    def _schedule_rounds(self, ev: Event) -> tuple[list[tuple[int | None, dict]], list[int], set[int]]:
+        """(solves [(version, data)], versions this event put into force, versions refused)."""
+        steps = self._all_steps(ev)
+        solves: list[tuple[int | None, dict]] = []
+        activated: list[int] = []
+        refused: set[int] = set()
+        for i, sr in enumerate(steps):
             if sr.step.tool is ToolName.SOLVE_SCHEDULE and sr.result and sr.result.ok:
-                data = sr.result.data
-                moves = [mv for mv in data.get("moves") or [] if mv.get("from_press") != mv.get("to_press")]
-                if moves:
-                    from warroom.agent.narrate import machine_label
-                    parts = [f"{mv.get('order_id')} 移至 {machine_label(str(mv.get('to_press')))}" for mv in moves[:3]]
-                    late = data.get("late_orders") or []
-                    tail = "交期不受影響" if data.get("deliveries_met", not late) else f"延誤：{'、'.join(late)}"
-                    return "；".join(parts) + f"；{tail}"
-                return "無，重排後交期全部滿足" if data.get("deliveries_met", True) else \
-                    f"延誤：{'、'.join(data.get('late_orders') or [])}"
+                data = sr.result.data or {}
+                v = data.get("schedule_version")
+                solves.append((v if isinstance(v, int) else None, data))
+            elif sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+                v = self._confirm_version(sr, steps[:i])
+                if v is None:
+                    continue
+                if sr.state == "ok":
+                    if v not in activated:
+                        activated.append(v)
+                elif sr.state in ("failed", "skipped", "rejected"):
+                    refused.add(v)
+        return solves, activated, refused
+
+    @staticmethod
+    def _moves_phrase(data: dict) -> str:
+        from warroom.agent.narrate import moves_text
+        mv = moves_text(data.get("moves"))            # same grouping as the phone card (count per press)
+        return "、".join(mv) if mv else "機台不變"
+
+    @staticmethod
+    def _delivery_tail(data: dict) -> str:
+        late = data.get("late_orders") or []
+        return "交期不受影響" if data.get("deliveries_met", not late) else f"延誤：{'、'.join(late)}"
+
+    def schedule_impact(self, ev: Event) -> str:
+        """③ 排程影響. Only what this event put into force counts as the schedule; a proposal is
+        shown as 待核准 while it can still be approved, and never after it was refused or the event
+        ended (safe stop keeps the approved version, not the discarded proposal)."""
+        solves, activated, refused = self._schedule_rounds(ev)
+        if solves:
+            by_v = {v: d for v, d in solves if v is not None}
+            terminal = ev.state in TERMINAL_STATES
+            lv, ldata = solves[-1]
+            proposal_open = not terminal and lv not in activated and lv not in refused
+            parts: list[str] = []
+            if activated:
+                av = activated[-1]
+                adata = by_v.get(av)
+                desc = self._moves_phrase(adata) if adata is not None else "已重排"
+                keep = terminal and (lv not in activated)
+                head = f"維持已核准 v{av}" if keep else f"已生效 v{av}"
+                parts.append(f"{head}：{desc}")
+                if not proposal_open:
+                    parts.append(self._delivery_tail(adata) if adata is not None else "交期不受影響")
+                    if keep and lv is not None:
+                        parts.append(f"v{lv} 未生效")
+            if proposal_open:
+                tag = f"待核准 v{lv}" if lv is not None else "待核准"
+                parts.append(f"{tag}：{self._moves_phrase(ldata)}")
+                parts.append(self._delivery_tail(ldata))
+            elif not terminal and any(sr.step.tool is ToolName.SOLVE_SCHEDULE and sr.state in ("pending", "running")
+                                      for sr in ev.steps):
+                parts.append("重排計算中…")
+            if parts:
+                return "；".join(parts)
+            # solved, nothing put into force, nothing open: the original schedule stands
+            return "保留原排程（未重排）"
         # No solver result yet. A press event, or any plan that schedules a solve, is still being
         # computed; the page-2 "大胎 #07 仍 17:00 入硫化機" sentence belongs only to the
         # event on the big open mill, where #07's A part is preheating (open_mill_overheat).
@@ -1131,6 +1403,8 @@ class Runtime:
     def warning_light(self) -> bool:
         """Page 9 tier 3: with the LAN down the phone cannot be reached, so the on-site warning light
         calls a person to the touch screen whenever an approval is waiting or an event is open."""
+        if self._safety_unrecorded:            # a safety action acted on the plant but is not audited yet
+            return True
         if self.network != "lan_down":
             return False
         if list(self.approvals.pending()):
