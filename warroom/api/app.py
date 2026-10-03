@@ -8,7 +8,11 @@ the on-site touch screen / dashboard kiosk) is the supervisor seat. Any other LA
 the shared supervisor PIN in `X-Supervisor-Pin` (env WARROOM_SUPERVISOR_PIN); with no PIN set,
 remote writes are refused. `decided_by` and `via` are set by the server from that session, never
 taken from the body as given, and `via="auto"` is server-only. /api/sim/* are demo controls and can
-be switched off with WARROOM_DEMO_CONTROLS=0. Page 9 tiers: lan_down refuses phone/remote approvals
+be switched off with WARROOM_DEMO_CONTROLS=0.
+PIN guessing is throttled (PinGuard): per client address, 5 wrong PINs lock that address out with
+a doubling back-off (30 s .. 15 min); 20 wrong PINs from anywhere within 10 min lock every remote
+write for 5 min. Every wrong PIN and every lockout is written to the audit log (kind intercepted).
+The PIN travels only in the header (never in a URL); set WARROOM_SSL_CERTFILE/KEYFILE to serve TLS. Page 9 tiers: lan_down refuses phone/remote approvals
 (409) and lights the warning light; only the local touch screen can decide."""
 from __future__ import annotations
 
@@ -17,6 +21,10 @@ import contextlib
 import hmac
 import logging
 import os
+import threading
+import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from datetime import datetime
@@ -96,6 +104,59 @@ class AccessConfig:
         return cls(supervisor_pin=pin, demo_controls=demo, local_hosts=(local_hosts or LOCAL_HOSTS) | extra)
 
 
+class PinGuard:
+    """Brute-force throttle for the supervisor PIN. Keyed by the TCP peer address (never by
+    X-Forwarded-For, which the client controls), plus a global budget so many addresses cannot
+    share the work. Wall-clock (monotonic) on purpose: this is a security limit, not factory time."""
+
+    def __init__(self, per_host_max: int = 5, base_lock_s: float = 30.0, max_lock_s: float = 900.0,
+                 global_max: int = 20, global_window_s: float = 600.0, global_lock_s: float = 300.0,
+                 now: Callable[[], float] = time.monotonic):
+        self.per_host_max, self.base_lock_s, self.max_lock_s = per_host_max, base_lock_s, max_lock_s
+        self.global_max, self.global_window_s, self.global_lock_s = global_max, global_window_s, global_lock_s
+        self.now = now
+        self._lock = threading.Lock()
+        self._fails: dict[str, int] = {}          # consecutive wrong PINs since the last lock/success
+        self._strikes: dict[str, int] = {}        # lockouts so far (doubles the next one)
+        self._until: dict[str, float] = {}
+        self._global: deque[float] = deque()
+        self._global_until = 0.0
+
+    def locked_for(self, host: str) -> float:
+        """Seconds this host must still wait (0 = may try)."""
+        with self._lock:
+            t = self.now()
+            return max(0.0, self._until.get(host, 0.0) - t, self._global_until - t)
+
+    def failure(self, host: str) -> tuple[float, str | None]:
+        """Record a wrong PIN. Returns (lock seconds now in force, 'host'|'global'|None if new lock)."""
+        with self._lock:
+            t = self.now()
+            self._global.append(t)
+            while self._global and t - self._global[0] > self.global_window_s:
+                self._global.popleft()
+            new = None
+            if len(self._global) >= self.global_max and self._global_until <= t:
+                self._global_until = t + self.global_lock_s
+                self._global.clear()
+                new = "global"
+            n = self._fails.get(host, 0) + 1
+            self._fails[host] = n
+            if n >= self.per_host_max:
+                k = self._strikes.get(host, 0)
+                self._strikes[host] = k + 1
+                self._until[host] = t + min(self.max_lock_s, self.base_lock_s * 2 ** k)
+                self._fails[host] = 0
+                new = new or "host"
+            return max(0.0, self._until.get(host, 0.0) - t, self._global_until - t), new
+
+    def success(self, host: str) -> None:
+        with self._lock:
+            self._fails.pop(host, None)
+            self._strikes.pop(host, None)
+            self._until.pop(host, None)
+
+
 class FaultBody(BaseModel):
     """FaultSpec without the id (server assigns one when missing)."""
     id: str | None = None
@@ -118,29 +179,58 @@ class NetworkBody(BaseModel):
     network: Literal["online", "wan_down", "lan_down"]
 
 
+def _norm_host(h: str) -> str:
+    """'::ffff:127.0.0.1' (IPv4-mapped, what Node's proxy forwards) -> '127.0.0.1'."""
+    h = h.strip()
+    return h[7:] if h.lower().startswith("::ffff:") else h
+
+
 def _404(what: str) -> HTTPException:
     return HTTPException(status_code=404, detail=f"not found: {what}")
 
 
 def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = None,
-               demo_controls: bool | None = None, local_hosts: frozenset[str] | None = None) -> FastAPI:
+               demo_controls: bool | None = None, local_hosts: frozenset[str] | None = None,
+               pin_guard: PinGuard | None = None) -> FastAPI:
     """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at / and /phone."""
     holder: dict[str, Runtime] = {}
     access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts)
+    guard = pin_guard or PinGuard()
+    if access.supervisor_pin and len(access.supervisor_pin) < 8:
+        log.warning("WARROOM_SUPERVISOR_PIN is %d characters; use 8+ random characters (PIN guessing is "
+                    "throttled, but a short PIN is still guessable over time)", len(access.supervisor_pin))
+
+    def _audit_pin(msg: str, host: str, **extra: Any) -> None:
+        try:
+            rt().audit.append(AuditKind.INTERCEPTED, f"remote@{host}", {"msg": msg, "host": host, **extra})
+        except Exception:  # noqa: BLE001 - auditing must not turn a 401 into a 500
+            log.exception("audit pin failure")
 
     def supervisor(request: Request) -> Session:
         """Who may write. Loopback = the on-site seat; LAN clients need the supervisor PIN."""
-        host = request.client.host if request.client else ""
-        fwd = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        host = _norm_host(request.client.host if request.client else "")
+        fwd = [_norm_host(h) for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
         local = host in access.local_hosts and all(h in access.local_hosts for h in fwd)
         if local:
             return Session(actor="supervisor", local=True, host=host)
         if not access.supervisor_pin:
             raise HTTPException(status_code=403, detail="remote writes are disabled: set WARROOM_SUPERVISOR_PIN "
                                                         "and send it as X-Supervisor-Pin")
+        wait = guard.locked_for(host)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=f"too many wrong PINs: locked for {wait:.0f} s",
+                                headers={"Retry-After": str(int(wait) + 1)})
         got = request.headers.get("x-supervisor-pin", "")
         if not hmac.compare_digest(got.encode(), access.supervisor_pin.encode()):
+            lock_s, new = guard.failure(host)
+            _audit_pin("supervisor PIN rejected", host, path=request.url.path, pin_sent=bool(got))
+            if new:
+                _audit_pin("supervisor PIN lockout", host, scope=new, lock_s=round(lock_s))
+            if lock_s > 0:
+                raise HTTPException(status_code=429, detail=f"too many wrong PINs: locked for {lock_s:.0f} s",
+                                    headers={"Retry-After": str(int(lock_s) + 1)})
             raise HTTPException(status_code=401, detail="supervisor PIN required (X-Supervisor-Pin)")
+        guard.success(host)
         return Session(actor=f"supervisor@{fwd[0] if fwd else host}", local=False, host=fwd[0] if fwd else host)
 
     def demo(session: Session = Depends(supervisor)) -> Session:
@@ -417,12 +507,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 r.set_speed(ctl.speed)
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from None
-        elif ctl.action == "reset":
-            await r.reset()
-        elif ctl.action == "scenario":
-            if ctl.scenario is None:
+        elif ctl.action in ("reset", "scenario"):
+            if ctl.action == "scenario" and ctl.scenario is None:
                 raise HTTPException(status_code=422, detail="scenario required")
-            await r.load_scenario(ctl.scenario)
+            try:
+                await (r.reset() if ctl.action == "reset" else r.load_scenario(ctl.scenario))
+            except Exception as e:  # noqa: BLE001 - the runtime kept the previous scenario intact
+                raise HTTPException(status_code=503, detail={
+                    "message": f"情境切換失敗，維持原情境 {r.scenario.value}：{type(e).__name__}: {e}"[:400],
+                    "scenario": r.scenario.value}) from None
         if ctl.speed is not None and ctl.action != "speed":
             r.set_speed(ctl.speed)
         r.bus.publish(WsType.CLOCK, r.clock_info())

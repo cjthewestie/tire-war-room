@@ -119,7 +119,7 @@ services:
       PORT: "8000"
       WARROOM_INGEST: ${WARROOM_INGEST:-mqtt}            # readings go sim/gateway -> mosquitto -> app; broker down = direct + counted
       WARROOM_MQTT_URL: mqtt://mqtt:1883
-      WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:-}  # REQUIRED for phone approvals over the LAN (X-Supervisor-Pin / ?pin=)
+      WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:-}  # REQUIRED for phone approvals over the LAN (X-Supervisor-Pin header; use 8+ random chars)
       WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
       WARROOM_LOCAL_HOSTS: ${WARROOM_LOCAL_HOSTS:-}        # e.g. the edge bridge gateway, so the on-box touch screen counts as local
     volumes:

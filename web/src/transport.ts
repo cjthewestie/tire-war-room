@@ -56,13 +56,13 @@ async function getJSON<T>(path: string): Promise<T> {
 }
 
 // Writes from a LAN client (the phone) need the supervisor PIN (server: WARROOM_SUPERVISOR_PIN).
-// Open the page once as /phone?pin=XXXX (kept in this browser), or enter it when asked.
+// It is entered when asked and sent only in the X-Supervisor-Pin header: never read from or put in a
+// URL (history, logs), and kept for this tab only (sessionStorage), not persisted in the browser.
 const PIN_KEY = 'warroom.pin'
 function supervisorPin(): string | null {
   try {
-    const q = new URLSearchParams(location.search).get('pin')
-    if (q) { localStorage.setItem(PIN_KEY, q); return q }
-    return localStorage.getItem(PIN_KEY)
+    try { localStorage.removeItem(PIN_KEY) } catch { /* older builds kept it here */ }
+    return sessionStorage.getItem(PIN_KEY)
   } catch { return null }
 }
 async function errDetail(r: Response): Promise<string> {
@@ -79,10 +79,11 @@ async function postJSON<T>(path: string, body: unknown, retried = false): Promis
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (pin) headers['X-Supervisor-Pin'] = pin
   const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
   if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
     const p = window.prompt('請輸入主管 PIN（廠內 LAN 核准）')
     if (p) {
-      try { localStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
       return postJSON<T>(path, body, true)
     }
   }

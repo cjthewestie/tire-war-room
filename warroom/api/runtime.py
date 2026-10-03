@@ -18,12 +18,15 @@ import asyncio
 import heapq
 import inspect
 import itertools
+import json
 import logging
+import os
 import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from warroom import factory as F
@@ -164,10 +167,14 @@ class ComponentBuilder:
 
     # --- per run ---
     def build(self, scenario: ScenarioName, sleep: Callable[[float], Any] | None = None,
-              fresh_store: bool = True) -> Components:
+              fresh_store: bool = True, staged: bool = False) -> Components:
         """fresh_store=False (process start) reopens the persisted schedule store of the same
         scenario, so a watchdog restart or an offline update keeps approved versions and the
-        rollback history (page 10). An explicit scenario load or reset starts a fresh store."""
+        rollback history (page 10). An explicit scenario load or reset starts a fresh store.
+
+        staged=True (live scenario switch): the fresh store is built in a staging folder and the
+        live folder is left alone; Runtime commits it with commit_store() only after the whole
+        build succeeded, or throws it away with discard_staging()."""
         for k in self.PER_RUN:
             self.degraded.pop(k, None)
         clock, bus = self.clock, self.bus
@@ -190,7 +197,7 @@ class ComponentBuilder:
             return RuleSafetyCore(clock=clock)
         safety = self._t("safety", safety_real, lambda: FB.FallbackSafetyCore(clock=clock))
 
-        store = self._store(sim, scenario, fresh_store)
+        store = self._store(sim, scenario, fresh_store, staged=staged)
         attach_plan = getattr(detector, "attach_plan", None)
         if callable(attach_plan):               # page 6: compare plan with actual every minute
             attach_plan(store=store, sim=sim)
@@ -229,8 +236,42 @@ class ComponentBuilder:
                           tools=tools, gate=gate, commander=self.commander, capacity=self.capacity,
                           degraded=self.degraded)
 
-    def _store(self, sim, scenario: ScenarioName | None = None, fresh: bool = True):
-        root = self.s.schedule_dir / "live"
+    @property
+    def live_root(self) -> Path:
+        return self.s.schedule_dir / "live"
+
+    @property
+    def staging_root(self) -> Path:
+        return self.s.schedule_dir / "live.staging"
+
+    def discard_staging(self) -> None:
+        shutil.rmtree(self.staging_root, ignore_errors=True)
+
+    def commit_store(self, old_store: Any, new_store: Any) -> None:
+        """Swap a staged fresh store in as the live one. The old store is detached first, under its
+        own lock (so a solver thread of a cancelled event that is mid-write finishes first): its root
+        points at a folder that no longer exists, so any late write from that thread fails instead of
+        landing in the new live store (the cause of 'live has no ACTIVE version')."""
+        live, staging = self.live_root, self.staging_root
+        new_root = getattr(new_store, "root", None)
+        if new_root is None or Path(new_root) != staging:
+            return                                   # memory fallback store: nothing on disk to swap
+        lock = getattr(old_store, "_lock", None)
+        dead = self.s.schedule_dir / f"live.retired-{time.monotonic_ns()}"
+        with (lock if lock is not None else _NoLock()):
+            if old_store is not None and getattr(old_store, "root", None) is not None:
+                try:
+                    old_store.root = dead
+                except Exception:  # noqa: BLE001
+                    pass
+            if live.exists():
+                os.replace(live, dead)
+            os.replace(staging, live)
+            new_store.root = live
+        shutil.rmtree(dead, ignore_errors=True)
+
+    def _store(self, sim, scenario: ScenarioName | None = None, fresh: bool = True, staged: bool = False):
+        root = self.staging_root if (staged and fresh) else self.live_root
         marker = root / "scenario.txt"
 
         def real():
@@ -269,6 +310,18 @@ class ComponentBuilder:
             if res.schedule is not None:
                 return res.schedule
         return None
+
+
+class _NoLock:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+
+HOLD_STATUSES = (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED)
+HOLDS_FILE = "holds.json"
 
 
 class _NullAudit:
@@ -317,6 +370,13 @@ class Runtime:
         self._llm_probe: tuple[float, bool] = (-1e9, False)
         self.ticks = 0
         self.compute_hold_max_s = 120.0          # never freeze the plant longer than this per tick
+        self._switching = False                  # a scenario load is swapping components: no ticks
+        self._switch_lock: asyncio.Lock | None = None
+        self._holds: dict[str, dict[str, Any]] = {}
+        self._oob_seen: dict[str, datetime] = {}
+        if components is None and getattr(self.builder, "reopened_store", False):
+            self._reapply_holds()                # watchdog restart: press 7 stays out of service
+        self._holds = self._sim_holds()
 
     # ------------------------------------------------------------------ shortcuts
     clock = property(lambda self: self.c.clock)
@@ -349,6 +409,10 @@ class Runtime:
             self._kb_ok = False
 
     async def stop(self) -> None:
+        try:
+            self._sync_holds()
+        except Exception:  # noqa: BLE001 - never block a shutdown
+            log.exception("persist holds")
         if self._loop_task:
             self._loop_task.cancel()
             try:
@@ -424,6 +488,10 @@ class Runtime:
 
     def _publish_periodic(self, force: bool = False) -> None:
         now = time.monotonic()
+        try:
+            self._sync_holds()
+        except Exception:  # noqa: BLE001 - persistence must never break the loop
+            log.exception("persist holds")
         if self.network == "lan_down" or getattr(self, "_light_on", False):
             try:
                 self.sync_warning_light()
@@ -450,6 +518,8 @@ class Runtime:
         accelerated demo (or a test driving tick() flat out) keeps the page-11 beats. The wait sits
         at the END of the tick, after this second's readings went through the safety core: the red
         path never waits on the LLM (page 5); only the simulated plant's clock does."""
+        if self._switching:                     # components are being swapped (load_scenario)
+            return
         before = self.clock.now()
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
@@ -461,6 +531,7 @@ class Runtime:
         self._track_baseline(readings)
         for an in self.c.detector.ingest(readings):
             self._on_anomaly(an)
+        self._track_after_close()
         self._wake_sleepers()
         if publish:
             self._publish_periodic(force=True)
@@ -579,20 +650,69 @@ class Runtime:
         self._publish_periodic(force=True)
 
     async def load_scenario(self, name: ScenarioName) -> None:
+        """Switch scenario as one step: stop the plant loop, cancel and await every event task, build
+        the new components with the schedule store in a staging folder, then swap. If the build
+        fails, the old components, clock and live store are kept as they were (never a new clock with
+        the old events) and the error is raised."""
         if self.builder is None:
             raise RuntimeError("runtime was built from injected components; cannot rebuild")
-        await self._cancel_events()
-        self._wake_sleepers(cancel=True)
-        self.scenario = ScenarioName(name)
-        self.c = self.builder.build(self.scenario, sleep=self.sim_sleep, fresh_store=True)
-        self.ingest.reset()
-        self.safety_log.clear()
-        self.anomalies.clear()
-        self._baseline.clear()
-        self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "scenario loaded", "scenario": self.scenario.value,
-                                                           "factory_time": self.clock.now().isoformat(),
-                                                           "degraded": self.degraded})
-        self._publish_periodic(force=True)
+        if self._switch_lock is None:
+            self._switch_lock = asyncio.Lock()
+        async with self._switch_lock:
+            new_scenario = ScenarioName(name)
+            was_running = self.running
+            self._switching = True
+            try:
+                if self._loop_task is not None:
+                    self._loop_task.cancel()
+                    try:
+                        await self._loop_task
+                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                        pass
+                    self._loop_task = None
+                for _ in range(20):              # a cancelled task may not spawn more, but be sure
+                    if not any(not t.done() for t in self._tasks.values()):
+                        break
+                    await self._cancel_events()
+                self._tasks.clear()
+                self._wake_sleepers(cancel=True)
+                saved_now = self.clock.now()
+                saved_degraded = dict(self.builder.degraded)
+                try:
+                    comps = self.builder.build(new_scenario, sleep=self.sim_sleep, fresh_store=True, staged=True)
+                    self.builder.commit_store(self.c.store, comps.store)
+                except Exception as e:
+                    self.builder.discard_staging()
+                    self.builder.degraded.clear()
+                    self.builder.degraded.update(saved_degraded)
+                    if self.clock.now() != saved_now:
+                        self.clock.reset(saved_now)
+                    log.exception("scenario load %s failed; previous scenario kept", new_scenario.value)
+                    try:
+                        self.audit.append(AuditKind.SYSTEM, "system",
+                                          {"msg": "scenario load failed; previous scenario kept",
+                                           "scenario": new_scenario.value, "kept": self.scenario.value,
+                                           "error": f"{type(e).__name__}: {e}"[:300]})
+                    except Exception:  # noqa: BLE001
+                        pass
+                    raise
+                self.scenario = new_scenario
+                self.c = comps
+                self.ingest.reset()
+                self.safety_log.clear()
+                self.anomalies.clear()
+                self._baseline.clear()
+                self._oob_seen.clear()
+                self._holds = self._sim_holds()
+                self.__dict__.pop("_wip", None)
+                self.audit.append(AuditKind.SYSTEM, "supervisor",
+                                  {"msg": "scenario loaded", "scenario": self.scenario.value,
+                                   "factory_time": self.clock.now().isoformat(), "degraded": self.degraded})
+            finally:
+                self._switching = False
+                if was_running and self.run_loop and not self.running:
+                    self._loop_task = asyncio.create_task(self._loop(), name="warroom-loop")
+            self._publish_periodic(force=True)
 
     async def reset(self) -> None:
         await self.load_scenario(self.scenario)
@@ -655,7 +775,44 @@ class Runtime:
         if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE, MachineStatus.WARNING) and \
                 self._open_event_id(m.machine_id):
             return MachineStatus.ALARM
+        seen = self._oob_seen.get(m.machine_id)
+        if m.status in NORMAL_STATUSES and seen is not None and \
+                (self.clock.now() - seen).total_seconds() <= self.OOB_RELEASE_S:
+            # its event closed but the readings are not back in band (e.g. cooling water still low):
+            # still 異常（處置中）, so the header never says 正常 next to a red tile
+            return MachineStatus.WARNING
         return m.status
+
+    OOB_RELEASE_S = 60.0       # back in band this long (sim s) after a closed event -> 正常 again
+
+    def _track_after_close(self) -> None:
+        """Per tick, for machines whose latest event is closed: remember when a reading was last out
+        of band. Only those machines: the plain tile rule is too twitchy on small channels to drive
+        the header for the whole plant, and a machine with an open event is ALARM anyway."""
+        latest: dict[str, Event] = {}
+        for ev in self.events():
+            cur = latest.get(ev.machine_id)
+            if cur is None or ev.opened_at > cur.opened_at:
+                latest[ev.machine_id] = ev
+        now = self.clock.now()
+        for mid, ev in latest.items():
+            if ev.state not in TERMINAL_STATES:
+                continue
+            try:
+                m = self.sim.machine(mid)
+            except Exception:  # noqa: BLE001
+                continue
+            if self._out_of_band(m):
+                self._oob_seen[mid] = now
+
+    def _out_of_band(self, m: MachineState) -> bool:
+        """Same rule as the red tiles (tiles_for): a live reading past the alarm line."""
+        if m.last_reading is None:
+            return False
+        try:
+            return any(t.status is TileStatus.ALARM for t in self.tiles_for(m))
+        except Exception:  # noqa: BLE001
+            return False
 
     def machine_tiles(self) -> list[MachineTile]:
         by_id = {m.machine_id: m for m in self.sim.machines()}
@@ -672,7 +829,7 @@ class Runtime:
         ms = sorted(self.sim.machines(), key=lambda m: order.get(m.machine_id, 999))
         if line:
             ms = [m for m in ms if m.line.value == line]
-        return [m.model_copy(update={"status": self._effective_status(m)}) for m in ms]
+        return [self._live_note(m.model_copy(update={"status": self._effective_status(m)})) for m in ms]
 
     def lines(self) -> list[dict[str, Any]]:
         tiles = self.machine_tiles()
@@ -719,7 +876,7 @@ class Runtime:
 
     def machine_detail(self, machine_id: str, minutes: float = 30.0) -> MachineDetail:
         m = self.sim.machine(machine_id)
-        m = m.model_copy(update={"status": self._effective_status(m)})
+        m = self._live_note(m.model_copy(update={"status": self._effective_status(m)}))
         ev = self._event_obj(self._open_event_id(machine_id))
         hist = self.sim.history(machine_id, minutes)
         hist = hist[::max(1, len(hist) // 180)]
@@ -747,12 +904,7 @@ class Runtime:
             return None
         d = F.MACHINE_BY_ID[ev.machine_id]
         m = self.sim.machine(ev.machine_id)
-        if d.line.value == "CURE":
-            where = f"{int(d.short_name)} 號{d.name}"
-        elif d.line.value == "BOND":
-            where = f"貼合{d.name}"
-        else:
-            where = f"{d.line.value} 線{d.name}"
+        where = self._where(ev.machine_id)
         title = f"異常：{where}　{KIND_TEXT.get(ev.anomaly.kind.value, ev.anomaly.kind.value)}"
         hyp = next((h for h in reversed(ev.hypotheses) if h.status.value in ("active", "confirmed")), None) or \
             (ev.plan.hypothesis if ev.plan else None)
@@ -768,13 +920,48 @@ class Runtime:
                           tiles=self.tiles_for(m, ev), auto_done=auto_done, pending=pending,
                           schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline)
 
+    @staticmethod
+    def _where(machine_id: str) -> str:
+        d = F.MACHINE_BY_ID[machine_id]
+        if d.line.value == "CURE":
+            return f"{int(d.short_name)} 號{d.name}"
+        if d.line.value == "BOND":
+            return f"貼合{d.name}"
+        return f"{d.line.value} 線{d.name}"
+
+    def _live_note(self, m: MachineState) -> MachineState:
+        """The drawer banner (MachineState.note): the state machine stores the detector's wake-time
+        message there, whose forecast (e.g. '約 6 分後達 120°C') can be disproved minutes later.
+        Replace it with the same live sentence and forecast the focus panel uses, labelled."""
+        if not m.note:
+            return m
+        ev = next((e for e in sorted(self.events(), key=lambda e: e.opened_at, reverse=True)
+                   if e.machine_id == m.machine_id and e.anomaly.message and m.note.startswith(e.anomaly.message)),
+                  None)
+        if ev is None or ev.anomaly.channel is not Channel.TEMP or m.last_reading is None or \
+                m.last_reading.temp_c is None:
+            return m
+        live = self._live_detail(ev, m, self._where(m.machine_id))
+        if ev.state not in TERMINAL_STATES:
+            live = f"事件處置中（{ev.anomaly.ts:%H:%M} 喚醒）；現況：{live}"
+        return m.model_copy(update={"note": live})
+
     def _live_detail(self, ev: Event, m: MachineState, where: str) -> str:
         """Centre-panel sentence built from the LIVE reading at render time (page 2: 膠溫 112°C 且持續
         上升), not the frozen detection-time message. The forecast comes from the detector's
         prediction and stays consistent with it: a rise that settles below the limit says so."""
         r = m.last_reading
-        if ev.anomaly.channel is not Channel.TEMP or r is None or r.temp_c is None or ev.state in TERMINAL_STATES:
+        if ev.anomaly.channel is not Channel.TEMP or r is None or r.temp_c is None:
             return ev.anomaly.message
+        if ev.state in TERMINAL_STATES:
+            # never the frozen wake-time message (its time-to-limit may be disproved by now): the live
+            # reading and the current forecast, labelled as the state after closing
+            closed = "事件已結案" if ev.state.value == "closed" else "已安全停止"
+            return f"{closed}；現況：" + self._live_sentence(m, where)
+        return self._live_sentence(m, where)
+
+    def _live_sentence(self, m: MachineState, where: str) -> str:
+        r = m.last_reading
         d = F.MACHINE_BY_ID[m.machine_id]
         is_press = d.line.value == "CURE"
         label = "膠溫" if m.compound_stage is not CompoundStage.NONE else ("硫化溫度" if is_press else "溫度")
@@ -969,6 +1156,62 @@ class Runtime:
             ops.append(("demold", j.press_id, t))
         return [(sh, n, short) for sh, n, short in staffing_gaps(ops, full) if sh.end > now]
 
+    # ------------------------------------------------------------------ war-room machine holds
+    # A press taken out of service (machine_out notify) or held / stopped by the safety core is a
+    # factory decision, not sim state. It is persisted next to the schedule store (same lifecycle:
+    # kept on a watchdog restart, cleared by an explicit scenario load) and reapplied on startup,
+    # so a restart cannot quietly re-enable a press or a rollback onto it (page 7 / page 10).
+    def _holds_path(self) -> Path | None:
+        root = getattr(self.c.store, "root", None)
+        return Path(root) / HOLDS_FILE if root is not None else None
+
+    def _sim_holds(self) -> dict[str, dict[str, Any]]:
+        try:
+            ms = self.sim.machines()
+        except Exception:  # noqa: BLE001
+            return {}
+        return {m.machine_id: {"status": m.status.value, "note": m.note}
+                for m in ms if m.status in HOLD_STATUSES}
+
+    def persisted_holds(self) -> dict[str, dict[str, Any]]:
+        path = self._holds_path()
+        if path is None or not path.is_file():
+            return {}
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            return {k: v for k, v in raw.items() if k in F.MACHINE_BY_ID and isinstance(v, dict)
+                    and v.get("status") in {st.value for st in HOLD_STATUSES}}
+        except Exception as e:  # noqa: BLE001 - unreadable file: report, keep running
+            log.warning("holds file %s unreadable: %s", path, e)
+            return {}
+
+    def _sync_holds(self) -> None:
+        cur = self._sim_holds()
+        if cur == self._holds:
+            return
+        path = self._holds_path()
+        if path is not None and path.parent.is_dir():
+            tmp = path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(cur, ensure_ascii=False, indent=1), encoding="utf-8")
+            os.replace(tmp, path)
+        added = sorted(set(cur) - set(self._holds))
+        released = sorted(set(self._holds) - set(cur))
+        self._holds = cur
+        if added or released:
+            self.audit.append(AuditKind.SYSTEM, "system", {"msg": "machine holds persisted", "holds": cur,
+                                                           "added": added, "released": released})
+
+    def _reapply_holds(self) -> None:
+        holds = self.persisted_holds()
+        for mid, h in holds.items():
+            try:
+                self.sim.set_machine_status(mid, MachineStatus(h["status"]), h.get("note"))
+            except Exception as e:  # noqa: BLE001
+                log.warning("could not reapply hold on %s: %s", mid, e)
+        if holds:
+            self.audit.append(AuditKind.SYSTEM, "system", {"msg": "machine holds reapplied after restart",
+                                                           "holds": holds})
+
     # ------------------------------------------------------------------ schedule rollback (gated)
     ROLLBACK_BLOCKING = (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED, MachineStatus.OFFLINE)
 
@@ -1002,6 +1245,13 @@ class Runtime:
         elif target.status.value not in ("superseded", "rolled_back"):
             reasons.append(f"v{target.version} 狀態為 {target.status.value}，從未核准生效；只能回復曾生效的版本")
         blocked: dict[str, str] = {}
+        try:
+            self._sync_holds()
+        except Exception:  # noqa: BLE001
+            log.exception("persist holds")
+        for mid, h in self.persisted_holds().items():      # survives a restart even if the sim forgot
+            if mid in F.CURE_PRESS_IDS:
+                blocked[mid] = h["status"]
         for m in self.sim.machines():
             if m.machine_id not in F.CURE_PRESS_IDS:
                 continue

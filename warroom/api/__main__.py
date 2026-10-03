@@ -39,9 +39,14 @@ def cmd_serve(args) -> int:
     from warroom.api.runtime import Runtime
     s = _settings(args)
     app = create_app(Runtime(s, allow_fallback=not args.strict))
-    print(f"戰情室 on http://{s.host}:{s.port}  (dashboard /, phone /phone, API /docs)  "
+    # TLS on the factory LAN (the supervisor PIN header must not be sniffable): point these at a
+    # cert/key pair, e.g. one minted for the Spark's LAN address and trusted on the supervisor phone.
+    cert, key = os.environ.get("WARROOM_SSL_CERTFILE"), os.environ.get("WARROOM_SSL_KEYFILE")
+    tls = {"ssl_certfile": cert, "ssl_keyfile": key} if cert and key else {}
+    scheme = "https" if tls else "http"
+    print(f"戰情室 on {scheme}://{s.host}:{s.port}  (dashboard /, phone /phone, API /docs)  "
           f"scenario={s.scenario} speed={s.sim_speed} llm={s.llm_mode.value}", flush=True)
-    uvicorn.run(app, host=s.host, port=s.port, log_level=args.log_level, ws="websockets")
+    uvicorn.run(app, host=s.host, port=s.port, log_level=args.log_level, ws="websockets", **tls)
     return 0
 
 
