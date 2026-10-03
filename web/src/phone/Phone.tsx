@@ -6,6 +6,7 @@ import { machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
+import { useApprovalAlerts } from './alert'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -16,6 +17,7 @@ export function Phone() {
   const lanDown = net === 'lan_down'
   const ev = primaryEvent(state.snapshot?.events)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+  const alerts = useApprovalAlerts(pending, connected && !lanDown)
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -24,6 +26,12 @@ export function Phone() {
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : ''}</span>
           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
         </div>
+        {!alerts.armed ? (
+          <button className="ph-arm" onClick={() => void alerts.arm()}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
+        ) : (
+          <div className="ph-armed muted">核准提醒已開啟{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</div>
+        )}
+        {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
         {pending.length === 0 ? (
           <div className="ph-card idle">
