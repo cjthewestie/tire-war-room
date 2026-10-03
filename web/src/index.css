@@ -136,6 +136,8 @@ main { background: #16191e; border: 1px solid var(--border); border-top: 0; bord
 .actions li { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14.5px; }
 .actions .ck { color: var(--ink); }
 .actions .todo-l { flex: 1; }
+.actions li.revoked { color: var(--ink-dim); }
+.actions li.revoked .ck { color: var(--warn); }
 .risk { margin-left: 6px; font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--panel-3); color: var(--ink-dim); }
 .risk.r-R3, .risk.r-R2 { background: var(--warn-soft); color: var(--warn); }
 .risk.r-R1 { background: var(--accent-soft); color: var(--accent); }

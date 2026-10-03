@@ -437,6 +437,7 @@ export interface FocusPanel {
   state: EventState
   timeline: TimelineItem[]
   approved?: ApprovedAction[]   // ✓ 已核准 (R2/R3 the supervisor approved); ✓ 已自動 is R1 only
+  revoked?: string[]            // ↺ 已撤回: "從 2 線調 1 人（因主管改選夜班加班）" (a consequence, never an approval)
 }
 
 export interface OrderProgress {

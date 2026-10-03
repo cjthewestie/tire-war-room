@@ -3,20 +3,37 @@
 # Load:   sudo nft -f deploy/network/nftables-warroom.nft        (warroom-firewall.service does it at boot)
 # Remove: sudo nft delete table inet warroom_offline              (only for a planned online update window)
 #
-# Allowed destinations: loopback, the factory LAN / OT networks (RFC1918 + link-local), Docker bridges,
-# multicast for local discovery. Everything else leaving the box is dropped, counted and logged, split by
-# who sent it so the unplug test can tell the war-room stack from DGX OS housekeeping (NTP, snapd, motd):
-#   forward hook = bridged containers (vLLM, qdrant, mqtt)                  -> egress_containers,
-#                  log prefix "warroom-egress-drop fwd "
-#   output hook  = host-network processes: the app (network_mode: host, uid 10001), DGX OS services,
-#                  the bench itself                                         -> egress_host,
-#                  log prefix "warroom-egress-drop host " with the socket's UID (log flags skuid), so the
-#                  app's attempts (UID=10001) are told apart from timesyncd/snapd/motd-news
-#   dropped_egress = both, kept for older readers. Counters count PACKETS (a blocked TCP connect is the SYN
-#   plus its retransmits); bench/unplug_test.py counts ATTEMPTS from the log lines instead.
+# Two tiers:
+#  1. The war-room stack gets NO blanket LAN pass. It never starts a connection off the box: the app is
+#     host-networked (uid 10001) and talks to vLLM / Qdrant / MQTT on loopback; the phone, the touchscreen
+#     and the plant gateway connect IN, and their replies are `ct state established`. So:
+#       output hook, `meta skuid 10001`: loopback + established + @stack_peers4/6 only. Anything else is
+#         dropped and logged "warroom-egress-drop host " with UID=10001. That includes a lookup sent to the
+#         plant's LAN DNS resolver and a CONNECT to a LAN HTTP proxy: both would carry data out of the
+#         factory through a LAN host, so both count.
+#       forward hook, from a Docker bridge (vLLM, qdrant, mqtt): new flows may only go bridge to bridge.
+#         Anything else (LAN or internet) is dropped and logged "warroom-egress-drop fwd ".
+#     @stack_peers4/6 start EMPTY. Add only the hosts the stack itself must dial (a remote MQTT gateway, an
+#     NTP host, a phone-push relay) as files /etc/warroom/peers.d/*.nft, e.g.
+#         add element inet warroom_offline stack_peers4 { 192.168.10.5 }
+#     The include at the bottom is a glob, so no file = no error and an empty set.
+#  2. Everything else on the box (DGX OS: timesyncd, snapd, apt) keeps the old allow-list: loopback, the
+#     factory LAN / OT networks (RFC1918 + link-local), multicast. Other destinations are dropped, counted
+#     and logged "warroom-egress-drop host " with the socket's UID, so the unplug test reports them as
+#     host_other_attempts and does not count them against the stack.
+#
+# DNS is egress evidence: every NEW query to port 53 (udp/tcp), from any process on the box or any
+# container, is logged "warroom-dns host " (with UID) / "warroom-dns fwd " BEFORE any accept, and counted in
+# dns_host / dns_containers. Without this a lookup to a LAN resolver is accepted by tier 2 and never shows
+# up, although the resolver forwards it to the internet. bench/unplug_test.py counts the stack's queries.
+#
+# Counters count PACKETS (a blocked TCP connect is the SYN plus its retransmits); bench/unplug_test.py counts
+# ATTEMPTS from the log lines instead. dropped_egress = every drop, kept for older readers.
 # Inbound is a separate table: deploy/network/nftables-warroom-inbound.nft admits :8000 only from @app_clients and :1883 (MQTT) only from @mqtt_gateways.
-# Edit `lan4` if the plant uses public-range addressing internally (rare, but check with factory IT; the
-# OT network is zoned per IEC 62443 and must reach the Spark only through the data gateway, p.10).
+# Edit `lan4` if the plant uses public-range addressing internally (rare, but check with factory IT; the OT
+# network is zoned per IEC 62443 and must reach the Spark only through the data gateway, p.10).
+# This table is a firewall, not an unplug. The page-9 verdict comes from `bench.unplug_test --unplug <uplink>`
+# (link really down, DNS unreachable); a run with only this table loaded is the secondary check.
 
 table inet warroom_offline {
     set lan4 {
@@ -27,14 +44,31 @@ table inet warroom_offline {
         type ipv6_addr; flags interval;
         elements = { ::1/128, fc00::/7, fe80::/10, ff00::/8 }
     }
+    # Hosts the war-room stack itself may dial. Empty by default; see the header.
+    set stack_peers4 {
+        type ipv4_addr; flags interval;
+    }
+    set stack_peers6 {
+        type ipv6_addr; flags interval;
+    }
 
     counter dropped_egress { }
     counter egress_host { }
     counter egress_containers { }
+    counter dns_host { }
+    counter dns_containers { }
 
     chain output {
         type filter hook output priority -10; policy accept;
         oifname "lo" accept
+        ct state new udp dport 53 counter name dns_host log prefix "warroom-dns host " level warn flags skuid
+        ct state new tcp dport 53 counter name dns_host log prefix "warroom-dns host " level warn flags skuid
+        # tier 1: the host-networked app (deploy/Dockerfile `useradd --uid 10001`)
+        meta skuid 10001 ct state established,related accept
+        meta skuid 10001 ip daddr @stack_peers4 accept
+        meta skuid 10001 ip6 daddr @stack_peers6 accept
+        meta skuid 10001 counter name dropped_egress counter name egress_host log prefix "warroom-egress-drop host " level warn flags skuid drop
+        # tier 2: DGX OS
         ip daddr @lan4 accept
         ip6 daddr @lan6 accept
         counter name dropped_egress counter name egress_host log prefix "warroom-egress-drop host " level warn flags skuid drop
@@ -42,8 +76,21 @@ table inet warroom_offline {
 
     chain forward {
         type filter hook forward priority -10; policy accept;
+        ct state established,related accept
+        iifname "docker0" ct state new udp dport 53 counter name dns_containers log prefix "warroom-dns fwd " level warn
+        iifname "docker0" ct state new tcp dport 53 counter name dns_containers log prefix "warroom-dns fwd " level warn
+        iifname "br-*" ct state new udp dport 53 counter name dns_containers log prefix "warroom-dns fwd " level warn
+        iifname "br-*" ct state new tcp dport 53 counter name dns_containers log prefix "warroom-dns fwd " level warn
+        # tier 1: the bridged containers (vLLM, qdrant, mqtt) only talk to each other
+        iifname "docker0" oifname "docker0" accept
+        iifname "br-*" oifname "br-*" accept
+        iifname "docker0" counter name dropped_egress counter name egress_containers log prefix "warroom-egress-drop fwd " level warn drop
+        iifname "br-*" counter name dropped_egress counter name egress_containers log prefix "warroom-egress-drop fwd " level warn drop
+        # tier 2: anything else routed through the box (inbound DNAT to a published port, other namespaces)
         ip daddr @lan4 accept
         ip6 daddr @lan6 accept
         counter name dropped_egress counter name egress_containers log prefix "warroom-egress-drop fwd " level warn drop
     }
 }
+
+include "/etc/warroom/peers.d/*.nft"

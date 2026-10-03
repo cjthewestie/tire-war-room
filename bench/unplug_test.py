@@ -1,9 +1,20 @@
 """Unplug test (page 9: 拔網路線 → 2 秒內告警、對外連線 0 次).
 
+Two kinds of block, and only one of them is the page-9 test:
+  --unplug IFACE   (page-9 verdict) the uplink really goes down: `ip link set dev IFACE down` (macOS `ifconfig
+                   IFACE down`), repeatable for every uplink. The LAN resolver, proxies and NTP become
+                   unreachable, so resolver timeouts and dead upstreams are exercised; `dns_unreachable` checks
+                   that no configured resolver still answers. The boot firewall stays loaded and still logs.
+  --block          (secondary check) firewall only: the boot nft table (or pf anchor) drops non-LAN
+                   destinations, but the LAN, its DNS resolver and any proxy stay up. `internet_blocked`
+                   passes by construction here; what this run proves is that the stack made no attempt, as
+                   seen by the drop log and the DNS log. The `page9_unplug` verdict stays None.
+
 Steps
- 1. Block outbound traffic (--block): Linux applies deploy/network/nftables-warroom.nft (or --block-cmd,
-    e.g. "ip link set eth1 down"); macOS loads deploy/network/pf-warroom.conf into a pf anchor. Needs root.
-    Without root the test still runs, says the block was NOT applied, and the egress verdict is None.
+ 1. Block outbound traffic: --unplug and/or --block (above), or --block-cmd. Needs root. On Linux, when
+    warroom-firewall.service already loaded the table, --block reuses it as-is (nothing is applied or removed),
+    which is why --block alone is not an unplug. Without root the test still runs, says the block was NOT
+    applied, and the egress verdict is None.
  2. Zero the firewall's drop counter (nft `dropped_egress`), then watch for a fixed window (--watch, default
     600 s = 10 min of normal running) plus one event:
       --app-url http://127.0.0.1:8000   real stack: POST /api/sim/control scenario, wait on /ws for `anomaly`,
@@ -19,7 +30,9 @@ Steps
         `host` = a host-network process, logged with its UID: counted when the UID is the app's (APP_UID,
         the app runs with network_mode: host) or belongs to a watched stack process in the host network
         namespace; otherwise it is DGX OS housekeeping (timesyncd, snapd, motd-news) and is reported as
-        host_other_attempts, not counted. Log unreadable -> the per-chain
+        host_other_attempts, not counted. DNS counts too: every new query to port 53 is logged
+        "warroom-dns host|fwd " before any accept (a lookup to a LAN resolver is data leaving through that
+        resolver), attributed the same way and added to the stack's attempts. Log unreadable -> the per-chain
         packet counters (egress_containers counted, egress_host reported); old table without them -> the
         box-wide dropped_egress packet counter, flagged as such.
       - pf block-rule packet counter (macOS, block applied)
@@ -38,18 +51,23 @@ Steps
     socket watcher still checks. The drop counter is the kernel's own Sandbox log: every
     `deny(1) network-outbound` line for a process in our tree is one blocked attempt to leave. `log` refuses to
     run inside a sandbox, so the sandboxed child records its pids and window and the unsandboxed parent reads
-    the log after the child exits, then re-judges and re-saves the result.
+    the log after the child exits, then re-judges and re-saves the result. Name lookups are denied too: the
+    profile blocks the mDNSResponder socket, so a lookup is a logged deny (counted, listed as dns_by_pid)
+    instead of a query that leaves the Mac through the system resolver. `localhost` still resolves from
+    /etc/hosts; the endpoint URLs are rewritten to 127.0.0.1 so the bench's own calls make no lookup.
  --spawn-app: start `python -m warroom.api serve` (LLM_MODE=llm against --base-url/--model) on a free
     localhost port as a child, run the --app-url path against it, watch it, stop it afterwards.
 
   uv run python -m bench.unplug_test --watch 0               # Mac: direct, socket check only
   uv run python -m bench.unplug_test --sandbox --spawn-app --watch 120   # Mac: app really offline, no root
-  sudo -E uv run python -m bench.unplug_test --block --app-url http://127.0.0.1:8000     # Spark, 10 min
+  sudo -E bench/py.sh -m bench.unplug_test --unplug enP7s7 --app-url http://127.0.0.1:8000   # Spark, page 9
+  sudo -E bench/py.sh -m bench.unplug_test --block --app-url http://127.0.0.1:8000             # secondary
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import dataclasses
 import ipaddress
 import json
 import os
@@ -81,18 +99,26 @@ NFT_COUNTER = ["inet", "warroom_offline", "dropped_egress"]   # box-wide total (
 # Split counters in nftables-warroom.nft: output hook = host processes, forward hook = the containers.
 NFT_SPLIT = {"host": "egress_host", "containers": "egress_containers"}
 DROP_LOG_PREFIX = "warroom-egress-drop"
+DNS_LOG_PREFIX = "warroom-dns"           # nftables-warroom.nft logs every new :53 query before any accept
+NFT_DNS = {"host": "dns_host", "containers": "dns_containers"}
+DNS_PROBE_ZONE = "example.com"    # probe asks for a fresh random name under it: no cache can answer that
 APP_UID = 10001          # deploy/Dockerfile `useradd --uid 10001`; the app container is host-networked
 QDRANT_PORTS = (6333, 6334)
 PROBE_HOSTS = ("1.1.1.1", "8.8.8.8")
 SANDBOX_ENV = "WARROOM_UNPLUG_SANDBOXED"
 RESULT_PATH_ENV = "WARROOM_UNPLUG_RESULT_PATH"      # child writes its saved-result path here for the parent
-# Seatbelt profile: everything allowed except outbound network to anything but localhost. Unix sockets
-# (DNS via mDNSResponder, local IPC) stay allowed: resolving a name works, connecting to it does not.
-SANDBOX_PROFILE = """(version 1)
+MDNS_SOCKET = "/private/var/run/mDNSResponder"
+# Seatbelt profile: everything allowed except outbound network to anything but localhost. Local IPC over unix
+# sockets stays allowed, EXCEPT the mDNSResponder socket: a lookup through it is a DNS query that leaves the
+# Mac (the onnxruntime telemetry host was resolved that way before its connect was denied). Denied, it shows
+# in the Sandbox log as `deny(1) network-outbound /private/var/run/mDNSResponder` and is counted. Later rules
+# win in SBPL, so the deny comes last. `localhost` still resolves (from /etc/hosts).
+SANDBOX_PROFILE = f"""(version 1)
 (allow default)
 (deny network-outbound)
 (allow network-outbound (remote ip "localhost:*"))
 (allow network-outbound (remote unix-socket))
+(deny network-outbound (remote unix-socket (path-literal "{MDNS_SOCKET}")))
 """
 
 
@@ -113,10 +139,12 @@ def sandbox_deny_detail(text: str, pids: set[int], before: str | None = None) ->
 
     Only a report that names a remote (`remote:*:443`, `1.1.1.1:443`) is a blocked attempt to leave: the
     kernel also logs remote-less network-outbound denies around ordinary localhost sockets (seen with a bare
-    connect to 127.0.0.1:11434 that succeeded), and those are counted apart as `no_remote`. 'N duplicate
+    connect to 127.0.0.1:11434 that succeeded), and those are counted apart as `no_remote`. A deny naming the
+    mDNSResponder socket is a name lookup: counted with the rest and also listed in `dns_by_pid`. 'N duplicate
     report(s) for' adds N; the kernel repeats the remote on those lines. `before` ('YYYY-MM-DD HH:MM:SS.mmm')
     drops lines at or after it."""
     by: dict[int, int] = {}
+    dns: dict[int, int] = {}
     no_remote: dict[int, int] = {}
     remotes: set[str] = set()
     for ln in text.splitlines():
@@ -131,10 +159,12 @@ def sandbox_deny_detail(text: str, pids: set[int], before: str | None = None) ->
         if m.group(2):
             by[pid] = by.get(pid, 0) + k
             remotes.add(m.group(2))
+            if m.group(2) == MDNS_SOCKET:              # a name lookup: counted, and listed apart
+                dns[pid] = dns.get(pid, 0) + k
         else:
             no_remote[pid] = no_remote.get(pid, 0) + k
     return {"by_pid": dict(sorted(by.items())), "remotes": sorted(remotes),
-            "no_remote_by_pid": dict(sorted(no_remote.items()))}
+            "dns_by_pid": dict(sorted(dns.items())), "no_remote_by_pid": dict(sorted(no_remote.items()))}
 
 
 def parse_sandbox_denies(text: str, pids: set[int], before: str | None = None) -> int:
@@ -394,6 +424,20 @@ def parse_pf_block_packets(text: str) -> int | None:
     return total if found else None
 
 
+def parse_pf_dns_packets(text: str) -> int | None:
+    """Sum `Packets:` of the `label "warroom-dns"` pass rules (box-wide DNS to the LAN resolver)."""
+    total, in_dns, found = 0, False, False
+    for ln in text.splitlines():
+        if not ln.startswith((" ", "\t", "[")):
+            in_dns = ln.strip().startswith("pass") and 'label "warroom-dns"' in ln
+            continue
+        m = re.search(r"Packets:\s*(\d+)", ln)
+        if m and in_dns:
+            total += int(m.group(1))
+            found = True
+    return total if found else None
+
+
 def parse_conntrack(text: str, lan: list | None = None) -> set[tuple[str, str, int]]:
     """Flows whose ORIGINAL-direction destination leaves the factory: {(proto, dst, dport)}."""
     out = set()
@@ -409,9 +453,20 @@ def parse_conntrack(text: str, lan: list | None = None) -> set[tuple[str, str, i
 
 
 _DROP_RE = re.compile(DROP_LOG_PREFIX + r" (?:(host|fwd) )?(.*)")
+_DNS_RE = re.compile(DNS_LOG_PREFIX + r" (?:(host|fwd) )?(.*)")
 
 
-def parse_drop_log(text: str) -> list[dict[str, Any]]:
+def parse_dns_log(text: str) -> list[dict[str, Any]]:
+    """New DNS queries (port 53) in kernel log text, one dict per (chain, proto, src, sport, dst, dport), same
+    shape as parse_drop_log plus kind="dns". Logged before any accept, so a query the LAN resolver answered
+    is here too: it is data leaving the factory through that resolver."""
+    out = parse_drop_log(text, _DNS_RE)
+    for a in out:
+        a["kind"] = "dns"
+    return out
+
+
+def parse_drop_log(text: str, pattern: re.Pattern = _DROP_RE) -> list[dict[str, Any]]:
     """Blocked egress ATTEMPTS in kernel log text: one dict per distinct (chain, proto, src, sport, dst, dport).
 
     nf_log line: `warroom-egress-drop host IN= OUT=eth0 SRC=.. DST=1.1.1.1 .. PROTO=TCP SPT=40000 DPT=443 ..
@@ -419,7 +474,7 @@ def parse_drop_log(text: str) -> list[dict[str, Any]]:
     counts them). chain: host (output hook), containers (forward hook), box (old table, no chain tag)."""
     seen: dict[tuple, dict[str, Any]] = {}
     for ln in text.splitlines():
-        m = _DROP_RE.search(ln)
+        m = pattern.search(ln)
         if not m:
             continue
         f = dict(kv.split("=", 1) for kv in m.group(2).split() if "=" in kv)
@@ -492,6 +547,7 @@ class EgressEvidence:
         self.split_start: dict[str, int | None] = {}
         self.split_end: dict[str, int | None] = {}
         self.drop_log: str | None = None
+        self.pf_dns_packets: int | None = None
         self._stop = threading.Event()
         self._t = threading.Thread(target=self._loop, daemon=True)
 
@@ -510,6 +566,7 @@ class EgressEvidence:
         if self.system == "Darwin":
             ok, txt = _run(["pfctl", "-a", "warroom_offline", "-vsr"])
             n = parse_pf_block_packets(txt) if ok else None
+            self.pf_dns_packets = parse_pf_dns_packets(txt) if ok else None
             if n is None:
                 self.notes.append(f"pf counters unreadable: {txt[:200]}")
             return n
@@ -520,7 +577,7 @@ class EgressEvidence:
         if not (self.block_applied and self.system == "Linux") or self.sandbox:
             return {}
         out: dict[str, int | None] = {}
-        for k, name in NFT_SPLIT.items():
+        for k, name in (*NFT_SPLIT.items(), *((f"dns_{k}", v) for k, v in NFT_DNS.items())):
             ok, txt = _run(["nft", "list", "counter", *NFT_COUNTER[:2], name])
             c = parse_nft_counter(txt) if ok else None
             out[k] = None if c is None else c["packets"]
@@ -533,11 +590,11 @@ class EgressEvidence:
         if not ok:
             self.notes.append(f"kernel log unreadable (journalctl -k): {txt[:200]}")
             return None
-        return "\n".join(ln for ln in txt.splitlines() if DROP_LOG_PREFIX in ln)
+        return "\n".join(ln for ln in txt.splitlines() if DROP_LOG_PREFIX in ln or DNS_LOG_PREFIX in ln)
 
     def reset_counter(self) -> None:
         if self.block_applied and self.system == "Linux":
-            for name in (NFT_COUNTER[2], *NFT_SPLIT.values()):
+            for name in (NFT_COUNTER[2], *NFT_SPLIT.values(), *NFT_DNS.values()):
                 ok, txt = _run(["nft", "reset", "counter", *NFT_COUNTER[:2], name])
                 if not ok:
                     self.notes.append(f"nft reset {name} failed: {txt[:200]}")
@@ -583,19 +640,28 @@ class EgressEvidence:
         extra: dict[str, Any] = ({"sandbox_pids": sorted(self.sandbox_pids), "bench_pid": os.getpid(),
                                   "window": [self._since, self._until]}
                                  if self.sandbox else {})
+        keys = (*NFT_SPLIT, *(f"dns_{k}" for k in NFT_DNS))
         split = {k: (None if self.split_start.get(k) is None or self.split_end.get(k) is None
-                     else self.split_end[k] - self.split_start[k]) for k in NFT_SPLIT}
+                     else self.split_end[k] - self.split_start[k]) for k in keys}
         if self.split_end:
             extra["host_dropped_packets"] = split["host"]
             extra["container_dropped_packets"] = split["containers"]
+            extra["dns_host_packets"] = split["dns_host"]              # None: table predates the DNS log
+            extra["dns_container_packets"] = split["dns_containers"]
+        if self.system == "Darwin" and self.pf_dns_packets is not None:
+            extra["dns_packets_box_wide"] = self.pf_dns_packets     # mDNSResponder: not attributable
         if self.drop_log is not None:
             uids = host_ns_uids(set(stack_pids or ())) | {APP_UID}
             stack, other = attribute_drops(parse_drop_log(self.drop_log), uids)
+            dns_stack, dns_other = attribute_drops(parse_dns_log(self.drop_log), uids)
             extra.update(stack_drop_attempts=stack, host_other_attempts=other, stack_host_uids=sorted(uids),
-                         counter_source="kernel log 'warroom-egress-drop': attempts, attributed by chain + UID")
+                         stack_dns_queries=dns_stack, host_other_dns_queries=dns_other,
+                         counter_source="kernel log 'warroom-egress-drop' + 'warroom-dns': attempts and DNS "
+                                        "queries, attributed by chain + UID")
         elif split.get("containers") is not None:
-            extra["counter_source"] = ("nft egress_containers packet counter (kernel log unreadable; packets, "
-                                       "not attempts; egress_host reported, not counted)")
+            extra["counter_source"] = ("nft egress_containers + dns_containers packet counters (kernel log "
+                                       "unreadable; packets, not attempts; egress_host / dns_host reported, "
+                                       "not counted)")
         elif dropped is not None and self.system == "Linux":
             extra["counter_source"] = ("nft dropped_egress packet counter, BOX-WIDE (old table without split "
                                        "counters): includes DGX OS traffic, not attributed to the stack")
@@ -609,6 +675,127 @@ def nft_table_loaded() -> bool:
     """Is the boot egress firewall (table inet warroom_offline) already in the ruleset?"""
     ok, _ = _run(["nft", "list", "table", *NFT_COUNTER[:2]])
     return ok
+
+
+def unplug_commands(ifaces: list[str], system: str | None = None) -> tuple[list[str], list[str]]:
+    """Take the uplink(s) really down for the window, and back up afterwards (page 9: 拔網路線)."""
+    system = system or platform.system()
+    for i in ifaces:
+        if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,32}", i):
+            raise ValueError(f"bad interface name {i!r}")
+    if system == "Linux":
+        down = " && ".join(f"ip link set dev {i} down" for i in ifaces)
+        up = "; ".join(f"ip link set dev {i} up" for i in ifaces)
+    elif system == "Darwin":
+        down = " && ".join(f"ifconfig {i} down" for i in ifaces)
+        up = "; ".join(f"ifconfig {i} up" for i in ifaces)
+    else:
+        return [], []
+    return ["sh", "-c", down], ["sh", "-c", up]
+
+
+def saved_routes(ifaces: list[str]) -> list[str]:
+    """IPv4 + IPv6 routes through `ifaces` (Linux). `ip link set down` flushes them; networkd/NetworkManager
+    usually re-adds them on link up, a static or container setup does not, so the test puts them back."""
+    if platform.system() != "Linux":
+        return []
+    out: list[str] = []
+    for fam in ("-4", "-6"):
+        for i in ifaces:
+            ok, txt = _run(["ip", fam, "route", "show", "dev", i])
+            if ok:
+                out += [f"{fam} {ln.strip()}" + ("" if " dev " in f" {ln} " else f" dev {i}")
+                        for ln in txt.splitlines()
+                        if ln.strip() and not ln.startswith(("fe80::", "multicast", "ff00::"))]
+    return out
+
+
+def restore_routes(routes: list[str], wait_s: float = 5.0) -> dict[str, Any]:
+    """After link up: wait for the network manager to re-add the routes, then `ip route replace` any that are
+    still missing. Returns what was re-added and what failed."""
+    def missing() -> list[str]:
+        have = {fam: _run(["ip", fam, "route", "show"])[1] for fam in ("-4", "-6")}
+        return [r for r in routes if r.split(" ", 1)[1].split(" dev ")[0].split()[0] not in have[r[:2]]]
+    deadline = time.monotonic() + wait_s
+    while missing() and time.monotonic() < deadline:
+        time.sleep(0.5)
+    readded, failed = [], []
+    for r in missing():
+        fam, rest = r.split(" ", 1)
+        ok, msg = _run(["ip", fam, "route", "replace", *rest.split()])
+        (readded if ok else failed).append(r if ok else f"{r}: {msg[:80]}")
+    return {"readded": readded, "failed": failed}
+
+
+def link_states(ifaces: list[str], sys_net: Path = Path("/sys/class/net")) -> dict[str, str]:
+    """Operational state per interface: Linux /sys/class/net/<if>/operstate, macOS `ifconfig` flags."""
+    out: dict[str, str] = {}
+    for i in ifaces:
+        if platform.system() == "Linux" or (sys_net / i).exists():
+            try:
+                out[i] = (sys_net / i / "operstate").read_text().strip()
+            except OSError as e:
+                out[i] = f"unknown ({e.__class__.__name__})"
+        else:
+            ok, txt = _run(["ifconfig", i])
+            flags = re.search(r"flags=\w+<([^>]*)>", txt) if ok else None
+            out[i] = "unknown" if not flags else ("up" if "UP" in flags.group(1).split(",") else "down")
+    return out
+
+
+def resolvers(resolv_conf: Path = Path("/etc/resolv.conf"), upstream_conf: Path =
+              Path("/run/systemd/resolve/resolv.conf")) -> list[str]:
+    """Nameservers the box would use: resolv.conf, plus systemd-resolved's real upstreams (the stub 127.0.0.53
+    alone would only show that the local stub answers)."""
+    out: list[str] = []
+    for f in (resolv_conf, upstream_conf):
+        try:
+            for ln in f.read_text().splitlines():
+                parts = ln.split()
+                if len(parts) >= 2 and parts[0] == "nameserver" and parts[1] not in out:
+                    out.append(parts[1])
+        except OSError:
+            continue
+    return out
+
+
+def dns_query_packet(name: str, qid: int = 0x5752) -> bytes:
+    """A minimal RFC 1035 query: one A question, recursion desired."""
+    q = b"".join(bytes([len(p)]) + p.encode() for p in name.rstrip(".").split(".")) + b"\0"
+    return qid.to_bytes(2, "big") + b"\x01\x00" + b"\x00\x01\x00\x00\x00\x00\x00\x00" + q + b"\x00\x01\x00\x01"
+
+
+def parse_dns_reply(data: bytes, qid: int = 0x5752) -> dict[str, Any]:
+    """rcode and answer count of a reply to dns_query_packet. `answered`: the resolver reached an
+    authoritative answer (NOERROR or NXDOMAIN) = its upstream path out of the factory works. SERVFAIL /
+    REFUSED from a local stub whose upstream is gone is not an answer."""
+    if len(data) < 12 or int.from_bytes(data[:2], "big") != qid:
+        return {"ok": False, "error": "short or foreign reply"}
+    rcode = data[3] & 0x0F
+    answers = int.from_bytes(data[6:8], "big")
+    return {"ok": True, "rcode": rcode, "answers": answers, "answered": rcode in (0, 3)}
+
+
+def dns_probe(servers: list[str] | None = None, name: str | None = None, timeout_s: float = 2.0,
+              port: int = 53) -> dict[str, Any]:
+    """Ask every configured resolver for a fresh random name (never cached, so a stub's cache cannot fake an
+    answer). With the uplink down none may answer (page 9: DNS gone too). SERVFAIL from the local stub = not
+    answered; a timeout = unreachable."""
+    servers = resolvers() if servers is None else servers
+    name = name or f"warroom-unplug-{os.urandom(6).hex()}.{DNS_PROBE_ZONE}"
+    per: dict[str, Any] = {}
+    for srv in servers:
+        fam = socket.AF_INET6 if ":" in srv else socket.AF_INET
+        try:
+            with socket.socket(fam, socket.SOCK_DGRAM) as s:
+                s.settimeout(timeout_s)
+                s.sendto(dns_query_packet(name), (srv.split("%")[0], port))
+                per[srv] = parse_dns_reply(s.recvfrom(4096)[0])
+        except TimeoutError:
+            per[srv] = {"ok": False, "error": "timeout"}
+        except OSError as e:
+            per[srv] = {"ok": False, "error": f"{e.__class__.__name__}: {e}"[:120]}
+    return {"name": name, "servers": per, "resolved": any(r.get("answered") for r in per.values())}
 
 
 def block_commands(custom_block: str | None, custom_unblock: str | None,
@@ -769,20 +956,46 @@ async def app_alert(app_url: str, scenario: str, timeout_s: float, speed: float)
 async def main_async(args) -> dict[str, Any]:
     lan = [ipaddress.ip_network(c) for c in (args.lan_cidr or [])]
     ep = Endpoint.from_env(args.base_url, args.model)
+    if in_sandbox():
+        # `localhost` would make the bench (and the spawned app) look the name up; under the sandbox that is a
+        # denied mDNSResponder lookup, counted as egress. 127.0.0.1 needs no lookup.
+        ep = dataclasses.replace(ep, base_url=re.sub(r"//localhost(?=[:/]|$)", "//127.0.0.1", ep.base_url))
+        if args.app_url:
+            args.app_url = re.sub(r"//localhost(?=[:/]|$)", "//127.0.0.1", args.app_url)
     out: dict[str, Any] = {"platform": platform.platform(), "is_root": os.geteuid() == 0, "watch_s": args.watch}
-    blk, unblk = block_commands(args.block_cmd, args.unblock_cmd)
-    out["block"] = {"requested": args.block or args.sandbox, "applied": False}
+    unplug = list(args.unplug or [])
+    blk, unblk = block_commands(args.block_cmd, args.unblock_cmd) if (args.block or args.block_cmd) else ([], [])
+    out["block"] = {"requested": bool(args.block or args.sandbox or unplug or args.block_cmd), "applied": False,
+                    "kind": "sandbox" if (in_sandbox() or args.sandbox) else "unplug" if unplug
+                    else "custom" if args.block_cmd else "firewall" if args.block else "none"}
+    unplug_ok = False
+    if unplug and not in_sandbox():
+        down, _up = unplug_commands(unplug)
+        routes = saved_routes(unplug)
+        ok, msg = apply(down)
+        states = link_states(unplug)
+        unplug_ok = ok and all(v == "down" for v in states.values())
+        out["block"]["unplug"] = {"ifaces": unplug, "cmd": " ".join(down), "applied": ok, "msg": msg,
+                                  "link_state_after_down": states, "saved_routes": routes}
     if in_sandbox():
         out["block"].update(applied=True, method="sandbox-exec", scope=(
             "process-level: bench" + (" + spawned war-room app" if args.spawn_app else "")
             + "; outbound allowed to localhost only; model server is outside the sandbox (socket-watched)"),
             profile=SANDBOX_PROFILE)
-    elif args.block:
+    elif args.block or args.block_cmd:
         ok, msg = apply(blk)
         out["block"].update(applied=ok, cmd=" ".join(blk), msg=msg)
         if blk == ["true"] and not args.block_cmd:
-            out["block"]["msg"] = "boot firewall table inet warroom_offline already loaded; reused, not re-applied or removed"
+            out["block"]["msg"] = ("boot firewall table inet warroom_offline already loaded; reused, not re-applied "
+                                   "or removed. Firewall only: LAN, its DNS resolver and proxies stay up")
+    if unplug and not in_sandbox():
+        # an unplug alone is a block; the firewall (boot table) keeps logging what the stack still tries
+        out["block"]["applied"] = unplug_ok or out["block"]["applied"]
+        if not out["block"].get("cmd") and platform.system() == "Linux" and nft_table_loaded():
+            out["block"]["firewall"] = "boot table inet warroom_offline loaded: drop + DNS log active"
+            out["block"]["applied_firewall"] = True
     applied = out["block"]["applied"]
+    firewall_logs = bool(out["block"].get("cmd") or out["block"].get("applied_firewall"))
     alert_s = None
     app_proc = None
     try:
@@ -793,7 +1006,8 @@ async def main_async(args) -> dict[str, Any]:
             args.pid = (args.pid or []) + [app_proc.pid]
         ports = watch_ports(ep.base_url, args.app_url, args.watch_port)
         t0 = time.monotonic()
-        with EgressEvidence(applied, lan) as egress, \
+        with EgressEvidence(applied and (firewall_logs or in_sandbox() or platform.system() != "Linux"), lan) \
+                as egress, \
                 SocketWatcher(set(args.pid or []), lan, interval_s=args.interval, ports=ports) as w:
             out["endpoint"] = await endpoint_info(ep)
             if args.app_url:
@@ -812,6 +1026,9 @@ async def main_async(args) -> dict[str, Any]:
         out["egress"] = egress.report(stack_pids=w.watched | set(args.pid or []))
         # probe AFTER the window so its own packets are not counted as the stack's egress
         out["internet_reachable_during_test"] = internet_reachable()
+        # DNS: with the uplink down no resolver may still answer for a public name. Skipped in the sandbox,
+        # where the probe's own denied packets would be counted against the bench's pid.
+        out["dns_probe"] = None if in_sandbox() else dns_probe()
     finally:
         if app_proc is not None:
             app_proc.terminate()
@@ -819,9 +1036,15 @@ async def main_async(args) -> dict[str, Any]:
                 app_proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 app_proc.kill()
-        if args.block and applied and not in_sandbox():
+        if (args.block or args.block_cmd) and out["block"].get("cmd") and not in_sandbox():
             ok, msg = apply(unblk)
             out["block"]["unblocked"] = ok
+        if unplug and not in_sandbox():
+            ok, msg = apply(unplug_commands(unplug)[1])
+            out["block"]["unplug"]["restored"] = ok
+            out["block"]["unplug"]["link_state_after_up"] = link_states(unplug)
+            if routes:
+                out["block"]["unplug"]["routes"] = restore_routes(routes)
     out["verdicts"] = verdicts(out, alert_s, bool(args.app_url))
     out["saved_to"] = str(save_result("unplug", ep, out, args.out_dir))
     if in_sandbox() and os.environ.get(RESULT_PATH_ENV):
@@ -852,6 +1075,7 @@ def finalize_sandboxed(path: Path) -> dict[str, Any]:
     if detail:
         eg["denies_by_pid"] = {str(k): v for k, v in detail["by_pid"].items()}
         eg["deny_remotes"] = detail["remotes"]
+        eg["dns_by_pid"] = {str(k): v for k, v in detail.get("dns_by_pid", {}).items()}
         eg["no_remote_denies_by_pid"] = {str(k): v for k, v in detail["no_remote_by_pid"].items()}
     roles = {str(p): "sandboxed child" for p in eg.get("sandbox_pids", [])}
     if eg.get("bench_pid"):
@@ -901,38 +1125,79 @@ def verdicts(out: dict[str, Any], alert_s: float | None, via_app: bool) -> list[
     eg = out["egress"]
     flows = len(eg["conntrack_outbound_flows"]) if eg["conntrack_available"] else None
     stack_attempts = eg.get("stack_drop_attempts")          # Linux kernel drop log, attributed
+    stack_dns = eg.get("stack_dns_queries") or []
     if stack_attempts is not None:
-        # Attempts, not packets; one blocked connect seen by several sources is one attempt.
+        # Attempts, not packets; one blocked connect seen by several sources is one attempt. A DNS query from
+        # the app is both DNS-logged and drop-logged: one attempt.
+        def key(a: dict[str, Any]) -> tuple:
+            return (a.get("proto"), a.get("src"), a.get("sport"), a.get("dst"), a.get("dport"))
+        att = {key(a): a for a in stack_attempts} | {key(a): a for a in stack_dns}
         sock_att = {("sock", o.get("pid"), o.get("ip"), o.get("port")) for o in sk.get("outbound", [])}
-        drop_dst = {(a["dst"], a["dport"]) for a in stack_attempts}
+        drop_dst = {(a["dst"], a["dport"]) for a in att.values()}
         sock_att = {t for t in sock_att if (t[2], t[3]) not in drop_dst}   # SYN_SENT of a dropped connect
-        flow_new = {f for f in eg["conntrack_outbound_flows"] if (f.get("dst"), f.get("dport")) not in drop_dst}
-        dropped = len(stack_attempts)
+        flow_new = [f for f in eg["conntrack_outbound_flows"] if (f.get("dst"), f.get("dport")) not in drop_dst]
+        dropped = len(att)
         measured = dropped + len(sock_att) + len(flow_new)
-        source = (f"kernel drop log: {dropped} stack attempt(s) (containers + stack-UID host); "
-                  f"{len(eg.get('host_other_attempts') or [])} DGX OS host attempt(s) not counted")
+        source = (f"kernel drop + DNS log: {len(stack_attempts)} stack attempt(s), {len(stack_dns)} stack DNS "
+                  f"quer(y/ies) (containers + stack-UID host); {len(eg.get('host_other_attempts') or [])} DGX OS "
+                  f"host attempt(s) and {len(eg.get('host_other_dns_queries') or [])} OS DNS quer(y/ies) not counted")
     else:
         dropped = eg.get("container_dropped_packets", eg["firewall_dropped_packets"])
+        if dropped is not None and eg.get("dns_container_packets"):
+            dropped += eg["dns_container_packets"]
         measured = sk["outbound_connections"] + (dropped or 0) + (flows or 0)
         source = ("sandbox-exec deny log (process-level; model server socket-watched only)"
                   if out["block"].get("method") == "sandbox-exec"
                   else eg.get("counter_source") or "firewall drop counter")
+    blk = out["block"]
+    kind = blk.get("kind") or ("sandbox" if blk.get("method") == "sandbox-exec" else "firewall")
+    unp = blk.get("unplug") or {}
+    unplugged = bool(unp.get("applied")) and all(v == "down" for v in (unp.get("link_state_after_down") or {"x": ""}).values())
+    dns = out.get("dns_probe")
+    tier = ("page-9 run: uplink down" if unplugged
+            else "secondary check: firewall only, LAN + its DNS resolver stay up" if kind in ("firewall", "custom")
+            else "secondary check: process-level sandbox" if kind == "sandbox" else "")
     evidence = {"socket_samples": sk["outbound_connections"], "stack_dropped": dropped,
+                "stack_dns_queries": len(stack_dns), "tier": tier,
                 "firewall_dropped_packets_box_wide": eg["firewall_dropped_packets"],
                 "host_other_attempts": len(eg.get("host_other_attempts") or []),
                 "conntrack_outbound_flows": flows}
     if not applied:
-        passed, note = None, ("network NOT blocked (needs root); socket samples only, which miss short "
-                              "connections — not evidence of 0 outbound")
+        passed, note = None, ("network NOT blocked (needs root, or the block command failed: see block.msg / "
+                              "block.unplug.msg); socket samples only, which miss short connections — not "
+                              "evidence of 0 outbound")
     elif dropped is None:
         passed, note = None, "block applied but firewall counter unreadable; socket samples only"
     else:
         passed = measured == 0
         note = source + " + socket samples" + (" + conntrack" if flows is not None else "")
+        if tier:
+            note += f" [{tier}]"
     vs.append(Verdict("outbound_connections", "0", measured, passed, note=note, extra=evidence).__dict__)
     if applied:
         vs.append(Verdict("internet_blocked", "unreachable", out["internet_reachable_during_test"],
-                          not out["internet_reachable_during_test"]).__dict__)
+                          not out["internet_reachable_during_test"],
+                          note="" if unplugged else "passes by construction under a firewall/sandbox block; "
+                          "meaningful only with --unplug").__dict__)
+    if dns is not None and applied:
+        vs.append(Verdict("dns_unreachable", "no resolver answers", dns.get("resolved"),
+                          (not dns.get("resolved")) if unplugged else None,
+                          note=("resolvers: " + ", ".join(f"{k}={v.get('error') or ('answered' if v.get('answered') else 'rcode ' + str(v.get('rcode')))}"
+                                                         for k, v in (dns.get("servers") or {}).items())
+                                + ("" if unplugged else " (info: the LAN resolver is meant to stay up without --unplug)"))
+                          ).__dict__)
+    if unplugged:
+        p9 = None if passed is None else (passed and not out["internet_reachable_during_test"]
+                                          and not (dns or {}).get("resolved"))
+        vs.append(Verdict("page9_unplug", "link down, 0 outbound, no DNS", unp.get("ifaces"), p9,
+                          note="uplink(s) down for the whole window: " + ", ".join(unp.get("ifaces") or [])
+                          + ("" if p9 is not None else "; not judged: no firewall drop/DNS log evidence of 0 "
+                             "outbound (load the boot nft table, or add --block)")).__dict__)
+    else:
+        why = ("uplink did not go down: " + json.dumps(unp.get("link_state_after_down"))) if unp else \
+            "not exercised: no --unplug, so the cable was never pulled (LAN, DNS and proxies stayed up)"
+        vs.append(Verdict("page9_unplug", "link down, 0 outbound, no DNS", None, None,
+                          note=why + "; re-run with --unplug <uplink> as root").__dict__)
     return vs
 
 
@@ -940,7 +1205,10 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--base-url")
     p.add_argument("--model")
-    p.add_argument("--block", action="store_true")
+    p.add_argument("--block", action="store_true",
+                   help="firewall only (secondary check): boot nft table / pf anchor; LAN and DNS stay up")
+    p.add_argument("--unplug", action="append", metavar="IFACE",
+                   help="page-9 run: take this uplink down for the window (repeat for each uplink); root")
     p.add_argument("--sandbox", action="store_true", help="macOS, no root: run inside sandbox-exec, offline")
     p.add_argument("--spawn-app", action="store_true", help="start the war-room app as a child and test it")
     p.add_argument("--block-cmd")
