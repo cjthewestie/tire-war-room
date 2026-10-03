@@ -15,7 +15,8 @@ until curl -fsS "${LLM_URL}/models" >/dev/null 2>&1; do
   sleep 5
 done
 echo "preload: model server up"
-# Preferred: the bench prompts from inside the app container (same system prefix as the commander).
+# Preferred: bench.preload from inside the app container -- the commander's own build_messages(CommanderRequest),
+# so the prefix cache holds the exact SYSTEM_PROMPT the first anomaly will send.
 if command -v docker >/dev/null && docker compose --project-directory "$COMPOSE_DIR" exec -T \
      -e BASE_URL=http://vllm:8000/v1 -e MODEL="$MODEL" app python -m bench.preload 2>/dev/null; then
   exit 0

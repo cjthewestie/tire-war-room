@@ -63,7 +63,7 @@ import psutil
 
 from bench.llm import Endpoint, Verdict, endpoint_info, json_schema_format, run, save_result, stream_chat
 from bench.memory_check import role_of
-from bench.prompts import ANOMALIES, alert_card_messages, card_schema
+from bench.prompts import ANOMALIES, COMMANDER_MAX_TOKENS, commander_format, commander_messages, live_anomaly
 from warroom.factory import ALERT_CARD_MAX_TOKENS, LATENCY_FIRST_ALERT_S, TTFT_TARGET_S
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -527,9 +527,11 @@ async def direct_alert(ep: Endpoint, runs: int) -> list[float | None]:
     out = []
     cli = ep.client()
     for i in range(runs):
-        r = await stream_chat(ep, alert_card_messages(ANOMALIES[i % 2]), max_tokens=ALERT_CARD_MAX_TOKENS,
-                              response_format=json_schema_format("AlertCard", card_schema()), client=cli)
-        out.append(round(r.total_s, 4) if r.ok else None)
+        # the commander's real call; the card is the alert_card field leading its plan stream
+        r = await stream_chat(ep, commander_messages(live_anomaly(ANOMALIES[i % 2])), max_tokens=COMMANDER_MAX_TOKENS,
+                              response_format=commander_format(), client=cli, watch_alert_card=True,
+                              stop_on_alert_card=True)
+        out.append(round(r.alert_card_s, 4) if r.ok and r.alert_card_s is not None else None)
     await cli.close()
     return out
 

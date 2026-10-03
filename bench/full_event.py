@@ -7,8 +7,9 @@ the LLM commander on the endpoint, no mock fallback. A scripted supervisor appro
 picks night overtime at 02:31:30. full_event_p50 = commander LLM wall + every tool's wall for the
 event (sim-time waits for VERIFY and the supervisor are not wall time).
 
-Breakdown (--mode pipeline): four hand-built LLM calls (classify/alert card, plan, replan, diagnosis)
-with the verify reading fixed at 119.5 °C and a small synthetic CP-SAT model. It shows per-round
+Breakdown (--mode pipeline): the commander's own call twice (plan, then replan with H1 rejected; the
+alert card and phone card are timed inside those streams, as in the app) with the verify reading fixed
+at 119.5 °C and a small synthetic CP-SAT model. It shows per-round
 LLM latency; it is not the state machine and is reported as pipeline_p50 when both run.
 
   uv run python -m bench.full_event --runs 3                       # both; headline = state machine
@@ -28,7 +29,6 @@ from bench.llm import (
     Endpoint,
     Verdict,
     endpoint_info,
-    json_schema_format,
     parse_json,
     run,
     save_result,
@@ -37,15 +37,15 @@ from bench.llm import (
 )
 from bench.prompts import (
     ANOMALIES,
-    alert_card_messages,
-    card_schema,
-    diagnosis_messages,
-    plan_messages,
-    plan_schema,
+    COMMANDER_MAX_TOKENS,
+    commander_format,
+    commander_messages,
+    live_anomaly,
+    page11_rejected_h1,
 )
 from warroom import factory as F
 from warroom.contracts import CommanderPlan
-from warroom.factory import ALERT_CARD_MAX_TOKENS, LATENCY_FULL_EVENT_S
+from warroom.factory import LATENCY_FULL_EVENT_S
 
 
 def arrhenius_total_h(size_h: float = 28.0, done_h: float = 10.0, t_ref_c: float = 128.0,
@@ -93,18 +93,21 @@ def cpsat_reschedule(time_limit_s: float = 2.0) -> dict[str, Any]:
 
 
 async def bench_pipeline(ep: Endpoint, think: bool) -> dict[str, Any]:
-    a = ANOMALIES[0]
+    """Scripted breakdown on the commander's own call (bench.prompts.commander_messages): R2 plan (the
+    alert card is timed inside its stream, as the app's on_alert sees it), compute, R3 replan with H1
+    rejected at 119.5 °C. The app makes no separate alert-card or diagnosis call -- R1 and R4 are
+    derived from the R2 / R3 streams and carry no LLM time of their own."""
+    a = live_anomaly(ANOMALIES[0])
     cli = ep.client(timeout_s=300)
     rounds: dict[str, Any] = {}
     t0 = time.perf_counter()
+    fmt = commander_format()
 
-    r1 = await stream_chat(ep, alert_card_messages(a), max_tokens=ALERT_CARD_MAX_TOKENS,
-                           response_format=json_schema_format("AlertCard", card_schema()), client=cli)
-    rounds["R1_classify_alert"] = r1.to_dict()
-
-    fmt = json_schema_format("CommanderPlan", plan_schema())
-    r2 = await stream_chat(ep, plan_messages(a, "plan"), max_tokens=2000, response_format=fmt,
-                           think=think, client=cli)
+    r2 = await stream_chat(ep, commander_messages(a, "plan"), max_tokens=COMMANDER_MAX_TOKENS, response_format=fmt,
+                           think=think, client=cli, watch_alert_card=True)
+    rounds["R1_classify_alert"] = {"ok": r2.ok and r2.alert_card_s is not None, "derived_from": "R2_plan",
+                                   "alert_card_s": r2.alert_card_s, "alert_card": r2.alert_card,
+                                   "note": "no separate call: the alert card leads the R2 plan stream"}
     rounds["R2_plan"] = r2.to_dict() | {"plan_valid": _valid_plan(r2.text)}
 
     tc = time.perf_counter()
@@ -117,18 +120,22 @@ async def bench_pipeline(ep: Endpoint, think: bool) -> dict[str, Any]:
     verify = {"expectation": "CURE-07 temp_c >= 121 within 30 min", "observed_c": 119.5, "H1": "rejected",
               "safety_core": "CURE-07 CURE_HOLD already applied by rule",
               "neighbours": {F.press_id(6): 127.8, F.press_id(8): 127.9}}
-    r3 = await stream_chat(ep, plan_messages(a, "replan", context={**compute, "verify": verify}),
-                           max_tokens=2000, response_format=fmt, think=think, client=cli)
+    extra = {"failed_expectation": {"hypothesis_id": "H1", "observed": 119.5},
+             "neighbours": {F.press_id(6): {"temp_c_now": 127.8}, F.press_id(7): {"temp_c_now": 119.5},
+                            F.press_id(8): {"temp_c_now": 127.9}},
+             "results": {**compute, "verify": verify}}
+    r3 = await stream_chat(ep, commander_messages(a, "replan", extra=extra, rejected=page11_rejected_h1()),
+                           max_tokens=COMMANDER_MAX_TOKENS, response_format=fmt, think=think, client=cli,
+                           watch_alert_card=True)
     rounds["R3_replan"] = r3.to_dict() | {"plan_valid": _valid_plan(r3.text)}
-
-    r4 = await stream_chat(ep, diagnosis_messages(a, {**compute, "verify": verify}), max_tokens=300,
-                           client=cli)
-    rounds["R4_diagnosis"] = r4.to_dict()
+    rounds["R4_diagnosis"] = {"ok": r3.ok and r3.alert_card_s is not None, "derived_from": "R3_replan",
+                              "alert_card_s": r3.alert_card_s, "alert_card": r3.alert_card,
+                              "note": "no separate call: the phone card is the R3 replan's alert card"}
     await cli.close()
     total = time.perf_counter() - t0
     llm_ok = all(rounds[k]["ok"] for k in ("R1_classify_alert", "R2_plan", "R3_replan", "R4_diagnosis"))
     return {"total_s": round(total, 3), "llm_ok": llm_ok, "rounds": rounds,
-            "tokens_out": sum((rounds[k].get("completion_tokens") or 0) for k in rounds if k.startswith("R"))}
+            "tokens_out": sum((rounds[k].get("completion_tokens") or 0) for k in ("R2_plan", "R3_replan"))}
 
 
 def _valid_plan(text: str) -> bool:
@@ -310,7 +317,7 @@ async def main_async(args) -> dict[str, Any]:
         name = "full_event_p50" if mode == "pipeline" else "pipeline_p50"
         verdicts.append(Verdict(name, f"≈ {LATENCY_FULL_EVENT_S} s (≤ target)", p50,
                                 None if p50 is None else p50 <= LATENCY_FULL_EVENT_S,
-                                note="scripted 4-call breakdown, synthetic solve; not the state machine"))
+                                note="scripted breakdown (commander plan + replan calls), synthetic solve; not the state machine"))
     out["verdicts"] = [v.__dict__ for v in verdicts]
     out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
     return out
@@ -323,7 +330,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--think", action="store_true", help="let the model reason on plan/replan rounds")
     p.add_argument("--mode", choices=("both", "state-machine", "pipeline"), default="both",
-                   help="state-machine = the headline (real Runtime); pipeline = scripted 4-call breakdown")
+                   help="state-machine = the headline (real Runtime); pipeline = scripted commander plan/replan breakdown")
     p.add_argument("--via-state-machine", action="store_true", help="kept for old scripts; same as --mode both")
     p.add_argument("--out-dir", type=Path)
     out = run(main_async(p.parse_args(argv)))

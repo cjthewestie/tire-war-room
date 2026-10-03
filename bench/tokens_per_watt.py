@@ -1,7 +1,8 @@
 """tokens/W (page 10: 每瓦效能, 插座電表量整機功耗, tokens/W 公布).
 
-Method: hold a steady generation load for --duration seconds at --concurrency streams (the event mix:
-alert cards + plans), count generated tokens from the server's usage, and divide by the whole-machine
+Method: hold a steady generation load for --duration seconds at --concurrency streams of the commander's
+real call (bench.prompts.commander_messages, CommanderPlan response_format; plan and replan rounds, the
+alert card leads each plan), count generated tokens from the server's usage, and divide by the whole-machine
 power read from a wall-plug meter during the same window.
 
   tokens/s      = generated tokens / load seconds
@@ -30,8 +31,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from bench.llm import Endpoint, endpoint_info, json_schema_format, run, save_result, stream_chat
-from bench.prompts import ANOMALIES, alert_card_messages, card_schema, plan_messages, plan_schema
+from bench.llm import Endpoint, endpoint_info, run, save_result, stream_chat
+from bench.prompts import (
+    ANOMALIES,
+    COMMANDER_MAX_TOKENS,
+    commander_format,
+    commander_messages,
+    live_anomaly,
+    page11_rejected_h1,
+)
 
 
 def meter_average(path: Path, t_start: float, t_end: float) -> float | None:
@@ -101,13 +109,14 @@ async def load(ep: Endpoint, duration_s: float, concurrency: int) -> tuple[int, 
         nonlocal tokens, calls, errors
         i = k
         while time.perf_counter() < deadline:
-            a = ANOMALIES[i % len(ANOMALIES)]
-            if i % 2:
-                r = await stream_chat(ep, plan_messages(a), max_tokens=800, client=cli,
-                                      response_format=json_schema_format("CommanderPlan", plan_schema()))
+            a = live_anomaly(ANOMALIES[i % len(ANOMALIES)])
+            if i % 2 and a["machine_id"] == ANOMALIES[0]["machine_id"]:   # page-11 replan round (H1 rejected)
+                msgs = commander_messages(a, "replan", rejected=page11_rejected_h1(),
+                                          extra={"failed_expectation": {"hypothesis_id": "H1", "observed": 119.5}})
             else:
-                r = await stream_chat(ep, alert_card_messages(a), max_tokens=100, client=cli,
-                                      response_format=json_schema_format("AlertCard", card_schema()))
+                msgs = commander_messages(a, "plan")
+            r = await stream_chat(ep, msgs, max_tokens=COMMANDER_MAX_TOKENS, client=cli,
+                                  response_format=commander_format())
             calls += 1
             if r.ok:
                 tokens += r.completion_tokens or 0
@@ -134,6 +143,8 @@ async def main_async(args) -> dict[str, Any]:
     if args.meter_csv:
         plug_w = meter_average(args.meter_csv, t_start, t_end)
     out: dict[str, Any] = {"endpoint": await endpoint_info(ep), "concurrency": args.concurrency,
+                           "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), "
+                                     "plan + replan rounds",
                            "window_unix": [t_start, t_end], "calls": calls, "errors": errors,
                            "plug": efficiency(tokens, secs, plug_w, args.idle_watts),
                            "power_source": "plug_meter" if plug_w else "none (tokens/W not computed)"}

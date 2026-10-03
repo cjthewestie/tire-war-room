@@ -1,8 +1,17 @@
-"""Benchmark prompts built from the real factory model and SOP corpus, so the token mix matches what
-the commander sees in production (Traditional Chinese factory context + JSON schema + sensor window).
+"""Benchmark prompts.
 
-The commander's own production prompt lives in warroom/agent (agent owner). The bench keeps its own
-copy so it can run before, and independently of, the agent module.
+Latency, concurrency, tokens/W and boot preload use the COMMANDER'S OWN CALL (``commander_messages``):
+warroom.agent.commander.build_messages -- the byte-identical SYSTEM_PROMPT plus a real CommanderRequest
+shaped like the one StateMachine sends after CLASSIFY (machine, cure job, 30-min sensor summary,
+prediction, SOP hits). The app has no separate alert-card call: the first card is the ``alert_card``
+field that leads the constrained CommanderPlan stream, so the first-alert time is when that object is
+complete in the stream (bench.llm.stream_chat(watch_alert_card=True)). ``commander_format`` and
+``COMMANDER_MAX_TOKENS`` match OpenAICommander.request_kwargs.
+
+``micro_alert_card_messages`` / ``plan_messages`` / ``diagnosis_messages`` are the short bench-only
+prompts (own SYSTEM, ~1.5k chars). They are kept as a labelled micro-benchmark and for the scripted
+pipeline breakdown only; no judged page-9/10 number comes from them. ``SYSTEM`` + ``factory_context``
+etc. also feed the open-book factory quiz (bench.accuracy), which is not a commander call.
 """
 from __future__ import annotations
 
@@ -15,7 +24,26 @@ from pathlib import Path
 from typing import Any
 
 from warroom import factory as F
-from warroom.contracts import AlertCard, CommanderPlan, ToolName
+from warroom.agent.commander import build_messages
+from warroom.agent.commander import plan_schema as commander_plan_schema
+from warroom.agent.narrate import machine_label
+from warroom.contracts import (
+    TOOLS_BY_STATE,
+    WRITE_TOOLS,
+    AlertCard,
+    Anomaly,
+    AnomalyKind,
+    Channel,
+    CommanderPlan,
+    CommanderRequest,
+    EventState,
+    Expectation,
+    Hypothesis,
+    HypothesisStatus,
+    Prediction,
+    Severity,
+    ToolName,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 SOP_DIR = ROOT / "warroom" / "kb" / "sop"
@@ -143,8 +171,9 @@ def anomaly_block(a: dict[str, Any]) -> str:
             f"{sensor_window(a['machine_id'], *a['window'], t_end=a.get('t_end'))}")
 
 
-def alert_card_messages(a: dict[str, Any], prefix: str = "") -> list[dict[str, str]]:
-    """First alert card: ≤100 tokens, must reach the screen ≤2 s (page 9)."""
+def micro_alert_card_messages(a: dict[str, Any], prefix: str = "") -> list[dict[str, str]]:
+    """MICRO-BENCHMARK ONLY: a short standalone alert-card prompt (bench SYSTEM, AlertCard schema).
+    The app never makes this call -- its card leads the CommanderPlan stream (commander_messages)."""
     schema = json.dumps(AlertCard.model_json_schema(), ensure_ascii=False)
     return [
         {"role": "system", "content": SYSTEM + "\n\n" + factory_context() + (("\n\n" + prefix) if prefix else "")},
@@ -198,3 +227,118 @@ def plan_schema() -> dict[str, Any]:
 
 def card_schema() -> dict[str, Any]:
     return AlertCard.model_json_schema()
+
+
+# =====================================================================================
+# The commander's real call (judged latency, concurrency, tokens/W, preload)
+# =====================================================================================
+COMMANDER_MAX_TOKENS = 1200          # OpenAICommander default max_tokens
+
+# CommanderRequest.allowed_tools exactly as StateMachine._ask builds it
+COMMANDER_ALLOWED_TOOLS = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
+
+_SOP_QUERY_FILES = {   # what StateMachine._sop_query finds for each anomaly family (top-3 hits)
+    "press_plan": ("cure-press-temp-drop.md", "steam-pressure-low.md", "cure-interrupt.md"),
+    "press_replan": ("cure-interrupt.md", "sensor-drift.md", "cure-press-temp-drop.md"),
+    "mill_plan": ("open-mill-overheat.md", "cooling-water-fault.md", "preheat-overheat-scrap.md"),
+    "mill_replan": ("preheat-overheat-scrap.md", "open-mill-overheat.md", "cooling-water-fault.md"),
+}
+_CTX_JOBS = {   # cure jobs for the presses in ANOMALIES (page 11: medium tire, 10 h of 28 h at 128 °C)
+    F.press_id(7): {"job_id": "J-07-B207", "order_id": "#B-207", "size": "M", "mold_id": "M-207", "elapsed": 10.0},
+    F.press_id(3): {"job_id": "J-03-S118", "order_id": "#S-118", "size": "S", "mold_id": "S-118", "elapsed": 6.0},
+}
+_KIND = {"temp_drop": AnomalyKind.TEMP_DROP, "overheat": AnomalyKind.OVERHEAT, "steam_low": AnomalyKind.STEAM_LOW}
+
+
+def _sop_hits(key: str) -> list[dict[str, Any]]:
+    """SOP hits in StateMachine._sop_brief's shape, text taken from the real corpus."""
+    out = []
+    for i, name in enumerate(_SOP_QUERY_FILES[key]):
+        p = SOP_DIR / name
+        if not p.exists():
+            continue
+        text = p.read_text(encoding="utf-8")
+        head = text.splitlines()[0].lstrip("# ").strip()
+        sop_id, _, title = head.partition(" ")
+        out.append({"sop_id": sop_id, "title": title or head, "score": round(0.82 - 0.07 * i, 2),
+                    "text": text[:400]})
+    return out
+
+
+def commander_anomaly(a: dict[str, Any]) -> Anomaly:
+    """The contracts.Anomaly the detector would deliver for bench anomaly dict `a` (live_anomaly values)."""
+    t_end = a.get("t_end") or datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ)
+    ch = Channel(a["channel"])
+    v = float(a["value"])
+    trend = round((v - float(a["baseline"])) / 30.0, 3)
+    pred = Prediction(machine_id=a["machine_id"], channel=ch, now_value=v, predicted_value=v,
+                      band_lo=round(v - 1.0, 1), band_hi=round(v + 1.0, 1), horizon_s=1800,
+                      trend_per_min=0.0 if a["kind"] == "temp_drop" else trend)
+    sev = Severity.CRITICAL if a["kind"] == "overheat" else Severity.WARN
+    return Anomaly(id=a.get("event_id", "AN-BENCH").replace("EVT", "AN"), ts=t_end, machine_id=a["machine_id"],
+                   kind=_KIND.get(a["kind"], AnomalyKind.TEMP_DROP), channel=ch, value=v,
+                   baseline=float(a["baseline"]), prediction=pred, severity=sev, message=a["message"],
+                   detection_latency_s=48.0)
+
+
+def commander_context(a: dict[str, Any], phase: str = "plan") -> dict[str, Any]:
+    """StateMachine._classify_async's base_context for `a`: machine, cure_job, sensors summary, SOP hits."""
+    mid = a["machine_id"]
+    mdef = F.MACHINE_BY_ID[mid]
+    t_end = a.get("t_end") or datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ)
+    ctx: dict[str, Any] = {"machine": {"id": mid, "label": machine_label(mid), "line": mdef.line.value,
+                                       "status": "running",
+                                       "compound_stage": "unvulcanized" if mdef.handles_compound else "none",
+                                       "steam_header": mdef.steam_header}}
+    job = _CTX_JOBS.get(mid)
+    if job:
+        cure_h = float(F.CURE_HOURS[job["size"]])
+        mold_in = t_end - timedelta(hours=job["elapsed"])
+        ctx["cure_job"] = {"job_id": job["job_id"], "order_id": job["order_id"], "size": job["size"],
+                           "mold_id": job["mold_id"], "mold_in_at": mold_in.isoformat(),
+                           "planned_demold_at": (mold_in + timedelta(hours=cure_h)).isoformat(),
+                           "setpoint_c": 128.0, "cure_required_h": cure_h, "cure_elapsed_h": job["elapsed"]}
+    lo, hi = sorted(a["window"])
+    key = "temp_c" if a["channel"] == "temp_c" else a["channel"]
+    s = {f"{key}_now": float(a["value"])}
+    if key == "temp_c":
+        s |= {"temp_c_min": lo, "temp_c_max": hi,
+              "trend_c_per_min": round((a["window"][1] - a["window"][0]) / 30.0, 3)}
+    if mdef.handles_compound:
+        s |= {"water_flow_lpm_now": 21.5, "pressure_kgf_cm2_now": 3.1}
+    if mdef.steam_header:
+        s |= {"steam_kgf_cm2_now": 4.4 if a["kind"] != "steam_low" else float(a["value"]),
+              "pressure_kgf_cm2_now": 20.0}
+    ctx["sensors"] = {mid: s}
+    fam = "press" if mdef.steam_header else "mill"
+    ctx["sop"] = _sop_hits(f"{fam}_{phase}")
+    return ctx
+
+
+def commander_request(a: dict[str, Any], phase: str = "plan", extra: dict[str, Any] | None = None,
+                      rejected: list[Hypothesis] | None = None) -> CommanderRequest:
+    """The CommanderRequest StateMachine._ask sends for anomaly `a` (context = base_context | extra)."""
+    return CommanderRequest(phase=phase, event_id=a.get("event_id", "EVT-BENCH"), anomaly=commander_anomaly(a),
+                            allowed_tools=COMMANDER_ALLOWED_TOOLS,
+                            context={**commander_context(a, phase), **(extra or {})}, rejected=rejected or [])
+
+
+def commander_messages(a: dict[str, Any], phase: str = "plan", extra: dict[str, Any] | None = None,
+                       rejected: list[Hypothesis] | None = None) -> list[dict[str, str]]:
+    """The exact messages OpenAICommander sends: SYSTEM_PROMPT (identical every call, prefix-cacheable)
+    + build_user_message(CommanderRequest). Per-event data lives only in the user message."""
+    return build_messages(commander_request(a, phase, extra, rejected))
+
+
+def page11_rejected_h1() -> list[Hypothesis]:
+    """Page-11 replan input: H1 (steam pressure low, temp will stabilise ≥121 °C) rejected at 119.5 °C."""
+    return [Hypothesis(id="H1", statement="蒸汽壓不足，溫度會穩定", cause_code="steam_pressure_low",
+                       status=HypothesisStatus.REJECTED,
+                       expectation=Expectation(machine_id=F.press_id(7), channel=Channel.TEMP, op=">=", value=121,
+                                               within_min=30),
+                       evidence=["溫度續降至 119.5°C"])]
+
+
+def commander_format() -> dict[str, Any]:
+    """response_format exactly as OpenAICommander.request_kwargs sends it (alert_card first)."""
+    return {"type": "json_schema", "json_schema": {"name": "CommanderPlan", "schema": commander_plan_schema()}}

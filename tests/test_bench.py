@@ -429,31 +429,73 @@ def test_report_builds_table(env_fake, tmp_path):
 
 # ---------------------------------------------------------------- cold vs warm, batching vs queuing
 def test_live_anomaly_makes_every_alert_prompt_unique_but_keeps_system_prefix():
-    from bench.prompts import ANOMALIES, alert_card_messages, live_anomaly
-    msgs = [alert_card_messages(live_anomaly(ANOMALIES[0])) for _ in range(5)]
-    assert len({m[1]["content"] for m in msgs}) == 5                 # anomaly block differs every call
-    assert len({m[0]["content"] for m in msgs}) == 1                 # shared system prefix stays cacheable
-    assert all(m[1]["content"].startswith("事件 EVT-") for m in msgs)  # nonce leads the user block
+    from bench.prompts import ANOMALIES, commander_messages, live_anomaly
+    from warroom.agent.commander import SYSTEM_PROMPT
+    msgs = [commander_messages(live_anomaly(ANOMALIES[0])) for _ in range(5)]
+    assert len({m[1]["content"] for m in msgs}) == 5                 # request differs every call
+    assert {m[0]["content"] for m in msgs} == {SYSTEM_PROMPT}        # commander's own, cacheable prefix
+    assert all(json.loads(m[1]["content"])["event_id"].startswith("EVT-") for m in msgs)
     a = live_anomaly(ANOMALIES[0], nonce="x")
     assert a == live_anomaly(ANOMALIES[0], nonce="x")                 # deterministic per nonce
     assert abs(a["value"] - ANOMALIES[0]["value"]) <= 0.4
 
 
+def test_bench_and_preload_send_the_commanders_exact_call():
+    """Finding: bench/preload used their own short SYSTEM, so the prefix cache was warmed for a prompt the
+    commander never sends. Now every judged bench and the preload go through commander.build_messages."""
+    from bench import preload
+    from bench.prompts import (ANOMALIES, COMMANDER_ALLOWED_TOOLS, commander_format, commander_messages,
+                               commander_request, live_anomaly)
+    from warroom.agent.commander import SYSTEM_PROMPT, OpenAICommander, build_messages
+    from warroom.config import Settings
+    from warroom.contracts import EventState, TOOLS_BY_STATE, WRITE_TOOLS
+    for a in ANOMALIES:
+        la = live_anomaly(a, nonce="t")
+        req = commander_request(la)
+        assert commander_messages(la) == build_messages(req)
+        ctx = req.context
+        assert {"machine", "sensors", "sop"} <= set(ctx) and ctx["sop"] and ctx["machine"]["id"] == a["machine_id"]
+    assert COMMANDER_ALLOWED_TOOLS == sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
+    pre = preload.preload_messages()
+    assert pre and all(m[0]["content"] == SYSTEM_PROMPT for m in pre)
+    import httpx
+    cmd = OpenAICommander(Settings(base_url="http://127.0.0.1:9/v1", model="m"), http_client=httpx.AsyncClient())
+    kw = cmd.request_kwargs(commander_request(live_anomaly(ANOMALIES[0], nonce="t")))
+    assert kw["response_format"] == commander_format() and kw["max_tokens"] == 1200
+
+
+def test_stream_chat_times_alert_card_inside_plan_stream(env_fake):
+    import asyncio as _a
+    from bench.prompts import ANOMALIES, COMMANDER_MAX_TOKENS, commander_format, commander_messages, live_anomaly
+    ep = Endpoint.from_env()
+    r = _a.run(stream_chat(ep, commander_messages(live_anomaly(ANOMALIES[0])), max_tokens=COMMANDER_MAX_TOKENS,
+                           response_format=commander_format(), watch_alert_card=True))
+    assert r.ok and r.alert_card == PLAN["alert_card"]
+    assert r.ttft_s <= r.alert_card_s <= r.total_s and not r.stopped_early
+    r2 = _a.run(stream_chat(ep, commander_messages(live_anomaly(ANOMALIES[0])), max_tokens=COMMANDER_MAX_TOKENS,
+                            response_format=commander_format(), stop_on_alert_card=True))
+    assert r2.ok and r2.stopped_early and r2.alert_card == PLAN["alert_card"]
+
+
 def test_ttft_alert_card_judged_on_cold_unique_prompts(env_fake, tmp_path):
+    from warroom.agent.commander import SYSTEM_PROMPT
     _, state = env_fake
     before = len(state.setdefault("bodies", []))
     out = ttft.main(["--runs", "3", "--skip-long", "--out-dir", str(tmp_path)])
     ac = out["alert_card"]
-    assert ac["cold"]["total_s"]["n"] == 3 and ac["warm"]["total_s"]["n"] == 3
+    assert ac["cold"]["card_s"]["n"] == 3 and ac["warm"]["card_s"]["n"] == 3
     ids = ac["cold_event_ids"]
     assert len(set(ids)) == 3
-    users = [json.dumps(b["messages"][1], ensure_ascii=False) for b in state["bodies"][before:]
-             if len(b["messages"]) == 2 and "告警卡" in b["messages"][1]["content"]]
-    for i in ids:                                                   # each cold call carried its own event id
+    bodies = state["bodies"][before:]
+    users = [b["messages"][1]["content"] for b in bodies
+             if len(b["messages"]) == 2 and b["messages"][0]["content"] == SYSTEM_PROMPT
+             and b.get("response_format", {}).get("json_schema", {}).get("name") == "CommanderPlan"]
+    for i in ids:                                                   # each cold call was the commander's, own event id
         assert sum(i in u for u in users) == 1
     v = {x["name"]: x for x in out["verdicts"]}
-    assert v["first_alert_card_p90"]["measured"] == ac["cold"]["total_s"]["p90"]
+    assert v["first_alert_card_p90"]["measured"] == ac["cold"]["card_s"]["p90"]
     assert v["first_alert_card_warm_p90"]["passed"] is None          # warm is info only
+    assert v["micro_alert_card_p90"]["passed"] is None and "micro" in ac["micro"]["label"].lower()
 
 
 def test_batching_detects_queued_calls():

@@ -107,6 +107,9 @@ class CallResult:
     reasoning_chars: int = 0
     error: str | None = None
     chunks: int = 0
+    alert_card_s: float | None = None      # watch_alert_card: alert_card object complete in the plan stream
+    alert_card: dict[str, Any] | None = None
+    stopped_early: bool = False            # stop_on_alert_card closed the stream after the card
 
     @property
     def decode_tps(self) -> float | None:
@@ -125,8 +128,17 @@ class CallResult:
 async def stream_chat(ep: Endpoint, messages: list[dict[str, Any]], *, max_tokens: int = 256,
                       temperature: float = 0.0, response_format: dict[str, Any] | None = None,
                       think: bool = False, extra_body: dict[str, Any] | None = None,
-                      timeout_s: float = 120.0, client: AsyncOpenAI | None = None) -> CallResult:
-    """Streams one chat completion and times it. Never raises: errors come back as ok=False."""
+                      timeout_s: float = 120.0, client: AsyncOpenAI | None = None,
+                      watch_alert_card: bool = False, stop_on_alert_card: bool = False) -> CallResult:
+    """Streams one chat completion and times it. Never raises: errors come back as ok=False.
+
+    watch_alert_card: time the moment the ``alert_card`` object of a streamed CommanderPlan is complete,
+    with the commander's own parser (warroom.agent.commander.extract_alert_card) -- that is when the app's
+    on_alert fires and the first card reaches the screen. stop_on_alert_card closes the stream right
+    after it (the card time does not depend on what follows; usage tokens are then unknown)."""
+    extract = None
+    if watch_alert_card or stop_on_alert_card:
+        from warroom.agent.commander import extract_alert_card as extract
     cli = client or ep.client(timeout_s)
     body = dict(thinking_extra(ep.kind, think))
     body.update(extra_body or {})
@@ -141,6 +153,10 @@ async def stream_chat(ep: Endpoint, messages: list[dict[str, Any]], *, max_token
     reasoning = 0
     usage = None
     chunks = 0
+    card_s = None
+    card = None
+    stopped = False
+    text_so_far = ""
     try:
         stream = await cli.chat.completions.create(**kwargs)
         async for ch in stream:
@@ -162,14 +178,24 @@ async def stream_chat(ep: Endpoint, messages: list[dict[str, Any]], *, max_token
                 if ttft_any is None:
                     ttft_any = now
                 parts.append(delta.content)
+                if extract is not None and card_s is None:
+                    text_so_far += delta.content
+                    c = extract(text_so_far)
+                    if c is not None:
+                        card_s, card = now, c.model_dump(mode="json")
+                        if stop_on_alert_card:
+                            stopped = True
+                            await stream.close()
+                            break
         total = time.perf_counter() - t0
         text = "".join(parts)
         ctoks = usage.completion_tokens if usage else None
         ptoks = usage.prompt_tokens if usage else None
-        return CallResult(True, ttft, ttft_any, total, ptoks, ctoks, text, reasoning, None, chunks)
+        return CallResult(True, ttft, ttft_any, total, ptoks, ctoks, text, reasoning, None, chunks,
+                          card_s, card, stopped)
     except Exception as e:  # noqa: BLE001 - a benchmark reports failures, it does not crash
         return CallResult(False, ttft, ttft_any, time.perf_counter() - t0, None, None, "".join(parts),
-                          reasoning, f"{type(e).__name__}: {e}", chunks)
+                          reasoning, f"{type(e).__name__}: {e}", chunks, card_s, card, stopped)
     finally:
         if client is None:
             await cli.close()
