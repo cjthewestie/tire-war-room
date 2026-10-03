@@ -8,7 +8,17 @@
 # Images: warroom-firewall.service drops all non-LAN egress (dockerd included) from the next boot on, so
 # every image the stack needs is pulled/built HERE, while the box is still online, and the install fails
 # if one is missing. Offline install: `docker load -i images.tar` first, then SKIP_PULL=1.
-# Env: DOCKER=docker, SKIP_PULL=1 (verify only), NO_IMAGES=1 (skip the image step: tests, no docker).
+# Weights: vLLM runs with HF_HUB_OFFLINE=1, so the same goes for the model weights. Install runs
+# fetch_models.sh (online), then `fetch_models.sh --check`, and fails before enabling any unit if one is
+# missing -- otherwise vLLM restart-loops and the app silently serves the mock commander.
+# Offline install: copy a filled HF cache to ${HF_CACHE} first; SKIP_PULL=1 also skips the download.
+# Env: DOCKER=docker, SKIP_PULL=1 (verify only), NO_IMAGES=1 (skip the image step: tests, no docker),
+#      SKIP_FETCH=1 (verify weights, no download; defaults to SKIP_PULL), NO_MODELS=1 (skip weights: tests),
+#      WITH_CONTROL=1 (default: also fetch+require the ~66 GB BF16 checkpoint the page-10 FP8 control group
+#      in bench/spark_ablation.sh serves; WITH_CONTROL=0 skips it and the ablation then refuses `control`),
+#      HF_CACHE (default ${ROOT}/hf).
+# OS quiet: LAN_NTP=<factory NTP host(s)> (timesyncd target), QUIET_OS=0 (leave DGX OS online housekeeping
+#      alone), ETC_DIR=/etc (tests).
 set -euo pipefail
 ROOT="${WARROOM_ROOT:-/opt/warroom}"
 SRC="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -41,6 +51,13 @@ if (( ${#pin} < 8 )) || [[ "$pin" =~ [[:space:]\"\'\$\#] ]]; then
   exit 1
 fi
 ln -sfn "$ROOT/releases/$VER" "$ROOT/current"
+# Weights dir: $HF_CACHE if given (and written to .env so compose mounts the same dir), else .env's, else $ROOT/hf.
+envf="$ROOT/current/deploy/spark/.env"
+env_hf="$(sed -n 's/^HF_CACHE=//p' "$envf" | tail -1)"
+if [[ -n "${HF_CACHE:-}" && "$HF_CACHE" != "$env_hf" ]]; then
+  { grep -v '^HF_CACHE=' "$envf" || true; echo "HF_CACHE=$HF_CACHE"; } >"$envf.tmp" && mv "$envf.tmp" "$envf"
+fi
+HF_CACHE="${HF_CACHE:-${env_hf:-$ROOT/hf}}"
 chown -R 10001 "$ROOT/data/runtime" 2>/dev/null || true   # app container user
 
 if [[ "${NO_IMAGES:-0}" != 1 ]]; then
@@ -60,6 +77,24 @@ if [[ "${NO_IMAGES:-0}" != 1 ]]; then
     else echo "install: image MISSING: $img" >&2; missing=1; fi
   done <<<"$images"
   (( missing == 0 )) || { echo "install aborted: the stack cannot start offline without these images" >&2; exit 1; }
+fi
+
+WITH_CONTROL="${WITH_CONTROL:-1}"
+if [[ "${NO_MODELS:-0}" != 1 ]]; then
+  fetch=("$ROOT/current/deploy/bin/fetch_models.sh")
+  mkdir -p "$HF_CACHE"
+  if [[ "$WITH_CONTROL" != 1 ]]; then
+    echo "WARNING: WITH_CONTROL=0 -- the BF16 checkpoint for the page-10 FP8 control group is NOT fetched." >&2
+    echo "WARNING: once the boot firewall is up, bench/spark_ablation.sh cannot run 'control' and the" >&2
+    echo "WARNING: NVFP4-vs-FP8 accuracy gap gets no Spark number. Re-run with WITH_CONTROL=1 while online." >&2
+  fi
+  if [[ "${SKIP_FETCH:-${SKIP_PULL:-0}}" != 1 ]]; then
+    echo "downloading model weights into $HF_CACHE while still online (the boot firewall blocks Hugging Face)"
+    HF_CACHE="$HF_CACHE" WITH_CONTROL="$WITH_CONTROL" bash "${fetch[@]}" \
+      || { echo "install aborted: model download failed" >&2; exit 1; }
+  fi
+  HF_CACHE="$HF_CACHE" WITH_CONTROL="$WITH_CONTROL" bash "${fetch[@]}" --check \
+    || { echo "install aborted: vLLM cannot start offline without these weights (the app would run on the mock commander)" >&2; exit 1; }
 fi
 
 # Bench venv: $ROOT/venv, the interpreter bench/py.sh (and so bench/spark_ablation.sh) uses on this host.
@@ -97,6 +132,13 @@ from warroom.config import get_settings; TextEmbedding(model_name=get_settings()
 bench.memory_check, bench.accuracy, bench.tokens_per_watt, bench.unplug_test, ortools, openai, psutil") \
     || { echo "install aborted: the bench venv cannot import the benches" >&2; exit 1; }
   echo "bench venv ok: run benches with bench/py.sh -m bench.<name> (bench/spark_ablation.sh does)"
+  # NAT profiler venv $ROOT/nat-venv (page 10: every target recorded with the NeMo Agent Toolkit profiler).
+  # Overlay on $ROOT/venv, built while online; deploy/nat/run.sh finds it. NO_NAT_VENV=1 skips it.
+  if [[ "${NO_NAT_VENV:-0}" != 1 ]]; then
+    WARROOM_ROOT="$ROOT" UV="$UV" UV_CACHE_DIR="$ROOT/.uv-cache" UV_PYTHON_INSTALL_DIR="$ROOT/python" \
+      SKIP_PULL="${SKIP_PULL:-0}" bash "$ROOT/current/deploy/nat/build_venv.sh" \
+      || { echo "install aborted: NAT profiler venv failed (deploy/nat/run.sh could not record targets offline)" >&2; exit 1; }
+  fi
 fi
 
 # Quiet DGX OS's own internet calls, so the unplug test's 0 means the box made no attempt at all. The nft
@@ -128,7 +170,7 @@ for u in "$ROOT"/current/deploy/systemd/*.service; do ln -sfn "$u" "$SYSTEMD_DIR
 if command -v systemctl >/dev/null && [[ "${NO_SYSTEMCTL:-0}" != 1 ]]; then
   systemctl daemon-reload
   systemctl enable warroom-firewall.service warroom-stack.service warroom-preload.service warroom-watchdog.service
-  echo "installed $VER (images present). Start it now with:"
+  echo "installed $VER (images and weights present). Start it now with:"
   echo "  systemctl start warroom-firewall warroom-stack warroom-preload warroom-watchdog"
 fi
 echo "current -> $(readlink "$ROOT/current")"

@@ -145,3 +145,53 @@ def test_openshell_launcher_dry_run_fills_the_policy(tmp_path):
     assert "${" not in r.stdout
     assert "openshell sandbox create --name warroom --from warroom-app:latest --policy" in r.stdout
     assert "BASE_URL=http://10.1.2.3:8001/v1" in r.stdout
+
+
+# --------------------------------------------------------------------------- NAT on the Spark (offline)
+def _run_sh(tmp_path, env_extra, *args):
+    env = {"HOME": str(tmp_path), "PATH": "/usr/bin:/bin", **env_extra}          # no uv on PATH, like the Spark
+    return subprocess.run(["bash", str(ROOT / "deploy/nat/run.sh"), *args], env=env,
+                          capture_output=True, text=True, timeout=30)
+
+
+def _fake_nat(path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('#!/bin/sh\necho "NAT $* PYTHONPATH=$PYTHONPATH HF=$HF_HUB_OFFLINE"\n')
+    path.chmod(0o755)
+    return path
+
+
+def test_run_sh_uses_the_spark_nat_venv_without_uv(tmp_path):
+    _fake_nat(tmp_path / "opt/nat-venv/bin/nat")
+    r = _run_sh(tmp_path, {"WARROOM_ROOT": str(tmp_path / "opt"), "LLM": "1",
+                           "BASE_URL": "http://127.0.0.1:8001/v1", "MODEL": "nemotron"}, "eval")
+    assert r.returncode == 0, r.stderr
+    assert "NAT eval --config_file deploy/nat/eval.yml" in r.stdout
+    assert "workflow.base_url http://127.0.0.1:8001/v1" in r.stdout and "workflow.model nemotron" in r.stdout
+    assert f"PYTHONPATH={ROOT}" in r.stdout and "HF=1" in r.stdout          # release code first, offline Hub
+
+
+def test_run_sh_override_and_clear_error_when_no_nat(tmp_path):
+    nat = _fake_nat(tmp_path / "custom/nat")
+    r = _run_sh(tmp_path, {"WARROOM_ROOT": str(tmp_path / "none"), "WARROOM_NAT": str(nat)}, "run")
+    assert r.returncode == 0 and "NAT run --config_file deploy/nat/workflow.yml --input press7_temp_drop" in r.stdout
+    r = _run_sh(tmp_path, {"WARROOM_ROOT": str(tmp_path / "none")}, "run")
+    assert r.returncode == 127 and "install_spark.sh" in r.stderr
+
+
+def test_spark_example_points_at_vllm_not_the_app():
+    run_sh = (ROOT / "deploy/nat/run.sh").read_text()
+    compose = (ROOT / "deploy/spark/docker-compose.yml").read_text()
+    assert '8001:8000"' in compose                                            # vLLM published on :8001
+    assert "BASE_URL=http://127.0.0.1:8001/v1 MODEL=nemotron" in run_sh
+    assert "localhost:8000/v1" not in run_sh and ":8000/v1" not in run_sh
+    assert "nemotron" in (ROOT / "deploy/spark/vllm-serve.sh").read_text()     # served model name
+
+
+def test_install_spark_builds_the_nat_venv_while_online():
+    inst = (ROOT / "deploy/bin/install_spark.sh").read_text()
+    build = (ROOT / "deploy/nat/build_venv.sh").read_text()
+    assert "deploy/nat/build_venv.sh" in inst and "NO_NAT_VENV" in inst
+    assert inst.index("build_venv.sh") > inst.index("bench venv ok")          # after $ROOT/venv exists
+    assert "deploy/nat/requirements.txt" in build and "--offline" in build and "nat.components" in build
+    subprocess.run(["bash", "-n", str(ROOT / "deploy/nat/build_venv.sh")], check=True)
