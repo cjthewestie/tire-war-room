@@ -130,6 +130,10 @@ class ComponentBuilder:
         def real():
             from warroom.agent import JsonlAuditLog
             return JsonlAuditLog(self.s.audit_path, bus=self.bus, clock=self.clock)
+        if self.use_real:
+            # Never swap the append-only log for memory: JsonlAuditLog repairs a torn last line and
+            # archives a broken chain itself, so a failure here is a real disk fault -> fail closed.
+            return real()
         return self._t("audit", real, lambda: FB.MemoryAuditLog(None, bus=self.bus, clock=self.clock))
 
     def _kb(self):
