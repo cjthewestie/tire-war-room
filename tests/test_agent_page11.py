@@ -117,7 +117,7 @@ async def test_page11_timeline(tmp_path):
     assert tl[i].ts == at("02:14:01")
     i = _find(tl, "指揮官", "讀 30 分鐘溫度", "查 SOP", "假設 H1：蒸汽壓不足，溫度會穩定", start=i)
     assert tl[i].ts == at("02:14:03")
-    i = _find(tl, "指揮官", "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知",
+    i = _find(tl, "指揮官", "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）、S5 設定硫化時間（需核准）→ S6 通知",
               "預期：30 分內 ≥121°C", start=i)
     assert tl[i].ts == at("02:14:09")
     i = _find(tl, "工具", "S1：122°C 總需 36.5 h（+8.5 h）", "S2：下一模 #A-311 交期 3 天後", "夜班缺 1 人", start=i)
@@ -143,7 +143,7 @@ async def test_page11_timeline(tmp_path):
     assert h1.expectation.op == ">=" and h1.expectation.value == 121 and h1.expectation.within_min == 30
     assert any("119.5" in e for e in h1.evidence)
     assert (h2.id, h2.cause_code) == ("H2", "steam_leak_or_sensor_drift")
-    assert ev.replans == 1 and ev.consecutive_failures == 1
+    assert ev.replans == 1 and ev.consecutive_failures == 0     # round 2 executed cleanly: streak over
 
     # S1 numbers came from the formula tool, S3 schedule override referenced $S1.total_cure_h
     solve1 = tools.calls_of(ToolName.SOLVE_SCHEDULE)[0]

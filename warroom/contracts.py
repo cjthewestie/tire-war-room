@@ -821,6 +821,7 @@ class ApprovalRequest(_M):
     done: list[str] = Field(default_factory=list)    # 已做
     gaps: list[str] = Field(default_factory=list)    # 缺口
     delivery_impact: str = ""                         # 交期 "不受影響"
+    actions: list[str] = Field(default_factory=list)  # 核准內容: every gated write with its key args (code-built)
     options: list[ApprovalOption]
     status: ApprovalStatus = ApprovalStatus.PENDING
     decision: "ApprovalDecision | None" = None

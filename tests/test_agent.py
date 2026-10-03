@@ -231,8 +231,10 @@ async def test_mock_commander_page11():
             h.expectation.within_min) == ("H1", "steam_pressure_low", "CURE-07", ">=", 121, 30)
     assert [(s.id, s.tool) for s in plan.steps] == [
         ("S1", ToolName.CURE_FORMULA), ("S2", ToolName.QUERY_ORDERS_SHIFTS), ("S3", ToolName.SOLVE_SCHEDULE),
-        ("S4", ToolName.CONFIRM_SCHEDULE), ("S5", ToolName.NOTIFY_TEAMS)]
+        ("S4", ToolName.CONFIRM_SCHEDULE), ("S5", ToolName.SET_CURE_TIME), ("S6", ToolName.NOTIFY_TEAMS)]
     assert plan.steps[2].depends_on == ["S1", "S2"]
+    assert plan.steps[4].args == {"press_id": "CURE-07", "total_cure_h": "$S1.total_cure_h",
+                                  "reason": plan.steps[4].args["reason"]}       # the formula's value, by reference
     assert plan.steps[0].args["actual_temp_c"] == 122 and plan.steps[0].args["elapsed_h"] == 10
     assert plan.goal == "7 號降溫，大胎不能延誤"
     assert approx_tokens(plan.alert_card.title + plan.alert_card.summary) <= 100
@@ -335,7 +337,7 @@ async def test_openai_commander_streams_and_constrains(base_url, expect_guided):
         assert body["chat_template_kwargs"] == {"enable_thinking": False}
     else:                  # Ollama: reasoning_effort none
         assert body["reasoning_effort"] == "none" and body["think"] is False
-    assert plan.hypothesis.id == "H1" and len(plan.steps) == 5
+    assert plan.hypothesis.id == "H1" and len(plan.steps) == 6
     assert info.valid_json and not info.fell_back_to_mock and info.ttft_ms is not None
     assert info.prompt_tokens == 900 and info.completion_tokens == 300
     assert len(alerts) == 1 and alerts[0][0].title.startswith("7 號機")
@@ -436,8 +438,10 @@ async def test_two_consecutive_failures_safe_stop_and_rollback(tmp_path):
     assert not tools.calls_of(ToolName.CONFIRM_SCHEDULE)
 
 
-async def test_safe_stop_rolls_back_activated_schedule(tmp_path):
-    """Round 1 confirms v2, verify fails (H1), round 2 supervisor rejects -> 2 failures -> rollback to v1."""
+async def test_safe_stop_keeps_the_approved_schedule(tmp_path):
+    """Round 1 confirms v2 (approved), verify fails (H1), round 2 supervisor rejects -> 2 failures ->
+    SAFE_STOP. The supervisor-approved v2 stays in force: rolling back to v1 would put #A-311 back on
+    the press the safety core is holding (review finding 5)."""
     clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path)
 
     async def sup():
@@ -450,8 +454,11 @@ async def test_safe_stop_rolls_back_activated_schedule(tmp_path):
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await t
     assert ev.state is EventState.SAFE_STOP
-    assert store.rollbacks == [1] and store.active == 1
-    assert any(e.kind is AuditKind.ROLLBACK for e in audit.tail(0, 0))
+    assert store.rollbacks == [] and store.active == 2
+    assert not any(e.kind is AuditKind.ROLLBACK for e in audit.tail(0, 0))
+    assert "維持主管已核准的排程 v2" in ev.outcome
+    kept = next(e for e in audit.tail(0, 0) if e.payload.get("safe_stop_schedule") == "kept")
+    assert kept.payload["approved_by_this_event"] == [2]
 
 
 async def test_approval_timeout_safe_stop(tmp_path):
@@ -492,7 +499,8 @@ async def test_out_of_scope_steps_intercepted_and_logged(tmp_path):
     rejected_gate = [e for e in entries if e.kind is AuditKind.GATE and e.payload.get("tool") == "notify_teams"]
     assert rejected_gate                                       # malformed (bad machine id) write rejected
     assert not tools.calls_of(ToolName.NOTIFY_TEAMS)
-    assert ev.state is EventState.CLOSED and audit.verify_chain()
+    # a plan whose only write the gate refused did nothing: a miss, not a closed success
+    assert ev.state is EventState.SAFE_STOP and audit.verify_chain()
 
 
 async def test_tool_not_open_in_state_is_blocked(tmp_path):
@@ -529,6 +537,7 @@ async def test_page2_open_mill_auto_then_approval(tmp_path):
     assert seen["notifies_before"] == ["maintenance"]
     req = seen["req"]
     assert req.risk is RiskLevel.R3_CRITICAL and [o.label for o in req.options] == ["放慢生料投入"]
+    assert req.actions == ["S4 放慢生料投入 → 大開煉機組［A 線大開煉機］：A 線大開煉機膠溫偏高，請放慢生料投入直到冷卻恢復"]
     assert "已通知維修" in req.done
     assert any("膠溫 112°C 未達 120°C 停機線" in t.text for t in ev.timeline)
     assert any(t.text.startswith("✓ 已自動：通知維修") for t in ev.timeline)

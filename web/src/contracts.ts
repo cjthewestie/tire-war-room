@@ -263,6 +263,7 @@ export interface ApprovalRequest {
   done: string[]
   gaps: string[]
   delivery_impact: string
+  actions?: string[]
   options: ApprovalOption[]
   status: ApprovalStatus
   decision: ApprovalDecision | null

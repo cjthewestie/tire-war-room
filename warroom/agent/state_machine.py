@@ -13,8 +13,11 @@ One Event per wake-up from the detector. States follow contracts.ALLOWED_TRANSIT
   rejects the hypothesis and goes to REPLAN with the evidence (page 11: 119.5 °C → H1 不成立).
 - Failure policy (page 7): a failed tool is retried MAX_TOOL_RETRIES times, then the SOP path
   (REPLAN with sop_path context); solver timeout → backup solver happens inside the scheduler and
-  is shown on the timeline; MAX_CONSECUTIVE_FAILURES → SAFE_STOP, rolling the schedule store back
-  to the version that was active when the event opened.
+  is shown on the timeline; MAX_CONSECUTIVE_FAILURES → SAFE_STOP. Safe stop keeps the schedule in
+  force (never rolls back a supervisor-approved version); unapproved proposals are simply never
+  confirmed. An approved round that executes cleanly resets the failure streak.
+- The LLM path never lifts a machine status the safety core or a decision set (STOPPED /
+  OUT_OF_SERVICE); see _set_status.
 - Every transition, LLM call, tool call/result, gate decision and interception is audited; every
   change is published on the bus (WsType.EVENT / ALERT_CARD).
 
@@ -190,13 +193,14 @@ class _Run:
     step_changes: dict[str, dict[str, Any]] = field(default_factory=dict)    # option step id -> StaffingChange
     staffing_done: list[dict[str, Any]] = field(default_factory=list)        # executed staffing notifies
     revocations: dict[str, dict[str, Any]] = field(default_factory=dict)     # revoke step id -> staffing_done entry
+    activated: list[int] = field(default_factory=list)       # schedule versions THIS event confirmed (approved)
 
 
 class StateMachine:
     """Implements contracts.EventStateMachine (page 5/7/11). See module docstring.
 
     Extra keyword args (all optional, defaults suit the live runtime):
-      store              ScheduleStore, for rollback on SAFE_STOP (keep the original schedule).
+      store              ScheduleStore (safe-stop bookkeeping, staffing amendments).
       sleep              async fn(sim_seconds) used by VERIFY polling; default waits on the clock.
       approval_timeout_s wall seconds to wait for the supervisor before SAFE_STOP.
       verify_poll_s      sim seconds between VERIFY reads.
@@ -234,8 +238,9 @@ class StateMachine:
             self._commander_streams = False
         try:
             self._gate_takes_cross_team = "cross_team" in inspect.signature(gate.check).parameters
+            self._gate_takes_evidence = "evidence" in inspect.signature(gate.check).parameters
         except (TypeError, ValueError):
-            self._gate_takes_cross_team = False
+            self._gate_takes_cross_team = self._gate_takes_evidence = False
 
     # ------------------------------------------------------------------ public API
     def events(self) -> list[Event]:
@@ -342,13 +347,27 @@ class StateMachine:
                                                                                          self._max_kept]:
             del self._events[eid]
 
-    def _set_status(self, machine_id: str, status: MachineStatus, note: str | None = None) -> None:
+    # The LLM path may never lift what the safety core (STOPPED) or a decision (OUT_OF_SERVICE) put
+    # down: ALARM only over a machine that is still running, RUNNING only back from ALARM. Taking a
+    # machine out of service is always allowed (it only restricts further).
+    _STATUS_FROM: dict[MachineStatus, frozenset[MachineStatus]] = {
+        MachineStatus.ALARM: frozenset({MachineStatus.RUNNING, MachineStatus.WARNING, MachineStatus.IDLE}),
+        MachineStatus.RUNNING: frozenset({MachineStatus.ALARM}),
+    }
+
+    def _set_status(self, machine_id: str, status: MachineStatus, note: str | None = None) -> bool:
         if self.sim is None:
-            return
+            return False
+        allowed = self._STATUS_FROM.get(status)
+        if allowed is not None:
+            st = self._machine_state(machine_id)
+            if st is not None and st.status not in allowed:
+                return False                     # e.g. safety core STOPPED it: keep it stopped
         try:
             self.sim.set_machine_status(machine_id, status, note)
+            return True
         except Exception:  # noqa: BLE001
-            pass
+            return False
 
     def _machine_state(self, machine_id: str):
         if self.sim is None:
@@ -476,6 +495,13 @@ class StateMachine:
                 await self._execute(run, chosen, auto_tag=False)
                 if change is not None:
                     await self._execute(run, self._revoke_steps(run, change, res), auto_tag=False)
+                if chosen and not any(sr.state == "failed" for sr in chosen) and ev.consecutive_failures:
+                    # an approved round that executed cleanly ends the failure streak (page 7 counts
+                    # CONSECUTIVE failures)
+                    self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                      {"failure_streak_reset": ev.consecutive_failures,
+                                       "reason": "approved writes executed"}, event_id=ev.id)
+                    ev.consecutive_failures = 0
             elif not auto:
                 self._to(ev, EventState.EXECUTE, "no write steps")
 
@@ -644,9 +670,18 @@ class StateMachine:
         for s in getattr(self.commander, "last_intercepted", None) or []:
             self.audit.append(AuditKind.INTERCEPTED, "commander",
                               {"step": s, "reason": "tool not on the allow-list (dropped from plan)"}, event_id=ev.id)
-        if plan.hypothesis.cause_code in {h.cause_code for h in rejected} and not plan.safe_stop:
+        if plan.hypothesis.expectation is not None:
+            exp, fixes = self._bound_expectation(ev, plan.hypothesis.expectation)
+            if fixes:
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"expectation_bounded": fixes,
+                                   "from": plan.hypothesis.expectation.model_dump(mode="json"),
+                                   "to": exp.model_dump(mode="json")}, event_id=ev.id)
+                plan = plan.model_copy(update={"hypothesis": plan.hypothesis.model_copy(update={"expectation": exp})})
+        again = self._repeats_rejected(plan.hypothesis, rejected)
+        if again and not plan.safe_stop:
             self.audit.append(AuditKind.SYSTEM, "state_machine",
-                              {"error": "commander re-proposed a rejected hypothesis",
+                              {"error": "commander re-proposed a rejected hypothesis", "match": again,
                                "cause_code": plan.hypothesis.cause_code}, event_id=ev.id)
             plan = plan.model_copy(update={"safe_stop": True})
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
@@ -663,6 +698,75 @@ class StateMachine:
             await self._pace(llm_started, max(MODEL_LLM_PLAN_S, info.total_ms / 1000.0))
             self._narrate_steps(run)
         return plan
+
+    # ---- VERIFY must test the event, not whatever the LLM picked ----
+    EXPECT_MARGIN_C = 1.0
+    EXPECT_WITHIN_MIN = (5.0, 60.0)
+
+    def _bound_expectation(self, ev: Event, exp: Any) -> tuple[Any, list[str]]:
+        """Pin the expectation to the event's machine and bound its threshold by code, so VERIFY
+        cannot be satisfied trivially (another machine, the wrong direction, a threshold the
+        faulty state already meets). Returns (expectation, list of fixes applied)."""
+        from warroom.contracts import CompoundStage
+        from warroom.factory import COMPOUND_STOP_C, CURATIVE_STOP_C
+        a = ev.anomaly
+        fixes: list[str] = []
+        upd: dict[str, Any] = {}
+        if exp.machine_id != ev.machine_id:
+            fixes.append(f"machine {exp.machine_id} -> {ev.machine_id}")
+            upd["machine_id"] = ev.machine_id
+        lo_w, hi_w = self.EXPECT_WITHIN_MIN
+        if not lo_w <= exp.within_min <= hi_w:
+            upd["within_min"] = min(hi_w, max(lo_w, exp.within_min))
+            fixes.append(f"within_min {exp.within_min:g} -> {upd['within_min']:g}")
+        channel = exp.channel
+        op, value = exp.op, exp.value
+        if op == "between":                                  # keep the bound that counters the anomaly
+            dropping = a.baseline is not None and a.value < a.baseline
+            op, value = (">=", exp.value) if dropping else ("<=", exp.value_hi if exp.value_hi is not None
+                                                             else exp.value)
+            fixes.append(f"between -> {op}")
+            upd["value_hi"] = None
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        st = self._machine_state(ev.machine_id)
+        need_op: str | None = None
+        bound: float | None = None
+        if channel is Channel.TEMP and mdef is not None and mdef.line is Line.CURE:
+            need_op, bound = ">=", CURE_TEMP_MIN_C + self.EXPECT_MARGIN_C       # recover into the cure band
+        elif channel is Channel.TEMP and mdef is not None and mdef.handles_compound:
+            limit = CURATIVE_STOP_C if st is not None and st.compound_stage is CompoundStage.CURATIVE_ADDED \
+                else COMPOUND_STOP_C
+            need_op, bound = "<=", limit - 2 * self.EXPECT_MARGIN_C             # back under the stop line
+        elif channel is a.channel and a.baseline is not None and a.value != a.baseline:
+            need_op = ">=" if a.value < a.baseline else "<="
+            bound = a.value                                                     # at least no worse than now
+        if need_op is not None:
+            if op != need_op:
+                fixes.append(f"op {op} -> {need_op}")
+                op = need_op
+            if bound is not None and (value < bound if op == ">=" else value > bound):
+                fixes.append(f"value {value:g} -> {bound:g}")
+                value = bound
+        if op != exp.op:
+            upd["op"] = op
+        if value != exp.value:
+            upd["value"] = float(value)
+        return (exp.model_copy(update=upd) if upd else exp), fixes
+
+    @staticmethod
+    def _repeats_rejected(h: Hypothesis, rejected: list[Hypothesis]) -> str | None:
+        """A rejected hypothesis comes back under a new name: same cause code, same statement, or
+        the same test (machine, channel, op and threshold within 0.5)."""
+        for r in rejected:
+            if h.cause_code == r.cause_code:
+                return f"cause_code {h.cause_code}"
+            if h.statement.strip() and h.statement.strip() == r.statement.strip():
+                return "statement"
+            e1, e2 = h.expectation, r.expectation
+            if e1 is not None and e2 is not None and (e1.machine_id, e1.channel, e1.op) == \
+                    (e2.machine_id, e2.channel, e2.op) and abs(e1.value - e2.value) <= 0.5:
+                return f"expectation of {r.id}"
+        return None
 
     def _narrate_hypothesis(self, run: _Run, phase: str, rejected: list[Hypothesis]) -> None:
         ev, plan = run.ev, run.plan
@@ -789,6 +893,28 @@ class StateMachine:
                 return any(c.get("kind") == "transfer" for c in sched.get("staffing_changes") or [])
         return None
 
+    @staticmethod
+    def _evidence(run: _Run) -> dict[str, Any]:
+        """What THIS event's own tool results support, for the gate: schedule versions a feasible
+        solve produced (confirm_schedule may only activate those) and cure-formula totals
+        (set_cure_time may only carry the formula's value, never an AI guess)."""
+        feasible_versions: list[int] = []
+        cure_h: list[float] = []
+        for res in run.results.values():
+            if not res.ok:
+                continue
+            if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("feasible") and \
+                    res.data.get("schedule_version") is not None:
+                feasible_versions.append(int(res.data["schedule_version"]))
+            elif res.tool is ToolName.CURE_FORMULA and res.data.get("total_cure_h") is not None:
+                cure_h.append(float(res.data["total_cure_h"]))
+        return {"feasible_versions": feasible_versions, "cure_formula_h": cure_h}
+
+    def _check(self, run: _Run, step: PlanStep, **kw: Any) -> GateDecision:
+        if self._gate_takes_evidence and step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+            kw["evidence"] = self._evidence(run)
+        return self.gate.check(step, EventState.EXECUTE, run.feasible, **kw)
+
     def _gate(self, run: _Run
               ) -> tuple[list[StepRun], list[StepRun], list[StepRun], list[ApprovalOption], RiskLevel]:
         """Returns (auto now, auto deferred until approval, needs approval, options, request risk).
@@ -815,7 +941,7 @@ class StateMachine:
             kw = {}
             if step.tool is ToolName.CONFIRM_SCHEDULE and self._gate_takes_cross_team:
                 kw["cross_team"] = self._cross_team(run, resolved.args)
-            gd = self.gate.check(resolved, EventState.EXECUTE, run.feasible, **kw)
+            gd = self._check(run, resolved, **kw)
             sr.gate = gd
             self.audit.append(AuditKind.GATE, "gate", {"step_id": step.id, "decision": gd.model_dump(mode="json")},
                               event_id=ev.id)
@@ -884,12 +1010,13 @@ class StateMachine:
             staff_steps = [sr for sr in needs if sr.step.tool is ToolName.NOTIFY_TEAMS
                            and sr.step.args.get("kind") in STAFFING_KINDS]
             for sr in staff_steps:
-                opts.append(ApprovalOption(id=chr(ord("A") + len(opts)), label=sr.step.purpose,
+                opts.append(ApprovalOption(id=chr(ord("A") + len(opts)), label=self._action_text(run, sr.step, True),
                                            tool=sr.step.tool, args=sr.step.args, recommended=not opts))
         if not opts:
+            # built in code from the validated args, never the commander's own wording (purpose)
             first = needs[0].step
-            label = first.purpose if len(needs) == 1 else "核准以上動作"
-            label = label.replace("（需主管核准）", "")
+            label = self._action_text(run, first, True) if len(needs) == 1 else \
+                "核准全部：" + "；".join(self._action_text(run, sr.step, True) for sr in needs)
             opts.append(ApprovalOption(id="A", label=label, tool=first.tool, args=first.args, recommended=True))
         if opts and not any(o.recommended for o in opts):
             opts[0] = opts[0].model_copy(update={"recommended": True})
@@ -1060,6 +1187,9 @@ class StateMachine:
         done = list(dict.fromkeys(run.done))
         if ev.safety_actions or self._safety_acted(ev.machine_id):
             done.insert(0, "安全核心已處置")
+        for prev in run.staffing_done:                   # an earlier round already filled this gap
+            if not prev["revoked"]:
+                done.append(f"已安排{prev['label']}（前一輪核准，本輪可改選）")
         todo = self._todo_text(run, needs)
         if todo:
             done.append(todo)
@@ -1069,7 +1199,7 @@ class StateMachine:
         req = ApprovalRequest(
             id=f"AP-{ev.id}-{rnd}", event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,
             risk=risk, title=plan.alert_card.title, reason=reason, done=done, gaps=list(dict.fromkeys(gaps)),
-            delivery_impact=delivery, options=options,
+            delivery_impact=delivery, options=options, actions=self._actions(run, needs, options),
             expires_at=now + timedelta(seconds=self.approval_timeout_s))
         req = self.approvals.request(req)
         ev.approvals.append(req.id)
@@ -1129,10 +1259,11 @@ class StateMachine:
                 self._log_reject(run, step, gd)
             else:
                 chosen.append(sr)
-        if d.decision is DecisionKind.MODIFY and d.modified_args:
-            # re-gate modified steps: a modification can never widen permissions
+        if d.modified_args:
+            # re-gate modified steps (MODIFY, or APPROVE that carries args): a modification can never
+            # widen permissions or replace a formula value
             for sr in list(chosen):
-                gd = self.gate.check(sr.step, EventState.EXECUTE, run.feasible)
+                gd = self._check(run, sr.step)
                 if gd.verdict is GateVerdict.REJECT:
                     sr.state = "rejected"
                     self._log_reject(run, sr.step, gd)
@@ -1280,6 +1411,8 @@ class StateMachine:
                         n = _press_no(str(mv.get("to_press")))
                         run.done.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 已重排")
             run.executed.append(f"排程 v{v} 生效")
+            if isinstance(v, int):
+                run.activated.append(v)
         elif step.tool is ToolName.SET_CURE_TIME:
             run.executed.append(f"{machine_label(str(step.args.get('press_id')))}硫化 {fmt_num(step.args.get('total_cure_h'))} h")
         elif step.tool is ToolName.NOTIFY_TEAMS:
@@ -1350,13 +1483,20 @@ class StateMachine:
         h = ev.hypotheses[-1]
         exp = h.expectation
         failed_writes = [sr for sr in ev.steps if sr.state == "failed"]
+        # a write the gate refused (AI-guessed value, unsimulated schedule, out of scope) means the
+        # plan did not do what it claimed: that is a miss, not "nothing to do"
+        gate_refused = [sr for sr in ev.steps if sr.state == "rejected" and sr.step.tool in WRITE_TOOLS
+                        and sr.gate is not None and sr.gate.verdict is GateVerdict.REJECT]
         if exp is None:
-            ok = not failed_writes
+            ok = not failed_writes and not gate_refused
             self.audit.append(AuditKind.SYSTEM, "verifier",
                               {"hypothesis": h.id, "expectation": None, "ok": ok,
-                               "failed_steps": [sr.step.id for sr in failed_writes]}, event_id=ev.id)
+                               "failed_steps": [sr.step.id for sr in failed_writes],
+                               "gate_refused_steps": [sr.step.id for sr in gate_refused]}, event_id=ev.id)
             self._note(ev, "驗證（程式）", "無數值預期：動作已執行完成" if ok else
-                       f"{len(failed_writes)} 項動作執行失敗", "dynamic" if not ok else "info")
+                       "；".join(x for x in (f"{len(failed_writes)} 項動作執行失敗" if failed_writes else "",
+                                            f"{len(gate_refused)} 項動作被把關攔截" if gate_refused else "") if x),
+                       "dynamic" if not ok else "info")
             return ok, None
         start = run.plan_at or self._now()
         deadline = start + timedelta(minutes=exp.within_min)
@@ -1429,26 +1569,64 @@ class StateMachine:
         ev = run.ev
         if ev.state in TERMINAL_STATES:
             return
-        rolled = ""
-        if self.store is not None and run.prev_schedule_version is not None:
-            try:
-                cur = self.store.current().version
-                if cur != run.prev_schedule_version:
-                    self.store.rollback(run.prev_schedule_version)
-                    self.audit.append(AuditKind.ROLLBACK, "state_machine",
-                                      {"from_version": cur, "to_version": run.prev_schedule_version,
-                                       "reason": reason}, event_id=ev.id)
-                    rolled = f"（排程已回復 v{run.prev_schedule_version}）"
-            except Exception as e:  # noqa: BLE001
-                self.audit.append(AuditKind.SYSTEM, "state_machine", {"rollback_error": str(e)[:300]},
-                                  event_id=ev.id)
+        kept = self._safe_stop_schedule(run, reason)
         for h in ev.hypotheses:
             if h.status is HypothesisStatus.ACTIVE:
                 h.status = HypothesisStatus.PROPOSED
-        ev.outcome = f"安全中止：{reason}；維持原排程{rolled}"
+        ev.outcome = f"安全中止：{reason}；{kept}"
         self._to(ev, EventState.SAFE_STOP, reason)
         ev.closed_at = self._now()
         self._note(ev, "系統", ev.outcome, "dynamic")
+
+
+    def _safe_stop_schedule(self, run: _Run, reason: str) -> str:
+        """SAFE_STOP never rolls the store back. Every version this event activated was approved by
+        the supervisor, and the store is shared: rolling back would also undo other events' approved
+        versions (concurrent anomalies) or put a job back on a press the safety core is holding
+        (page 11: #A-311 back on press 7). What safe stop discards is this event's own unapproved
+        proposals, which are never confirmed; the schedule in force stays."""
+        if self.store is None:
+            return "維持原排程"
+        try:
+            cur = self.store.current().version
+        except Exception as e:  # noqa: BLE001
+            self.audit.append(AuditKind.SYSTEM, "state_machine", {"store_error": str(e)[:300]}, event_id=run.ev.id)
+            return "維持原排程"
+        discarded: list[int] = []
+        try:
+            discarded = [v.version for v in self.store.versions()
+                         if v.status is ScheduleStatus.PROPOSED and v.event_id == run.ev.id]
+        except Exception:  # noqa: BLE001 - a store without versions(): nothing to list
+            pass
+        held = self._jobs_on_held_presses(cur)
+        if held:
+            self._note(run.ev, "系統", "注意：現行排程 v{} 仍有 {} 模排在停機／停用的 {}，入模前需人工確認".format(
+                cur, sum(held.values()), "、".join(machine_label(p) for p in held)), "dynamic")
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"safe_stop_schedule": "kept", "active_version": cur, "future_jobs_on_held_presses": held,
+                           "version_at_open": run.prev_schedule_version, "approved_by_this_event": run.activated,
+                           "discarded_proposals": discarded, "reason": reason}, event_id=run.ev.id)
+        if run.activated and cur in run.activated:
+            return f"維持主管已核准的排程 v{cur}（不回復）"
+        if cur != run.prev_schedule_version and run.prev_schedule_version is not None:
+            return f"維持現行排程 v{cur}（其他事件已核准）"
+        return "維持原排程"
+
+
+    def _jobs_on_held_presses(self, version: int) -> dict[str, int]:
+        """{press: future mold-ins} in the active schedule on presses that are STOPPED / OUT_OF_SERVICE."""
+        out: dict[str, int] = {}
+        try:
+            jobs = self.store.get(version).schedule.jobs
+        except Exception:  # noqa: BLE001
+            return out
+        now = self._now()
+        for j in jobs:
+            st = self._machine_state(j.press_id)
+            if st is not None and st.status in (MachineStatus.STOPPED, MachineStatus.OUT_OF_SERVICE) \
+                    and j.mold_in > now:
+                out[j.press_id] = out.get(j.press_id, 0) + 1
+        return out
 
 
 def _staff_key(c: dict[str, Any]) -> tuple[str, str, str]:

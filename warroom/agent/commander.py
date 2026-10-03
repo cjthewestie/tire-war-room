@@ -344,7 +344,8 @@ def _round_half(x: float) -> float:
 class MockCommander:
     """Deterministic rule commander. Reproduces page 11: plan phase -> H1 steam_pressure_low,
     expectation <press> temp_c >= 121 within 30 min, steps S1 cure_formula, S2 query_orders_shifts,
-    S3 solve_schedule(dep S1,S2), S4 confirm_schedule, S5 notify_teams; replan with H1 rejected ->
+    S3 solve_schedule(dep S1,S2), S4 confirm_schedule, S5 set_cure_time ($S1.total_cure_h),
+    S6 notify_teams; replan with H1 rejected ->
     H2 steam_leak_or_sensor_drift (header neighbours compared, SOP 「硫化中斷處置」 in context),
     press out of service, reschedule. Page 2: cooling_insufficient, notify maintenance (R1) +
     slow_feed (R3). Third miss -> safe_stop (keep the original schedule)."""
@@ -411,7 +412,12 @@ class MockCommander:
             PlanStep(id="S4", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S3"], purpose="確認新排程（需主管核准）",
                      args={"schedule_version": "$S3.schedule_version",
                            "reason": f"{lbl}降溫，延長硫化至 ${{S1.total_cure_h}} h 後重排"}),
-            PlanStep(id="S5", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4"], purpose="通知硫化組與夜班新排程",
+            # page 5 write tool 設定硫化時間（建議值）: the formula's value, gated R2, approved with S4
+            PlanStep(id="S5", tool=ToolName.SET_CURE_TIME, depends_on=["S1", "S3"],
+                     purpose=f"設定{lbl}硫化時間為公式值（需主管核准）",
+                     args={"press_id": mid, "total_cure_h": "$S1.total_cure_h",
+                           "reason": f"{lbl}降溫至 {_fmt(actual)}°C，Arrhenius 等效硫化"}),
+            PlanStep(id="S6", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4", "S5"], purpose="通知硫化組與夜班新排程",
                      args={"teams": [TeamId.CURING.value, TeamId.BODY.value], "kind": NotifyKind.INFO.value,
                            "machine_id": mid,
                            "message": f"{lbl}延長硫化至 ${{S1.total_cure_h}} h（+${{S1.extra_h}} h），已依新排程調整下一模"}),
@@ -519,7 +525,7 @@ class MockCommander:
                            "machine_id": mid, "message": f"{lbl}冷卻水路疑似故障，請暫停投料並出料降溫"}),
             PlanStep(id="S2", tool=ToolName.NOTIFY_TEAMS, purpose="維修優先處理冷卻水路",
                      args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value,
-                           "machine_id": mid, "message": f"{lbl}放慢投料無效，冷卻水路列為最優先檢修"}),
+                           "machine_id": mid, "message": f"{lbl}膠溫未回落，冷卻水路列為最優先檢修"}),
         ]
         return CommanderPlan(
             goal=f"{lbl}降溫，避免整批膠料提早硬化",
