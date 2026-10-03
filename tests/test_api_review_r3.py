@@ -150,15 +150,17 @@ def test_excel_orders_and_shifts_reach_sim_tools_panel_and_schedule(tmp_path):
     rt = _real(tmp_path, P11, orders_xlsx=xlsx)
     assert "orders_xlsx" not in rt.degraded
     by_id = {o.id: o for o in rt.sim.orders()}
-    assert {"#A-309", "#B-207", "#B-212"} <= set(by_id) and "#M-201" not in by_id
-    assert by_id["#A-311"].size.value == "M" and by_id["#A-311"].qty == 4      # workbook, not the sim seed
+    # the workbook names the plant's own orders (data/make_orders_seed.py) with its own customers
+    assert {"#M-201", "#L-301", "#A-311"} <= set(by_id) and by_id["#M-201"].customer == "高雄港機具"
+    assert by_id["#A-311"].size.value == "L" and by_id["#A-311"].qty == 1
     assert any(s.id == "1003-body-夜班" for s in rt.sim.shifts())
     res = rt.c.tools.call(ToolCall(id="t1", tool=ToolName.QUERY_ORDERS_SHIFTS, args={}))
-    assert res.ok and "#A-309" in [o["id"] for o in res.data["orders"]], res
+    assert res.ok and "高雄港機具" in [o["customer"] for o in res.data["orders"]], res
     assert "10/03 夜班缺 1 人" in res.data["gaps"]
     panel = {o.label: (o.done, o.total) for o in rt.snapshot().orders}
     assert panel == {"小胎": (38, 100), "中胎": (12, 100), "大胎": (8, 100)}
-    assert "#A-309" in {j.order_id for j in rt.c.store.current().schedule.jobs}
+    ids = [j.id for j in rt.c.store.current().schedule.jobs]
+    assert "#A-311" in {j.order_id for j in rt.c.store.current().schedule.jobs} and len(ids) == len(set(ids))
 
 
 def test_missing_excel_is_reported_and_sim_seed_kept(tmp_path):

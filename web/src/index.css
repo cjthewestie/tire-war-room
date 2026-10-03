@@ -78,6 +78,7 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .seg button:last-child { border-right: 0; }
 .seg button.on { background: var(--panel-3); color: var(--ink); }
 .seg.net button.on.online { color: var(--accent); }
+.seg.net button.on.weak { color: var(--warn); }
 .seg.net button.on.wan_down { color: var(--warn); }
 .seg.net button.on.lan_down { color: var(--alarm); }
 .seg.sm button { padding: 2px 8px; font-size: 12px; }

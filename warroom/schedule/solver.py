@@ -427,12 +427,20 @@ def _generate_jobs(ctx: _Ctx, unavailable: set[str], due_min, prio, horizon_end:
         orders = sorted((o for o in ctx.req.orders if o.size in sizes and left[o.id] > 0),
                         key=lambda o: (o.due, -o.priority, o.id))
         # earliest due first (EDD) within a size; tires beyond the size's quota are left for later
+        # job ids already in the plan (in-progress, pinned, locked) are never reused: a pinned
+        # J-A-311-01 plus three generated tires must give -02..-04, not a second -01
+        used = {j.id for j in ctx.frozen + ctx.locked} | {j.id for j in out}
         for o in orders:
-            for k in range(1, left[o.id] + 1):
+            seq = 0
+            for _ in range(left[o.id]):
                 if quota[o.size] <= 0:
                     break
                 quota[o.size] -= 1
-                out.append(_Job(f"J-{o.id.lstrip('#')}-{k:02d}", o.id, o.size, o.mold_id,
+                seq += 1
+                while (jid := f"J-{o.id.lstrip('#')}-{seq:02d}") in used:
+                    seq += 1
+                used.add(jid)
+                out.append(_Job(jid, o.id, o.size, o.mold_id,
                                 int(F.CURE_HOURS[o.size] * 60), False, presses,
                                 lb=ctx.now_m + F.BACKPROP[o.size]["a_feed_min"], due=due_min(o.id),
                                 priority=o.priority))
@@ -646,7 +654,12 @@ def check_schedule(sched: Schedule, req: SolveRequest, ctx: _Ctx | None = None) 
     unavailable = set(req.unavailable_presses)
     ranges = ctx.slot_ranges() + [(a, b) for a, b, _ in ctx.short_windows]
     by_press: dict[str, list[ScheduleJob]] = {}
+    seen: set[str] = set()
     for j in sched.jobs:
+        if j.id in seen:                  # an id clash, not a press overlap
+            errs.append(f"工單編號 {j.id} 重複")
+            continue
+        seen.add(j.id)
         by_press.setdefault(j.press_id, []).append(j)
         if j.frozen:
             continue

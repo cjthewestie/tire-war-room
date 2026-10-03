@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CapacityReport, Event, EventState, ScheduleVersion, Shift, StepRun } from '../contracts'
 import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
-import { TOOL_LABEL, resultText, staffingChoice, stepLabel } from '../stepText'
+import { TOOL_LABEL, isRevoke, resultText, staffingChoice, stepLabel } from '../stepText'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -266,7 +266,8 @@ function StepRow({ s, staffing }: { s: StepRun; staffing?: string }) {
       <span className="step-id" title={s.step.id}>{label}</span>
       <div className="step-b">
         <div className="step-t"><code title={s.step.tool}>{TOOL_LABEL[s.step.tool] ?? s.step.tool}</code>{s.step.depends_on.length > 0 && <small className="muted">依賴 {s.step.depends_on.map(stepLabel).join('、')}</small>}
-          {s.gate?.risk && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{s.gate.risk}</small>}</div>
+          {s.gate?.risk && !isRevoke(s.step.id) && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{s.gate.risk}</small>}
+          {isRevoke(s.step.id) && <small className="muted" title="主管後一輪改選，先前已執行的人力調動依此撤回並通知；不是另一項核准">因主管改選而撤回</small>}</div>
         <div className="step-p">{s.step.purpose}</div>
         {summary && <div className="step-r"><MarkedText text={summary} /></div>}
       </div>

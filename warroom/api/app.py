@@ -19,8 +19,11 @@ Behind Docker NAT every client arrives with the gateway's address, so an address
 the on-site seat. In a container loopback is not the seat by default; the touch screen pairs once
 with WARROOM_KIOSK_TOKEN via GET /kiosk?token=... (HttpOnly cookie). With neither a PIN nor a kiosk
 token configured in a container, a kiosk token is generated and its pairing URL logged.
-The PIN travels only in the header (never in a URL); set WARROOM_SSL_CERTFILE/KEYFILE to serve TLS. Page 9 tiers: lan_down refuses phone/remote approvals
-(409) and lights the warning light; only the local touch screen can decide."""
+The PIN travels only in the header (never in a URL); set WARROOM_SSL_CERTFILE/KEYFILE to serve TLS. Page 9 tiers: weak (弱網)
+leaves the agent untouched and only delays/batches WebSocket pushes to the phone and other remote
+clients (WARROOM_WEAK_PUSH_DELAY_S, default 5 s); wan_down keeps the phone on the factory LAN;
+lan_down refuses phone/remote approvals (409) and lights the warning light; only the local touch
+screen can decide."""
 from __future__ import annotations
 
 import asyncio
@@ -274,7 +277,57 @@ class ClearBody(BaseModel):
 
 
 class NetworkBody(BaseModel):
-    network: Literal["online", "wan_down", "lan_down"]
+    network: Literal["online", "weak", "wan_down", "lan_down"]
+
+
+# full-state messages: on a weak link only the newest of each is worth sending
+_COALESCE = frozenset({WsType.SNAPSHOT, WsType.MACHINES, WsType.CLOCK})
+
+
+class WeakLinkBuffer:
+    """Page 9 弱網: pushes to a remote client are held and sent as one batch `delay_s` after the
+    first held message (wall clock: this is the network, not factory time). Full-state messages
+    (snapshot, machines, clock) are coalesced to the newest; every event, approval, audit and
+    schedule message is kept, in order. Nothing upstream waits on this: the plant loop, the safety
+    core and the agent publish to the bus as usual."""
+
+    def __init__(self, delay_s: float):
+        self.delay_s = max(0.0, float(delay_s))
+        self._held: list[WsMessage] = []
+        self._since: float | None = None
+        self.held_total = 0
+        self.coalesced = 0
+        self.batches = 0
+
+    def __len__(self) -> int:
+        return len(self._held)
+
+    def push(self, msg: WsMessage, now: float) -> None:
+        if msg.type in _COALESCE:
+            before = len(self._held)
+            self._held = [m for m in self._held if m.type is not msg.type]
+            self.coalesced += before - len(self._held)
+        self._held.append(msg)
+        self.held_total += 1
+        if self._since is None:
+            self._since = now
+
+    def wait_s(self, now: float) -> float | None:
+        """Seconds until the held batch is due (None = nothing held)."""
+        if self._since is None:
+            return None
+        return max(0.0, self._since + self.delay_s - now)
+
+    def due(self, now: float) -> list[WsMessage]:
+        if self._since is None or now < self._since + self.delay_s:
+            return []
+        return self.flush()
+
+    def flush(self) -> list[WsMessage]:
+        out, self._held, self._since = self._held, [], None
+        if out:
+            self.batches += 1
+        return out
 
 
 def _norm_host(h: str) -> str:
@@ -290,12 +343,18 @@ def _404(what: str) -> HTTPException:
 def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = None,
                demo_controls: bool | None = None, local_hosts: frozenset[str] | None = None,
                pin_guard: PinGuard | None = None, kiosk_token: str | None = None,
-               container: bool | None = None) -> FastAPI:
+               container: bool | None = None, weak_push_delay_s: float | None = None) -> FastAPI:
     """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at / and /phone."""
     holder: dict[str, Runtime] = {}
     access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts, kiosk_token, container)
     guard = pin_guard or PinGuard()
     devices = DeviceRegistry()
+    if weak_push_delay_s is None:
+        try:
+            weak_push_delay_s = float(os.environ.get("WARROOM_WEAK_PUSH_DELAY_S", "5"))
+        except ValueError:
+            weak_push_delay_s = 5.0
+    weak_stats = {"held": 0, "coalesced": 0, "batches": 0}
     if access.supervisor_pin and len(access.supervisor_pin) < 8:
         log.warning("WARROOM_SUPERVISOR_PIN is %d characters; use 8+ random characters (PIN guessing is "
                     "throttled, but a short PIN is still guessable over time)", len(access.supervisor_pin))
@@ -306,11 +365,17 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         except Exception:  # noqa: BLE001 - auditing must not turn a 401 into a 500
             log.exception("audit pin failure")
 
-    def kiosk_ok(request: Request) -> bool:
+    def kiosk_ok(request: Request | WebSocket) -> bool:
         if not access.kiosk_token:
             return False
         got = request.cookies.get(KIOSK_COOKIE) or request.headers.get("x-kiosk-token") or ""
         return bool(got) and hmac.compare_digest(got.encode(), access.kiosk_token.encode())
+
+    def on_site(conn: Request | WebSocket) -> bool:
+        """The on-site seat (loopback outside a container, or a paired kiosk), same rule as writes."""
+        host = _norm_host(conn.client.host if conn.client else "")
+        fwd = [_norm_host(h) for h in conn.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+        return (host in access.local_hosts and all(h in access.local_hosts for h in fwd)) or kiosk_ok(conn)
 
     def supervisor(request: Request, response: Response) -> Session:
         """Who may write. The on-site seat = loopback (outside a container) or a paired kiosk;
@@ -415,6 +480,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 "ingest": ingest.stats.as_dict() if ingest else None,
                 "schedule_store_reopened": getattr(r.builder, "reopened_store", None) if r.builder else None,
                 "network": r.network, "warning_light": r.warning_light(),
+                "weak_link": {"push_delay_s": weak_push_delay_s, **weak_stats},
                 "access": {"remote_pin_set": bool(access.supervisor_pin), "demo_controls": access.demo_controls}}
 
     # ------------------------------------------------------------------ dashboard
@@ -569,13 +635,16 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             n += 1
             rid = f"AP-RB-{r.now():%H%M%S}-v{pv['from_version']}to{pv['to_version']}-{n}"
         moved = "、".join(f"{m['order_id']} {m['from_press']}→{m['to_press']}" for m in pv["moved"][:3])
+        impact = f"換機 {pv['moved_count']} 筆" + (f"：{moved}" if moved else "")
+        if pv.get("retimed_count"):
+            impact += f"；同機改時間 {pv['retimed_count']} 筆"
         try:
             r.approvals.request(ApprovalRequest(
                 id=rid, event_id=eid, created_at=r.now(), risk=RiskLevel(pv["risk"]),
                 title=f"排程回復 v{pv['from_version']} → v{pv['to_version']}",
                 reason=body.reason or "主管一鍵回復上一版排程",
-                done=[], gaps=[], delivery_impact=f"異動 {pv['moved_count']} 筆" + (f"：{moved}" if moved else ""),
-                options=[]))
+                done=[], gaps=[f"撤回人力：{t}" for t in pv.get("staffing_revoked") or []],
+                delivery_impact=impact, options=[]))
             r.approvals.decide(ApprovalDecision(
                 request_id=rid, decision=DecisionKind.APPROVE, reason=body.reason or "確認回復（對話框）",
                 decided_by=session.actor, via="touchscreen" if session.local else "phone", decided_at=r.now()))
@@ -586,7 +655,13 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail=str(e)) from None
         r.audit.append(AuditKind.ROLLBACK, session.actor,
                        {"from_version": pv["from_version"], "to_version": v.version, "approval_id": rid,
-                        "risk": pv["risk"]}, event_id=None if eid == "SCHEDULE" else eid)
+                        "risk": pv["risk"], "staffing_revoked": pv.get("staffing_revoked") or [],
+                        "staffing_restored": pv.get("staffing_restored") or []},
+                       event_id=None if eid == "SCHEDULE" else eid)
+        try:
+            r.after_rollback(pv, v, session.actor, rid)
+        except Exception:  # noqa: BLE001 - the rollback is done; a failed notice is logged, not a 500
+            log.exception("rollback follow-up")
         r.bus.publish(WsType.SCHEDULE, v)
         return v
 
@@ -697,8 +772,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
     @app.post("/api/sim/network")
     async def sim_network(body: NetworkBody, session: Session = Depends(demo)) -> dict[str, Any]:
-        """Offline-tier demo (page 9). online / wan_down: the agent runs locally and the phone
-        approves over the factory LAN. lan_down: phone and remote approvals are refused (409), the
+        """Offline-tier demo (page 9). weak (弱網): the agent is unaffected; only pushes to the phone
+        and remote clients are delayed and batched. online / wan_down: the agent runs locally and
+        the phone approves over the factory LAN. lan_down: phone and remote approvals are refused (409), the
         local touch screen decides, and the warning light goes on while anything needs a person."""
         r = rt()
         r.network = body.network
@@ -706,27 +782,53 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         light = r.sync_warning_light()
         r.bus.publish(WsType.SNAPSHOT, r.snapshot())
         return {"ok": True, "network": r.network, "warning_light": light,
-                "phone_approvals": body.network != "lan_down"}
+                "phone_approvals": body.network != "lan_down",
+                "push_delay_s": weak_push_delay_s if body.network == "weak" else 0.0}
 
     # ------------------------------------------------------------------ websocket
     @app.websocket("/ws")
     async def ws(sock: WebSocket) -> None:
         await sock.accept()
         r = rt()
+        local = on_site(sock)
+        loop = asyncio.get_running_loop()
+        buf = WeakLinkBuffer(weak_push_delay_s)
         sub = r.bus.subscribe()
         nxt = asyncio.ensure_future(sub.__anext__())
         await asyncio.sleep(0)               # registers the subscriber queue before the snapshot
         drain = asyncio.create_task(_drain(sock))
+
+        async def send_held(msgs: list[WsMessage]) -> None:
+            for m in msgs:
+                await sock.send_text(m.model_dump_json())
+            weak_stats["held"] += buf.held_total
+            weak_stats["coalesced"] += buf.coalesced
+            weak_stats["batches"] += 1 if msgs else 0
+            buf.held_total = buf.coalesced = 0
+
         try:
             await _send(sock, WsType.SNAPSHOT, r.snapshot().model_dump(mode="json"), r.now())
             await _send(sock, WsType.CLOCK, r.clock_info(), r.now())
             while True:
-                done, _ = await asyncio.wait({nxt, drain}, return_when=asyncio.FIRST_COMPLETED)
+                done, _ = await asyncio.wait({nxt, drain}, timeout=buf.wait_s(loop.time()),
+                                             return_when=asyncio.FIRST_COMPLETED)
                 if drain in done:
                     break
-                msg: WsMessage = nxt.result()
-                await sock.send_text(msg.model_dump_json())
-                nxt = asyncio.ensure_future(sub.__anext__())
+                if nxt in done:
+                    msg: WsMessage = nxt.result()
+                    nxt = asyncio.ensure_future(sub.__anext__())
+                    if not local and r.network == "weak":
+                        buf.push(msg, loop.time())      # page 9 弱網: push delayed, agent unaffected
+                    else:
+                        if len(buf):
+                            await send_held(buf.flush())   # link recovered: held batch first, in order
+                        await sock.send_text(msg.model_dump_json())
+                if len(buf) and (r.network != "weak" or local):
+                    await send_held(buf.flush())
+                else:
+                    held = buf.due(loop.time())
+                    if held:
+                        await send_held(held)
         except (WebSocketDisconnect, RuntimeError):
             pass
         finally:

@@ -366,6 +366,11 @@ class ImportedPlanSim:
         setattr(self._sim, name, value)
 
 
+def _is_revoke(step_id: str) -> bool:
+    """The state machine's compensating notice for replaced staffing: '<approval id>-revoke-<n>'."""
+    return "-revoke-" in step_id
+
+
 class _NoLock:
     def __enter__(self):
         return self
@@ -1121,7 +1126,7 @@ class Runtime:
         return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=title, detail=detail,
                           tiles=self.tiles_for(m, ev), auto_done=auto_done, pending=pending,
                           schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline,
-                          approved=self._approved_for(ev))
+                          approved=self._approved_for(ev), revoked=self._revoked_for(ev))
 
     @staticmethod
     def _where(machine_id: str) -> str:
@@ -1279,6 +1284,8 @@ class Runtime:
                        and (j, sr.step.id) not in used]
             for sr in ran:
                 used.add((j, sr.step.id))
+                if _is_revoke(sr.step.id):
+                    continue              # a compensating withdrawal: ↺ 已撤回 (_revoked_for), never ✓ 已核准
                 out.append(ApprovedAction(approval_id=req.id, option_id=opt_id, label=self._approved_label(sr),
                                           decided_by=who, status=req.status))
             if not ran:
@@ -1292,6 +1299,19 @@ class Runtime:
                     label += "（✗ 未生效：排程已被另一事件更新）"
                 out.append(ApprovedAction(approval_id=req.id, option_id=opt_id,
                                           label=label, decided_by=who, status=req.status))
+        return out
+
+    def _revoked_for(self, ev: Event) -> list[str]:
+        """↺ 已撤回: staffing an earlier round ran that the supervisor's later choice replaced (the
+        state machine sends a compensating notice). Shown with its cause, never as an approval."""
+        import re
+        out = []
+        for sr in self._all_steps(ev):
+            if not _is_revoke(sr.step.id) or sr.state != "ok":
+                continue
+            what = sr.step.purpose.removeprefix("撤回").strip() or "先前人力調動"
+            m = re.search(r"（主管改選(.+?)）", str(sr.step.args.get("message") or ""))
+            out.append(f"{what}（因主管改選{m.group(1)}）" if m else what)
         return out
 
     @staticmethod
@@ -1466,7 +1486,7 @@ class Runtime:
         closed = [e for e in evs if e.state in TERMINAL_STATES][:5]
         from warroom.api import progress as P
         wip = self.__dict__.setdefault("_wip", P.WipTracker())
-        return DashboardSnapshot(header=self.header(), orders=P.order_progress(self.sim, self.events()),
+        return DashboardSnapshot(header=self.header(), orders=P.order_progress(self.sim, self.events(), self.c.store),
                                  semi_finished=wip.semi_finished(self.sim, self.focus_event()),
                                  focus=self.focus_panel(),
                                  machines=self.machine_tiles(), events=open_ + closed,
@@ -1639,22 +1659,126 @@ class Runtime:
         for pid, n in sorted(hits.items()):
             why = {"out_of_service": "停用", "stopped": "安全核心停機／扣模", "offline": "離線"}.get(blocked[pid], blocked[pid])
             reasons.append(f"{machine_label(pid)}目前{why}，v{target.version} 仍排了 {n} 模新入模")
+        cure_conflicts = self._rollback_cure_conflicts(target)
+        for c in cure_conflicts:
+            reasons.append(c["text"])
         cur_jobs = {j.id: j for j in cur.schedule.jobs}
         tgt_jobs = {j.id: j for j in target.schedule.jobs}
-        moved = []
+        moved, retimed = [], 0
         for jid, tj in tgt_jobs.items():
             cj = cur_jobs.get(jid)
-            if cj is not None and (cj.press_id != tj.press_id or cj.mold_in != tj.mold_in) and tj.mold_in >= now:
+            if cj is None or tj.mold_in < now:
+                continue
+            if cj.press_id != tj.press_id:
                 moved.append({"job_id": jid, "order_id": tj.order_id, "from_press": cj.press_id,
                               "to_press": tj.press_id, "to_mold_in": tj.mold_in.isoformat()})
+            elif cj.mold_in != tj.mold_in:
+                retimed += 1                    # same press, new time: counted, never shown as a 'move'
+        revoked, restored = self._rollback_staffing_diff(cur.schedule, target.schedule)
         cross = any(c.kind == "transfer" for c in target.schedule.staffing_changes)
+        cross = cross or any(c.kind == "transfer" for c in revoked)     # undoing a cross-team move is one too
         risk = RiskLevel.R3_CRITICAL if cross else RiskLevel.R2_CHANGE
         return {"from_version": cur.version, "to_version": target.version, "target_status": target.status.value,
                 "target_reason": target.reason, "feasible": not reasons, "reasons": reasons, "risk": risk.value,
-                "moved": moved[:20], "moved_count": len(moved),
+                "moved": moved[:20], "moved_count": len(moved), "retimed_count": retimed,
                 "added": len(set(tgt_jobs) - set(cur_jobs)), "removed": len(set(cur_jobs) - set(tgt_jobs)),
                 "staffing_changes": [c.label for c in target.schedule.staffing_changes],
-                "blocked_presses": blocked}
+                "staffing_revoked": [self._staffing_text(c) for c in revoked],
+                "staffing_restored": [self._staffing_text(c) for c in restored],
+                "cure_conflicts": cure_conflicts, "blocked_presses": blocked}
+
+    def _rollback_cure_conflicts(self, target: Any) -> list[dict[str, Any]]:
+        """A tire already in a press cures for what the plant (cure formula / approved set_cure_time)
+        says, whatever version is in force. A version that plans that tire shorter would de-mold it
+        early and put the next mold-in before the real de-mold, so the rollback is refused with the
+        numbers (page 11: physics numbers come from the formula, never from an older plan)."""
+        from warroom.agent.narrate import machine_label
+        plan = {j.id: j for j in target.schedule.jobs}
+        by_press_in: dict[tuple[str, datetime], Any] = {(j.press_id, j.mold_in): j for j in target.schedule.jobs}
+        out = []
+        try:
+            machines = self.sim.machines()
+        except Exception:  # noqa: BLE001
+            return out
+        for m in machines:
+            cj = m.cure_job
+            if cj is None or m.machine_id not in F.CURE_PRESS_IDS:
+                continue
+            tj = plan.get(cj.job_id) or by_press_in.get((m.machine_id, cj.mold_in_at))
+            if tj is None or tj.cure_h + 0.05 >= cj.cure_required_h:
+                continue
+            real_demold = cj.mold_in_at + timedelta(hours=cj.cure_required_h)
+            nxt = min((j for j in target.schedule.jobs if j.press_id == m.machine_id and j.mold_in > tj.mold_in),
+                      key=lambda j: j.mold_in, default=None)
+            text = (f"v{target.version} 排 {machine_label(m.machine_id)} 在模胎 {cj.order_id} 硫化 {tj.cure_h:g} h，"
+                    f"但依硫化公式／已核准設定需 {cj.cure_required_h:.1f} h（{real_demold:%m/%d %H:%M} 才出模）")
+            if nxt is not None and nxt.mold_in < real_demold:
+                text += f"；v{target.version} 的下一模 {nxt.order_id} {nxt.mold_in:%m/%d %H:%M} 入模會早於出模"
+            out.append({"press_id": m.machine_id, "job_id": cj.job_id, "plan_cure_h": tj.cure_h,
+                        "required_cure_h": round(cj.cure_required_h, 2), "real_demold": real_demold.isoformat(),
+                        "text": text + "。請改以重排處理"})
+        return out
+
+    @staticmethod
+    def _staffing_key(c: Any) -> tuple:
+        return (c.kind, c.shift_date, c.shift_name, getattr(c.to_team, "value", c.to_team),
+                getattr(c.from_team, "value", c.from_team), c.people)
+
+    def _rollback_staffing_diff(self, cur: Any, target: Any) -> tuple[list[Any], list[Any]]:
+        """(changes in force now that the rollback revokes, changes the rollback brings back)."""
+        now = self.clock.now()
+        cur_c = list(getattr(cur, "staffing_changes", None) or [])
+        tgt_c = list(getattr(target, "staffing_changes", None) or [])
+        tk = {self._staffing_key(c) for c in tgt_c}
+        ck = {self._staffing_key(c) for c in cur_c}
+        live = lambda c: c.shift_date >= (now - timedelta(days=1)).date()   # noqa: E731 - past shifts are history
+        return ([c for c in cur_c if self._staffing_key(c) not in tk and live(c)],
+                [c for c in tgt_c if self._staffing_key(c) not in ck and live(c)])
+
+    @staticmethod
+    def _staffing_text(c: Any) -> str:
+        team = F.TEAM_LABELS.get(c.to_team, getattr(c.to_team, "value", str(c.to_team)))
+        return f"{c.shift_date:%m/%d} {c.shift_name} {c.label}（{team}）"
+
+    def after_rollback(self, pv: dict[str, Any], version: Any, actor: str, approval_id: str) -> None:
+        """What an approved rollback changes for people: every staffing change it revokes or brings
+        back is sent to the affected teams (R1 info notice; the rollback itself was the approval), and
+        the event that produced the rolled-back version gets a timeline row, so its outcome no longer
+        reads as if that version were still in force."""
+        from warroom.contracts import NotifyKind, TimelineItem, ToolCall
+        store = self.c.store
+        cur = store.get(pv["from_version"])
+        revoked, restored = self._rollback_staffing_diff(cur.schedule, version.schedule)
+        for verb, changes in (("撤回", revoked), ("恢復", restored)):
+            for c in changes:
+                teams = [c.to_team] + ([c.from_team] if c.kind == "transfer" and c.from_team else [])
+                msg = (f"排程回復 v{pv['from_version']} → v{version.version}：{verb} {c.shift_date:%m/%d} "
+                       f"{c.shift_name}{c.label}")
+                res = None
+                if self.c.tools is not None:
+                    res = self.c.tools.call(ToolCall(id=f"{approval_id}-{verb}-{c.shift_date:%m%d}-{c.kind}",
+                                                     tool=ToolName.NOTIFY_TEAMS,
+                                                     args={"teams": [t.value for t in teams],
+                                                           "kind": NotifyKind.INFO.value, "message": msg}))
+                self.audit.append(AuditKind.SYSTEM, actor,
+                                  {"msg": "rollback staffing notice", "text": msg, "approval_id": approval_id,
+                                   "teams": [t.value for t in teams], "delivered": bool(res and res.ok)},
+                                  event_id=cur.event_id)
+        eid = cur.event_id
+        sm = self.c.state_machine
+        if not eid or sm is None:
+            return
+        try:
+            ev = sm.get(eid)
+        except Exception:  # noqa: BLE001 - not an agent event (manual / seed version)
+            return
+        extra = "；".join(f"撤回 {t}" for t in pv.get("staffing_revoked") or [])
+        ev.timeline.append(TimelineItem(ts=self.clock.now(), actor="主管", tag="human",
+                                        text=f"排程回復 v{pv['from_version']} → v{version.version}（{actor} 核准）"
+                                             + (f"；{extra}" if extra else "")))
+        note = f"排程已回復 v{version.version}（v{pv['from_version']} 不再生效）"
+        ev.outcome = f"{ev.outcome}；{note}" if ev.outcome else note
+        self.bus.publish(WsType.EVENT, ev)
 
     def labor_view(self) -> dict[str, Any]:
         """Schedule & labor (page 6): shifts (with approved staffing changes applied), labor needs of

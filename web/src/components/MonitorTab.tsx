@@ -115,6 +115,9 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
             <span className="ck">✓</span>已核准：{a.label}<small className="muted">（{whoLabel(a.decided_by)}）</small>
           </li>
         ))}
+        {(focus.revoked ?? []).map((r) => (
+          <li key={`rv-${r}`} className="revoked"><span className="ck" aria-hidden>↺</span>已撤回：{r}</li>
+        ))}
         {focus.pending.map((p) => {
           const r = req(p.approval_id)
           const s = sent[p.approval_id]

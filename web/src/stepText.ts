@@ -15,12 +15,19 @@ export const NOTIFY_LABEL: Record<string, string> = {
 
 /** The staffing option the supervisor picked in a round: its approval-option step "A 夜班加班" → "夜班加班". */
 export function staffingChoice(steps: { step: { id: string; purpose: string } }[]): string | undefined {
-  const ap = [...steps].reverse().find((s) => s.step.id.startsWith('AP-'))
+  // a '-revoke-' step is the withdrawal of an earlier pick, not the pick itself
+  const ap = [...steps].reverse().find((s) => s.step.id.startsWith('AP-') && !isRevoke(s.step.id))
   return ap ? ap.step.purpose.replace(/^\p{Lu} /u, '') : undefined
 }
 
-/** "S1" stays "S1"; an approval-option step "AP-EV-…-1-B" becomes "核准 B". */
+/** The state machine's compensating notice for replaced staffing ("<approval id>-revoke-<n>"). */
+export function isRevoke(id: string): boolean {
+  return id.includes('-revoke-')
+}
+
+/** "S1" stays "S1"; an approval-option step "AP-EV-…-1-B" becomes "核准 B"; a withdrawal "↺ 撤回". */
 export function stepLabel(id: string): string {
+  if (isRevoke(id)) return '↺ 撤回'
   if (!id.startsWith('AP-')) return id
   const opt = id.split('-').pop()
   return opt && opt.length === 1 && opt >= "A" && opt <= "Z" ? `核准 ${opt}` : '核准'
@@ -76,7 +83,7 @@ export function resultText(tool: ToolName, args: D, data: D, opts: { staffing?: 
       // The solver proposes staffing; the supervisor's pick (an approval-option step) is what ran.
       for (const c of arr(sched.staffing_changes)) {
         const l = String(c.label ?? '')
-        bits.push(opts.staffing && l && l !== opts.staffing ? `人力改採${opts.staffing}（主管選定；求解器原提${l}）` : l)
+        bits.push(opts.staffing && l && l !== opts.staffing ? `人力：主管改選${opts.staffing}（求解器原提${l}）` : l)
       }
       if (data.deliveries_met) bits.push('交期全部滿足')
       else if (arr(data.late_orders).length) bits.push(`延誤 ${arr(data.late_orders).join('、')}`)

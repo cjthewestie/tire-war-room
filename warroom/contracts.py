@@ -969,7 +969,7 @@ class HeaderStatus(_M):
     abnormal_count: int               # 異常 1 台
     factory_time: datetime
     llm_mode: LLMMode
-    network: Literal["online", "wan_down", "lan_down"] = "online"
+    network: Literal["online", "weak", "wan_down", "lan_down"] = "online"   # page 9: weak = 弱網 (pushes delayed, agent unaffected)
     warning_light: bool = False       # page 9: LAN down -> on-site touch screen + warning light (on while something needs a person)
     bad_data_total: int = 0           # rejected readings in the last BAD_DATA_WINDOW_MIN sim-minutes, all machines
     bad_data: list[BadDataMark] = Field(default_factory=list)   # per machine, same window

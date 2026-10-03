@@ -462,7 +462,7 @@ export interface HeaderStatus {
   abnormal_count: number
   factory_time: ISODate
   llm_mode: LLMMode
-  network: "online" | "wan_down" | "lan_down"
+  network: "online" | "weak" | "wan_down" | "lan_down"   // page 9: weak = 弱網 (pushes delayed, agent unaffected)
   warning_light?: boolean   // page 9: LAN down -> on-site touch screen + warning light
   bad_data_total?: number   // page 10: readings the validation layer rejected (recent window), never wake the AI
   bad_data?: BadDataMark[]

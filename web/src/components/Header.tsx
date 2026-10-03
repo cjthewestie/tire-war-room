@@ -5,7 +5,7 @@ import { useWarRoom } from '../useWarRoom'
 
 export type Tab = 'monitor' | 'schedule'
 
-const NET_LABEL = { online: '網路正常', wan_down: 'WAN 中斷・手機走廠內 LAN', lan_down: 'LAN 中斷・現場觸控螢幕＋警示燈' }
+const NET_LABEL = { online: '網路正常', weak: '弱網・延後推播（Agent 不受影響）', wan_down: 'WAN 中斷・手機走廠內 LAN', lan_down: 'LAN 中斷・現場觸控螢幕＋警示燈' }
 
 export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   const { state, transport, connected } = useWarRoom()

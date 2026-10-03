@@ -1,10 +1,12 @@
 """Panels ① 訂單進度 and ② 半成品進度, derived from live plant state instead of the page-2 seed.
 
 ① remaining_h: the page-2 estimate (factory.DEMO_ORDER_PROGRESS) is the time left with every press
-of that size class available. It is scaled by tires left (sim) and by press capacity: a press that is
-out of service or held by the safety core stops producing, so the classes it serves take longer
-(CURE-07 停用 -> 中／大胎 4 -> 3 presses -> x4/3). The note says which press is lost and whether the
-solver kept the scheduled deliveries.
+of that size class available. When a press is taken out of service (approved 停用), the stretch comes
+from the solver's plans, not a fixed ratio: the cure press-hours the first plan (v1, every press up)
+de-molds in its first 7 days, against what the plan in force de-molds in its first 7 days without the
+lost press. A press the safety core only holds (扣模, not yet approved out of service) changes no
+number: the note says it waits for the supervisor and the new plan. Scheduled deliveries are claimed
+only for what that plan holds (本週已排訂單), never for the whole order book.
 
 ② WIP: when the focus event is on a curing press, the panel follows the tire in that press (its parts
 A–D are already bonded and in the mould) with its cure progress; otherwise it is the sim's page-2
@@ -12,6 +14,7 @@ tire 大胎 #07, whose part states follow the A/B/C machines live.
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from warroom import factory as F
@@ -56,7 +59,43 @@ def _latest_solve(events: list[Event]) -> dict | None:
     return None
 
 
-def order_progress(sim: Any, events: list[Event]) -> list[OrderProgress]:
+def _status(sim: Any, pid: str) -> MachineStatus | None:
+    try:
+        return sim.machine(pid).status
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _week_press_hours(version: Any, pool: tuple[str, ...], exclude: set[str]) -> float | None:
+    """Cure press-hours the plan de-molds on `pool` in the first 7 days of its horizon."""
+    sched = getattr(version, "schedule", None)
+    if sched is None:
+        return None
+    a = sched.horizon_start
+    b = a + timedelta(days=7)
+    return sum(j.cure_h for j in sched.jobs if j.press_id in pool and j.press_id not in exclude and a <= j.demold < b)
+
+
+def _capacity_stretch(store: Any, pool: tuple[str, ...], down: set[str]) -> tuple[float, float, float, int] | None:
+    """(factor, press-hours/week with every press, press-hours/week in force, active version) from the
+    solver's plans, or None when there is no store or no comparable plan."""
+    if store is None:
+        return None
+    try:
+        versions = store.versions()
+        active = store.current()
+    except Exception:  # noqa: BLE001
+        return None
+    if not versions or active.version == versions[0].version:
+        return None
+    full = _week_press_hours(versions[0], pool, set())
+    now = _week_press_hours(active, pool, down)
+    if not full or not now:
+        return None
+    return full / now, full, now, active.version
+
+
+def order_progress(sim: Any, events: list[Event], store: Any = None) -> list[OrderProgress]:
     base = sim.order_progress()
     lost = _lost_presses(sim)
     solve = _latest_solve(events) if lost else None
@@ -67,16 +106,33 @@ def order_progress(sim: Any, events: list[Event]) -> list[OrderProgress]:
         if not down:
             out.append(o)
             continue
-        avail = len(pool) - len(down)
-        names = "、".join(f"{_press_no(p)} 號機" for p in down)
-        if avail <= 0:
-            out.append(o.model_copy(update={"note": f"{names}停用：無可用硫化機，剩餘時間無法估算"}))
+        out_of_service = [p for p in down if _status(sim, p) is MachineStatus.OUT_OF_SERVICE]
+        held = [p for p in down if p not in out_of_service]
+        names = lambda ps: "、".join(f"{_press_no(p)} 號機" for p in ps)   # noqa: E731
+        if not out_of_service:
+            # safety core hold only: no approved change yet, so no new number
+            out.append(o.model_copy(update={"note": f"{names(held)}安全核心扣模：待主管核准停用與新排程後重估剩餘時間"}))
             continue
-        note = f"{names}停用：可用硫化機 {avail}/{len(pool)} 台，剩餘時間 ×{len(pool) / avail:.2f}"
+        avail = len(pool) - len(down)
+        if avail <= 0:
+            out.append(o.model_copy(update={"note": f"{names(down)}停用：無可用硫化機，剩餘時間無法估算"}))
+            continue
+        st = _capacity_stretch(store, pool, set(down))
+        if st is not None and st[0] > 1.0:
+            factor, full, now, ver = st
+            note = (f"{names(out_of_service)}停用：依生效排程 v{ver}，週硫化 {full:,.0f}→{now:,.0f} 機時"
+                    f"（{(now - full) / full:+.0%}），剩餘時間依此延長")
+        elif st is not None:
+            factor, note = 1.0, f"{names(out_of_service)}停用：生效排程 v{st[3]} 週硫化機時未減少，剩餘時間不變"
+        else:
+            factor = len(pool) / avail
+            note = f"{names(out_of_service)}停用：尚無新排程，依可用硫化機 {avail}/{len(pool)} 台估算"
+        if held:
+            note += f"；{names(held)}安全核心扣模中"
         if solve is not None:
             late = solve.get("late_orders") or []
-            note += "；已排訂單交期不受影響" if solve.get("deliveries_met", not late) else f"；延誤：{'、'.join(late)}"
-        out.append(o.model_copy(update={"remaining_h": round(o.remaining_h * len(pool) / avail, 1), "note": note}))
+            note += "；本週已排訂單交期不受影響" if solve.get("deliveries_met", not late) else f"；延誤：{'、'.join(late)}"
+        out.append(o.model_copy(update={"remaining_h": round(o.remaining_h * factor, 1), "note": note}))
     return out
 
 
