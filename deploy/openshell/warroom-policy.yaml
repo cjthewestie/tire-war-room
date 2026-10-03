@@ -6,7 +6,9 @@
 # the app goes straight into an OpenShell sandbox with this policy. Tool allow-listing stays in the
 # Action Gate (warroom.agent.gate); this file is the kernel/network layer under it.
 #
-# ${SPARK_HOST} is filled in by run_sandboxed.sh (the Spark's own address as seen from the sandbox).
+# ${SPARK_HOST} is filled in by run_sandboxed.sh: the Spark's LAN IP, never loopback (127.0.0.1 inside the
+# sandbox's network namespace is the sandbox itself). compose binds vLLM/Qdrant/MQTT there (VLLM_BIND,
+# QDRANT_BIND, MQTT_BIND) and deploy/openshell/nft-sandbox-services.nft keeps the rest of the LAN off :8001/:6333.
 version: 1
 
 landlock:
@@ -36,7 +38,7 @@ network_policies:
           - allow: {method: POST, path: /v1/chat/completions}
           - allow: {method: GET, path: /v1/models}
           - allow: {method: GET, path: /health}
-        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+        allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
       - path: /opt/venv/bin/python*
   sop_kb:
@@ -47,7 +49,7 @@ network_policies:
         protocol: rest
         enforcement: enforce
         access: read-write
-        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+        allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
       - path: /opt/venv/bin/python*
   sensor_mqtt:
@@ -56,6 +58,6 @@ network_policies:
       - host: ${SPARK_HOST}
         port: 1883
         protocol: tcp
-        allowed_ips: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+        allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
       - path: /opt/venv/bin/python*

@@ -1,0 +1,36 @@
+#!/usr/sbin/nft -f
+# Keep the commander LLM (vLLM :8001) and the SOP KB (Qdrant :6333) private when they are bound to the
+# Spark's LAN IP for the OpenShell-sandboxed app (deploy/openshell/run_sandboxed.sh fills the two
+# placeholders and loads this; it is a separate table so a mistake here never unloads the egress
+# allow-list in deploy/network/nftables-warroom.nft).
+#
+# Why it is needed: the sandbox has its own network namespace, so 127.0.0.1 inside it is the sandbox,
+# not the Spark. vLLM/Qdrant therefore have to listen on an address the sandbox can reach (SPARK_HOST,
+# compose VLLM_BIND/QDRANT_BIND). This table drops every other source, so a phone or PC on the factory
+# LAN still cannot reach the model or the KB directly.
+#
+# Covered: Docker's DNAT path (forward hook; `ct original` = the address/port the client dialled) and the
+# userland docker-proxy / host-process path (input hook). Not covered: MQTT :1883, which the plant data
+# gateway on the LAN must reach by design (compose MQTT_BIND).
+#   ${SPARK_HOST}  the Spark's LAN IP the services are bound to
+#   ${SANDBOX_SRC} comma-separated sources allowed in: the sandbox's address range + the Spark itself
+# Inspect: sudo nft list table inet warroom_sandbox_svc     Remove: sudo nft delete table inet warroom_sandbox_svc
+
+table inet warroom_sandbox_svc {
+    set sandbox_src {
+        type ipv4_addr; flags interval;
+        elements = { ${SANDBOX_SRC} }
+    }
+
+    counter dropped_svc { }
+
+    chain input {
+        type filter hook input priority -5; policy accept;
+        ip daddr ${SPARK_HOST} tcp dport { 8001, 6333 } ip saddr != @sandbox_src counter name dropped_svc drop
+    }
+
+    chain forward {
+        type filter hook forward priority -5; policy accept;
+        ct original ip daddr ${SPARK_HOST} ct original proto-dst { 8001, 6333 } ip saddr != @sandbox_src counter name dropped_svc drop
+    }
+}

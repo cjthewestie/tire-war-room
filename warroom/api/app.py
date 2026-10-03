@@ -10,8 +10,15 @@ remote writes are refused. `decided_by` and `via` are set by the server from tha
 taken from the body as given, and `via="auto"` is server-only. /api/sim/* are demo controls and can
 be switched off with WARROOM_DEMO_CONTROLS=0.
 PIN guessing is throttled (PinGuard): per client address, 5 wrong PINs lock that address out with
-a doubling back-off (30 s .. 15 min); 20 wrong PINs from anywhere within 10 min lock every remote
-write for 5 min. Every wrong PIN and every lockout is written to the audit log (kind intercepted).
+a doubling back-off (30 s .. 15 min); 20 wrong PINs from anywhere within 10 min put every remote
+address WITHOUT a paired device on a shared slow lane (one PIN attempt per 10 s, for 5 min). A
+correct PIN is never refused for being someone else's bad luck: a phone that entered the PIN once
+holds a paired-device cookie (warroom_device, second factor) and skips the slow lane. Every wrong
+PIN and every lockout is written to the audit log (kind intercepted).
+Behind Docker NAT every client arrives with the gateway's address, so an address cannot identify
+the on-site seat. In a container loopback is not the seat by default; the touch screen pairs once
+with WARROOM_KIOSK_TOKEN via GET /kiosk?token=... (HttpOnly cookie). With neither a PIN nor a kiosk
+token configured in a container, a kiosk token is generated and its pairing URL logged.
 The PIN travels only in the header (never in a URL); set WARROOM_SSL_CERTFILE/KEYFILE to serve TLS. Page 9 tiers: lan_down refuses phone/remote approvals
 (409) and lights the warning light; only the local touch screen can decide."""
 from __future__ import annotations
@@ -32,7 +39,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Body, Depends, FastAPI, HTTPException, Query, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import Response
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -79,6 +87,19 @@ class RollbackBody(BaseModel):
 
 
 LOCAL_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "testclient"})
+KIOSK_COOKIE = "warroom_kiosk"
+DEVICE_COOKIE = "warroom_device"
+_TRUE = ("1", "true", "yes", "on")
+_FALSE = ("0", "false", "no", "off")
+
+
+def in_container() -> bool:
+    env = os.environ.get("WARROOM_IN_CONTAINER", "").strip().lower()
+    if env in _TRUE:
+        return True
+    if env in _FALSE:
+        return False
+    return Path("/.dockerenv").exists()
 
 
 @dataclass(frozen=True)
@@ -93,43 +114,95 @@ class AccessConfig:
     supervisor_pin: str | None
     demo_controls: bool
     local_hosts: frozenset[str] = LOCAL_HOSTS
+    kiosk_token: str | None = None
+    container: bool = False
 
     @classmethod
     def from_env(cls, supervisor_pin: str | None = None, demo_controls: bool | None = None,
-                 local_hosts: frozenset[str] | None = None) -> AccessConfig:
+                 local_hosts: frozenset[str] | None = None, kiosk_token: str | None = None,
+                 container: bool | None = None) -> AccessConfig:
         pin = supervisor_pin if supervisor_pin is not None else (os.environ.get("WARROOM_SUPERVISOR_PIN") or None)
         demo = demo_controls if demo_controls is not None else \
             os.environ.get("WARROOM_DEMO_CONTROLS", "1").lower() not in ("0", "false", "no", "off")
         extra = frozenset(h.strip() for h in os.environ.get("WARROOM_LOCAL_HOSTS", "").split(",") if h.strip())
-        return cls(supervisor_pin=pin, demo_controls=demo, local_hosts=(local_hosts or LOCAL_HOSTS) | extra)
+        # WARROOM_LOOPBACK_LOCAL=0: loopback is NOT the on-site seat. Set when a tunnel/port-forward (the
+        # OpenShell sandbox, deploy/openshell/run_sandboxed.sh) delivers every client as 127.0.0.1, so
+        # loopback would otherwise make every LAN phone PIN-free. Only WARROOM_LOCAL_HOSTS then counts.
+        container = in_container() if container is None else container
+        # In a container (Docker NAT) the on-box browser arrives as the bridge gateway, never as
+        # loopback; only in-container processes are loopback. So loopback is not the seat there
+        # unless WARROOM_LOOPBACK_LOCAL=1 says so explicitly.
+        lb_env = os.environ.get("WARROOM_LOOPBACK_LOCAL", "").strip().lower()
+        loopback = lb_env in _TRUE if lb_env else not container
+        base = local_hosts or (LOCAL_HOSTS if loopback else frozenset())
+        kiosk = kiosk_token if kiosk_token is not None else (os.environ.get("WARROOM_KIOSK_TOKEN") or None)
+        if container and extra:
+            log.warning("WARROOM_LOCAL_HOSTS=%s inside a container: behind Docker NAT a LAN client can arrive "
+                        "with the gateway's address and would become the PIN-free seat. Prefer "
+                        "WARROOM_KIOSK_TOKEN (GET /kiosk?token=...) or network_mode: host.", ",".join(sorted(extra)))
+        if container and not pin and not kiosk:
+            import secrets
+            kiosk = secrets.token_urlsafe(18)
+            log.warning("no WARROOM_SUPERVISOR_PIN and no WARROOM_KIOSK_TOKEN in a container: nobody could "
+                        "approve. Generated a kiosk token for this run; pair the on-site screen once by "
+                        "opening  /kiosk?token=%s", kiosk)
+        return cls(supervisor_pin=pin, demo_controls=demo, local_hosts=base | extra, kiosk_token=kiosk,
+                   container=container)
 
 
 class PinGuard:
     """Brute-force throttle for the supervisor PIN. Keyed by the TCP peer address (never by
-    X-Forwarded-For, which the client controls), plus a global budget so many addresses cannot
-    share the work. Wall-clock (monotonic) on purpose: this is a security limit, not factory time."""
+    X-Forwarded-For, which the client controls). Wall-clock (monotonic) on purpose: this is a
+    security limit, not factory time.
+
+    Per host: per_host_max wrong PINs lock that address with a doubling back-off.
+    Global: global_max wrong PINs from anywhere within global_window_s start a slow lane for
+    global_lock_s: callers without a paired device share ONE attempt per global_slow_s, so many
+    addresses cannot share the guessing work, yet a correct PIN still gets through (delayed, never
+    refused). A paired device (trusted=True: it entered the right PIN before) skips the slow lane."""
 
     def __init__(self, per_host_max: int = 5, base_lock_s: float = 30.0, max_lock_s: float = 900.0,
                  global_max: int = 20, global_window_s: float = 600.0, global_lock_s: float = 300.0,
-                 now: Callable[[], float] = time.monotonic):
+                 global_slow_s: float = 10.0, now: Callable[[], float] = time.monotonic):
         self.per_host_max, self.base_lock_s, self.max_lock_s = per_host_max, base_lock_s, max_lock_s
         self.global_max, self.global_window_s, self.global_lock_s = global_max, global_window_s, global_lock_s
+        self.global_slow_s = global_slow_s
         self.now = now
         self._lock = threading.Lock()
         self._fails: dict[str, int] = {}          # consecutive wrong PINs since the last lock/success
         self._strikes: dict[str, int] = {}        # lockouts so far (doubles the next one)
         self._until: dict[str, float] = {}
         self._global: deque[float] = deque()
-        self._global_until = 0.0
+        self._global_until = 0.0                  # slow lane in force until
+        self._next_slot = 0.0                     # next slow-lane attempt allowed at
 
-    def locked_for(self, host: str) -> float:
-        """Seconds this host must still wait (0 = may try)."""
+    def slow_lane(self) -> bool:
+        with self._lock:
+            return self._global_until > self.now()
+
+    def _wait(self, host: str, trusted: bool, t: float) -> float:
+        w = self._until.get(host, 0.0) - t
+        if not trusted and self._global_until > t:
+            w = max(w, self._next_slot - t)
+        return max(0.0, w)
+
+    def locked_for(self, host: str, trusted: bool = False) -> float:
+        """Seconds this host must still wait before its next PIN attempt (0 = may try)."""
+        with self._lock:
+            return self._wait(host, trusted, self.now())
+
+    def admit(self, host: str, trusted: bool = False) -> float:
+        """Gate one PIN attempt: returns the wait (0 = go). In the slow lane, a go reserves the
+        shared slot, so the next untrusted attempt anywhere waits global_slow_s."""
         with self._lock:
             t = self.now()
-            return max(0.0, self._until.get(host, 0.0) - t, self._global_until - t)
+            w = self._wait(host, trusted, t)
+            if w == 0 and not trusted and self._global_until > t:
+                self._next_slot = t + self.global_slow_s
+            return w
 
     def failure(self, host: str) -> tuple[float, str | None]:
-        """Record a wrong PIN. Returns (lock seconds now in force, 'host'|'global'|None if new lock)."""
+        """Record a wrong PIN. Returns (seconds this host must now wait, 'host'|'global'|None if new)."""
         with self._lock:
             t = self.now()
             self._global.append(t)
@@ -148,13 +221,38 @@ class PinGuard:
                 self._until[host] = t + min(self.max_lock_s, self.base_lock_s * 2 ** k)
                 self._fails[host] = 0
                 new = new or "host"
-            return max(0.0, self._until.get(host, 0.0) - t, self._global_until - t), new
+            return max(0.0, self._until.get(host, 0.0) - t), new
 
     def success(self, host: str) -> None:
         with self._lock:
             self._fails.pop(host, None)
             self._strikes.pop(host, None)
             self._until.pop(host, None)
+
+
+class DeviceRegistry:
+    """Paired supervisor devices: a random token issued after a correct PIN (HttpOnly cookie). It is
+    a second factor that exempts the device from the global slow lane; the PIN is still required."""
+
+    def __init__(self, max_devices: int = 64):
+        self._tokens: dict[str, float] = {}
+        self._lock = threading.Lock()
+        self.max_devices = max_devices
+
+    def issue(self) -> str:
+        import secrets
+        tok = secrets.token_urlsafe(24)
+        with self._lock:
+            self._tokens[tok] = time.monotonic()
+            while len(self._tokens) > self.max_devices:
+                self._tokens.pop(next(iter(self._tokens)))
+        return tok
+
+    def valid(self, tok: str | None) -> bool:
+        if not tok:
+            return False
+        with self._lock:
+            return any(hmac.compare_digest(tok.encode(), k.encode()) for k in self._tokens)
 
 
 class FaultBody(BaseModel):
@@ -191,11 +289,13 @@ def _404(what: str) -> HTTPException:
 
 def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = None,
                demo_controls: bool | None = None, local_hosts: frozenset[str] | None = None,
-               pin_guard: PinGuard | None = None) -> FastAPI:
+               pin_guard: PinGuard | None = None, kiosk_token: str | None = None,
+               container: bool | None = None) -> FastAPI:
     """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at / and /phone."""
     holder: dict[str, Runtime] = {}
-    access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts)
+    access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts, kiosk_token, container)
     guard = pin_guard or PinGuard()
+    devices = DeviceRegistry()
     if access.supervisor_pin and len(access.supervisor_pin) < 8:
         log.warning("WARROOM_SUPERVISOR_PIN is %d characters; use 8+ random characters (PIN guessing is "
                     "throttled, but a short PIN is still guessable over time)", len(access.supervisor_pin))
@@ -206,17 +306,26 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         except Exception:  # noqa: BLE001 - auditing must not turn a 401 into a 500
             log.exception("audit pin failure")
 
-    def supervisor(request: Request) -> Session:
-        """Who may write. Loopback = the on-site seat; LAN clients need the supervisor PIN."""
+    def kiosk_ok(request: Request) -> bool:
+        if not access.kiosk_token:
+            return False
+        got = request.cookies.get(KIOSK_COOKIE) or request.headers.get("x-kiosk-token") or ""
+        return bool(got) and hmac.compare_digest(got.encode(), access.kiosk_token.encode())
+
+    def supervisor(request: Request, response: Response) -> Session:
+        """Who may write. The on-site seat = loopback (outside a container) or a paired kiosk;
+        LAN clients need the supervisor PIN."""
         host = _norm_host(request.client.host if request.client else "")
         fwd = [_norm_host(h) for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
         local = host in access.local_hosts and all(h in access.local_hosts for h in fwd)
-        if local:
+        if local or kiosk_ok(request):
             return Session(actor="supervisor", local=True, host=host)
         if not access.supervisor_pin:
+            hint = " or pair the on-site screen via /kiosk?token=..." if access.kiosk_token else ""
             raise HTTPException(status_code=403, detail="remote writes are disabled: set WARROOM_SUPERVISOR_PIN "
-                                                        "and send it as X-Supervisor-Pin")
-        wait = guard.locked_for(host)
+                                                        f"and send it as X-Supervisor-Pin{hint}")
+        trusted = devices.valid(request.cookies.get(DEVICE_COOKIE) or request.headers.get("x-supervisor-device"))
+        wait = guard.admit(host, trusted)
         if wait > 0:
             raise HTTPException(status_code=429, detail=f"too many wrong PINs: locked for {wait:.0f} s",
                                 headers={"Retry-After": str(int(wait) + 1)})
@@ -231,6 +340,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                     headers={"Retry-After": str(int(lock_s) + 1)})
             raise HTTPException(status_code=401, detail="supervisor PIN required (X-Supervisor-Pin)")
         guard.success(host)
+        if not trusted:                          # pair this device: skips the global slow lane next time
+            tok = devices.issue()
+            response.set_cookie(DEVICE_COOKIE, tok, httponly=True, samesite="strict",
+                                secure=request.url.scheme == "https", max_age=12 * 3600)
+            response.headers["X-Supervisor-Device"] = tok
         return Session(actor=f"supervisor@{fwd[0] if fwd else host}", local=False, host=fwd[0] if fwd else host)
 
     def demo(session: Session = Depends(supervisor)) -> Session:
@@ -256,6 +370,32 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     app = FastAPI(title="實心胎智慧製造戰情室 API", version="0.1.0", lifespan=lifespan)
     if runtime is not None:
         app.state.runtime = runtime
+    app.state.access = access
+
+    # ------------------------------------------------------------------ on-site seat pairing
+    @app.get("/kiosk", include_in_schema=False)
+    async def kiosk(request: Request, token: str = Query("", max_length=256)):
+        """Pair the on-site touch screen once: the right WARROOM_KIOSK_TOKEN sets an HttpOnly cookie
+        that makes this browser the local seat (no source-IP trust behind Docker NAT)."""
+        host = _norm_host(request.client.host if request.client else "")
+        if not access.kiosk_token:
+            raise HTTPException(status_code=404, detail="kiosk pairing is not configured (WARROOM_KIOSK_TOKEN)")
+        wait = guard.admit(host)
+        if wait > 0:
+            raise HTTPException(status_code=429, detail=f"too many wrong tokens: locked for {wait:.0f} s",
+                                headers={"Retry-After": str(int(wait) + 1)})
+        if not hmac.compare_digest(token.encode(), access.kiosk_token.encode()):
+            lock_s, new = guard.failure(host)
+            _audit_pin("kiosk token rejected", host)
+            if new:
+                _audit_pin("kiosk token lockout", host, scope=new, lock_s=round(lock_s))
+            raise HTTPException(status_code=401, detail="wrong kiosk token")
+        guard.success(host)
+        _audit_pin("kiosk paired", host)
+        resp = RedirectResponse("/", status_code=303)
+        resp.set_cookie(KIOSK_COOKIE, access.kiosk_token, httponly=True, samesite="strict",
+                        secure=request.url.scheme == "https", max_age=365 * 24 * 3600)
+        return resp
 
     # ------------------------------------------------------------------ health
     @app.get("/api/health", response_model=HealthStatus)

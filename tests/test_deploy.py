@@ -70,8 +70,9 @@ def test_spark_compose_structure():
     assert c["networks"]["core"]["internal"] is True
     assert s["vllm"]["environment"]["HF_HUB_OFFLINE"] == "1"
     assert s["vllm"]["environment"]["VLLM_NO_USAGE_STATS"] == "1"
-    assert s["vllm"]["ports"] == ["127.0.0.1:8001:8000"]          # model server never on the LAN
-    assert s["qdrant"]["ports"] == ["127.0.0.1:6333:6333"]
+    # model server off the LAN by default; the OpenShell path binds the LAN IP behind nft-sandbox-services.nft
+    assert s["vllm"]["ports"] == ["${VLLM_BIND:-127.0.0.1}:8001:8000"]
+    assert s["qdrant"]["ports"] == ["${QDRANT_BIND:-127.0.0.1}:6333:6333"]
     assert s["qdrant"]["mem_limit"] == f"{MEMORY_BUDGET_GB['qdrant']}g"
     assert s["app"]["mem_limit"] == f"{MEMORY_BUDGET_GB['sched_app']}g"
     env = s["app"]["environment"]

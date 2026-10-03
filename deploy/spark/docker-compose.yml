@@ -50,7 +50,10 @@ services:
       resources:
         reservations:
           devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
-    ports: ["127.0.0.1:8001:8000"]
+    # VLLM_BIND: 127.0.0.1 by default. The OpenShell-sandboxed app (deploy/openshell/run_sandboxed.sh) runs in
+    # its own network namespace where 127.0.0.1 is the sandbox itself, so that path binds this to the Spark's
+    # LAN IP and loads deploy/openshell/nft-sandbox-services.nft to keep everyone but the sandbox off it.
+    ports: ["${VLLM_BIND:-127.0.0.1}:8001:8000"]
     networks: [core, edge]
     restart: unless-stopped
     healthcheck:
@@ -83,7 +86,7 @@ services:
     volumes:
       - ${QDRANT_DATA:-/opt/warroom/data/qdrant}:/qdrant/storage
     mem_limit: 3g                 # page 9: Qdrant 3 GB
-    ports: ["127.0.0.1:6333:6333"]
+    ports: ["${QDRANT_BIND:-127.0.0.1}:6333:6333"]   # sandbox path: Spark LAN IP + nft-sandbox-services.nft
     networks: [core, edge]
     restart: unless-stopped
     healthcheck:

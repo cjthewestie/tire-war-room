@@ -24,6 +24,22 @@ if [[ ! -d "$ROOT/releases/$VER" ]]; then
 fi
 [[ -f "$ROOT/releases/$VER/deploy/spark/.env" ]] || cp "$ROOT/releases/$VER/deploy/spark/.env.example" \
   "$ROOT/releases/$VER/deploy/spark/.env"
+# Supervisor PIN: the only way the phone approves over the LAN (the touchscreen on 127.0.0.1 needs none; the
+# app runs on the host network). Without it no remote client can approve, so refuse to finish until it is set.
+# Pass it as WARROOM_SUPERVISOR_PIN=... to write it into .env, or edit .env and rerun.
+pin_envf="$ROOT/releases/$VER/deploy/spark/.env"
+pin_in_env() { sed -n 's/^WARROOM_SUPERVISOR_PIN=//p' "$pin_envf" | tail -1; }
+if [[ -n "${WARROOM_SUPERVISOR_PIN:-}" && "$WARROOM_SUPERVISOR_PIN" != "$(pin_in_env)" ]]; then
+  { grep -v '^WARROOM_SUPERVISOR_PIN=' "$pin_envf" || true; echo "WARROOM_SUPERVISOR_PIN=$WARROOM_SUPERVISOR_PIN"; } \
+    >"$pin_envf.tmp" && mv "$pin_envf.tmp" "$pin_envf"
+fi
+chmod 600 "$pin_envf" 2>/dev/null || true
+pin="$(pin_in_env)"
+if (( ${#pin} < 8 )) || [[ "$pin" =~ [[:space:]\"\'\$\#] ]]; then
+  echo "install aborted: WARROOM_SUPERVISOR_PIN in $pin_envf is empty, under 8 characters, or has spaces/quotes/\$/#" >&2
+  echo "  the supervisor phone could not approve anything. Rerun with: sudo WARROOM_SUPERVISOR_PIN=\$(openssl rand -hex 6) $0 $VER" >&2
+  exit 1
+fi
 ln -sfn "$ROOT/releases/$VER" "$ROOT/current"
 chown -R 10001 "$ROOT/data/runtime" 2>/dev/null || true   # app container user
 

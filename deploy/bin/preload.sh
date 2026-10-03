@@ -18,7 +18,7 @@ echo "preload: model server up"
 # Preferred: bench.preload from inside the app container -- the commander's own build_messages(CommanderRequest),
 # so the prefix cache holds the exact SYSTEM_PROMPT the first anomaly will send.
 if command -v docker >/dev/null && docker compose --project-directory "$COMPOSE_DIR" exec -T \
-     -e BASE_URL=http://vllm:8000/v1 -e MODEL="$MODEL" app python -m bench.preload 2>/dev/null; then
+     -e BASE_URL=http://127.0.0.1:8001/v1 -e MODEL="$MODEL" app python -m bench.preload 2>/dev/null; then
   exit 0
 fi
 # Fallback: one tiny request so at least the weights and graphs are resident.
