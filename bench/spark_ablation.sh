@@ -4,7 +4,7 @@
 #   deploy/spark/.env must exist; run from the repo root on the Spark:  bench/spark_ablation.sh
 # Configs (QUANT SPEC PREFIX_CACHE KV_DTYPE):
 #   full        nvfp4 dspark 1 fp8    production
-#   no_spec     nvfp4 off    1 fp8    -> contribution of speculative decoding
+#   no_spec     nvfp4 off    1 fp8    -> contribution of speculative decoding (decode tok/s, bench.decode)
 #   no_cache    nvfp4 dspark 0 fp8    -> contribution of prefix caching
 #   mtp         nvfp4 mtp    1 fp8    -> built-in MTP instead of the DSpark draft
 #   control     fp8   off    0 auto   -> page-10 control group
@@ -19,7 +19,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 PY="${PY:-bench/py.sh}"
 # Fail before touching vLLM if the bench interpreter cannot import every bench this run needs.
-"$PY" -c "import bench.ttft, bench.concurrent, bench.full_event, bench.memory_check, bench.accuracy, ortools, openai" \
+"$PY" -c "import bench.ttft, bench.decode, bench.concurrent, bench.full_event, bench.memory_check, bench.accuracy, bench.tokens_per_watt, ortools, openai" \
   || { echo "bench interpreter not usable ($PY); on the Spark re-run deploy/bin/install_spark.sh while online" >&2; exit 1; }
 [[ "${PREFLIGHT_ONLY:-0}" == 1 ]] && { echo "preflight ok: $("$PY" -c 'import sys; print(sys.executable)')"; exit 0; }
 COMPOSE="${COMPOSE:-docker compose --project-directory deploy/spark}"
@@ -78,10 +78,14 @@ for c in $CONFIGS; do
   wait_up || { echo "vllm did not come up for $c" >&2; failed+=("$c"); continue; }
   export BASE_URL="$URL/v1" MODEL=nemotron
   "$PY" -m bench.ttft --runs 10 --out-dir "$OUT/$c"
+  "$PY" -m bench.decode --runs 10 --config "$c" --out-dir "$OUT/$c"   # page 10: 推測解碼 95–108 tok/s, batch 1
   "$PY" -m bench.concurrent --runs 5 --out-dir "$OUT/$c"
   "$PY" -m bench.full_event --runs 3 --out-dir "$OUT/$c"
   "$PY" -m bench.memory_check --out-dir "$OUT/$c"
   "$PY" -m bench.accuracy --quant "$q" --out-dir "$OUT/$c"   # open book (headline), kb + generated quiz
+  # tokens/s and, with a plug meter (TPW_ARGS="--watts <avg> --idle-watts <idle>" or "--meter-csv f.csv"), tokens/W
+  # shellcheck disable=SC2086
+  "$PY" -m bench.tokens_per_watt --duration "${TPW_DURATION:-60}" ${TPW_ARGS:-} --out-dir "$OUT/$c"
 done
 # restore production (the watchdog stays paused until it is healthy again)
 $COMPOSE up -d --force-recreate vllm
@@ -95,6 +99,8 @@ if [[ -n "$fa" && -n "$fc" ]]; then
 else
   echo "accuracy gap not paired: need both full and control runs" >&2
 fi
+# Spec-decode contribution in tok/s: full and mtp vs no_spec, plus tokens/s per config.
+"$PY" -m bench.decode --ablation "$OUT" --out-dir "$OUT" || echo "decode ablation summary failed" >&2
 echo "results in $OUT (accuracy per config; paired NVFP4 vs FP8 gap in $OUT/accuracy-compare-*-paired-*.json)"
 rc=0
 if (( ${#failed[@]} )); then echo "FAILED: vllm never came up for: ${failed[*]}" >&2; rc=1; fi

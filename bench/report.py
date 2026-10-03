@@ -13,7 +13,7 @@ from typing import Any
 from bench.llm import RESULTS_DIR
 from bench.provenance import BENCH_DEPS, BENCH_DIR, code_fingerprint
 
-ORDER = ["ttft", "concurrent", "full_event", "full_event-think", "accuracy", "accuracy-open-book",
+ORDER = ["ttft", "decode", "concurrent", "full_event", "full_event-think", "accuracy", "accuracy-open-book",
          "accuracy-open-book-cite", "memory", "unplug", "tokens_per_watt"]
 
 
@@ -177,7 +177,7 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
     for (b, _, _), d in sorted(best.items()):
         la = d.get("host_load_avg_1_5_15")
         cpus = (d.get("host") or {}).get("cpu_count") or 0
-        if la and cpus and not d.get("_stale") and b.split("-")[0] in ("ttft", "concurrent", "full_event", "unplug"):
+        if la and cpus and not d.get("_stale") and b.split("-")[0] in ("ttft", "decode", "concurrent", "full_event", "unplug"):
             if max(la[0], la[1]) > cpus / 2:
                 out.append(f"**{b} measured on a busy host** ({d['_file']}: load average {la[0]}/{la[1]}/{la[2]} "
                            f"on {cpus} cores). Latency is inflated by other work sharing the box and the model "
@@ -194,6 +194,16 @@ def open_items(best: dict[tuple[str, str, str], dict[str, Any]]) -> list[str]:
             if d.get("gap_points") is not None and d["gap_points"] > 3.0:
                 out.append(f"**Accuracy gap {b}: {d['gap_points']} points > 3** ({d['_file']}, n={d.get('n_items')}; "
                            f"one item = {d.get('points_per_item')} points).")
+    dec = [d for d in by("decode") if not d.get("_stale")]
+    if not dec:
+        out.append("**Decode speed not measured.** Page 10 prints 推測解碼 95–108 tok/s; no current single-stream "
+                   "decode result exists. Run `bench/py.sh -m bench.decode --runs 10` (batch 1, the commander's "
+                   "full plan stream); `bench/spark_ablation.sh` runs it per config for the spec-decode gain.")
+    for d in dec:
+        v = next((x for x in d.get("verdicts", []) if x["name"] == "decode_tps_p50"), None)
+        if v and v.get("passed") is False:
+            out.append(f"**Decode {v['measured']} tok/s < 95** ({d['_file']}): below the slide's 95–108 tok/s "
+                       "band. Either the slide's number changes or the stack does.")
     tpw = by("tokens_per_watt")
     if not any((d.get("plug") or {}).get("tokens_per_joule") for d in tpw):
         out.append("**tokens/W not published.** No wall-plug reading has been recorded (tokens/s only). Needs a plug "
