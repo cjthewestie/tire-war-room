@@ -96,6 +96,7 @@ from warroom.contracts import (
     SafetyAction,
     ScheduleStatus,
     StaffingChange,
+    StepRound,
     StepRun,
     TimelineItem,
     ToolCall,
@@ -775,6 +776,10 @@ class StateMachine:
         plan = plan.model_copy(update={"hypothesis": hyp})
         run.plan, run.plan_at = plan, self._now()
         run.results = {}
+        if ev.steps:                                      # keep the earlier round visible (page 7 decomposition)
+            prev_h = ev.plan.hypothesis.id if ev.plan is not None else None
+            ev.prior_rounds.append(StepRound(round=len(ev.prior_rounds) + 1, hypothesis_id=prev_h,
+                                             goal=ev.goal, steps=ev.steps))
         ev.plan, ev.goal = plan, plan.goal
         ev.steps = [StepRun(step=s, state="pending") for s in plan.steps]
         self._narrate_hypothesis(run, phase, rejected)

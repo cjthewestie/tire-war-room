@@ -38,6 +38,8 @@ from warroom.contracts import (
     TERMINAL_STATES,
     Anomaly,
     ApprovalRequest,
+    ApprovalStatus,
+    ApprovedAction,
     AuditKind,
     Channel,
     CompoundStage,
@@ -921,7 +923,8 @@ class Runtime:
         auto_done, pending = self._actions_for(ev)
         return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=title, detail=detail,
                           tiles=self.tiles_for(m, ev), auto_done=auto_done, pending=pending,
-                          schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline)
+                          schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline,
+                          approved=self._approved_for(ev))
 
     @staticmethod
     def _where(machine_id: str) -> str:
@@ -1028,6 +1031,60 @@ class Runtime:
             else:
                 pending.append(PendingAction(approval_id=req.id, label=req.title))
         return auto, pending
+
+    @staticmethod
+    def _approved_label(sr: Any) -> str:
+        import re
+        p = re.sub(r"[（(]需主管核准[）)]", "", sr.step.purpose).strip()
+        p = re.sub(r"^[A-Z] ", "", p)                    # approval-option step "A 夜班加班"
+        a, d = sr.step.args, (sr.result.data if sr.result and sr.result.ok else {}) or {}
+        if sr.step.tool is ToolName.SET_CURE_TIME:
+            h = d.get("total_cure_h", a.get("total_cure_h"))
+            if isinstance(h, (int, float)):
+                p += f"（{h:.1f} h）"
+        elif sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+            v = d.get("version", a.get("schedule_version"))
+            if isinstance(v, int):
+                p += f"（排程 v{v}）"
+        return p
+
+    def _approved_for(self, ev: Event) -> list[ApprovedAction]:
+        """✓ 已核准: the R2/R3 writes the supervisor approved and that ran, per approval, across every
+        plan round (prior_rounds + the current steps). An approval whose writes have not run yet still
+        shows once, by the option or title the supervisor approved."""
+        reqs = sorted((r for r in self.approvals.all() if r.event_id == ev.id and r.status in
+                       (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)), key=lambda r: r.created_at)
+        rounds = [r.steps for r in getattr(ev, "prior_rounds", [])] + [ev.steps]
+        out: list[ApprovedAction] = []
+        used: set[tuple[int, str]] = set()
+        ri = 0
+        for req in reqs:
+            d = req.decision
+            who = d.decided_by if d else "supervisor"
+            opt_id = d.option_id if d else None
+
+            def owns(sr: Any) -> bool:      # the option step it spawned, or the gated step it was raised for
+                return sr.step.id.startswith(f"{req.id}-") or (
+                    sr.step.id == req.step_id and sr.gate is not None
+                    and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL))
+            j = next((k for k in range(ri, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
+            ran: list[Any] = []
+            if j is not None:
+                ri = j
+                ran = [sr for sr in rounds[j] if sr.state == "ok" and sr.gate is not None
+                       and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+                       and (sr.step.id.startswith(f"{req.id}-") or not sr.step.id.startswith("AP-"))
+                       and (j, sr.step.id) not in used]
+            for sr in ran:
+                used.add((j, sr.step.id))
+                out.append(ApprovedAction(approval_id=req.id, option_id=opt_id, label=self._approved_label(sr),
+                                          decided_by=who, status=req.status))
+            if not ran:
+                opt = next((o for o in req.options if o.id == opt_id), None) or \
+                    (req.options[0] if len(req.options) == 1 else None)
+                out.append(ApprovedAction(approval_id=req.id, option_id=opt_id,
+                                          label=opt.label if opt else req.title, decided_by=who, status=req.status))
+        return out
 
     def schedule_impact(self, ev: Event) -> str:
         for sr in reversed(ev.steps):

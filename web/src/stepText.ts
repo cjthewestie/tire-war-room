@@ -13,6 +13,12 @@ export const NOTIFY_LABEL: Record<string, string> = {
   staff_move: '跨組調人', overtime: '加班', machine_out: '機台停用',
 }
 
+/** The staffing option the supervisor picked in a round: its approval-option step "A 夜班加班" → "夜班加班". */
+export function staffingChoice(steps: { step: { id: string; purpose: string } }[]): string | undefined {
+  const ap = [...steps].reverse().find((s) => s.step.id.startsWith('AP-'))
+  return ap ? ap.step.purpose.replace(/^\p{Lu} /u, '') : undefined
+}
+
 /** "S1" stays "S1"; an approval-option step "AP-EV-…-1-B" becomes "核准 B". */
 export function stepLabel(id: string): string {
   if (!id.startsWith('AP-')) return id
@@ -34,7 +40,7 @@ const pressShort = (id: unknown): string => {
 const teams = (v: unknown): string => (Array.isArray(v) ? v.map((t) => TEAM_LABELS[t as keyof typeof TEAM_LABELS] ?? String(t)).join('、') : '')
 
 /** One short Chinese phrase for a tool result. Never dumps JSON. */
-export function resultText(tool: ToolName, args: D, data: D): string {
+export function resultText(tool: ToolName, args: D, data: D, opts: { staffing?: string } = {}): string {
   switch (tool) {
     case 'cure_formula':
       return `${args.actual_temp_c != null ? `${num(args.actual_temp_c)}°C ` : ''}總硫化 ${num(data.total_cure_h)} h（+${num(data.extra_h)} h）`
@@ -67,7 +73,11 @@ export function resultText(tool: ToolName, args: D, data: D): string {
       for (const [k, n] of grouped) bits.push(n > 1 ? `${k} ×${n}` : k)
       if (retimed) bits.push(`另 ${retimed} 模微調時間`)
       const sched = (data.schedule ?? {}) as D
-      for (const c of arr(sched.staffing_changes)) bits.push(String(c.label ?? ''))
+      // The solver proposes staffing; the supervisor's pick (an approval-option step) is what ran.
+      for (const c of arr(sched.staffing_changes)) {
+        const l = String(c.label ?? '')
+        bits.push(opts.staffing && l && l !== opts.staffing ? `人力改採${opts.staffing}（主管選定；求解器原提${l}）` : l)
+      }
       if (data.deliveries_met) bits.push('交期全部滿足')
       else if (arr(data.late_orders).length) bits.push(`延誤 ${arr(data.late_orders).join('、')}`)
       bits.push(data.feasible === false ? '不可行' : `可行（${data.solver === 'heuristic' ? '備援求解器' : 'CP-SAT'}）`)

@@ -457,7 +457,7 @@ class MockCommander:
                      purpose=f"設定{lbl}硫化時間為公式值（需主管核准）",
                      args={"press_id": mid, "total_cure_h": "$S1.total_cure_h",
                            "reason": f"{lbl}降溫至 {_fmt(actual)}°C，Arrhenius 等效硫化"}),
-            PlanStep(id="S6", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4", "S5"], purpose="通知硫化組與夜班新排程",
+            PlanStep(id="S6", tool=ToolName.NOTIFY_TEAMS, depends_on=["S4", "S5"], purpose="通知硫化組與胎體組新排程",
                      args={"teams": [TeamId.CURING.value, TeamId.BODY.value], "kind": NotifyKind.INFO.value,
                            "machine_id": mid,
                            "message": f"{lbl}延長硫化至 ${{S1.total_cure_h}} h（+${{S1.extra_h}} h），已依新排程調整下一模"}),

@@ -443,6 +443,7 @@ export function openMillScript(A: number): Script {
       ],
       auto_done: now >= at(12) ? ['通知維修冷卻水路'] : [],
       pending: approvals.filter((a) => a.status === 'pending').map((a) => ({ approval_id: a.id, option_id: 'A', label: '放慢生料投入' })),
+      approved: approvals.filter((a) => a.status === 'approved' || a.status === 'modified').map((a) => ({ approval_id: a.id, option_id: 'A', label: '放慢生料投入', decided_by: a.decision?.decided_by ?? '主管', status: a.status })),
       schedule_impact: '無，大胎 #07 仍 17:00 入硫化機', state, timeline: T,
     }
     const safety: SafetyAction[] = now >= STOP_T && !(ok && d < STOP_T) ? [{

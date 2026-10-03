@@ -868,6 +868,15 @@ class StepRun(_M):
     gate: GateDecision | None = None
 
 
+class StepRound(_M):
+    """An earlier round's step plan, kept when a replan replaces ev.steps (page 7: the S1..S5
+    decomposition stays demoable after ↺ 換假設)."""
+    round: int                        # 1 = first plan
+    hypothesis_id: str | None = None
+    goal: str | None = None
+    steps: list[StepRun] = Field(default_factory=list)
+
+
 class Event(_M):
     id: str                           # "EV-20261003-021400-CURE-07"
     opened_at: datetime
@@ -884,6 +893,7 @@ class Event(_M):
     alert_card: AlertCard | None = None
     consecutive_failures: int = 0
     replans: int = 0
+    prior_rounds: list[StepRound] = Field(default_factory=list)   # earlier rounds' steps, oldest first
     closed_at: datetime | None = None
     outcome: str | None = None
 
@@ -903,6 +913,15 @@ class PendingAction(_M):
     label: str                        # "放慢生料投入"
 
 
+class ApprovedAction(_M):
+    """An R2/R3 write the supervisor approved: ③ shows it as ✓ 已核准 (✓ 已自動 is R1 only)."""
+    approval_id: str
+    option_id: str | None = None
+    label: str                        # "放慢生料投入" / "夜班加班"
+    decided_by: str = "supervisor"
+    status: ApprovalStatus = ApprovalStatus.APPROVED
+
+
 class FocusPanel(_M):
     """③ 中央說明面板."""
     event_id: str
@@ -915,6 +934,7 @@ class FocusPanel(_M):
     schedule_impact: str              # "無，大胎 #07 仍 17:00 入硫化機"
     state: EventState
     timeline: list[TimelineItem] = Field(default_factory=list)
+    approved: list[ApprovedAction] = Field(default_factory=list)  # ✓ 已核准
 
 
 class OrderProgress(_M):

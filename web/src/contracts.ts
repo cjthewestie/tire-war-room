@@ -296,6 +296,13 @@ export interface StepRun {
   gate: GateDecision | null
 }
 
+export interface StepRound {
+  round: number
+  hypothesis_id: string | null
+  goal: string | null
+  steps: StepRun[]
+}
+
 export interface Event {
   id: string
   opened_at: ISODate
@@ -312,6 +319,7 @@ export interface Event {
   alert_card: AlertCard | null
   consecutive_failures: number
   replans: number
+  prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
   closed_at: ISODate | null
   outcome: string | null
 }
@@ -409,6 +417,14 @@ export interface PendingAction {
   label: string
 }
 
+export interface ApprovedAction {
+  approval_id: string
+  option_id: string | null
+  label: string
+  decided_by: string
+  status: ApprovalStatus
+}
+
 export interface FocusPanel {
   event_id: string
   machine_id: string
@@ -420,6 +436,7 @@ export interface FocusPanel {
   schedule_impact: string
   state: EventState
   timeline: TimelineItem[]
+  approved?: ApprovedAction[]   // ✓ 已核准 (R2/R3 the supervisor approved); ✓ 已自動 is R1 only
 }
 
 export interface OrderProgress {

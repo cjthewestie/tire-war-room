@@ -1,0 +1,110 @@
+{
+  "bench": "memory",
+  "recorded_at": "2026-10-03T21:29:07.565148+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "df3416c4535b",
+    "deps": [
+      "memory_check.py"
+    ],
+    "deps_dirty": true,
+    "fingerprint": "954773cb077069b2"
+  },
+  "host_load_avg_1_5_15": [
+    173.34,
+    186.03,
+    164.25
+  ],
+  "total_ram_gb": 64.0,
+  "used_gb": 51.34,
+  "stack_gb": 41.86,
+  "budget_total_gb": 49.0,
+  "band_gb": [
+    36.0,
+    50.0
+  ],
+  "roles": {
+    "model_server": {
+      "measured_gb": 40.88,
+      "budget_gb": 30,
+      "rss_gb": 0.05,
+      "container_gb": 0.0,
+      "gpu_gb": 0.0,
+      "pids": [
+        978,
+        91731
+      ],
+      "ollama_ps": [
+        {
+          "server": "http://127.0.0.1:11434",
+          "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+          "gb": 40.88,
+          "context": 32768
+        }
+      ],
+      "within_budget": false
+    },
+    "qdrant": {
+      "measured_gb": 0.0,
+      "budget_gb": 3,
+      "rss_gb": 0.0,
+      "container_gb": 0.0,
+      "gpu_gb": 0.0,
+      "pids": [],
+      "embedded_in": "app",
+      "within_budget": true,
+      "note": "QDRANT_URL unset: Qdrant runs embedded in the app (counted in app RSS); other apps' qdrant processes are ignored"
+    },
+    "app": {
+      "measured_gb": 0.98,
+      "budget_gb": 6,
+      "rss_gb": 0.98,
+      "container_gb": 0.0,
+      "gpu_gb": 0.0,
+      "pids": [
+        93866,
+        93869
+      ],
+      "within_budget": true
+    },
+    "os_and_other": {
+      "measured_gb": 9.47,
+      "budget_gb": 10,
+      "within_budget": true,
+      "note": "everything not matched to a role (on a dev Mac this includes the desktop)"
+    }
+  },
+  "judgement": {
+    "verdict": "FAIL",
+    "reasons": [
+      "stack+OS 51.86 GB > 50.0 GB upper edge"
+    ],
+    "total_gb": 51.86,
+    "os_gb": 10.0,
+    "os_basis": "budget",
+    "band_gb": [
+      36.0,
+      50.0
+    ],
+    "required_roles": [
+      "model_server",
+      "app"
+    ],
+    "context": {
+      "required": 32768,
+      "loaded": [
+        32768
+      ],
+      "min": 32768
+    }
+  },
+  "stack_within_band": false,
+  "headroom_gb": 12.66
+}

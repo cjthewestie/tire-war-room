@@ -107,6 +107,11 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
       <h4 className="sub">建議調整</h4>
       <ul className="actions">
         {focus.auto_done.map((a) => <li key={a} className="done"><span className="ck">✓</span>已自動：{a}</li>)}
+        {(focus.approved ?? []).map((a, i) => (
+          <li key={`${a.approval_id}-${i}`} className="done approved">
+            <span className="ck">✓</span>已核准：{a.label}<small className="muted">（{whoLabel(a.decided_by)}）</small>
+          </li>
+        ))}
         {focus.pending.map((p) => {
           const r = req(p.approval_id)
           const s = sent[p.approval_id]
@@ -180,6 +185,11 @@ function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[])
     if (c) causes.push({ kind: 'hyp', text: `假設：${c}（尚未驗證）` })
   }
   return { title, detail, causes }
+}
+
+/** "supervisor" is the API default for a phone decision; show the role in Chinese. */
+function whoLabel(by: string): string {
+  return !by || by === 'supervisor' ? '主管' : by
 }
 
 /** Presses cure for 24–34 h: show the server's minute count as hours. */

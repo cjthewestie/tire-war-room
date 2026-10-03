@@ -428,7 +428,7 @@ def test_report_builds_table(env_fake, tmp_path):
     ttft.main(["--runs", "1", "--skip-long", "--out-dir", str(tmp_path)])
     memory_check.main(["--out-dir", str(tmp_path)])
     text = report.build(tmp_path)
-    assert "| ttft | first_alert_card_p90 |" in text and "| memory | stack_gb |" in text
+    assert "| ttft | first_alert_card_p90 |" in text and "| memory | stack_plus_os_gb |" in text
 
 
 # ---------------------------------------------------------------- cold vs warm, batching vs queuing
@@ -592,6 +592,41 @@ def test_accuracy_defaults_to_open_book_and_pairs_saved_runs(env_fake, tmp_path)
     assert closed["open_book"] is False and "SOP 檔案" not in state["bodies"][-1]["messages"][0]["content"]
     with pytest.raises(SystemExit):
         accuracy.main(["--pair", one["saved_to"], closed["saved_to"], "--out-dir", str(tmp_path)])
+
+
+# ---------------------------------------------------------------- memory verdict (review: no PASS on a partial stack)
+def _roles(ms=29.0, app=1.5, app_pids=(1,), q=0.5, q_pids=(2,)):
+    r = lambda gb, pids: {"measured_gb": gb, "container_gb": 0.0, "pids": list(pids)}  # noqa: E731
+    return {"model_server": r(ms, (9,)), "app": r(app, app_pids), "qdrant": r(q, q_pids)}
+
+
+def test_memory_judge_needs_all_roles_full_context_and_both_band_edges():
+    j = memory_check.judge
+    req = ["model_server", "app", "qdrant"]
+    ok = j(_roles(), 31.0, 10.0, "measured", [32768], req)
+    assert ok["verdict"] == "PASS" and ok["total_gb"] == 41.0
+    # app not running -> never PASS
+    assert j(_roles(app=0.0, app_pids=()), 29.5, 10.0, "budget", [32768], req)["verdict"] == "UNJUDGED"
+    # 16k context (the 2026-10-03 local run) or unknown context -> UNJUDGED
+    short = j(_roles(), 31.0, 10.0, "budget", [16384], req)
+    assert short["verdict"] == "UNJUDGED" and "16384" in short["reasons"][0]
+    assert j(_roles(), 31.0, 10.0, "budget", [], req)["verdict"] == "UNJUDGED"
+    # both band edges
+    assert j(_roles(), 20.0, 10.0, "measured", [32768], req)["verdict"] == "FAIL"     # 30 < 36
+    assert j(_roles(), 45.0, 10.7, "measured", [32768], req)["verdict"] == "FAIL"     # 55.7 > 50
+    # OS basis is what the caller passed, recorded verbatim
+    assert ok["os_basis"] == "measured"
+
+
+def test_memory_ignores_foreign_bundled_qdrant_and_embedded_qdrant_is_not_required():
+    assert memory_check.classify("/Applications/OpenWhispr.app/Contents/Resources/bin/qdrant-darwin-arm64") is None
+    assert memory_check.classify("/qdrant/qdrant --config-path x") == "qdrant"
+    m = memory_check.measure("budget")
+    j = m["judgement"]
+    assert j["os_basis"] == "budget" and j["os_gb"] == 10.0
+    if not memory_check.qdrant_external():
+        assert m["roles"]["qdrant"]["embedded_in"] == "app" and "qdrant" not in j["required_roles"]
+    assert m["stack_within_band"] is {"PASS": True, "FAIL": False}.get(j["verdict"])
 
 
 # ---------------------------------------------------------------- unplug: attempts, attributed (not box packets)

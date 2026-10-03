@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CapacityReport, Event, EventState, ScheduleVersion, Shift, StepRun } from '../contracts'
 import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
-import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
+import { TOOL_LABEL, resultText, staffingChoice, stepLabel } from '../stepText'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -196,13 +196,22 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
                 <li key={h.id} className={`hyp h-${h.status}`}>
                   <b>{h.id}</b> {h.statement}
                   {h.expectation && <small>預期：{h.expectation.within_min} 分內 {h.expectation.op} {h.expectation.value}°C</small>}
-                  <em>{h.status === 'rejected' ? '不成立' : h.status === 'confirmed' ? '成立' : '驗證中'}</em>
+                  <em>{hypLabel(h.status, ev)}</em>
                 </li>
               ))}
             </ul>
           )}
+          {(ev.prior_rounds ?? []).map((r) => (
+            <details key={r.round} className="prior-round">
+              <summary>第{ROUND_NUM[r.round] ?? r.round}輪{r.hypothesis_id ? `（${r.hypothesis_id}）` : ''}・{r.steps.length} 步{r.goal ? `・${r.goal}` : ''}</summary>
+              <ol className="steps">
+                {r.steps.map((s) => <StepRow key={s.step.id} s={s} staffing={staffingChoice(r.steps)} />)}
+              </ol>
+            </details>
+          ))}
+          {(ev.prior_rounds ?? []).length > 0 && <p className="muted small round-now">第{ROUND_NUM[(ev.prior_rounds ?? []).length + 1] ?? (ev.prior_rounds ?? []).length + 1}輪{ev.state === 'closed' || ev.state === 'safe_stop' ? '（最後一輪）' : '（目前）'}</p>}
           <ol className="steps">
-            {ev.steps.map((s) => <StepRow key={s.step.id} s={s} />)}
+            {ev.steps.map((s) => <StepRow key={s.step.id} s={s} staffing={staffingChoice(ev.steps)} />)}
           </ol>
           {ev.outcome && <p className="outcome">結果：{ev.outcome}</p>}
         </>
@@ -212,8 +221,21 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
 }
 
 const STEP_LABEL: Record<StepRun['state'], string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '駁回' }
-function StepRow({ s }: { s: StepRun }) {
-  const summary = s.result?.ok ? resultText(s.step.tool, s.step.args, s.result.data) : s.result?.error ? `錯誤：${s.result.error.slice(0, 60)}` : ''
+const ROUND_NUM: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '四', 5: '五' }
+
+/** A hypothesis never tested by a reading stays 驗證中 only while the event is open. On close it is
+ *  handed to maintenance when the event took a machine out or called maintenance (page 11 H2). */
+function hypLabel(status: string, ev: Event): string {
+  if (status === 'rejected') return '不成立'
+  if (status === 'confirmed') return '成立'
+  if (ev.state !== 'closed' && ev.state !== 'safe_stop') return '驗證中'
+  const all = [...(ev.prior_rounds ?? []).flatMap((r) => r.steps), ...ev.steps]
+  const handed = all.some((s) => s.state === 'ok' && s.step.tool === 'notify_teams' && ['machine_out', 'maintenance'].includes(String(s.step.args.kind)))
+  return handed ? '未驗證・交維修' : '未驗證'
+}
+
+function StepRow({ s, staffing }: { s: StepRun; staffing?: string }) {
+  const summary = s.result?.ok ? resultText(s.step.tool, s.step.args, s.result.data, { staffing }) : s.result?.error ? `錯誤：${s.result.error.slice(0, 60)}` : ''
   const label = stepLabel(s.step.id)
   return (
     <li className={`step ss-${s.state}`}>

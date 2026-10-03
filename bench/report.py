@@ -124,8 +124,15 @@ def _rows(d: dict[str, Any]) -> list[tuple[str, str, str, str]]:
             out.append(("plan_valid_rate", "1.0", _fmt(d.get("plan_valid_rate")),
                         "reasoning ON" if d.get("think") else "reasoning OFF"))
     if b == "memory":
-        out.append(("stack_gb", f"≤ {d['band_gb'][1]} GB incl. OS", _fmt(d["stack_gb"]),
-                    "PASS" if d["stack_within_band"] else "FAIL"))
+        j = d.get("judgement")
+        if j:   # current shape: verdict PASS/FAIL/UNJUDGED over both band edges, OS basis labelled
+            lo, hi = j["band_gb"]
+            note = f"stack {_fmt(d['stack_gb'])} + OS {j['os_basis']} {_fmt(j['os_gb'])}; ctx {j['context']['min']}"
+            out.append(("stack_plus_os_gb", f"{lo}–{hi} GB, ctx ≥ {j['context']['required']}", _fmt(j["total_gb"]),
+                        f"{j['verdict']} ({note}" + (f"; {'; '.join(j['reasons'])}" if j["reasons"] else "") + ")"))
+        else:   # older result files: verdict was upper edge only, OS from the budget, roles not checked
+            out.append(("stack_gb", f"≤ {d['band_gb'][1]} GB incl. OS", _fmt(d["stack_gb"]),
+                        "UNJUDGED (old check: upper edge only, roles and context not checked)"))
     if b == "tokens_per_watt":
         pl = d.get("plug", {})
         out.append(("tokens_per_s", "-", _fmt(pl.get("tokens_per_s")), "measured"))

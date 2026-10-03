@@ -345,3 +345,9 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .drawer-wrap { align-items: flex-end; }
   .drawer { height: 85vh; border-radius: 16px 16px 0 0; border-left: 0; }
 }
+
+/* ⑥ earlier plan rounds stay demoable after a replan (page 7) */
+.prior-round { margin: 6px 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; opacity: .85; }
+.prior-round > summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); }
+.prior-round .steps { margin-top: 6px; }
+.round-now { margin: 8px 0 2px; }
