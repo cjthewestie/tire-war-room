@@ -269,3 +269,73 @@ async def test_runtime_tick_gap_stays_under_red_path_target_with_cold_kb(tmp_pat
         task.cancel()
     assert hits, "event never reached sop_search"
     assert max_gap < 0.2, f"tick loop blocked {max_gap:.3f} s while sop_search ran"
+
+
+# ------------------------------------------------------------------ held presses (review r3 #1-#3)
+def _fresh_plant(tmp_path):
+    from warroom.detect import StreamDetector
+    from warroom.schedule import FallbackScheduler, FileScheduleStore, seed_schedule
+    from warroom.sim import Factory
+    clock = SimClock(manual=True)
+    sim = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
+    det = StreamDetector(clock=clock)
+    for _ in range(140):
+        det.ingest(sim.step(1.0))
+    sched = FallbackScheduler()
+    store = FileScheduleStore(tmp_path / "sched", initial=seed_schedule(
+        clock.now(), sim.orders(), sim.shifts(), sim.machines(), scheduler=sched, next_on={"CURE-07": "#A-311"}))
+    ctx = ToolContext(sim=sim, detector=det, scheduler=sched, store=store, clock=clock)
+    return ctx, build_registry(ctx)
+
+
+def _future_on(ctx, version, press):
+    now = ctx.clock.now()
+    return [j.id for j in ctx.store.get(version).schedule.jobs
+            if j.press_id == press and not j.frozen and j.mold_in >= now]
+
+
+def test_solve_excludes_out_of_service_press_the_commander_did_not_list(tmp_path):
+    from warroom.contracts import MachineStatus
+    ctx, reg = _fresh_plant(tmp_path)
+    assert _future_on(ctx, ctx.store.current().version, "CURE-07")     # seed loads press 7
+    ctx.sim.set_machine_status("CURE-07", MachineStatus.OUT_OF_SERVICE, "7號機停用")
+    # a later event on another press: the commander names only CURE-10
+    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-10": 47.06}, time_limit_s=10)
+    assert r.ok, r.error
+    v = r.data["schedule_version"]
+    assert v is not None
+    assert _future_on(ctx, v, "CURE-07") == []
+    c = call(reg, "confirm_schedule", schedule_version=v, reason="test")
+    assert c.ok, c.error
+
+
+def test_solve_reads_persisted_holds_file(tmp_path):
+    import json
+    ctx, reg = _fresh_plant(tmp_path)
+    (ctx.store.root / "holds.json").write_text(json.dumps({"CURE-07": {"status": "out_of_service", "note": "x"}}))
+    r = call(reg, "solve_schedule", time_limit_s=10)
+    assert r.ok, r.error
+    assert _future_on(ctx, r.data["schedule_version"], "CURE-07") == []
+
+
+def test_confirm_refuses_proposal_that_loads_a_press_held_after_solve(tmp_path):
+    from warroom.contracts import MachineStatus
+    ctx, reg = _fresh_plant(tmp_path)
+    before = ctx.store.current().version
+    # round 1 solved at 02:14 while press 7 still ran: the proposal moves an order onto press 7
+    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 36.5}, time_limit_s=10)
+    assert r.ok, r.error
+    v = r.data["schedule_version"]
+    assert _future_on(ctx, v, "CURE-07")
+    # the safety core holds press 7 (CURE_HOLD shows as STOPPED) before the supervisor approves
+    ctx.sim.set_machine_status("CURE-07", MachineStatus.STOPPED, "cure hold")
+    c = call(reg, "confirm_schedule", schedule_version=v, reason="late approval")
+    assert not c.ok and "stale" in c.error and "CURE-07" in c.error
+    assert ctx.store.current().version == before
+    assert ctx.store.get(v).status is ScheduleStatus.PROPOSED
+    # re-solve (what the state machine does after a failed confirm) leaves press 7 empty and confirms
+    r2 = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 36.5}, time_limit_s=10)
+    assert r2.ok, r2.error
+    v2 = r2.data["schedule_version"]
+    assert _future_on(ctx, v2, "CURE-07") == []
+    assert call(reg, "confirm_schedule", schedule_version=v2, reason="re-solved").ok

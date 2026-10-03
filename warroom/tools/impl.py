@@ -9,9 +9,10 @@ Output keys follow the contracts' *Data models, plus the extra keys the agent re
 from __future__ import annotations
 
 import contextlib
-
+import json
 import math
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from warroom import factory as F
@@ -19,6 +20,7 @@ from warroom.contracts import (
     Channel,
     ConfirmScheduleArgs,
     CureFormulaArgs,
+    MachineStatus,
     NotifyTeamsArgs,
     PredictArgs,
     QueryOrdersShiftsArgs,
@@ -60,6 +62,49 @@ def _now(ctx: ToolContext) -> datetime:
     if ctx.sim is not None and getattr(ctx.sim, "clock", None) is not None:
         return ctx.sim.clock.now()
     raise ToolError("no clock in tool context")
+
+
+# A cure press in one of these states takes no new mold-in, whatever the commander asked for. The
+# same set guards the rollback endpoint (api.runtime.ROLLBACK_BLOCKING); the safety core's CURE_HOLD
+# shows as STOPPED. Holds are also read from the store's holds.json (written by the Runtime) so a
+# restart that re-enabled the press in the sim cannot reopen it.
+BLOCKING_PRESS_STATUSES = (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED, MachineStatus.OFFLINE)
+HOLDS_FILE = "holds.json"
+
+
+def held_presses(ctx: ToolContext) -> dict[str, str]:
+    """{cure press id: status value} for presses that must not get new mold-ins right now."""
+    out: dict[str, str] = {}
+    root = getattr(ctx.store, "root", None) if ctx.store is not None else None
+    if root is not None:
+        path = Path(root) / HOLDS_FILE
+        try:
+            if path.is_file():
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                blocking = {st.value for st in BLOCKING_PRESS_STATUSES}
+                for mid, h in (raw.items() if isinstance(raw, dict) else []):
+                    if mid in F.CURE_PRESS_IDS and isinstance(h, dict) and h.get("status") in blocking:
+                        out[mid] = h["status"]
+        except Exception:  # noqa: BLE001, S110 - unreadable holds file: the sim status below still applies
+            pass
+    if ctx.sim is not None:
+        for pid in F.CURE_PRESS_IDS:
+            try:
+                st = ctx.sim.machine(pid).status
+            except Exception:  # noqa: BLE001, S112
+                continue
+            if st in BLOCKING_PRESS_STATUSES:
+                out[pid] = MachineStatus(st).value
+    return out
+
+
+def future_jobs_on_presses(schedule: Any, presses: dict[str, str] | set[str], now: datetime) -> dict[str, int]:
+    """{press: count} of not-frozen jobs with mold-in at/after now on the given presses."""
+    hits: dict[str, int] = {}
+    for j in schedule.jobs:
+        if j.press_id in presses and not j.frozen and j.mold_in >= now:
+            hits[j.press_id] = hits.get(j.press_id, 0) + 1
+    return hits
 
 
 # ------------------------------------------------------------------ read / compute
@@ -175,16 +220,20 @@ def solve_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         scheduler = FallbackScheduler()
     now = _now(ctx)
     orders, shifts = list(sim.orders()), list(sim.shifts())
+    # Presses the plant has stopped / taken out are unavailable whatever the commander listed.
+    held = held_presses(ctx)
+    auto_added = sorted(p for p in held if p not in a.unavailable_presses)
+    unavailable = [*a.unavailable_presses, *auto_added]
     if ctx.store is not None:
         from warroom.schedule import reschedule
         res, ver = reschedule(ctx.store, scheduler, now, orders, shifts,
-                              unavailable_presses=a.unavailable_presses, cure_overrides_h=a.cure_overrides_h,
+                              unavailable_presses=unavailable, cure_overrides_h=a.cure_overrides_h,
                               time_limit_s=a.time_limit_s, allow_overtime=a.allow_overtime,
                               allow_cross_team=a.allow_cross_team, horizon_days=a.horizon_days)
         version = ver.version if ver is not None else None   # proposal only: no bus publish (worker thread)
     else:
         res = scheduler.solve(SolveRequest(now=now, orders=orders, shifts=shifts,
-                                           unavailable_presses=a.unavailable_presses,
+                                           unavailable_presses=unavailable,
                                            cure_overrides_h=a.cure_overrides_h, horizon_days=a.horizon_days,
                                            time_limit_s=a.time_limit_s, allow_overtime=a.allow_overtime,
                                            allow_cross_team=a.allow_cross_team))
@@ -211,6 +260,21 @@ def confirm_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
             # would silently drop whatever another event confirmed since (e.g. an approved cure extension).
             raise ToolError(f"schedule v{a.schedule_version} is stale: solved against v{target.parent_version}, "
                             f"but v{prev} is active now; re-run solve_schedule and re-approve")
+        # Held-press guard (same rule as the rollback gate): the plant may have stopped or taken out a
+        # press between solve and approval. Activating would load it again, so refuse like a stale
+        # proposal; the state machine halts the round and re-solves (solve_schedule excludes it).
+        held = held_presses(ctx)
+        hits: dict[str, int] = {}
+        if held:
+            try:
+                now = _now(ctx)
+            except ToolError:
+                now = datetime.min.replace(tzinfo=F.TZ)   # no clock: every not-frozen job counts
+            hits = future_jobs_on_presses(target.schedule, held, now)
+        if hits:
+            what = ", ".join(f"{p} ({held[p]}): {n} new mold-in(s)" for p, n in sorted(hits.items()))
+            raise ToolError(f"schedule v{a.schedule_version} is stale: it loads presses that are held now "
+                            f"[{what}]; re-run solve_schedule and re-approve")
         ver = store.activate(a.schedule_version)
     if ctx.bus is not None:
         ctx.bus.publish(WsType.SCHEDULE, ver)
