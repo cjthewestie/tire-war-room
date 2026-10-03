@@ -233,6 +233,14 @@ class ComponentBuilder:
         if callable(init):
             return init()
         if self.scheduler is not None:
+            try:   # in-progress cures frozen + page-11 pin: press 7's next mold is #A-311
+                from warroom.schedule import seed_schedule
+                orders = sim.orders()
+                next_on = {"CURE-07": "#A-311"} if any(o.id == "#A-311" for o in orders) else None
+                return seed_schedule(self.clock.now(), orders, sim.shifts(), sim.machines(),
+                                     scheduler=self.scheduler, next_on=next_on)
+            except Exception as e:  # noqa: BLE001 - fall back to a plain solve
+                log.warning("seed_schedule failed (%s); plain solve", e)
             res = self.scheduler.solve(SolveRequest(now=self.clock.now(), orders=sim.orders(), shifts=sim.shifts()))
             if res.schedule is not None:
                 return res.schedule
@@ -271,6 +279,7 @@ class Runtime:
         self._kb_ok: bool | None = None
         self._llm_probe: tuple[float, bool] = (-1e9, False)
         self.ticks = 0
+        self.compute_hold_max_s = 120.0          # never freeze the plant longer than this per tick
 
     # ------------------------------------------------------------------ shortcuts
     clock = property(lambda self: self.c.clock)
@@ -329,12 +338,18 @@ class Runtime:
             wall, last = now - last, now
             if self.paused:
                 continue
+            if self.speed > 1 and self.compute_busy():
+                # accelerated demo: the plant waits for the LLM / solver (wall time is not owed)
+                self._publish_periodic()
+                continue
             owed += wall * self.speed
             n = min(int(owed), self.max_steps_per_iter)
             owed = 0.0 if int(owed) > self.max_steps_per_iter else owed - n
             try:
                 for _ in range(n):
-                    await self.tick(1.0, publish=False)
+                    if self.speed > 1 and self.compute_busy():
+                        break
+                    await self.tick(1.0, publish=False, hold_compute=False)
                 self._publish_periodic()
             except asyncio.CancelledError:
                 raise
@@ -352,7 +367,19 @@ class Runtime:
             self.bus.publish(WsType.SNAPSHOT, self.snapshot())
 
     # ------------------------------------------------------------------ the pipeline
-    async def tick(self, dt_s: float = 1.0, *, publish: bool = True) -> None:
+    def compute_busy(self) -> bool:
+        """True while the commander (LLM) or the solver is working on an event."""
+        return getattr(self.state_machine, "compute_inflight", 0) > 0 or getattr(self.c.tools, "inflight", 0) > 0
+
+    async def tick(self, dt_s: float = 1.0, *, publish: bool = True, hold_compute: bool = True) -> None:
+        """One sim step. hold_compute: while the LLM or solver is running, sim time waits for it, so
+        an accelerated demo (or a test driving tick() flat out) keeps the page-11 beats: decisions
+        land seconds after detection instead of the plant racing ahead during a 3 s solve."""
+        if hold_compute:
+            waited = 0.0
+            while self.compute_busy() and waited < self.compute_hold_max_s:
+                await asyncio.sleep(0.01)
+                waited += 0.01
         before = self.clock.now()
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
@@ -677,9 +704,10 @@ class Runtime:
         for sr in reversed(ev.steps):
             if sr.step.tool is ToolName.SOLVE_SCHEDULE and sr.result and sr.result.ok:
                 data = sr.result.data
-                moves = data.get("moves") or []
+                moves = [mv for mv in data.get("moves") or [] if mv.get("from_press") != mv.get("to_press")]
                 if moves:
-                    parts = [f"{mv.get('order_id')} 移至 {mv.get('to_press')}" for mv in moves[:3]]
+                    from warroom.agent.narrate import machine_label
+                    parts = [f"{mv.get('order_id')} 移至 {machine_label(str(mv.get('to_press')))}" for mv in moves[:3]]
                     late = data.get("late_orders") or []
                     tail = "交期不受影響" if data.get("deliveries_met", not late) else f"延誤：{'、'.join(late)}"
                     return "；".join(parts) + f"；{tail}"

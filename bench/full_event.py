@@ -147,8 +147,28 @@ async def via_state_machine(ep: Endpoint) -> dict[str, Any]:
             sim = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
         except Exception:  # noqa: BLE001
             sim = None
-        tools = build_registry(ToolContext(sim=sim, audit=audit, clock=clock))
-        sm = StateMachine(make_commander(settings), tools, RuleGate(), approvals, audit, sim=sim, clock=clock)
+        store = None
+        if sim is not None:
+            from warroom.schedule import FallbackScheduler, FileScheduleStore, seed_schedule
+            sched = FallbackScheduler()
+            store = FileScheduleStore(tmp / "schedules", initial=seed_schedule(
+                clock.now(), sim.orders(), sim.shifts(), sim.machines(), scheduler=sched,
+                next_on={"CURE-07": "#A-311"}))
+        else:
+            sched = None
+        tools = build_registry(ToolContext(sim=sim, audit=audit, clock=clock, scheduler=sched, store=store))
+
+        async def sim_sleep(seconds: float) -> None:
+            # VERIFY waits in sim time: step the plant instead of sleeping wall-clock minutes
+            for _ in range(max(1, int(seconds))):
+                if sim is not None:
+                    sim.step(1.0)
+                else:
+                    clock.advance(1.0)
+            await asyncio.sleep(0)
+
+        sm = StateMachine(make_commander(settings), tools, RuleGate(store=store), approvals, audit, sim=sim,
+                          clock=clock, store=store, sleep=sim_sleep)
         an = Anomaly(id="AN-bench", ts=clock.now(), machine_id=F.press_id(7), kind=AnomalyKind.TEMP_DROP,
                      channel=Channel.TEMP, value=122.0, baseline=128.0, severity=Severity.CRITICAL,
                      message=ANOMALIES[0]["message"])

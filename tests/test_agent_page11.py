@@ -70,7 +70,8 @@ def build(tmp_path):
         await asyncio.sleep(0)
 
     sm = StateMachine(MockCommander(), tools, RuleGate(store=store), approvals, audit, sim=sim, bus=bus, clock=clock,
-                      store=store, sleep=sleep, approval_timeout_s=30)
+                      store=store, sleep=sleep, approval_timeout_s=30,
+                      verify_confirm_s=300)   # the scripted plant crosses 121 °C at exactly 02:26:00
     holder["sm"] = sm
     return clock, bus, audit, sim, store, tools, approvals, sm
 

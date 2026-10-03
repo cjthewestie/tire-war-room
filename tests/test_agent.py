@@ -330,10 +330,11 @@ async def test_openai_commander_streams_and_constrains(base_url, expect_guided):
     body = seen["body"]
     assert seen["path"].endswith("/chat/completions") and body["stream"] is True and body["temperature"] == 0
     assert body["model"] == "nemotron-test" and body["messages"][0]["content"] == SYSTEM_PROMPT
-    if expect_guided:
-        assert "guided_json" in body and "response_format" not in body
-    else:
-        assert body["response_format"]["type"] == "json_schema" and "guided_json" not in body
+    assert body["response_format"]["type"] == "json_schema" and "guided_json" not in body
+    if expect_guided:      # vLLM: reasoning off through the chat template
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+    else:                  # Ollama: reasoning_effort none
+        assert body["reasoning_effort"] == "none" and body["think"] is False
     assert plan.hypothesis.id == "H1" and len(plan.steps) == 5
     assert info.valid_json and not info.fell_back_to_mock and info.ttft_ms is not None
     assert info.prompt_tokens == 900 and info.completion_tokens == 300

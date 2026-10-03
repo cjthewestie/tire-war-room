@@ -153,9 +153,19 @@ def _teams(v: Any) -> list[Any]:
 
 def solver_text(data: dict[str, Any]) -> str:
     bits = []
+    retimed = 0
+    grouped: dict[tuple[str, str], int] = {}
     for mv in data.get("moves") or []:
         to = mv.get("to_press")
-        bits.append(f"{mv.get('order_id')} 移到 {machine_label(to) if to else '?'}")
+        if to and mv.get("from_press") == to:     # same press, new time: summarised below
+            retimed += 1
+            continue
+        key = (str(mv.get("order_id")), str(to) if to else "")
+        grouped[key] = grouped.get(key, 0) + 1
+    for (oid, to), n in grouped.items():
+        bits.append(f"{oid}{f' ×{n}' if n > 1 else ''} 移到 {machine_label(to) if to else '?'}")
+    if retimed:
+        bits.append(f"另 {retimed} 模同機微調時間")
     sched = data.get("schedule") or {}
     for c in sched.get("staffing_changes") or []:
         bits.append(staffing_label(c))

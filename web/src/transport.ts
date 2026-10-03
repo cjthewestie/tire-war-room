@@ -50,6 +50,8 @@ export class LiveTransport implements Transport {
     let timer: ReturnType<typeof setTimeout> | undefined
     const pullSnapshot = () => getJSON<DashboardSnapshot>(API.snapshot)
       .then((s) => onMsg({ type: 'snapshot', ts: s.header.factory_time, data: s })).catch(() => {})
+    let soon: ReturnType<typeof setTimeout> | undefined
+    const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
@@ -58,7 +60,14 @@ export class LiveTransport implements Transport {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))
       }
-      ws.onmessage = (e) => { try { onMsg(JSON.parse(e.data) as WsMessage) } catch { /* ignore malformed */ } }
+      ws.onmessage = (e) => {
+        let m: WsMessage
+        try { m = JSON.parse(e.data) as WsMessage } catch { return /* ignore malformed */ }
+        onMsg(m)
+        // the focus panel (③) is server-built: refresh it as soon as an event or approval changes
+        if (m.type === 'event' || m.type === 'approval_request' || m.type === 'approval_resolved' ||
+            m.type === 'anomaly' || m.type === 'safety_action') soonSnapshot()
+      }
     }
     pullSnapshot()
     getJSON<ScheduleVersion>(API.schedule).then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})

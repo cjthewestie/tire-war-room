@@ -184,7 +184,7 @@ class StateMachine:
       approval_timeout_s wall seconds to wait for the supervisor before SAFE_STOP.
       verify_poll_s      sim seconds between VERIFY reads.
       verify_confirm_s   a miss must persist this long (sim s) before the hypothesis is rejected;
-                         5 min by default so sensor noise around the threshold of a slow thermal
+                         4.5 min of a 30-s mean below the expectation, so sensor noise near the threshold of a slow thermal
                          mass does not reject a 30-min hypothesis (hard limits are the safety core's).
       max_replans        hypothesis swaps allowed before SAFE_STOP.
     """
@@ -193,7 +193,7 @@ class StateMachine:
                  approvals: ApprovalBroker, audit: AuditLog, sim: FactorySim | None = None,
                  bus: Bus | None = None, clock: Clock | None = None, *, store=None,
                  sleep: Callable[[float], Awaitable[None]] | None = None, approval_timeout_s: float = 600.0,
-                 verify_poll_s: float = 5.0, verify_confirm_s: float = 300.0, max_replans: int = 3,
+                 verify_poll_s: float = 5.0, verify_confirm_s: float = 270.0, max_replans: int = 3,
                  max_events_kept: int = 200):
         self.commander, self.tools, self.gate = commander, tools, gate
         self.approvals, self.audit, self.sim, self.bus = approvals, audit, sim, bus
@@ -207,6 +207,7 @@ class StateMachine:
         self._events: dict[str, Event] = {}
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._ids = itertools.count(1)
+        self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
         try:
             self._commander_streams = "on_alert" in inspect.signature(commander.plan).parameters
         except (TypeError, ValueError):
@@ -490,7 +491,11 @@ class StateMachine:
                                "state": state.value}, event_id=ev.id)
             try:
                 if tool is ToolName.SOLVE_SCHEDULE:      # CP-SAT may take seconds: keep the loop free
-                    res = await asyncio.to_thread(self.tools.call, call)
+                    self.compute_inflight += 1           # the Runtime holds sim time while > 0
+                    try:
+                        res = await asyncio.to_thread(self.tools.call, call)
+                    finally:
+                        self.compute_inflight -= 1
                 else:
                     res = self.tools.call(call)
             except Exception as e:  # noqa: BLE001 - registry should never raise; be safe anyway
@@ -574,6 +579,7 @@ class StateMachine:
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
+        self.compute_inflight += 1                   # LLM thinking time: Runtime may hold sim time
         try:
             if self._commander_streams:
                 plan, info = await self.commander.plan(req, on_alert=on_alert)
@@ -585,6 +591,8 @@ class StateMachine:
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500]}, event_id=ev.id)
             self._note(ev, "指揮官", f"指揮官呼叫失敗（{type(e).__name__}）", "dynamic")
             return None
+        finally:
+            self.compute_inflight -= 1
         self.audit.append(AuditKind.LLM_CALL, "commander",
                           {"phase": phase, **info.model_dump(mode="json"), "hypothesis": plan.hypothesis.id,
                            "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],
@@ -598,6 +606,8 @@ class StateMachine:
                                "cause_code": plan.hypothesis.cause_code}, event_id=ev.id)
             plan = plan.model_copy(update={"safe_stop": True})
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
+        if hyp.id in {h.id for h in ev.hypotheses}:       # a real model may reuse "H1" on replan
+            hyp = hyp.model_copy(update={"id": f"H{len(ev.hypotheses) + 1}"})
         ev.hypotheses.append(hyp)
         plan = plan.model_copy(update={"hypothesis": hyp})
         run.plan, run.plan_at = plan, self._now()
@@ -957,6 +967,8 @@ class StateMachine:
             for res in run.results.values():
                 if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("schedule_version") == v:
                     for mv in res.data.get("moves") or []:
+                        if mv.get("from_press") == mv.get("to_press"):
+                            continue                     # time shift on the same press, not a move
                         n = _press_no(str(mv.get("to_press")))
                         run.done.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 已重排")
             run.executed.append(f"排程 v{v} 生效")
@@ -977,7 +989,17 @@ class StateMachine:
                 run.executed.append("放慢生料投入" if kind == NotifyKind.SLOW_FEED.value else "暫停投料")
 
     # ------------------------------------------------------------------ VERIFY (code, no LLM)
+    VERIFY_SMOOTH_S = 30.0     # verify compares a 30-second mean, so one noisy sample cannot flip the verdict
+
     def _read_value(self, machine_id: str, channel: Channel) -> float | None:
+        if self.sim is not None and hasattr(self.sim, "history"):
+            try:
+                hist = self.sim.history(machine_id, self.VERIFY_SMOOTH_S / 60.0)
+                vals = [getattr(r, channel.value) for r in hist if getattr(r, channel.value, None) is not None]
+                if vals:
+                    return round(sum(vals) / len(vals), 2)
+            except Exception:  # noqa: BLE001 - fall back to the latest reading
+                pass
         st = self._machine_state(machine_id)
         if st is not None and st.last_reading is not None:
             return getattr(st.last_reading, channel.value, None)

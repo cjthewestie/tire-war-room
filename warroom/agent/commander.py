@@ -3,8 +3,8 @@
 OpenAICommander speaks the OpenAI chat-completions API, so one code path runs on Ollama (Mac),
 vLLM (DGX Spark, Nemotron 3.5 Lightning NVFP4) or NVIDIA cloud via BASE_URL / MODEL:
 
-- Constrained output: the CommanderPlan JSON schema. On vLLM it goes in extra_body guided_json
-  (xgrammar); elsewhere (Ollama, cloud) as response_format json_schema.
+- Constrained output: the CommanderPlan JSON schema as response_format json_schema on every
+  server (vLLM enforces it with xgrammar). Reasoning is switched off per server kind.
 - The schema lists ``alert_card`` first, so the ≤100-token alert card is the first thing the model
   streams; ``on_alert`` fires as soon as that object is complete (page 9: first card ≤ 2 s).
 - The system prompt is byte-identical on every call (tool catalogue, rules, factory facts), and all
@@ -193,6 +193,12 @@ def parse_plan(text: str) -> tuple[CommanderPlan, list[dict[str, Any]]]:
             if isinstance(s, dict) and s.get("tool") not in allowed:
                 intercepted.append(s)
             else:
+                # step-level keys a model sometimes nests inside args: lift them out, never invent them
+                if isinstance(s, dict) and isinstance(s.get("args"), dict):
+                    for k in ("depends_on", "purpose"):
+                        if k in s["args"]:
+                            v = s["args"].pop(k)
+                            s.setdefault(k, v)
                 keep.append(s)
         raw["steps"] = keep
     plan = CommanderPlan.model_validate(raw)
@@ -202,15 +208,50 @@ def parse_plan(text: str) -> tuple[CommanderPlan, list[dict[str, Any]]]:
 # =====================================================================================
 # OpenAI-compatible commander
 # =====================================================================================
-def _looks_like_vllm(settings: Settings) -> bool:
-    url = settings.base_url.lower()
-    return settings.guided_json and ":11434" not in url and "ollama" not in url and "nvidia.com" not in url
+def detect_server_kind(base_url: str, probe: bool = True) -> str:
+    """'ollama' | 'vllm' | 'openai'. LLM_SERVER_KIND overrides; else ask the server (Ollama answers
+    /api/version, vLLM /version); else guess from the URL. A port guess alone is wrong for a
+    second Ollama on :11435, so the probe comes first."""
+    import os
+    forced = os.environ.get("LLM_SERVER_KIND")
+    if forced:
+        return forced
+    url = base_url.rstrip("/")
+    root = url[:-3] if url.endswith("/v1") else url
+    if "nvidia.com" in url:
+        return "openai"
+    if probe:
+        try:
+            import httpx
+            with httpx.Client(timeout=1.0) as c:
+                if c.get(root + "/api/version").status_code == 200:
+                    return "ollama"
+                r = c.get(root + "/version")
+                if r.status_code == 200 and "version" in r.text:
+                    return "vllm"
+        except Exception:  # noqa: BLE001 - server down: fall through to the URL guess
+            pass
+    low = url.lower()
+    if "ollama" in low or ":11434" in low or ":11435" in low:
+        return "ollama"
+    return "vllm"
+
+
+def thinking_off(kind: str) -> dict[str, Any]:
+    """extra_body that turns Nemotron reasoning off (reasoning on: ~39 s and 0% valid plans, bench/results).
+    vLLM: chat_template_kwargs.enable_thinking=false (model card). Ollama: think=false alone does not stop
+    it when streaming; reasoning_effort='none' does (measured on Ollama 0.33.2)."""
+    if kind == "vllm":
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    if kind == "ollama":
+        return {"think": False, "reasoning_effort": "none"}
+    return {}
 
 
 class OpenAICommander:
     """OpenAI-compatible chat client (Ollama / vLLM / NVIDIA cloud via BASE_URL, MODEL).
-    Constrained output = CommanderPlan JSON schema (alert_card first): vLLM
-    extra_body={"guided_json": schema} (xgrammar), else response_format={"type":"json_schema",...}.
+    Constrained output = CommanderPlan JSON schema (alert_card first) as response_format json_schema;
+    reasoning off via extra_body for the detected server kind (vLLM / Ollama).
     Validates with pydantic; on invalid JSON / timeout falls back to MockCommander when
     settings.llm_fallback_to_mock. ``last_intercepted`` holds steps dropped for naming a tool off
     the allow-list on the latest call."""
@@ -225,7 +266,7 @@ class OpenAICommander:
                                   timeout=settings.llm_timeout_s, max_retries=0, http_client=http_client)
         self._fallback = MockCommander()
         self.schema = plan_schema()
-        self.use_guided_json = _looks_like_vllm(settings)
+        self.server_kind = detect_server_kind(settings.base_url, probe=http_client is None)
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw: str = ""
 
@@ -233,11 +274,13 @@ class OpenAICommander:
         kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req), temperature=0.0,
                                   max_tokens=self.max_tokens, stream=True,
                                   stream_options={"include_usage": True})
-        if self.use_guided_json:
-            kw["extra_body"] = {"guided_json": self.schema}
-        else:
-            kw["response_format"] = {"type": "json_schema",
-                                     "json_schema": {"name": "CommanderPlan", "schema": self.schema}}
+        # response_format json_schema works on vLLM (xgrammar; guided_json was removed in vLLM 0.12),
+        # Ollama and NVIDIA cloud alike.
+        kw["response_format"] = {"type": "json_schema",
+                                 "json_schema": {"name": "CommanderPlan", "schema": self.schema}}
+        extra = thinking_off(self.server_kind)
+        if extra:
+            kw["extra_body"] = extra
         return kw
 
     async def plan(self, req: CommanderRequest, on_alert: AlertCallback | None = None
@@ -549,3 +592,51 @@ def make_commander(settings: Settings) -> CommanderClient:
     if settings.llm_mode is LLMMode.LLM:
         return OpenAICommander(settings)
     return MockCommander()
+
+
+# =====================================================================================
+# Few-shot examples for the real model (static text: same bytes every call, so prefix caching works)
+# =====================================================================================
+def _example_plans() -> str:
+    """Two worked plans written by the rule commander on synthetic anomalies (press 9 temperature
+    drop, B-line open mill overheat). They show the standard procedure — formula, orders, solver,
+    approval-gated writes, "$S" references, expectation from the prediction band — not the numbers."""
+    from datetime import datetime
+
+    from warroom.contracts import Anomaly, AnomalyKind, Prediction, Severity
+    from warroom.factory import TZ
+    ts = datetime(2026, 1, 5, 3, 0, tzinfo=TZ)
+    press = Anomaly(id="AN-EX1", ts=ts, machine_id="CURE-09", kind=AnomalyKind.TEMP_DROP, channel=Channel.TEMP,
+                    value=124.0, baseline=127.0, severity=Severity.WARN, message="9 號 127 → 124°C，預測穩定在 124±1°C",
+                    prediction=Prediction(machine_id="CURE-09", channel=Channel.TEMP, now_value=124.0,
+                                          predicted_value=124.0, band_lo=123.0, band_hi=125.0, horizon_s=1800,
+                                          trend_per_min=0.0))
+    mill = Anomaly(id="AN-EX2", ts=ts, machine_id="B-OPEN", kind=AnomalyKind.OVERHEAT, channel=Channel.TEMP,
+                   value=104.0, baseline=95.0, severity=Severity.CRITICAL, message="B 線開煉機 膠溫 104°C 持續上升，水流偏低")
+    m = MockCommander()
+    out = []
+    for an, ctx in ((press, {"cure_job": {"size": "L", "setpoint_c": 127, "cure_elapsed_h": 6}}),
+                    (mill, {"machine": {"compound_stage": "unvulcanized"}})):
+        req = CommanderRequest(phase="plan", event_id="EX", anomaly=an, allowed_tools=list(ToolName), context=ctx)
+        d = m.build(req).model_dump(mode="json", exclude_none=True)
+        d = {"alert_card": d.pop("alert_card"), **d}
+        out.append(json.dumps(d, ensure_ascii=False, separators=(",", ":")))
+    first = m.build(CommanderRequest(phase="plan", event_id="EX", anomaly=press, allowed_tools=list(ToolName),
+                                     context={"cure_job": {"size": "L", "setpoint_c": 127, "cure_elapsed_h": 6}}))
+    h1 = first.hypothesis.model_copy(update={"status": HypothesisStatus.REJECTED})
+    rep = m.build(CommanderRequest(phase="replan", event_id="EX", anomaly=press, allowed_tools=list(ToolName),
+                                   rejected=[h1],
+                                   context={"failed_expectation": {"observed": 121.5},
+                                            "neighbours": {"CURE-10": {"temp_c_now": 127.0},
+                                                           "CURE-11": {"temp_c_now": 127.1}},
+                                            "sop": [{"title": "硫化中斷處置"}]}))
+    d = rep.model_dump(mode="json", exclude_none=True)
+    out.append(json.dumps({"alert_card": d.pop("alert_card"), **d}, ensure_ascii=False, separators=(",", ":")))
+    return ("\n\n範例（格式與步驟示範；數值一律以本次事件與工具結果為準）：\n"
+            "硫化機降溫（expectation 下限取預測區間 band_lo；先公式、再查訂單班表、再求解排程，寫入步驟需核准）：\n"
+            f"{out[0]}\n開煉機過熱（通知維修為自動，放慢投料需核准）：\n{out[1]}\n"
+            "replan：H1 已被程式驗證推翻（同管線其他機台正常），改提 H2、停用該機並重排：\n"
+            f"{out[2]}")
+
+
+SYSTEM_PROMPT = SYSTEM_PROMPT + _example_plans()

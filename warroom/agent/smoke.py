@@ -55,7 +55,7 @@ async def main() -> int:
     args = ap.parse_args()
     s = Settings(llm_mode=LLMMode.LLM)
     cmd = OpenAICommander(s, max_tokens=args.max_tokens)
-    print(f"base_url={s.base_url} model={s.model} constrained={'guided_json' if cmd.use_guided_json else 'response_format'}")
+    print(f"base_url={s.base_url} model={s.model} server={cmd.server_kind} constrained=response_format")
     t0 = time.perf_counter()
     card_at: list[float] = []
     plan, info = await cmd.plan(page11_request(args.phase),
