@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CapacityReport, Event, EventState, ScheduleVersion, Shift, StepRun } from '../contracts'
-import { CURE_PRESS_IDS, LABOR_TEAMS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
+import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
+import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -37,7 +38,24 @@ export function ScheduleTab() {
     if (!transport || !active) return
     setMsg(null)
     try {
-      const v = await transport.rollback()
+      let to: number | undefined
+      if (transport.rollbackPreview) {
+        // gate first: never re-activate a version that loads a press now out of service
+        const pv = await transport.rollbackPreview()
+        if (!pv.feasible) { setMsg(`無法回復到 v${pv.to_version}：${pv.reasons.join('；')}`); return }
+        const moved = pv.moved.slice(0, 5).map((m) => `・${m.order_id} ${machineLabel(m.from_press)} → ${machineLabel(m.to_press)}`)
+        const text = [
+          `回復排程 v${pv.from_version} → v${pv.to_version}（${RISK_LABEL[pv.risk]}）`,
+          `v${pv.to_version}：${pv.target_reason}`,
+          `異動 ${pv.moved_count} 筆入模${pv.added || pv.removed ? `，新增 ${pv.added}／移除 ${pv.removed}` : ''}`,
+          ...moved,
+          ...(pv.staffing_changes.length ? [`人力：${pv.staffing_changes.join('、')}`] : []),
+          '', '確認由主管核准並回復？',
+        ].join('\n')
+        if (!window.confirm(text)) { setMsg('已取消回復'); return }
+        to = pv.to_version
+      } else if (!window.confirm('回復上一版排程？')) { setMsg('已取消回復'); return }
+      const v = await transport.rollback(to, true)
       setMsg(v ? `已回復到 v${v.version}` : '沒有可回復的上一版')
       loadVersions()
     } catch (e) { setMsg(`回復失敗：${e}`) }
@@ -195,12 +213,13 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
 
 const STEP_LABEL: Record<StepRun['state'], string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '駁回' }
 function StepRow({ s }: { s: StepRun }) {
-  const summary = s.result ? summarize(s.result.data) : ''
+  const summary = s.result?.ok ? resultText(s.step.tool, s.step.args, s.result.data) : s.result?.error ? `錯誤：${s.result.error.slice(0, 60)}` : ''
+  const label = stepLabel(s.step.id)
   return (
     <li className={`step ss-${s.state}`}>
-      <span className="step-id">{s.step.id}</span>
+      <span className="step-id" title={s.step.id}>{label}</span>
       <div className="step-b">
-        <div className="step-t"><code>{s.step.tool}</code>{s.step.depends_on.length > 0 && <small className="muted">依賴 {s.step.depends_on.join('、')}</small>}
+        <div className="step-t"><code title={s.step.tool}>{TOOL_LABEL[s.step.tool] ?? s.step.tool}</code>{s.step.depends_on.length > 0 && <small className="muted">依賴 {s.step.depends_on.map(stepLabel).join('、')}</small>}
           {s.gate?.risk && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{s.gate.risk}</small>}</div>
         <div className="step-p">{s.step.purpose}</div>
         {summary && <div className="step-r"><MarkedText text={summary} /></div>}
@@ -208,18 +227,6 @@ function StepRow({ s }: { s: StepRun }) {
       <span className="step-st">{STEP_LABEL[s.state]}</span>
     </li>
   )
-}
-function summarize(data: Record<string, unknown>): string {
-  const pick = ['total_cure_h', 'extra_h', 'next_order', 'due_in_days', 'gaps', 'moves', 'staffing', 'all_due_met', 'predicted_value', 'options', 'active_version', 'sent', 'feasible', 'solver']
-  const out: string[] = []
-  for (const k of pick) if (k in data) out.push(`${k}=${fmtVal(data[k])}`)
-  if (!out.length) for (const [k, v] of Object.entries(data).slice(0, 3)) out.push(`${k}=${fmtVal(v)}`)
-  return out.join('　')
-}
-function fmtVal(v: unknown): string {
-  if (Array.isArray(v)) return v.map(fmtVal).join('／')
-  if (v && typeof v === 'object') return JSON.stringify(v).slice(0, 60)
-  return String(v)
 }
 
 function LaborPanel({ shifts, current, now, version }: { shifts: Shift[]; current: Shift[]; now: number; version: ScheduleVersion | null }) {
@@ -282,21 +289,37 @@ function LaborPanel({ shifts, current, now, version }: { shifts: Shift[]; curren
   )
 }
 
+const CAP_SIM_NOTE = '現況：硫化機組早班 08–17 出入模；只延長班表：硫化機組 06–15、14–23 錯班，胎體／胎面膠組夜班 20–05 兼出入模，週六夜班到週日 05:00；AI 排出模時刻：同上，加週末不斷火（週六夜班送最後一輪，週一清晨 00–05 出模）。'
+const near = (a: number, b: number) => Math.abs(a - b) < 0.05
+
 function CapacityPanel({ cap }: { cap: CapacityReport }) {
+  const sim = (label: string) => cap.rows.find((r) => r.label === label)
+  const cell = (target: number, got: number | undefined) => (
+    <td><b>{target}</b>{got != null && !near(got, target) && <small className="cap-sim" title="本機 40 週離散事件模擬">本機 {got}</small>}</td>
+  )
+  const pair = (t: [number, number], g: [number, number]) => (
+    <>
+      <b>{t[0].toFixed(1)} → {t[1].toFixed(1)} 週</b>
+      {!(near(t[0], g[0]) && near(t[1], g[1])) && <small className="cap-sim">本機模擬 {g[0].toFixed(1)} → {g[1].toFixed(1)} 週</small>}
+    </>
+  )
   return (
-    <Panel title="每台硫化機週產量與交期（p.6）" num="⑨" className="cap-panel">
+    <Panel title="每台硫化機週產量與交期" num="⑨" className="cap-panel" right={<span className="muted small">大字＝提案 p.6・小字＝本機模擬</span>}>
       <div className="cap">
         <table>
           <thead><tr><th>方案</th><th>小胎</th><th>中胎</th><th>大胎</th></tr></thead>
-          <tbody>{cap.rows.map((r, i) => <tr key={r.label} className={i === cap.rows.length - 1 ? 'best' : ''}><td>{r.label}</td><td>{r.small}</td><td>{r.medium}</td><td>{r.large}</td></tr>)}</tbody>
+          <tbody>{CAPACITY_TARGETS.map((t, i) => {
+            const g = sim(t.label)
+            return <tr key={t.label} className={i === CAPACITY_TARGETS.length - 1 ? 'best' : ''}><td>{t.label}</td>{cell(t.small, g?.small)}{cell(t.medium, g?.medium)}{cell(t.large, g?.large)}</tr>
+          })}</tbody>
         </table>
         <div className="cap-big">
-          <div><span className="muted small">中、大胎各 100 條</span><b>{cap.ml_100_weeks[0].toFixed(1)} → {cap.ml_100_weeks[1].toFixed(1)} 週</b></div>
-          <div><span className="muted small">小胎 100 條</span><b>{cap.small_100_weeks[0].toFixed(1)} → {cap.small_100_weeks[1].toFixed(1)} 週</b></div>
+          <div><span className="muted small">中、大胎各 100 條</span>{pair(LEAD_TIME_WEEKS.ml, cap.ml_100_weeks)}</div>
+          <div><span className="muted small">小胎 100 條</span>{pair(LEAD_TIME_WEEKS.small, cap.small_100_weeks)}</div>
         </div>
       </div>
-      <p className="muted small">模擬條件：{cap.conditions}</p>
-      <p className="muted small">數值由排程求解器與公式計算，不由 AI 推測。</p>
+      <p className="muted small">模擬條件：{CAPACITY_CONDITIONS}。{CAP_SIM_NOTE}</p>
+      <p className="muted small">提案數字為 p.6 試算；本機模擬為 40 週離散事件模擬的穩態值，與提案不同處以小字並列，不改寫提案數字。數值由排程求解器與公式計算，不由 AI 推測。</p>
     </Panel>
   )
 }

@@ -44,9 +44,9 @@ export function DemoStrip() {
           {JUMPS[current]!.map((j) => <button key={j.iso} onClick={() => run(() => transport.jump!(Date.parse(j.iso)))}>{j.label}</button>)}
         </div>
       )}
-      <div className="seg net" role="group" aria-label="拔網路測試" title={mock ? '模擬離線分層（p.9）' : '由後端回報；拔線測試請實際拔除網路'}>
+      <div className="seg net" role="group" aria-label="拔網路測試" title="模擬離線分層（p.9）：WAN 斷→手機走廠內 LAN；LAN 斷→現場觸控螢幕＋警示燈">
         {(['online', 'wan_down', 'lan_down'] as const).map((n) => (
-          <button key={n} disabled={!mock || busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}>
+          <button key={n} disabled={busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}>
             {n === 'online' ? '● 在線' : n === 'wan_down' ? 'WAN 斷' : 'LAN 斷'}
           </button>
         ))}

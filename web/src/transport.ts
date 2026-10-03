@@ -11,19 +11,38 @@ import { shiftInstances } from './mock/schedule'
 
 export type Mode = 'live' | 'mock'
 
+/** GET /api/schedule/rollback/preview: what a rollback would do and whether the gate allows it. */
+export interface RollbackPreview {
+  from_version: number
+  to_version: number
+  target_status: string
+  target_reason: string
+  feasible: boolean
+  reasons: string[]
+  risk: 'R2' | 'R3'
+  moved: { job_id: string; order_id: string; from_press: string; to_press: string; to_mold_in: string }[]
+  moved_count: number
+  added: number
+  removed: number
+  staffing_changes: string[]
+}
+
 export interface Transport {
   mode: Mode
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void): () => void
   decide(d: ApprovalDecision): Promise<ApprovalRequest | null>
   control(c: SimControl): Promise<void>
-  rollback(version?: number): Promise<ScheduleVersion | null>
+  /** confirm=true is the supervisor's explicit confirmation (the R2/R3 approval); live only checks it. */
+  rollback(version?: number, confirm?: boolean): Promise<ScheduleVersion | null>
+  /** Live only: the gate's preview of a rollback (diff + block reasons). */
+  rollbackPreview?(version?: number): Promise<RollbackPreview>
   machineDetail(id: string): Promise<MachineDetail>
   scheduleVersions(): Promise<ScheduleVersion[]>
   shifts(): Promise<Shift[]>
   currentShifts(): Promise<Shift[]>
   capacity(): Promise<CapacityReport>
   audit(): Promise<AuditEntry[]>
-  /** Mock only: simulate the offline tiers (page 9). Live: no-op, the backend reports `header.network`. */
+  /** Simulate the offline tiers (page 9). Live: POST /api/sim/network; the backend then reports `header.network`. */
   setNetwork(n: Network): Promise<void>
   /** Mock only: jump factory time. */
   jump?(t: number): Promise<void>
@@ -32,12 +51,42 @@ export interface Transport {
 // ---------------- live ----------------
 async function getJSON<T>(path: string): Promise<T> {
   const r = await fetch(path)
-  if (!r.ok) throw new Error(`${r.status} ${path}`)
+  if (!r.ok) throw new Error(`${r.status} ${path}${await errDetail(r)}`)
   return (await r.json()) as T
 }
-async function postJSON<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-  if (!r.ok) throw new Error(`${r.status} ${path}`)
+
+// Writes from a LAN client (the phone) need the supervisor PIN (server: WARROOM_SUPERVISOR_PIN).
+// Open the page once as /phone?pin=XXXX (kept in this browser), or enter it when asked.
+const PIN_KEY = 'warroom.pin'
+function supervisorPin(): string | null {
+  try {
+    const q = new URLSearchParams(location.search).get('pin')
+    if (q) { localStorage.setItem(PIN_KEY, q); return q }
+    return localStorage.getItem(PIN_KEY)
+  } catch { return null }
+}
+async function errDetail(r: Response): Promise<string> {
+  try {
+    const j = await r.json()
+    const d = j?.detail
+    if (typeof d === 'string') return `：${d}`
+    if (d?.message) return `：${d.message}`
+  } catch { /* not JSON */ }
+  return ''
+}
+async function postJSON<T>(path: string, body: unknown, retried = false): Promise<T> {
+  const pin = supervisorPin()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (pin) headers['X-Supervisor-Pin'] = pin
+  const r = await fetch(path, { method: 'POST', headers, body: JSON.stringify(body) })
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('請輸入主管 PIN（廠內 LAN 核准）')
+    if (p) {
+      try { localStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return postJSON<T>(path, body, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
   return (await r.json()) as T
 }
 
@@ -78,14 +127,19 @@ export class LiveTransport implements Transport {
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
-  rollback(version?: number) { return postJSON<ScheduleVersion>(API.scheduleRollback, version == null ? {} : { version }) }
+  rollback(version?: number, confirm = false) {
+    return postJSON<ScheduleVersion>(API.scheduleRollback, { ...(version == null ? {} : { version }), confirm })
+  }
+  rollbackPreview(version?: number) {
+    return getJSON<RollbackPreview>(`${API.scheduleRollback}/preview${version == null ? '' : `?version=${version}`}`)
+  }
   machineDetail(id: string) { return getJSON<MachineDetail>(apiPath(API.machine, { machine_id: id })) }
   scheduleVersions() { return getJSON<ScheduleVersion[]>(API.scheduleVersions) }
   shifts() { return getJSON<Shift[]>(API.shifts) }
   async currentShifts() { return shiftInstances(Date.now(), CURRENT_SHIFTS) }
   capacity() { return getJSON<CapacityReport>(API.capacity) }
   audit() { return getJSON<AuditEntry[]>(`${API.audit}?limit=200`) }
-  async setNetwork() { /* reported by the backend */ }
+  async setNetwork(n: Network) { await postJSON('/api/sim/network', { network: n }) }
 }
 
 // ---------------- mock ----------------

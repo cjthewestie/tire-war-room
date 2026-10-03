@@ -53,13 +53,17 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
   const send = async (decision: DecisionKind) => {
     if (!transport) return
     if (decision === 'reject' && !reason.trim()) { setMode('reject'); setErr('駁回需要填寫理由'); return }
+    if (decision === 'modify' && !reason.trim()) { setMode('modify'); setErr('修改需要填寫修改內容'); return }
     if (decision !== 'reject' && !chosen) { setErr('請先選擇方案'); return }
     setBusy(true); setErr(null)
     try {
       await transport.decide({
         request_id: a.id, decision, option_id: decision === 'reject' ? null : chosen,
-        modified_args: decision === 'modify' ? { note: reason } : null,
-        reason: reason || defaultReason(a, chosen), decided_by: '主管', via: 'phone',
+        // The note is free text for the audit log, never tool args: every *Args model is extra='forbid',
+        // so merging {note} into the chosen step made the gate reject it and the action was silently dropped.
+        modified_args: null,
+        reason: decision === 'modify' ? `修改：${reason.trim()}` : (reason.trim() || defaultReason(a, chosen)),
+        decided_by: '主管', via: 'phone',
       })
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
@@ -75,6 +79,10 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
         <dt>已做</dt><dd>{a.done.length ? a.done.join('；') : '—'}</dd>
         <dt>缺口</dt><dd>{a.gaps.length ? a.gaps.join('；') : '無'}</dd>
         <dt>交期</dt><dd>{a.delivery_impact}</dd>
+        {a.actions?.length ? (<>
+          <dt>核准內容</dt>
+          <dd>{a.actions.map((x, i) => <div key={i}>{x}</div>)}</dd>
+        </>) : null}
       </dl>
       <div className="ph-opts" role="radiogroup" aria-label="方案">
         {a.options.map((o) => (
@@ -85,7 +93,7 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
         ))}
       </div>
       {mode && (
-        <textarea className="ph-reason" placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容／理由'} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
+        <textarea className="ph-reason" placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容（必填，寫入稽核日誌）'} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
       )}
       {err && <p className="err">{err}</p>}
       <div className="ph-acts">

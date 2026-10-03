@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ApprovalRequest, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
+import type { ApprovalRequest, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
 import { LINES, LINE_SHORT, machineLabel } from '../factory'
 import { fmtHM, fmtNum } from '../format'
 import { primaryEvent } from '../store'
@@ -69,7 +69,7 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
       <Panel num="③" title="中央說明面板" className="focus calm">
         <div className="calm-body">
           <p className="calm-title">全廠正常</p>
-          <p className="muted">事件偵測常駐監看 28 台機台（非 LLM、always on）。異常 1 分鐘內喚醒指揮官。</p>
+          <p className="muted">事件偵測常駐監看 28 台機台（非 LLM、全天候常駐）。異常 1 分鐘內喚醒指揮官。</p>
           {ev && <p className="muted small">上一事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${ev.outcome}` : ''}</p>}
         </div>
       </Panel>
@@ -85,15 +85,22 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
   }
   const req = (id: string) => pending.find((a) => a.id === id)
   const closed = focus.state === 'closed' || focus.state === 'safe_stop'
+  const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
+  const view = focusView(focus, ev, [...pending, ...state.resolved])
   return (
     <Panel num="③" title="中央說明面板" className={`focus ${closed ? 'closed' : 'hot'}`} right={<span className={`state-pill st-${focus.state}`}>{STATE_LABEL[focus.state]}</span>}>
-      <h3 className="focus-title">{focus.title}</h3>
-      <p className="focus-detail">{focus.detail}</p>
+      <h3 className="focus-title">{view.title}</h3>
+      <p className="focus-detail">{view.detail}</p>
+      {view.causes.length > 0 && (
+        <ul className="focus-causes">
+          {view.causes.map((c) => <li key={c.text} className={`fc-${c.kind}`}>{c.text}</li>)}
+        </ul>
+      )}
       <div className="tiles">
         {focus.tiles.map((t) => (
           <div className={`tile ${t.status}`} key={t.label}>
             <span className="tile-l">{t.label}</span>
-            <span className="tile-v">{t.value}</span>
+            <span className="tile-v">{tileValue(t.label, t.value, focus.machine_id)}</span>
           </div>
         ))}
       </div>
@@ -146,4 +153,37 @@ function MachinesPanel({ machines, onMachine }: { machines: MachineTile[]; onMac
       <p className="muted small foot">點選機台：看溫度、壓力、時間、水流</p>
     </Panel>
   )
+}
+
+type Cause = { kind: 'hyp' | 'ok' | 'no'; text: string }
+/** Rebuild ③'s title, detail and cause from the live event, so the panel never contradicts the tiles or the phone:
+ *  the wake-time reading is labelled as such, the live value comes from the temperature tile, and a cause stays
+ *  "假設 H1" until code verifies it. After a replan the round-2 approval title (e.g. 7 號機停用，重排中) leads. */
+function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[]): { title: string; detail: string; causes: Cause[] } {
+  // Only the server-built panel freezes the wake-time anomaly message; a live-built detail (mock) is used as-is.
+  if (!ev || !ev.anomaly.message || !focus.detail.startsWith(ev.anomaly.message)) return { title: focus.title, detail: focus.detail, causes: [] }
+  const base = focus.detail.split('；原因：')[0]
+  const temp = focus.tiles.find((t) => t.label === '溫度')
+  const detail = `喚醒時（${fmtHM(ev.anomaly.ts)}）：${base}${temp && temp.value !== '—' ? `。現在：${temp.value}` : ''}`
+  const rejected = ev.hypotheses.filter((h) => h.status === 'rejected')
+  const latestRound = reqs.filter((r) => r.event_id === ev.id).sort((a, b) => b.round - a.round || (a.created_at < b.created_at ? 1 : -1))[0]
+  const title = rejected.length > 0 && latestRound && latestRound.round > 1
+    ? `${machineLabel(ev.machine_id)}：${latestRound.title}`
+    : focus.title
+  const causes: Cause[] = ev.hypotheses.map((h) => (
+    h.status === 'confirmed' ? { kind: 'ok' as const, text: `原因（已驗證）${h.id}：${h.statement}` }
+      : h.status === 'rejected' ? { kind: 'no' as const, text: `${h.id} 不成立：${h.statement}${h.evidence.length ? `（${h.evidence[h.evidence.length - 1]}）` : ''}` }
+        : { kind: 'hyp' as const, text: `假設 ${h.id}（${ev.state === 'closed' || ev.state === 'safe_stop' ? '未驗證，已依 SOP 處置' : '驗證中'}）：${h.statement}` }
+  ))
+  if (!causes.length) {
+    const c = focus.detail.split('；原因：')[1]
+    if (c) causes.push({ kind: 'hyp', text: `假設：${c}（尚未驗證）` })
+  }
+  return { title, detail, causes }
+}
+
+/** Presses cure for 24–34 h: show the server's minute count as hours. */
+function tileValue(label: string, value: string, machineId: string): string {
+  const m = label === '時間' && machineId.startsWith('CURE-') ? /^(\d+(?:\.\d+)?)分$/.exec(value) : null
+  return m ? `${(Number(m[1]) / 60).toFixed(1)} h` : value
 }

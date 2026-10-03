@@ -22,11 +22,12 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
       </nav>
       <div className="top-right">
         {net !== 'online' && <span className={`chip net ${net}`} title="離線分層（p.9）">{NET_LABEL[net]}</span>}
+        {h?.warning_light && <span className="chip bad" data-testid="warning-light" title="LAN 中斷：請至現場觸控螢幕處理"><i className="dot bad" />警示燈亮</span>}
         <span className="chip ok" data-testid="chip-normal"><i className="dot ok" />正常 {h?.normal_count ?? '–'} 台</span>
         <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'muted'}`} data-testid="chip-abnormal"><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
         <span className="clock">{ft ? <><span>{fmtMD(ft)}</span><span>{fmtHM(ft)}</span></> : '—'}</span>
         <span className={`mode ${transport?.mode ?? ''} ${connected ? '' : 'down'}`} title={transport?.mode === 'mock' ? '瀏覽器內模擬資料（無後端）' : '連線 FastAPI /ws'}>
-          {transport ? (transport.mode === 'mock' ? '模擬資料' : connected ? `即時・${h?.llm_mode === 'llm' ? 'LLM' : 'mock 指揮官'}` : '重新連線中…') : '連線中…'}
+          {transport ? (transport.mode === 'mock' ? '模擬資料' : connected ? `即時・${h?.llm_mode === 'llm' ? 'LLM 指揮官' : '規則模式指揮官'}` : '重新連線中…') : '連線中…'}
         </span>
       </div>
     </header>
