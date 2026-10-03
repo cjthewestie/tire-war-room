@@ -466,11 +466,25 @@ class EgressEvidence:
                 "notes": self.notes}
 
 
-def block_commands(custom_block: str | None, custom_unblock: str | None) -> tuple[list[str], list[str]]:
+def nft_table_loaded() -> bool:
+    """Is the boot egress firewall (table inet warroom_offline) already in the ruleset?"""
+    ok, _ = _run(["nft", "list", "table", *NFT_COUNTER[:2]])
+    return ok
+
+
+def block_commands(custom_block: str | None, custom_unblock: str | None,
+                   table_loaded: bool | None = None) -> tuple[list[str], list[str]]:
     if custom_block:
         return ["sh", "-c", custom_block], ["sh", "-c", custom_unblock or "true"]
     if platform.system() == "Linux":
-        return ["nft", "-f", str(NFT)], ["nft", "delete", "table", "inet", "warroom_offline"]
+        if table_loaded is None:
+            table_loaded = nft_table_loaded()
+        if table_loaded:
+            # warroom-firewall.service already loaded it at boot: re-loading would duplicate every rule and
+            # deleting it afterwards would leave the Spark with no egress allow-list until reboot (p.10).
+            # Leave it alone; EgressEvidence resets and reads its counter.
+            return ["true"], ["true"]
+        return ["nft", "-f", str(NFT)], ["nft", "delete", "table", *NFT_COUNTER[:2]]
     if platform.system() == "Darwin":
         # stock /etc/pf.conf does not reference our anchor, so load main ruleset + anchor together
         load = (f"(cat /etc/pf.conf; echo 'anchor \"warroom_offline\"'; "
@@ -611,6 +625,8 @@ async def main_async(args) -> dict[str, Any]:
     elif args.block:
         ok, msg = apply(blk)
         out["block"].update(applied=ok, cmd=" ".join(blk), msg=msg)
+        if blk == ["true"] and not args.block_cmd:
+            out["block"]["msg"] = "boot firewall table inet warroom_offline already loaded; reused, not re-applied or removed"
     applied = out["block"]["applied"]
     alert_s = None
     app_proc = None

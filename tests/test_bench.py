@@ -169,6 +169,19 @@ def test_block_commands_per_platform():
     assert blk[-1] == "ip link set eth1 down" and unblk[-1] == "ip link set eth1 up"
 
 
+def test_linux_block_keeps_boot_firewall(monkeypatch):
+    monkeypatch.setattr(unplug_test.platform, "system", lambda: "Linux")
+    # boot service already loaded the table: neither re-load (duplicate rules) nor delete it afterwards
+    blk, unblk = unplug_test.block_commands(None, None, table_loaded=True)
+    assert blk == ["true"] and unblk == ["true"]
+    assert "delete" not in unblk
+    # no table yet: the test applies it and removes only what it added
+    blk, unblk = unplug_test.block_commands(None, None, table_loaded=False)
+    assert blk[:2] == ["nft", "-f"] and unblk == ["nft", "delete", "table", "inet", "warroom_offline"]
+    monkeypatch.setattr(unplug_test, "_run", lambda cmd, timeout=10: (cmd[:3] == ["nft", "list", "table"], ""))
+    assert unplug_test.block_commands(None, None) == (["true"], ["true"])
+
+
 def test_tokens_per_watt_math_and_meter(tmp_path):
     e = tokens_per_watt.efficiency(6000, 60.0, 200.0, idle_w=50.0)
     assert e["tokens_per_s"] == 100.0
