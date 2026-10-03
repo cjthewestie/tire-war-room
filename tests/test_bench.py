@@ -141,7 +141,7 @@ def test_detect_kind_by_port_without_probe(monkeypatch):
 
 def test_is_outbound():
     for ip in ("127.0.0.1", "10.1.2.3", "192.168.1.10", "172.20.0.5", "169.254.1.1", "::1", "fe80::1",
-               "fd00::5", "::ffff:192.168.0.1", "224.0.0.251"):
+               "fd00::5", "::ffff:192.168.0.1", "224.0.0.251", "::127.0.0.1", "::10.0.0.2", "::"):
         assert not unplug_test.is_outbound(ip), ip
     for ip in ("1.1.1.1", "8.8.8.8", "2606:4700::1111", "::ffff:8.8.8.8"):
         assert unplug_test.is_outbound(ip), ip

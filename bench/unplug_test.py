@@ -69,6 +69,8 @@ def is_outbound(ip: str, lan: list[ipaddress._BaseNetwork] | None = None) -> boo
         return False
     if isinstance(a, ipaddress.IPv6Address) and a.ipv4_mapped:
         a = a.ipv4_mapped
+    elif isinstance(a, ipaddress.IPv6Address) and a.packed[:12] == bytes(12) and int(a) > 1:
+        a = ipaddress.IPv4Address(a.packed[12:])          # IPv4-compatible "::127.0.0.1" (macOS reports it)
     if a.is_loopback or a.is_private or a.is_link_local or a.is_multicast or a.is_unspecified:
         return False
     return not any(a in n for n in (lan or []))
@@ -448,7 +450,7 @@ async def app_alert(app_url: str, scenario: str, timeout_s: float, speed: float)
     COMMANDER card on /ws; read the commander's TTFT from the audit log; check health + phone page."""
     import websockets
     res: dict[str, Any] = {}
-    async with httpx.AsyncClient(base_url=app_url, timeout=5) as c:
+    async with httpx.AsyncClient(base_url=app_url, timeout=30) as c:     # scenario load takes ~5 s
         h = await c.get("/api/health")
         res["health"] = h.json() if h.status_code == 200 else h.status_code
         ph = await c.get("/phone")
