@@ -12,11 +12,20 @@ Model, shared by both solvers (built in `_prepare`):
   both start inside a staffed window with room for the 30-min op (curing team, or BODY night);
   one crew does one half-op at a time (labor as a constraint); feed must have started:
   a new job can't mold-in before now + A-line feed lead (T − 1h40/2h30/3h30).
-- Weekend rule (principle 3) follows from the windows: nothing de-molds Sunday after 05:00, so
-  the Saturday night shift loads the last round and it de-molds Monday.
+- Mold change (principle 4): when consecutive tires on a press use different molds, the next
+  mold-in waits MOLD_GAP_MIN (8 h) after the de-mold — hard in both solvers and in
+  check_schedule; PEN_MOLD_CHANGE still prefers fewer changes.
+- Weekend rule (principle 3) follows from the windows: nothing de-molds Sunday after 05:00, and
+  staffing.MONDAY_EARLY adds the Monday 00–05 de-mold, so the Saturday night shift loads the
+  last round and it de-molds Monday 清晨 (no fire-out, no re-preheat).
+- Generated jobs share the M/L presses by press-time between sizes (page 6 sim: M, L 2 presses
+  each), EDD within a size, so large tires run every week instead of queueing behind M.
 - Soft: lateness vs due date (heavy), early de-mold (level-loading / throughput), moving a job
   to another press, shifting its time, mold changes (principle 4, ~8 h stop each), ops in a
-  short-staffed shift (needs 夜班加班 or 從 2 線調 1 人).
+  short-staffed shift (needs 夜班加班 or 從 2 線調 1 人), an M tire on a press curing L now or
+  vice versa (中大胎固定機台; rush orders exempt), each extra mold a press carries, and (repair
+  only) re-timing a tire on a press the event did not touch. Rush orders (priority > 0) weigh
+  their de-mold time (1 + priority)×.
 - Repair, not re-plan: when the request names affected presses (unavailable / cure override),
   jobs of the untouched press pool keep their previous slot if still valid; moving work onto a
   press that shares the affected press's steam header (page 11: 6 and 8 share 7's pipe) costs
@@ -27,7 +36,8 @@ Model, shared by both solvers (built in `_prepare`):
   -> "10/03 夜班缺 1 人" with options 夜班加班 (R2) / 從 2 線調 1 人 (R3); the solver's pick
   is the transfer when allowed (page 11 02:14:25), else overtime.
 - deliveries_met means no order ends later than in the previous plan (交期不受影響); every
-  late order is still listed in late_orders, pre-existing ones also as a warning.
+  late order is still listed in late_orders, pre-existing ones also as a warning. It covers
+  only the tires in this plan, not tires of open orders beyond the horizon.
 CP-SAT is primary (15-min grid; stops at the time limit or after STALL_S without improvement);
 HeuristicScheduler is the page-7 backup solver; FallbackScheduler switches on
 timeout/error/infeasible and sets fell_back=True.
@@ -74,7 +84,10 @@ W_SHIFT = 3             # per minute a previous job's mold-in moves (stability b
 W_LATE = 200            # per minute late vs due date end-of-day
 PEN_MOVE = 4 * 60 * W_DEMOLD          # moving a job to another press ≈ 4 h
 PEN_MOLD_CHANGE = int(F.MOLD_CHANGE_STOP_H * 60 * W_DEMOLD)   # principle 4: ~8 h stop
+MOLD_GAP_MIN = int(F.MOLD_CHANGE_STOP_H * 60)   # hard: de-mold -> next mold-in with another mold
 PEN_SHORT_OP = 60 * W_DEMOLD          # an op inside a short-staffed shift
+PEN_SIZE_HOME = 48 * 60 * W_DEMOLD  # principle 4 中大胎固定機台: M on an L press or L on an M press (rush orders exempt)
+PEN_DISTURB = 4 * 60 * W_DEMOLD      # repair: changing a tire on a press the event did not touch at all
 PEN_SAME_HEADER = 12 * 60 * W_DEMOLD  # moving work onto the affected press's steam pipe (page 11: 6, 8 share 7's pipe)
 EXTRA_DAYS = 4          # jobs may finish this many days past the horizon
 REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
@@ -116,7 +129,9 @@ class _Ctx:
     free: list[_Job]
     locked: list[_Job] = field(default_factory=list)   # kept as in `previous` (unaffected pool)
     press_mold: dict[str, str | None] = field(default_factory=dict)   # last mold per press
+    press_size: dict[str, TireSize] = field(default_factory=dict)     # M/L press -> home size (its in-progress tire)
     suspect: set[str] = field(default_factory=set)   # presses sharing a steam header with an affected one
+    affected: set[str] = field(default_factory=set)  # presses the request re-cured or took out
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
     now_m: int = 0                  # req.now in minutes from the grid origin t0
@@ -216,6 +231,7 @@ def _prepare(req: SolveRequest) -> _Ctx:
     if not ctx.free:
         ctx.free = _generate_jobs(ctx, unavailable, due_min, prio, horizon_end)
     affected = set(req.cure_overrides_h) | unavailable
+    ctx.affected = affected
     for p in affected:
         hdr = F.MACHINE_BY_ID[p].steam_header if p in F.MACHINE_BY_ID else None
         if hdr:
@@ -223,6 +239,8 @@ def _prepare(req: SolveRequest) -> _Ctx:
     for p in F.CURE_PRESS_IDS:
         fz = sorted((j for j in ctx.frozen if j.press == p), key=lambda j: j.mold_in)
         ctx.press_mold[p] = _mold_key(fz[-1]) if fz else None
+        if fz and p in F.ML_PRESSES:
+            ctx.press_size[p] = fz[0].size      # the tire curing now, not a pinned next one
     for j in ctx.free:
         if not j.eligible:
             ctx.warnings.append(f"{j.id} 無可用硫化機（{j.size.value}）")
@@ -234,6 +252,13 @@ def _prepare(req: SolveRequest) -> _Ctx:
     ctx.jobs = ctx.frozen + ctx.free
     _lock_unaffected(ctx, affected)
     busy += _locked_busy(ctx)
+    # the touched press's de-mold fits around the ops the plan already has on other presses
+    # (repair, not re-plan: e.g. the Monday 00–05 de-mold crew is not pulled off their slots)
+    for j in ctx.free:
+        if j.orig_press is not None and j.orig_press not in affected and j.orig_mold_in is not None \
+                and j.orig_mold_in >= ctx.now_m:
+            busy += [(j.orig_mold_in + HALF_MIN, j.orig_mold_in + OP_MIN),
+                     (j.orig_mold_in + j.cure_min, j.orig_mold_in + j.cure_min + HALF_MIN)]
     _assign_releases(ctx, [j for j in ctx.frozen if j.press in affected], busy)
     return ctx
 
@@ -311,8 +336,11 @@ def _lock_unaffected(ctx: _Ctx, affected: set[str]) -> None:
     touched = set().union(*pools) if pools else set()
     ranges = ctx.slot_ranges() + [(a, b) for a, b, _ in ctx.short_windows]
     busy = [(j.release, j.release + HALF_MIN) for j in ctx.frozen if j.press not in affected]
+    on_press: dict[str, list[tuple[int, int, str]]] = {}
+    for j in ctx.frozen:
+        on_press.setdefault(j.press, []).append((j.mold_in, j.release, _mold_key(j)))
     keep, lock = [], []
-    for j in ctx.free:
+    for j in sorted(ctx.free, key=lambda j: (j.orig_mold_in if j.orig_mold_in is not None else 10**9, j.id)):
         ok = (j.orig_press is not None and j.orig_press not in touched and j.orig_press in j.eligible
               and j.orig_mold_in is not None and j.orig_mold_in >= j.lb
               and _in_ranges(j.orig_mold_in, ctx.mold_in_ranges(j.size))
@@ -322,12 +350,27 @@ def _lock_unaffected(ctx: _Ctx, affected: set[str]) -> None:
                     (j.orig_mold_in + j.cure_min, j.orig_mold_in + j.cure_min + HALF_MIN))
             ok = not any(a < y and x < b for a, b in busy for x, y in mine)
         if ok:
+            ok = not _press_clash(on_press.get(j.orig_press, []), j.orig_mold_in, j.orig_mold_in + j.cure_min,
+                                  _mold_key(j))
+        if ok:
             j.press, j.mold_in = j.orig_press, j.orig_mold_in
             lock.append(j)
+            on_press.setdefault(j.press, []).append((j.mold_in, j.mold_in + j.cure_min, _mold_key(j)))
         else:
             keep.append(j)
     ctx.free, ctx.locked = keep, lock
     ctx.jobs = ctx.frozen + ctx.locked + ctx.free
+
+
+def _press_clash(entries: list[tuple[int, int, str]], start: int, end: int, mold: str) -> list[int]:
+    """Ends (incl. any mold-change stop) of the press occupations [a, b) that a cure [start, end)
+    with `mold` collides with: overlap, or a mold change with less than MOLD_GAP_MIN between."""
+    out = []
+    for a, b, k in entries:
+        g = 0 if k == mold else MOLD_GAP_MIN
+        if a < end + g and start < b + g:
+            out.append(b + g)
+    return out
 
 
 def _locked_busy(ctx: _Ctx) -> list[tuple[int, int]]:
@@ -342,26 +385,50 @@ def _generate_jobs(ctx: _Ctx, unavailable: set[str], due_min, prio, horizon_end:
     horizon_h = (horizon_end - ctx.t0).total_seconds() / 3600
     for sizes in ([TireSize.S], [TireSize.M, TireSize.L]):
         presses = _eligible(sizes[0], unavailable)
-        min_cure = min(F.CURE_HOURS[s] for s in sizes)
-        # Mon–Sat staffing and waits for staffed de-molds: ~85 % of back-to-back cures
-        cap = len(presses) * max(1, int(horizon_h / min_cure * 0.85))
+        if not presses:
+            continue
         # tires already curing (frozen) count toward the order: generate only what is left
         curing: dict[str, int] = {}
         for fj in ctx.frozen:
             curing[fj.order_id] = curing.get(fj.order_id, 0) + 1
-        orders = sorted((o for o in ctx.req.orders if o.size in sizes and o.qty > o.done + curing.get(o.id, 0)),
+        left = {o.id: o.qty - o.done - curing.get(o.id, 0) for o in ctx.req.orders if o.size in sizes}
+        demand = {sz: sum(n for o in ctx.req.orders if o.size is sz and (n := left[o.id]) > 0) for sz in sizes}
+        quota = _size_quota(len(presses), horizon_h, sizes, demand)
+        orders = sorted((o for o in ctx.req.orders if o.size in sizes and left[o.id] > 0),
                         key=lambda o: (o.due, -o.priority, o.id))
-        # earliest due first (EDD); tires beyond what the presses can cure are left for later
+        # earliest due first (EDD) within a size; tires beyond the size's quota are left for later
         for o in orders:
-            for k in range(1, o.qty - o.done - curing.get(o.id, 0) + 1):
-                if cap <= 0:
+            for k in range(1, left[o.id] + 1):
+                if quota[o.size] <= 0:
                     break
-                cap -= 1
+                quota[o.size] -= 1
                 out.append(_Job(f"J-{o.id.lstrip('#')}-{k:02d}", o.id, o.size, o.mold_id,
                                 int(F.CURE_HOURS[o.size] * 60), False, presses,
                                 lb=ctx.now_m + F.BACKPROP[o.size]["a_feed_min"], due=due_min(o.id),
                                 priority=o.priority))
     return out
+
+
+def _size_quota(n_presses: int, horizon_h: float, sizes: list[TireSize], demand: dict[TireSize, int]) -> dict[TireSize, int]:
+    """Tires to generate per size. Mon–Sat staffing and waits for staffed de-molds: ~85 % of
+    back-to-back cures. One size: as many as fit. M and L share the 4 presses by press-time
+    (page 6 sim: M, L 2 presses each); press-time a size cannot use goes to the other."""
+    if len(sizes) == 1:
+        sz = sizes[0]
+        return {sz: n_presses * max(1, int(horizon_h / F.CURE_HOURS[sz] * 0.85))}
+    budget = n_presses * horizon_h * 0.85
+    active = [sz for sz in sizes if demand.get(sz, 0) > 0]
+    quota = {sz: 0 for sz in sizes}
+    if not active:
+        return quota
+    share = budget / len(active)
+    spare = 0.0
+    for sz in sorted(active, key=lambda z: demand[z] * F.CURE_HOURS[z]):   # smaller need first
+        cure = F.CURE_HOURS[sz]
+        n = min(demand[sz], max(1, int((share + spare) / cure)))
+        spare = max(0.0, share + spare - n * cure)
+        quota[sz] = n
+    return quota
 
 
 def _next_slot(ctx: _Ctx, t: int, ranges: list[tuple[int, int]] | None = None) -> int | None:
@@ -429,6 +496,7 @@ def _finalize(ctx: _Ctx, assign: dict[str, tuple[str, int]], solver: SolverName,
             new_late.add(oid)
     if late - new_late:
         warnings.append(f"既有延遲（非本次異動造成）：{', '.join(sorted(late - new_late))}")
+    warnings += _open_order_outlook(ctx, jobs)
     # diff vs previous
     moves: list[JobMove] = []
     prev = {pj.id: pj for pj in req.previous.jobs} if req.previous else {}
@@ -475,6 +543,40 @@ def _finalize(ctx: _Ctx, assign: dict[str, tuple[str, int]], solver: SolverName,
     return SolveResult(status=status, solver=solver, solve_ms=round((_time.perf_counter() - t_start) * 1000, 1),
                        schedule=sched, feasible=feasible, deliveries_met=not new_late, late_orders=sorted(late),
                        moves=moves, staffing_options=options, gaps=gaps)
+
+
+def _open_order_outlook(ctx: _Ctx, jobs: list[ScheduleJob]) -> list[str]:
+    """deliveries_met covers only the tires in this plan. For tires of open orders that are not
+    in it yet, project their finish at the page-6 AI rate (7/6/4.9 per press per week) on the
+    presses of their size after the plan's last de-mold of that size, and warn when that is past
+    the due date — so 交期 claims are not read as covering the whole order book."""
+    rate = F.CAPACITY_TARGETS[-1]
+    per_press = {TireSize.S: rate.small, TireSize.M: rate.medium, TireSize.L: rate.large}
+    unavailable = set(ctx.req.unavailable_presses)
+    in_plan: dict[str, int] = {}
+    for sj in jobs:
+        in_plan[sj.order_id] = in_plan.get(sj.order_id, 0) + 1
+    out = []
+    queue_end: dict[TireSize, datetime] = {}
+    for o in sorted(ctx.req.orders, key=lambda o: (o.due, -o.priority, o.id)):
+        rest = o.qty - o.done - in_plan.get(o.id, 0)
+        if rest <= 0:
+            continue
+        if o.size is TireSize.S:
+            n = len([p for p in F.SMALL_ONLY_PRESSES if p not in unavailable])
+        else:
+            avail = [p for p in F.ML_PRESSES if p not in unavailable]
+            home = [p for p in avail if ctx.press_size.get(p) is o.size]
+            n = len(home) or max(1, len(avail) // 2)
+        if n == 0:
+            continue
+        start = queue_end.get(o.size) or max((sj.demold for sj in jobs if sj.size is o.size),
+                                              default=ctx.dt(ctx.horizon_days * 1440))
+        end = start + timedelta(weeks=rest / (n * per_press[o.size]))
+        queue_end[o.size] = end
+        if end.date() > o.due:
+            out.append(f"{o.id} 剩 {rest} 顆預估 {end:%m/%d}（交期 {o.due:%m/%d}）")
+    return [f"本週排程外，依產能預估晚於交期：{'、'.join(out)}"] if out else []
 
 
 def _relabel(ctx: _Ctx, assign: dict[str, tuple[str, int]]) -> dict[str, tuple[str, int]]:
@@ -527,6 +629,8 @@ def check_schedule(sched: Schedule, req: SolveRequest, ctx: _Ctx | None = None) 
         for a, b in pairwise(js):
             if b.mold_in < a.demold:
                 errs.append(f"{p} {a.id} 與 {b.id} 重疊")
+            elif not b.frozen and _mold_key(a) != _mold_key(b) and b.mold_in < a.demold + timedelta(minutes=MOLD_GAP_MIN):
+                errs.append(f"{p} {a.id}→{b.id} 換模停機不足 {F.MOLD_CHANGE_STOP_H:g} 小時")
     return errs
 
 
@@ -561,9 +665,11 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
         free_at[j.press] = max(free_at[j.press], j.release)
         busy.append((j.release, j.release + HALF_MIN))
     busy += _locked_busy(ctx)
-    press_busy: dict[str, list[tuple[int, int]]] = {p: [] for p in F.CURE_PRESS_IDS}
+    press_busy: dict[str, list[tuple[int, int, str]]] = {p: [] for p in F.CURE_PRESS_IDS}
+    for j in ctx.frozen:
+        press_busy[j.press].append((j.mold_in, j.release, _mold_key(j)))
     for j in ctx.locked:
-        press_busy[j.press].append((j.mold_in, j.mold_in + j.cure_min))
+        press_busy[j.press].append((j.mold_in, j.mold_in + j.cure_min, _mold_key(j)))
     assign: dict[str, tuple[str, int]] = {}
     order = sorted(ctx.free, key=lambda j: (j.due if j.due is not None else 10**9, -j.priority,
                                             j.orig_mold_in if j.orig_mold_in is not None else 10**9, j.id))
@@ -571,14 +677,16 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
         best = None
         mi_ranges = ctx.mold_in_ranges(j.size)
         for p in j.eligible:
-            t = _first_feasible(ranges, max(free_at[p], j.lb), j.cure_min, busy, ctx.hmax, press_busy[p], mi_ranges)
+            t = _first_feasible(ranges, max(free_at[p], j.lb), j.cure_min, busy, ctx.hmax, press_busy[p], mi_ranges,
+                                _mold_key(j))
             if t is None:
                 continue
-            cost = W_DEMOLD * (t + j.cure_min)
+            cost = W_DEMOLD * (1 + max(0, j.priority)) * (t + j.cure_min)
             if j.orig_press is not None and p != j.orig_press:
                 cost += PEN_MOVE + (PEN_SAME_HEADER if p in ctx.suspect else 0)
             if mold.get(p) is not None and mold[p] != _mold_key(j):
                 cost += PEN_MOLD_CHANGE
+            cost += _size_home_pen(ctx, j, p)
             if _in_ranges(t, short) or _in_ranges(t + j.cure_min, short):
                 cost += PEN_SHORT_OP
             if j.due is not None:
@@ -591,15 +699,23 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
         _, p, t = best
         assign[j.id] = (p, t)
         free_at[p] = t + j.cure_min
-        press_busy[p].append((t, t + j.cure_min))
+        press_busy[p].append((t, t + j.cure_min, _mold_key(j)))
         mold[p] = _mold_key(j)
         busy.extend([(t + HALF_MIN, t + OP_MIN), (t + j.cure_min, t + j.cure_min + HALF_MIN)])
     return assign
 
 
-def _first_feasible(ranges, t, cure_min, busy, hmax, press_busy=(), mi_ranges=None) -> int | None:
+def _size_home_pen(ctx: _Ctx, j: _Job, p: str) -> int:
+    """M/L presses keep the size they are curing now (page 6: M, L 2 presses each). A rush order
+    (priority > 0, e.g. page 11 #A-311) may take any shared press."""
+    home = ctx.press_size.get(p)
+    return PEN_SIZE_HOME if home is not None and home is not j.size and j.priority <= 0 else 0
+
+
+def _first_feasible(ranges, t, cure_min, busy, hmax, press_busy=(), mi_ranges=None, mold: str = "") -> int | None:
     """First grid t' >= t with mold-in (in mi_ranges: staffed op + staffed prep) and de-mold
-    (t'+cure, in staffed op ranges) and no op clash."""
+    (t'+cure, in staffed op ranges), no op clash, and no press clash (press_busy entries
+    (start, end, mold); another mold needs MOLD_GAP_MIN between de-mold and mold-in)."""
     mi_ranges = ranges if mi_ranges is None else mi_ranges
     while t <= hmax:
         nt = _next_slot_r(mi_ranges, -(-t // GRID_MIN) * GRID_MIN)
@@ -615,7 +731,7 @@ def _first_feasible(ranges, t, cure_min, busy, hmax, press_busy=(), mi_ranges=No
                 return None
             t = max(nt + 1, nd2 - cure_min)
             continue
-        blocking = [b for a, b in press_busy if a < nd and nt < b]
+        blocking = _press_clash(list(press_busy), nt, nd, mold)
         if blocking:
             t = max(blocking)
             continue
@@ -720,14 +836,24 @@ class CpSatScheduler:
                     pm = ctx.press_mold.get(p)
                     if pm is not None and pm != _mold_key(j):
                         obj.append(PEN_MOLD_CHANGE * x)
+                    if _size_home_pen(ctx, j, p):
+                        obj.append(PEN_SIZE_HOME * x)
                 m.AddExactlyOne(lits)
                 op_iv.append(m.NewFixedSizeIntervalVar(mi + HALF_MIN, HALF_MIN, f"opi_{j.id}"))
                 op_iv.append(m.NewFixedSizeIntervalVar(de, HALF_MIN, f"opd_{j.id}"))
-                obj.append(W_DEMOLD * de)
+                obj.append(W_DEMOLD * (1 + max(0, j.priority)) * de)      # rush orders out first
                 if j.due is not None:
                     late = m.NewIntVar(0, ctx.hmax + j.cure_min, f"late_{j.id}")
                     m.Add(late >= de - j.due)
                     obj.append(W_LATE * late)
+                if (ctx.affected and j.orig_press is not None and j.orig_press not in ctx.affected
+                        and (j.id, j.orig_press) in xs and j.orig_mold_in is not None and j.orig_mold_in % GRID_MIN == 0
+                        and any(lo <= j.orig_mold_in // GRID_MIN <= hi for lo, hi in gr)):
+                    # repair, not re-plan: knock-on re-timings on untouched presses cost extra
+                    keep = m.NewBoolVar(f"keep_{j.id}")
+                    m.Add(gi == j.orig_mold_in // GRID_MIN).OnlyEnforceIf(keep)
+                    m.AddImplication(keep, xs[(j.id, j.orig_press)])
+                    obj.append(PEN_DISTURB * (1 - keep))
                 if j.orig_mold_in is not None:
                     dev = m.NewIntVar(0, 2 * (ctx.hmax + abs(j.orig_mold_in)), f"dev_{j.id}")
                     m.AddAbsEquality(dev, mi - j.orig_mold_in)
@@ -757,6 +883,8 @@ class CpSatScheduler:
             for p, ivs in press_iv.items():
                 if len(ivs) > 1:
                     m.AddNoOverlap(ivs)
+            _add_mold_gaps(m, ctx, xs, mi_vars)
+            obj += _distinct_mold_terms(m, ctx, xs)
             # labor: one de-mold/mold-in crew, one half-op at a time (de-mold [t, t+15),
             # mold-in [t+15, t+30)), so a de-mold and the next mold-in on one press chain cleanly
             if op_iv:
@@ -787,6 +915,55 @@ class CpSatScheduler:
             return SolveResult(status=SolveStatus.ERROR, solver=SolverName.CP_SAT,
                                solve_ms=round((_time.perf_counter() - t_start) * 1000, 1), schedule=None,
                                feasible=False, deliveries_met=False, gaps=[f"cp-sat error: {e}"])
+
+
+def _add_mold_gaps(m, ctx: _Ctx, xs: dict, mi_vars: dict) -> None:
+    """Principle 4 as a hard constraint: two tires on one press with different molds are at
+    least MOLD_GAP_MIN apart (de-mold -> next mold-in). Pairwise is exact: between two tires of
+    different molds there is always a change, so some consecutive pair carries the gap."""
+    for p in F.CURE_PRESS_IDS:
+        fixed = [(j.mold_in, j.release, _mold_key(j), True) for j in ctx.frozen if j.press == p]
+        fixed += [(j.mold_in, j.mold_in + j.cure_min, _mold_key(j), False) for j in ctx.locked if j.press == p]
+        free = [(GRID_MIN * mi_vars[j.id][0], mi_vars[j.id][1], _mold_key(j), xs[(j.id, p)])
+                for j in ctx.free if j.id in mi_vars and (j.id, p) in xs]
+        for s0, e0, k0, is_frozen in fixed:
+            for s1, e1, k1, x1 in free:
+                if k0 == k1:
+                    continue
+                if is_frozen:          # in progress: always before every free tire
+                    m.Add(s1 >= e0 + MOLD_GAP_MIN).OnlyEnforceIf(x1)
+                    continue
+                before = m.NewBoolVar("")
+                m.Add(s1 >= e0 + MOLD_GAP_MIN).OnlyEnforceIf([x1, before])
+                m.Add(e1 + MOLD_GAP_MIN <= s0).OnlyEnforceIf([x1, before.Not()])
+        for i, (s0, e0, k0, x0) in enumerate(free):
+            for s1, e1, k1, x1 in free[i + 1:]:
+                if k0 == k1:
+                    continue
+                before = m.NewBoolVar("")
+                m.Add(s1 >= e0 + MOLD_GAP_MIN).OnlyEnforceIf([x0, x1, before])
+                m.Add(s0 >= e1 + MOLD_GAP_MIN).OnlyEnforceIf([x0, x1, before.Not()])
+
+
+def _distinct_mold_terms(m, ctx: _Ctx, xs: dict) -> list:
+    """Fewer mold changes (principle 4) between planned tires too: each extra mold a press
+    carries costs PEN_MOLD_CHANGE (a lower bound on its changes). The in-progress and locked
+    molds count as already present."""
+    terms = []
+    for p in F.CURE_PRESS_IDS:
+        present = {_mold_key(j) for j in ctx.frozen + ctx.locked if j.press == p}
+        by_mold: dict[str, list] = {}
+        for j in ctx.free:
+            if (j.id, p) in xs:
+                by_mold.setdefault(_mold_key(j), []).append(xs[(j.id, p)])
+        for k, lits in by_mold.items():
+            if k in present:
+                continue
+            used = m.NewBoolVar(f"mold_{p}_{k}")
+            for x in lits:
+                m.AddImplication(x, used)
+            terms.append(PEN_MOLD_CHANGE * used)
+    return terms
 
 
 def _bad_request(req: SolveRequest) -> str | None:

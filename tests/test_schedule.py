@@ -432,3 +432,120 @@ def test_labor_conflicts_prep_ahead_rule():
     assert any("bonding" in b for b in bad)
     # outside the visible horizon: not counted
     assert labor_conflicts([prev_sat_22, nxt], shifts, horizon_end=mon6) == []
+
+
+# ---------------------------------------------------------------- review r3: mold change, weekend, large tires
+def _mold_gap_errors(sched):
+    errs = []
+    by: dict[str, list] = {}
+    for j in sched.jobs:
+        by.setdefault(j.press_id, []).append(j)
+    for p, js in by.items():
+        js.sort(key=lambda j: j.mold_in)
+        for a, b in zip(js, js[1:]):
+            if not b.frozen and a.mold_id != b.mold_id and b.mold_in - a.demold < timedelta(hours=F.MOLD_CHANGE_STOP_H):
+                errs.append(f"{p} {a.id}->{b.id} {(b.mold_in - a.demold).total_seconds() / 3600:.1f} h")
+    return errs
+
+
+def test_mold_change_stops_press_8h_in_seed_and_page11_reschedules(tmp_path):
+    """Page 6 principle 4: each mold change stops the press ~8 h. Consecutive tires with
+    different molds on one press are at least MOLD_CHANGE_STOP_H apart — seed, S3 (cure
+    extension) and the 02:31 replan (press 7 out)."""
+    clock, sim, seed = _sim_seed()
+    assert _mold_gap_errors(seed) == []
+    store = FileScheduleStore(tmp_path, initial=seed)
+    res, ver = reschedule(store, FallbackScheduler(), clock.now(), sim.orders(), sim.shifts(),
+                          cure_overrides_h={"CURE-07": 36.5})
+    assert res.feasible and ver is not None and _mold_gap_errors(res.schedule) == []
+    a311 = next(j for j in res.schedule.jobs if j.order_id == "#A-311")
+    assert a311.press_id == "CURE-09"
+    store.activate(ver.version)
+    res2, _ = reschedule(store, FallbackScheduler(), clock.now() + timedelta(minutes=17), sim.orders(), sim.shifts(),
+                         unavailable_presses=["CURE-07"])
+    assert res2.feasible and _mold_gap_errors(res2.schedule) == []
+
+
+@pytest.mark.parametrize("solver", [HeuristicScheduler(), CpSatScheduler()], ids=["heuristic", "cpsat"])
+def test_both_solvers_respect_mold_change_stop(solver):
+    """Two orders with different molds sharing the small presses: every switch waits 8 h."""
+    shifts = complete_shifts([], NOW - timedelta(days=1), NOW + timedelta(days=12))
+    orders = [Order(id="#SA", size=TireSize.S, qty=12, done=0, due=NOW.date() + timedelta(days=4), mold_id="MA"),
+              Order(id="#SB", size=TireSize.S, qty=12, done=0, due=NOW.date() + timedelta(days=5), mold_id="MB")]
+    res = solver.solve(SolveRequest(now=NOW, orders=orders, shifts=shifts, time_limit_s=10))
+    assert res.schedule is not None and res.feasible, res.gaps
+    assert _mold_gap_errors(res.schedule) == []
+    assert not any("換模" in w for w in res.schedule.warnings)
+
+
+def test_check_schedule_flags_short_mold_change():
+    shifts = complete_shifts([], NOW - timedelta(days=1), NOW + timedelta(days=12))
+    mon = datetime(2026, 10, 5, 10, 0, tzinfo=F.TZ)
+    a = back_propagate("J1", "#SA", TireSize.S, "CURE-01", mon, mold_id="MA", shifts=shifts)
+    b = back_propagate("J2", "#SB", TireSize.S, "CURE-01", a.demold + timedelta(hours=1), mold_id="MB", shifts=shifts)
+    from warroom.contracts import Schedule
+    sched = Schedule(id="X", created_at=NOW, horizon_start=NOW, horizon_end=NOW + timedelta(days=7), jobs=[a, b],
+                     solver=SolverName.HEURISTIC)
+    errs = check_schedule(sched, SolveRequest(now=NOW, orders=[], shifts=shifts))
+    assert any("換模停機不足" in e for e in errs), errs
+
+
+def test_weekend_no_fire_out_in_baseline():
+    """Page 6 principle 3 週末不斷火: every available press is loaded so it cures through Sunday
+    (Saturday night sends the last round, it de-molds Monday 清晨 00–05 or later). No press sits
+    cold over Sunday; the only idle allowed is the physics bound (a small tire de-molded Saturday
+    morning waits for the Saturday-night slot that lands its de-mold on Monday)."""
+    clock, sim, seed = _sim_seed()
+    sat = clock.now().date()
+    assert sat.weekday() == 5
+    sun_5 = datetime.combine(sat + timedelta(days=1), datetime.min.time(), tzinfo=F.TZ) + timedelta(hours=5)
+    mon_5 = sun_5 + timedelta(days=1)
+    for p in F.CURE_PRESS_IDS:
+        js = sorted((j for j in seed.jobs if j.press_id == p), key=lambda j: j.mold_in)
+        # when the Saturday night shift ends (last staffed op until Monday) every press holds a cure
+        assert any(j.mold_in <= sun_5 < j.demold for j in js), f"{p} fired out over the weekend"
+        for a, b in zip(js, js[1:]):
+            if a.frozen and a.demold >= sun_5:
+                continue      # in-progress tire loaded before now, cure ends in the unstaffed Sunday
+            if a.demold < mon_5 and b.mold_in > a.demold:
+                idle = (b.mold_in - a.demold).total_seconds() / 3600
+                # 21 h: a small tire de-molded Sat 05:12 must wait for Sun 00:00 (24 h cure -> Mon 00:00)
+                assert idle <= 21, f"{p} idle {idle:.1f} h {a.demold:%a %H:%M} -> {b.mold_in:%a %H:%M}"
+    # small presses de-mold in the Monday 00–05 window
+    early = [j for j in seed.jobs if j.size is TireSize.S and j.demold.weekday() == 0 and j.demold.hour < 5]
+    assert len(early) >= 5
+
+
+def test_monday_early_window_is_staffed_for_demold():
+    from warroom.schedule.staffing import MONDAY_EARLY_NAME, op_windows
+    sat = datetime(2026, 10, 3, tzinfo=F.TZ)
+    shifts = complete_shifts([], sat, sat + timedelta(days=3))
+    mon = [s for s in shifts if s.name == MONDAY_EARLY_NAME]
+    assert len(mon) == 1 and mon[0].start.weekday() == 0 and mon[0].start.hour == 0 and mon[0].end.hour == 5
+    assert any(w.start <= mon[0].start and mon[0].end <= w.end for w in op_windows(shifts))
+
+
+def test_large_tires_run_every_week_on_their_presses():
+    """Page 6 sim: M, L 2 presses each — the seed generates L work every week (not only M by
+    EDD), and the presses curing L now keep curing L."""
+    clock, sim, seed = _sim_seed()
+    now = clock.now()
+    new = [j for j in seed.jobs if not j.frozen and j.mold_in >= now]
+    n_l = sum(1 for j in new if j.size is TireSize.L and j.order_id != "#A-311")
+    n_m = sum(1 for j in new if j.size is TireSize.M)
+    assert n_l >= 6 and n_m >= 6, (n_l, n_m)
+    for p in ("CURE-08", "CURE-10"):     # curing #L-301 now
+        assert any(j.size is TireSize.L for j in new if j.press_id == p and j.mold_in < now + timedelta(days=7)), p
+
+
+def test_delivery_claims_scoped_to_this_plan():
+    """deliveries_met covers this plan's tires only: the approval text says so, and open orders
+    whose rest cannot be cured by their due date at the page-6 rate are flagged in warnings."""
+    from warroom.schedule.demo import describe
+    clock, sim, seed = _sim_seed()
+    store_res = FallbackScheduler().solve(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(),
+                                                       previous=seed, cure_overrides_h={"CURE-07": 36.5}))
+    text = describe(store_res)
+    assert "交期全數達成" not in text and ("本週排程訂單交期滿足" in text or "延遲" in text)
+    outlook = [w for w in store_res.schedule.warnings if w.startswith("本週排程外")]
+    assert len(outlook) == 1 and "#L-301" in outlook[0]

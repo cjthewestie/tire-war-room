@@ -27,14 +27,18 @@ NIGHT_MIN_PEOPLE = 2          # SOP-HR-01 §4
 NIGHT_MULTI_OP_PEOPLE = 3     # SOP-HR-01 §4: ≥2 de-molds in one night shift
 TRANSFER_FROM_TEAM = TeamId.SIDE     # page 11 「從 2 線調 1 人」: line 2 = B 胎側膠
 TRANSFER_FROM_LABEL = "2 線"
+# Page 6 principle 3 週末不斷火: the Saturday night shift loads the last round and it de-molds
+# Monday 清晨 00:00–05:00 (no re-preheat). Same window as capacity.POLICIES "AI 排出模時刻".
+MONDAY_EARLY_NAME = "週一清晨"
+MONDAY_EARLY = F.ShiftDef(TeamId.BODY, MONDAY_EARLY_NAME, time(0), time(5), weekdays=(0,))
 
 
 def is_night(shift: Shift) -> bool:
-    return shift.end.date() > shift.start.date() or shift.start.hour >= 18
+    return shift.end.date() > shift.start.date() or shift.start.hour >= 18 or shift.start.hour < 5
 
 
 def is_op_shift(shift: Shift) -> bool:
-    """Shift whose crew performs de-mold / mold-in."""
+    """Shift whose crew performs de-mold / mold-in (incl. the Monday 00–05 weekend de-mold)."""
     return shift.team is TeamId.CURING or (shift.team is TeamId.BODY and is_night(shift))
 
 
@@ -59,8 +63,9 @@ def expand_shift_defs(defs, start: datetime, end: datetime) -> list[Shift]:
 
 def complete_shifts(given: list[Shift], start: datetime, end: datetime, defs=None) -> list[Shift]:
     """Given shifts win; days/teams they do not cover are filled from the optimised premise
-    (factory.OPTIMISED_SHIFTS). The sim often passes only today's shifts."""
-    defs = defs if defs is not None else F.OPTIMISED_SHIFTS
+    (factory.OPTIMISED_SHIFTS) plus the principle-3 Monday 00–05 de-mold (MONDAY_EARLY).
+    The sim often passes only today's shifts."""
+    defs = defs if defs is not None else (*F.OPTIMISED_SHIFTS, MONDAY_EARLY)
     keyed = {(s.team, s.start): s for s in given}
     for s in expand_shift_defs(defs, start, end):
         keyed.setdefault((s.team, s.start), s)
