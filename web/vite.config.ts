@@ -16,14 +16,19 @@ const phoneRoute = (): Plugin => {
 }
 
 // Dev: `npm run dev` on :5173 proxies /api and /ws to the FastAPI server on :8000.
+// The backend treats loopback callers as the on-box supervisor seat, so the dev server binds to
+// localhost only, and the proxy forwards the real client address (xfwd -> X-Forwarded-For): a LAN
+// client reaching Vite (WARROOM_DEV_HOST=0.0.0.0 to test the phone page on a real phone) is then
+// a remote caller and needs the supervisor PIN, exactly as it would hitting FastAPI directly.
+const devHost = process.env.WARROOM_DEV_HOST || 'localhost'
 // Build: dist/index.html (war-room dashboard) + dist/phone.html (supervisor phone), served by FastAPI.
 export default defineConfig({
   plugins: [react(), phoneRoute()],
   server: {
-    host: true,
+    host: devHost,
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/ws': { target: 'ws://localhost:8000', ws: true },
+      '/api': { target: 'http://localhost:8000', xfwd: true },
+      '/ws': { target: 'ws://localhost:8000', ws: true, xfwd: true },
     },
   },
   build: {

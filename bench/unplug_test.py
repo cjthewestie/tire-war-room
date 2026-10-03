@@ -93,20 +93,41 @@ def in_sandbox() -> bool:
     return os.environ.get(SANDBOX_ENV) == "1"
 
 
-def parse_sandbox_denies(text: str, pids: set[int], before: str | None = None) -> int:
-    """Count `deny(1) network-outbound` reports in `log show --style compact` output for `pids`
-    ('N duplicate report' adds N). `before` ('YYYY-MM-DD HH:MM:SS.mmm') drops lines at or after it, i.e. the
-    deliberate internet probe that runs after the watch window."""
-    n = 0
+_DENY_RE = re.compile(r"Sandbox: \S+\((\d+)\) deny\(1\) network-outbound(?:\s+(\S+))?")
+
+
+def sandbox_deny_detail(text: str, pids: set[int], before: str | None = None) -> dict[str, Any]:
+    """`deny(1) network-outbound` reports in `log show --style compact` output for `pids`, per pid.
+
+    Only a report that names a remote (`remote:*:443`, `1.1.1.1:443`) is a blocked attempt to leave: the
+    kernel also logs remote-less network-outbound denies around ordinary localhost sockets (seen with a bare
+    connect to 127.0.0.1:11434 that succeeded), and those are counted apart as `no_remote`. 'N duplicate
+    report(s) for' adds N; the kernel repeats the remote on those lines. `before` ('YYYY-MM-DD HH:MM:SS.mmm')
+    drops lines at or after it."""
+    by: dict[int, int] = {}
+    no_remote: dict[int, int] = {}
+    remotes: set[str] = set()
     for ln in text.splitlines():
         if before and ln[:23] >= before:
             continue
-        m = re.search(r"Sandbox: \S+\((\d+)\) deny\(1\) network-outbound", ln)
+        m = _DENY_RE.search(ln)
         if not m or int(m.group(1)) not in pids:
             continue
         d = re.search(r"(\d+) duplicate reports? for", ln)
-        n += int(d.group(1)) if d else 1
-    return n
+        k = int(d.group(1)) if d else 1
+        pid = int(m.group(1))
+        if m.group(2):
+            by[pid] = by.get(pid, 0) + k
+            remotes.add(m.group(2))
+        else:
+            no_remote[pid] = no_remote.get(pid, 0) + k
+    return {"by_pid": dict(sorted(by.items())), "remotes": sorted(remotes),
+            "no_remote_by_pid": dict(sorted(no_remote.items()))}
+
+
+def parse_sandbox_denies(text: str, pids: set[int], before: str | None = None) -> int:
+    """Blocked attempts to leave by `pids`: the remote-naming denies of sandbox_deny_detail."""
+    return sum(sandbox_deny_detail(text, pids, before)["by_pid"].values())
 
 
 def now_ms() -> str:
@@ -458,7 +479,8 @@ class EgressEvidence:
         dropped = None
         if self.start_count is not None and self.end_count is not None:
             dropped = self.end_count - self.start_count
-        extra = ({"sandbox_pids": sorted(self.sandbox_pids), "window": [self._since, self._until]}
+        extra = ({"sandbox_pids": sorted(self.sandbox_pids), "bench_pid": os.getpid(),
+                  "window": [self._since, self._until]}
                  if self.sandbox else {})
         return {**extra, "firewall_dropped_packets": dropped, "conntrack_available": self.conntrack_ok,
                 "conntrack_snapshots": self.conntrack_snapshots,
@@ -504,7 +526,21 @@ def apply(cmd: list[str]) -> tuple[bool, str]:
 
 
 def internet_reachable(timeout_s: float = 2.0) -> bool:
-    """Probe: does a TCP connect to a public address succeed? (after blocking it must not)"""
+    """Probe: does a TCP connect to a public address succeed? (after blocking it must not)
+
+    Inside the sandbox the probe runs in its own short-lived child (still sandboxed), so its deliberate,
+    blocked connects carry a pid that is not in the recorded sandbox_pids and are never counted as egress."""
+    if in_sandbox():
+        code = f"from bench.unplug_test import _probe; raise SystemExit(0 if _probe({timeout_s!r}) else 1)"
+        try:
+            r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, timeout=timeout_s * len(PROBE_HOSTS) + 30)
+            return r.returncode == 0
+        except subprocess.TimeoutExpired:
+            return False
+    return _probe(timeout_s)
+
+
+def _probe(timeout_s: float) -> bool:
     for host in PROBE_HOSTS:
         try:
             with socket.create_connection((host, 443), timeout=timeout_s):
@@ -676,12 +712,16 @@ async def main_async(args) -> dict[str, Any]:
     return out
 
 
-def count_sandbox_denies(pids: set[int], since: str, until: str) -> tuple[int | None, str]:
+def count_sandbox_denies(pids: set[int], since: str, until: str,
+                         detail: dict[str, Any] | None = None) -> tuple[int | None, str]:
     """Blocked outbound attempts by `pids` from `since` up to (not incl.) `until` ('...HH:MM:SS.mmm', the moment
-    the internet probe starts), from the kernel Sandbox log. Must run unsandboxed."""
+    the internet probe starts), from the kernel Sandbox log. Must run unsandboxed. `detail`, if given, is
+    filled with sandbox_deny_detail (attempts per pid, remotes) so the report names only the pids that tried."""
     end = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.mktime(time.strptime(until[:19], "%Y-%m-%d %H:%M:%S")) + 1))
     ok, txt = _run(["/usr/bin/log", "show", "--style", "compact", "--start", since, "--end", end,
                     "--predicate", 'eventMessage CONTAINS "network-outbound"'], timeout=120)
+    if ok and detail is not None:
+        detail.update(sandbox_deny_detail(txt, pids, before=until))
     return (parse_sandbox_denies(txt, pids, before=until), "") if ok else (None, txt[:200])
 
 
@@ -689,8 +729,19 @@ def finalize_sandboxed(path: Path) -> dict[str, Any]:
     """Parent side of --sandbox: fill the deny count into the child's result, re-judge, re-save in place."""
     out = json.loads(path.read_text(encoding="utf-8"))
     eg = out["egress"]
-    n, err = count_sandbox_denies(set(eg.get("sandbox_pids", [])), *eg["window"])
+    detail: dict[str, Any] = {}
+    n, err = count_sandbox_denies(set(eg.get("sandbox_pids", [])), *eg["window"], detail=detail)
     eg["firewall_dropped_packets"] = n
+    if detail:
+        eg["denies_by_pid"] = {str(k): v for k, v in detail["by_pid"].items()}
+        eg["deny_remotes"] = detail["remotes"]
+        eg["no_remote_denies_by_pid"] = {str(k): v for k, v in detail["no_remote_by_pid"].items()}
+    roles = {str(p): "sandboxed child" for p in eg.get("sandbox_pids", [])}
+    if eg.get("bench_pid"):
+        roles[str(eg["bench_pid"])] = "bench"
+    if (out.get("spawned_app") or {}).get("pid"):
+        roles[str(out["spawned_app"]["pid"])] = "war-room app"
+    eg["pid_roles"] = roles
     eg["counter_source"] = "kernel Sandbox log: deny(1) network-outbound for the sandboxed pids"
     if err:
         eg.setdefault("notes", []).append(f"sandbox log unreadable: {err}")

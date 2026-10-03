@@ -149,6 +149,12 @@ def test_remote_writes_need_pin_and_auto_is_server_only(frt):
         # a forwarded LAN client behind a local proxy is still remote
         assert local.post("/api/sim/control", json={"action": "pause"},
                           headers={"X-Forwarded-For": LAN_PHONE[0]}).status_code == 403
+        # the Vite dev proxy (xfwd) forwards Node's IPv4-mapped form: still a LAN client
+        assert local.post("/api/sim/control", json={"action": "pause"},
+                          headers={"X-Forwarded-For": "::ffff:" + LAN_PHONE[0]}).status_code == 403
+        # ...while a browser on the box itself, forwarded the same way, stays the local seat
+        assert local.post("/api/sim/control", json={"action": "pause"},
+                          headers={"X-Forwarded-For": "::ffff:127.0.0.1"}).status_code == 200
         assert phone.get("/api/snapshot").status_code == 200          # reads stay open on the LAN
         assert local.post("/api/approvals/AP-1/decision", json=_body(via="auto")).status_code == 422
         r = local.post("/api/approvals/AP-1/decision", json=_body(via="dashboard", decided_by="廠長 王大明"))
