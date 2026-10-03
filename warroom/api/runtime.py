@@ -198,6 +198,9 @@ class ComponentBuilder:
         safety = self._t("safety", safety_real, lambda: FB.FallbackSafetyCore(clock=clock))
 
         store = self._store(sim, scenario, fresh_store, staged=staged)
+        attach_sim = getattr(sim, "attach_plan", None)
+        if callable(attach_sim):                # the plant loads presses from the ACTIVE schedule
+            attach_sim(store)
         attach_plan = getattr(detector, "attach_plan", None)
         if callable(attach_plan):               # page 6: compare plan with actual every minute
             attach_plan(store=store, sim=sim)

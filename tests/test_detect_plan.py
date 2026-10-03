@@ -116,6 +116,7 @@ def test_normal_plant_against_seeded_schedule_has_no_slips_for_a_day():
     from warroom.schedule import seed_schedule
     f = Factory(seed=7, scenario=ScenarioName.NORMAL)
     sched = seed_schedule(f.now(), f.orders(), f.shifts(), f.machines())
+    f.attach_plan(_Store(sched))                 # the plant loads presses from the plan
     d = StreamDetector()
     d.attach_plan(store=_Store(sched), sim=f)
     slips = []
@@ -123,6 +124,23 @@ def test_normal_plant_against_seeded_schedule_has_no_slips_for_a_day():
         f.step(60.0)
         slips += d.check_plan(f.now())
     assert slips == []
+
+
+def test_plant_running_its_own_queue_is_flagged_off_plan():
+    """A plant that ignores the plan (no attach_plan: it loads presses from its own queue) is caught:
+    a press holding a mold the active schedule does not have on it is a SCHEDULE_SLIP 'off_plan'."""
+    from warroom.schedule import seed_schedule
+    f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+    sched = seed_schedule(f.now(), f.orders(), f.shifts(), f.machines())
+    d = StreamDetector()
+    d.attach_plan(store=_Store(sched), sim=f)
+    slips = []
+    for _ in range(6 * 60):
+        f.step(60.0)
+        slips += d.check_plan(f.now())
+    off = [a for a in slips if a.id.endswith("off_plan")]
+    assert off and all(a.kind is AnomalyKind.SCHEDULE_SLIP and "偏離排程" in a.message for a in off)
+    assert len({a.machine_id for a in off}) == len(off)          # once per job
 
 
 async def test_mock_commander_plans_a_reschedule_for_a_slip():

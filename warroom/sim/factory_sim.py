@@ -11,9 +11,10 @@ from __future__ import annotations
 import math
 import random
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from warroom.clock import SimClock
 from warroom.contracts import (
@@ -30,6 +31,8 @@ from warroom.contracts import (
     Scenario,
     ScenarioName,
     ScenarioStep,
+    Schedule,
+    ScheduleJob,
     SemiFinishedPart,
     SemiFinishedProgress,
     SensorReading,
@@ -112,6 +115,7 @@ class Factory:
         keep_time = clock is not None and scenario is ScenarioName.NORMAL
         self.clock: SimClock = clock or SimClock(manual=True)
         self.safety_log: list[SafetyAction] = []
+        self._plan_source: Callable[[], Schedule | None] | None = None
         self.load_scenario(scenario, start_at=self.clock.now() if keep_time else None)
 
     # ------------------------------------------------------------------ scenario / reset
@@ -185,12 +189,14 @@ class Factory:
                   "CURE-10": ["#L-301"]}
         self._press: dict[str, _Press] = {}
         self._in_press: dict[str, int] = {o: 0 for o in self._orders}
+        self._plan_started: set[str] = set()       # schedule job ids already loaded into a press
         for pid, (oid, el_h) in plan.items():
             o = self._orders[oid]
             mold_in = t0 - timedelta(hours=el_h)
             job = self._make_job(pid, o, mold_in)
             self._press[pid] = _Press(job=job, queue=list(queues.get(pid, [])))
             self._in_press[oid] += 1
+            self._plan_started.add(job.job_id)
 
     def _make_job(self, pid: str, o: Order, mold_in: datetime) -> CureJobState:
         req = CURE_HOURS[o.size]
@@ -393,11 +399,78 @@ class Factory:
                              steam_kgf_cm2=steam, seq=seq)
 
     # ------------------------------------------------------------------ cure cycles
+    # ---- plan-driven mold-in (page 6: the cure-press schedule decides every de-mold / mold-in)
+    def attach_plan(self, source: Any) -> None:
+        """Drive every mold-in from the ACTIVE schedule. `source` is a ScheduleStore (its
+        current().schedule is read) or a callable returning a Schedule (or None).
+
+        With a plan attached, a free press loads the plan's next not-yet-started job on that press,
+        at max(planned T, de-mold + 30 min), with the plan's order, mold and cure_h; and stays idle
+        when the plan has nothing for it. So an approved move (#A-311 -> press 9) and the staffed
+        de-mold windows reach the plant. Without a plan the sim keeps its own queue (tests, replay)."""
+        if source is None:
+            self._plan_source = None
+        elif callable(source):
+            self._plan_source = source
+        else:
+            store = source
+
+            def _cur() -> Schedule | None:
+                return store.current().schedule
+            self._plan_source = _cur
+
+    def _plan(self) -> Schedule | None:
+        if self._plan_source is None:
+            return None
+        try:
+            return self._plan_source()
+        except Exception:  # noqa: BLE001 - no active version (store being swapped): no new mold-ins
+            return None
+
+    def next_planned_job(self, press_id: str) -> ScheduleJob | None:
+        """The plan's next job for this press that the plant has not loaded yet."""
+        sched = self._plan()
+        if sched is None:
+            return None
+        cands = [j for j in sched.jobs
+                 if j.press_id == press_id and not j.frozen and j.id not in self._plan_started]
+        return min(cands, key=lambda j: (j.mold_in, j.id)) if cands else None
+
+    def _start_from_plan(self, pid: str, ps: _Press, now: datetime) -> None:
+        m = self._m[pid]
+        if m.status is not MachineStatus.IDLE:
+            return                     # stopped / held / out of service: no new mold-in
+        if ps.idle_until is not None and now < ps.idle_until:
+            return                     # de-mold / mold change still in progress (30 min)
+        j = self.next_planned_job(pid)
+        if j is None:
+            m.note = "排程無下一模，待命"
+            return
+        at = j.mold_in if ps.idle_until is None else max(j.mold_in, ps.idle_until)
+        if now < at:
+            m.note = f"待排程入模 {j.mold_in:%m/%d %H:%M}（{j.order_id}）"
+            return
+        o = self._orders.get(j.order_id)
+        mold = j.mold_id or (o.mold_id if o is not None else None) or f"MD-{j.order_id}"
+        ps.job = CureJobState(job_id=j.id, order_id=j.order_id, size=j.size, mold_id=mold, mold_in_at=at,
+                              planned_demold_at=at + timedelta(hours=j.cure_h), setpoint_c=CURE_TEMP_NOMINAL_C,
+                              cure_required_h=j.cure_h, cure_elapsed_h=0.0)
+        self._plan_started.add(j.id)
+        if j.order_id in self._in_press:
+            self._in_press[j.order_id] += 1
+        if j.order_id in ps.queue:
+            ps.queue.remove(j.order_id)
+        ps.idle_until = None
+        m.status, m.note = MachineStatus.RUNNING, None
+
     def _advance_cure(self, now: datetime) -> None:
+        planned = self._plan_source is not None
         for pid, ps in self._press.items():
             m = self._m[pid]
             if ps.job is None:
-                if ps.idle_until is not None and now >= ps.idle_until and m.status is MachineStatus.IDLE:
+                if planned:
+                    self._start_from_plan(pid, ps, now)
+                elif ps.idle_until is not None and now >= ps.idle_until and m.status is MachineStatus.IDLE:
                     self._start_next(pid, ps, ps.idle_until)
                 continue
             if m.status not in (MachineStatus.RUNNING, MachineStatus.WARNING, MachineStatus.ALARM):
@@ -413,10 +486,14 @@ class Factory:
                 ps.idle_until = demold_at + timedelta(minutes=DEMOLD_MOLDIN_MIN)
                 m.status = MachineStatus.IDLE
                 m.note = "出模，換模入模中"
-                if now >= ps.idle_until:
+                if planned:
+                    if now >= ps.idle_until:
+                        self._start_from_plan(pid, ps, now)
+                elif now >= ps.idle_until:
                     self._start_next(pid, ps, ps.idle_until)
 
     def _start_next(self, pid: str, ps: _Press, at: datetime) -> None:
+        """No plan attached: the sim's own queue, then order priority / due date."""
         sizes = (TireSize.M, TireSize.L) if pid in ML_PRESSES else (TireSize.S,)
         candidates = list(ps.queue) + [o.id for o in sorted(self._orders.values(), key=lambda o: (-o.priority, o.due))
                                        if o.size in sizes]

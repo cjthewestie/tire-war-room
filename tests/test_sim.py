@@ -308,3 +308,74 @@ def test_replay_roundtrip(tmp_path):
     assert got[5] == ticks[0] and got[11] == ticks[1]
     with pytest.raises(FileNotFoundError):
         ReplaySource(tmp_path / "missing.jsonl")
+
+
+# ---------------------------------------------------------------- plan-driven mold-in (page 6)
+def _plan_with(f, extra_jobs, drop_press_jobs=()):
+    """The plant's in-progress cures as frozen jobs plus `extra_jobs`."""
+    from warroom.contracts import Schedule, SolverName
+    from warroom.schedule import back_propagate
+    jobs = []
+    for m in f.machines():
+        cj = m.cure_job
+        if cj is not None:
+            jobs.append(back_propagate(cj.job_id, cj.order_id, cj.size, m.machine_id, cj.mold_in_at,
+                                       cure_h=cj.cure_required_h, mold_id=cj.mold_id, frozen=True))
+    t0 = f.now()
+    return Schedule(id="S-T", created_at=t0, horizon_start=t0, horizon_end=t0 + timedelta(days=7),
+                    jobs=jobs + list(extra_jobs), solver=SolverName.HEURISTIC)
+
+
+def test_plan_attached_press_stays_idle_until_planned_mold_in():
+    """The plan's next job decides mold-in: no job -> the press stays idle after de-mold; a job at T
+    -> it loads at T (not at de-mold + 30 min) with the plan's job id, order and cure_h."""
+    from warroom.contracts import TireSize
+    from warroom.schedule import back_propagate
+    f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+    cj6 = f.machine("CURE-06").cure_job               # small, de-molds 3 h after start
+    T = cj6.planned_demold_at + timedelta(hours=5)
+    job = back_propagate("J-PLAN-06", "#S-102", TireSize.S, "CURE-06", T, cure_h=25.0, mold_id="MD-S102")
+    sched = _plan_with(f, [job])
+    f.attach_plan(lambda: sched)
+    f.step((cj6.planned_demold_at - f.now()).total_seconds() + 3600)        # de-molded 1 h ago
+    m = f.machine("CURE-06")
+    assert m.cure_job is None and m.status is MachineStatus.IDLE and "待排程入模" in (m.note or "")
+    while f.now() < T + timedelta(minutes=1):
+        f.step(60.0)
+    cj = f.machine("CURE-06").cure_job
+    assert cj is not None and cj.job_id == "J-PLAN-06" and cj.order_id == "#S-102"
+    assert cj.mold_in_at == T and cj.cure_required_h == 25.0 and cj.planned_demold_at == T + timedelta(hours=25)
+    # a press with nothing planned after its current cure stays idle (past its 30-min change)
+    while f.now() < T + timedelta(hours=2):
+        f.step(60.0)
+    m11 = f.machine("CURE-11")
+    assert m11.cure_job is None and m11.status is MachineStatus.IDLE and m11.note == "排程無下一模，待命"
+
+
+def test_approved_press_move_reaches_the_plant():
+    """Page 11: #A-311 moved from press 7 to press 9 in the ACTIVE plan -> the plant loads it on 9, never 7."""
+    from warroom.contracts import TireSize
+    from warroom.schedule import back_propagate
+    f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+    free9 = f.machine("CURE-09").cure_job.planned_demold_at + timedelta(minutes=30)
+    free7 = f.machine("CURE-07").cure_job.planned_demold_at + timedelta(minutes=30)
+    on7 = back_propagate("J-A311-01", "#A-311", TireSize.L, "CURE-07", free7, mold_id="#A-311")
+    on9 = back_propagate("J-A311-01", "#A-311", TireSize.L, "CURE-09", free9, mold_id="#A-311")
+    v1, v2 = _plan_with(f, [on7]), _plan_with(f, [on9])
+    active = {"s": v1}
+    f.attach_plan(lambda: active["s"])
+    active["s"] = v2                                   # supervisor approved the move
+    end = max(free7, free9) + timedelta(hours=1)
+    while f.now() < end:
+        f.step(60.0)
+    j9, j7 = f.machine("CURE-09").cure_job, f.machine("CURE-07").cure_job
+    assert j9 is not None and j9.order_id == "#A-311" and j9.mold_in_at == free9
+    assert j7 is None or j7.order_id != "#A-311"
+
+
+def test_no_plan_keeps_the_sims_own_queue():
+    f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+    free7 = f.machine("CURE-07").cure_job.planned_demold_at + timedelta(minutes=30)
+    while f.now() < free7 + timedelta(minutes=1):
+        f.step(60.0)
+    assert f.machine("CURE-07").cure_job.order_id == "#A-311"     # hard-coded queue, no plan attached

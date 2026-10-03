@@ -8,6 +8,9 @@ checked, each from data the plant really reports:
                     set_cure_time extension);
 * mold-in late   -- a scheduled job's mold-in time T passed SLIP_GRACE_MIN ago and its press has
                     stood empty the whole time since T;
+* off plan       -- a press holds a cure job the active schedule does not have on that press
+                    (neither its job id nor the same order with a mold-in within SLIP_GRACE_MIN),
+                    e.g. a mold loaded on the old press after an approved move;
 * WIP behind T   -- the tire being built for the next press (page 2 panel ②) has a part that is
                     not started at its back-propagated start (A feed T-1h40/2h30/3h30), or a
                     part not ready (waiting / alert) when bonding must start (T-40min/1h/1h30).
@@ -39,7 +42,7 @@ SLIP_GRACE_MIN = 30.0           # de-mold / mold-in take 30 min (page 6 sim cond
 WIP_GRACE_MIN = 15.0
 LOOKBACK_H = 6.0                # older planned mold-ins are history, not a fresh slip
 CRITICAL_LATE_MIN = 60.0
-TASK_TEXT = {"demold": "出模", "mold_in": "入模", "a_feed": "A 線投料", "bond": "貼合"}
+TASK_TEXT = {"demold": "出模", "mold_in": "入模", "a_feed": "A 線投料", "bond": "貼合", "off_plan": "計畫外入模"}
 
 
 def _label(mid: str) -> str:
@@ -83,6 +86,7 @@ class PlanWatcher:
         out += self._demold(now, by_id)
         if schedule is not None:
             out += self._mold_in(now, schedule, by_id)
+            out += self._off_plan(now, schedule, by_id)
         if semi is not None:
             out += self._wip(now, semi, by_id)
         return out
@@ -129,6 +133,29 @@ class PlanWatcher:
                                   f"硫化機仍空（{m.status.value}）"))
         return out
 
+    def _off_plan(self, now: datetime, schedule: Schedule, by_id: dict[str, MachineState]) -> list[Anomaly]:
+        out = []
+        for pid in CURE_PRESS_IDS:
+            m = by_id.get(pid)
+            if m is None or m.cure_job is None or m.active_event_id:
+                continue
+            cj = m.cure_job
+            on_press = [j for j in schedule.jobs if j.press_id == pid]
+            if any(j.id == cj.job_id for j in on_press):
+                continue
+            if any(j.order_id == cj.order_id and abs(j.mold_in - cj.mold_in_at) <= self.grace for j in on_press):
+                continue
+            key = (cj.job_id, "off_plan")
+            if key in self._seen:
+                continue
+            self._seen.add(key)
+            elsewhere = next((j.press_id for j in schedule.jobs if j.id == cj.job_id), None)
+            where = f"，計畫在 {_label(elsewhere)}" if elsewhere and elsewhere != pid else ""
+            out.append(self._make(now, pid, "off_plan", cj.mold_in_at, cj.order_id,
+                                  f"{_label(pid)} 正在硫化 {cj.order_id}（{cj.mold_in_at:%m/%d %H:%M} 入模），"
+                                  f"生效排程此機台沒有這一模{where}"))
+        return out
+
     def _wip(self, now: datetime, semi: SemiFinishedProgress, by_id: dict[str, MachineState]) -> list[Anomaly]:
         T = semi.planned_mold_in_at
         if T is None or now >= T:
@@ -163,10 +190,13 @@ class PlanWatcher:
     def _make(self, now: datetime, mid: str, task: str, planned: datetime, order_id: str, text: str) -> Anomaly:
         late = max(0.0, (now - planned).total_seconds() / 60.0)
         sev = Severity.CRITICAL if late >= CRITICAL_LATE_MIN else Severity.WARN
+        msg = f"排程延誤：{text}，已落後 {late:.0f} 分（計畫與實際比對）"
+        if task == "off_plan":          # not late: the plant runs a mold the plan does not have
+            sev, msg = Severity.WARN, f"偏離排程：{text}（計畫與實際比對）"
         return Anomaly(
             id=f"AN-{now:%Y%m%d-%H%M%S}-{mid}-SLIP-{task}", ts=now, machine_id=mid,
             kind=AnomalyKind.SCHEDULE_SLIP,
             channel=Channel.TEMP,       # required by the contract; a slip has no sensor channel
             value=round(late, 1), baseline=0.0, prediction=None, severity=sev,
-            message=f"排程延誤：{text}，已落後 {late:.0f} 分（計畫與實際比對）",
+            message=msg,
             related_machines=[], detection_latency_s=None)
