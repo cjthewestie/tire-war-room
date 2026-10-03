@@ -185,6 +185,105 @@ def test_watchdog_respects_llm_boot_grace(tmp_path, healthy_url):
     assert "boot grace" in (tmp_path / "log").read_text()
 
 
+def _fake_compose(tmp_path: Path, health: str = "") -> Path:
+    """compose stand-in: logs restarts; `ps -q` prints a container id; also acts as `docker inspect`."""
+    fake = tmp_path / "compose"
+    fake.write_text(f"""#!/bin/sh
+case "$1" in
+  ps) echo cid123 ;;
+  inspect) echo "{health}" ;;
+  *) echo "$@" >> {tmp_path}/calls ;;
+esac
+""")
+    fake.chmod(0o755)
+    return fake
+
+
+def test_watchdog_waits_out_vllm_reload_after_its_own_restart(tmp_path, healthy_url):
+    """A crash late in uptime must not become a restart loop: after restarting vllm the watchdog gives it
+    LLM_GRACE_S to load, measured from that restart, not from boot."""
+    fake = _fake_compose(tmp_path)
+    env = {"APP_URL": healthy_url, "LLM_URL": f"http://127.0.0.1:{free_port()}/health", "QDRANT_URL": healthy_url,
+           "FAIL_LIMIT": "3", "STATE_DIR": str(tmp_path / "s"), "COMPOSE": str(fake), "DOCKER": str(fake),
+           "LOG": str(tmp_path / "log"), "LLM_GRACE_S": "600"}
+    (tmp_path / "s").mkdir()
+    (tmp_path / "s" / "llm.restarted").write_text("0\n")     # last restart long ago; boot uptime >> 600 s here
+    wd = str(DEPLOY / "bin" / "watchdog.sh")
+    for _ in range(9):
+        sh(["bash", wd], env=env, check=False)
+    calls = (tmp_path / "calls").read_text().split("\n") if (tmp_path / "calls").exists() else []
+    assert [c for c in calls if c] == ["restart vllm"]      # was 3 restarts in 9 probes before the fix
+    assert "restart grace" in (tmp_path / "log").read_text()
+
+
+def test_watchdog_skips_vllm_while_container_health_starting(tmp_path, healthy_url):
+    fake = _fake_compose(tmp_path, health="starting")
+    env = {"APP_URL": healthy_url, "LLM_URL": f"http://127.0.0.1:{free_port()}/health", "QDRANT_URL": healthy_url,
+           "FAIL_LIMIT": "1", "STATE_DIR": str(tmp_path / "s"), "COMPOSE": str(fake), "DOCKER": str(fake),
+           "LOG": str(tmp_path / "log"), "LLM_GRACE_S": "0"}
+    sh(["bash", str(DEPLOY / "bin" / "watchdog.sh")], env=env, check=False)
+    assert not (tmp_path / "calls").exists()
+    assert "health=starting" in (tmp_path / "log").read_text()
+
+
+def test_watchdog_pause_file_blocks_restarts_until_stale(tmp_path):
+    fake = _fake_compose(tmp_path)
+    state = tmp_path / "s"
+    state.mkdir()
+    dead = f"http://127.0.0.1:{free_port()}/x"
+    env = {"APP_URL": dead, "LLM_URL": dead, "QDRANT_URL": dead, "FAIL_LIMIT": "1", "STATE_DIR": str(state),
+           "COMPOSE": str(fake), "DOCKER": str(fake), "LOG": str(tmp_path / "log"), "LLM_GRACE_S": "0"}
+    (state / "pause").touch()
+    sh(["bash", str(DEPLOY / "bin" / "watchdog.sh")], env=env, check=False)
+    assert not (tmp_path / "calls").exists()
+    assert "paused by" in (tmp_path / "log").read_text()
+    old = 1_000_000_000
+    os.utime(state / "pause", (old, old))                   # a crashed bench run must not disable it forever
+    sh(["bash", str(DEPLOY / "bin" / "watchdog.sh")], env=env, check=False)
+    assert "restart app" in (tmp_path / "calls").read_text()
+
+
+def _fake_docker(tmp_path: Path, present: set[str]) -> Path:
+    fake = tmp_path / "docker"
+    fake.write_text(f"""#!/bin/sh
+echo "$@" >> {tmp_path}/docker-calls
+if [ "$1" = compose ]; then
+  for a in "$@"; do [ "$a" = "--images" ] && {{ printf 'vllm/vllm-openai:v0.28.0\\nqdrant/qdrant:v1.15.4\\nwarroom-app:latest\\n'; exit 0; }}; done
+  exit 0
+fi
+if [ "$1" = image ] && [ "$2" = inspect ]; then
+  case " {' '.join(sorted(present))} " in *" $3 "*) exit 0 ;; esac
+  exit 1
+fi
+""")
+    fake.chmod(0o755)
+    return fake
+
+
+def test_install_pulls_and_builds_images_before_enabling_units(tmp_path):
+    root, sysd = tmp_path / "opt", tmp_path / "systemd"
+    sysd.mkdir()
+    docker = _fake_docker(tmp_path, {"vllm/vllm-openai:v0.28.0", "qdrant/qdrant:v1.15.4", "warroom-app:latest"})
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker)},
+           timeout=120)
+    calls = (tmp_path / "docker-calls").read_text()
+    assert "pull vllm qdrant" in calls and "build app" in calls
+    assert calls.index("pull vllm qdrant") < calls.index("config --images")
+    assert r.stdout.count("image ok:") == 3
+
+
+def test_install_fails_when_an_image_is_missing(tmp_path):
+    root, sysd = tmp_path / "opt", tmp_path / "systemd"
+    sysd.mkdir()
+    docker = _fake_docker(tmp_path, {"qdrant/qdrant:v1.15.4", "warroom-app:latest"})
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker)},
+           check=False, timeout=120)
+    assert r.returncode != 0 and "MISSING: vllm/vllm-openai:v0.28.0" in r.stderr
+    assert not list(sysd.iterdir())                         # units not linked/enabled
+
+
 # ---------------------------------------------------------------- offline update + rollback
 def make_bundle(tmp_path: Path, ver: str) -> Path:
     r = sh(["bash", str(DEPLOY / "update" / "make_bundle.sh"), ver, str(tmp_path / "usb")],
@@ -256,7 +355,8 @@ def test_install_script_layout(tmp_path):
     sysd = tmp_path / "systemd"
     sysd.mkdir()
     sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
-       env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1"}, timeout=120)
+       env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1"},
+       timeout=120)
     assert os.readlink(root / "current") == str(root / "releases" / "t1")
     for d in ("data/runtime", "data/qdrant", "hf"):
         assert (root / d).is_dir()
