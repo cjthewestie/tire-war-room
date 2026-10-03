@@ -1567,28 +1567,6 @@ class StateMachine:
             return "\0"
         return f"{d} {c.get('shift_name') or ''}"
 
-    def _todo_text(self, run: _Run, needs: list[StepRun]) -> str:
-        """'將做：…' — what the supervisor is approving, from this event's own computed results:
-        the Arrhenius cure extension, the presses taken out, the solver's press moves; otherwise the
-        gated steps' purposes (e.g. 放慢生料投入)."""
-        bits: list[str] = []
-        for res in run.results.values():
-            if res.tool is ToolName.CURE_FORMULA and res.ok and res.data.get("total_cure_h") is not None:
-                extra = res.data.get("extra_h")
-                bits.append(f"延長硫化 {fmt_num(res.data['total_cure_h'])} h"
-                            + (f"（+{fmt_num(extra)} h）" if extra is not None else ""))
-        for step, data in self._solve_steps(run):
-            for p in step.args.get("unavailable_presses") or []:
-                bits.append(f"{machine_label(str(p))}停用")
-            bits += moves_text(data.get("moves"))
-        if not bits:
-            for sr in needs:
-                if sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") in STAFFING_KINDS:
-                    continue                                 # staffing is the A/B choice below
-                bits.append(sr.step.purpose.replace("（需主管核准）", "").strip())
-        bits = [b for b in dict.fromkeys(bits) if b and b not in run.done]
-        return "將做：" + "；".join(bits) if bits else ""
-
     def _delivery_text(self, run: _Run) -> str:
         """交期 row: the solver's verdict when this event re-solved; otherwise the schedule is
         unchanged (the page-2 mill names the tire still going in on time when the sim knows it)."""
@@ -1650,6 +1628,10 @@ class StateMachine:
         the A/B choice replaces is shown once as that choice."""
         staff_choice = any(o.args.get("kind") in STAFFING_KINDS for o in options) and len(options) > 1
         out: list[str] = []
+        for prev in run.staffing_done:                   # an earlier round already filled this gap
+            if not prev["revoked"]:
+                out.append(f"人力：第 {prev.get('round', '?')} 輪已核准並執行「{prev['label']}」"
+                           f"（本輪改選其他方案會撤回並通知）")
         for sr in needs:
             if staff_choice and sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") in STAFFING_KINDS:
                 continue
@@ -1677,15 +1659,12 @@ class StateMachine:
             reason = f"{last.id} 不成立：" + (last.evidence[-1] if last.evidence else "驗證未達預期")
         else:
             reason = f"假設 {plan.hypothesis.id}：{plan.hypothesis.statement}"
+        # 已做 = only what has already run (page 11: 安全核心已處置；#A-311 改 9 號). What approving
+        # will do (one line per gated write) and staffing an earlier round already sent are 核准內容
+        # lines (_actions); there is no 「將做：…」 summary, which could name an unconfirmed solve.
         done = list(dict.fromkeys(run.done))
         if ev.safety_actions or self._safety_acted(ev.machine_id):
             done.insert(0, "安全核心已處置")
-        for prev in run.staffing_done:                   # an earlier round already filled this gap
-            if not prev["revoked"]:
-                done.append(f"已安排{prev['label']}（前一輪核准，本輪可改選）")
-        todo = self._todo_text(run, needs)
-        if todo:
-            done.append(todo)
         gaps, _ = self._event_staffing(run)
         delivery = self._delivery_text(run)
         now = self._now()
@@ -1899,7 +1878,10 @@ class StateMachine:
         for sr in chosen:
             if run.step_changes.get(sr.step.id) is change:
                 sr.state = "skipped"
-                self._note(run.ev, "系統", f"人力沿用先前已執行的「{change.get('label')}」，不重複通知", "info")
+                prev = next((p for p in run.staffing_done if p["key"] == _staff_key(change)
+                             and p["label"] == change.get("label") and not p["revoked"]), {})
+                self._note(run.ev, "系統", f"人力沿用第 {prev.get('round', '?')} 輪已執行的「{change.get('label')}」，"
+                           "不重複通知", "info")
                 continue
             out.append(sr)
         return out
@@ -2055,7 +2037,8 @@ class StateMachine:
                 self._log_reject(run, step, gd)
                 continue
             run.revocations[step.id] = prev
-            self._note(run.ev, "系統", f"主管改選「{change.get('label')}」→ 撤回先前已執行的「{prev['label']}」", "dynamic")
+            self._note(run.ev, "系統", f"依主管改選「{change.get('label')}」→ "
+                       f"撤回第 {prev.get('round', '?')} 輪已執行的「{prev['label']}」", "dynamic")
             out.append(sr)
         return out
 
@@ -2179,7 +2162,8 @@ class StateMachine:
                 if change is not None:
                     run.staffing_done.append({"key": _staff_key(change), "kind": change.get("kind"),
                                               "label": change.get("label") or label, "args": dict(step.args),
-                                              "step_id": step.id, "executed_label": label, "revoked": False})
+                                              "step_id": step.id, "executed_label": label, "revoked": False,
+                                              "round": run.approvals_made})
             elif step.id in run.revocations:
                 prev = run.revocations[step.id]
                 prev["revoked"] = True

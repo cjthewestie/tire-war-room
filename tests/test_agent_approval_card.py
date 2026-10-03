@@ -1,5 +1,6 @@
 """Approval cards carry only THIS event's own facts: the solver gaps its changes land in, the
-staffing A/B that closes them, a filled 交期 row, and a '將做' line naming what is being approved.
+staffing A/B that closes them, a filled 交期 row, and 核准內容 lines naming what is being approved.
+已做 lists only what has already run (page 11), never a 「將做：…」 line.
 Real Runtime, mock commander (no model needed)."""
 from __future__ import annotations
 
@@ -45,7 +46,8 @@ async def test_page2_mill_card_has_no_unrelated_gap(tmp_path):
     assert card.gaps == []                                   # a plant-wide night shortage is not this event's
     assert card.delivery_impact.startswith("不受影響")
     assert "大胎 #07" in card.delivery_impact
-    assert any(d.startswith("將做：") and "放慢生料投入" in d for d in card.done)
+    assert not any(d.startswith("將做") for d in card.done), card.done
+    assert any("放慢生料投入" in a for a in card.actions), card.actions
     assert [o.label for o in card.options] == ["放慢生料投入"]
 
 
@@ -56,16 +58,27 @@ async def test_concurrent_cards_do_not_reuse_page11_staffing(tmp_path):
         assert not any("夜班" in g for g in card.gaps), (mid, card.gaps)
         assert not any("夜班" in o.label or "2 線" in o.label for o in card.options), (mid, card.options)
         assert card.delivery_impact, mid
-        assert any(d.startswith("將做：") for d in card.done), (mid, card.done)
-    assert any("延長硫化" in d for d in cards["CURE-03"][0].done)
+        assert not any(d.startswith("將做") for d in card.done), (mid, card.done)
+        assert card.actions, mid
+    assert any("硫化總時數" in a for a in cards["CURE-03"][0].actions), cards["CURE-03"][0].actions
 
 
 async def test_page11_round1_says_what_is_approved(tmp_path):
     cards = await _cards(tmp_path, "press7_temp_drop", minutes=5)
     card = cards["CURE-07"][0]
-    todo = next(d for d in card.done if d.startswith("將做："))
-    assert "延長硫化 36.5 h（+8.5 h）" in todo
-    assert "#A-311 改" in todo
+    assert card.done == []                                  # nothing has run yet: 已做 is empty, not 「將做：…」
+    assert any(a.startswith("S4b 7 號機硫化總時數 36.5 h") for a in card.actions), card.actions
+    assert any(a.startswith("S4 排程") and "#A-311 改 9 號" in a for a in card.actions), card.actions
     assert card.gaps == ["10/03 夜班缺 1 人"]               # #A-311's new mold-in lands in that night shift
     assert [o.label for o in card.options] == ["夜班加班", "從 2 線調 1 人"]
     assert card.delivery_impact == "不受影響"
+
+
+async def test_page11_round2_done_row_lists_only_what_ran(tmp_path):
+    """Page 11 phone card, round 2: 已做 安全核心已處置；#A-311 改 9 號 — no 「將做：…」 and no
+    staffing note in that row; the round-1 transfer is named in 核准內容 instead."""
+    cards = await _cards(tmp_path, "press7_temp_drop", minutes=21)
+    r2 = cards["CURE-07"][1]
+    assert r2.done[0] == "安全核心已處置" and "#A-311 改 9 號" in r2.done, r2.done
+    assert not any(d.startswith("將做") or "人力" in d or "從 2 線" in d for d in r2.done), r2.done
+    assert any("第 1 輪已核准並執行「從 2 線調 1 人」" in a for a in r2.actions), r2.actions

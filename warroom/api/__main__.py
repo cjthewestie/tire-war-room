@@ -50,6 +50,13 @@ def cmd_serve(args) -> int:
     return 0
 
 
+# --auto-approve takes the recommended option, except where the proposal scripts the supervisor's
+# choice: page 11 round 2, the supervisor vetoes the cross-team transfer and picks A 夜班加班.
+DEMO_SUPERVISOR_PICKS: dict[str, dict[int, tuple[str, str]]] = {
+    "press7_temp_drop": {2: ("A", "否決跨組調人：影響 2 線，改夜班加班")},
+}
+
+
 async def _demo(args) -> int:
     from warroom.api.runtime import Runtime
     from warroom.contracts import ApprovalDecision, DecisionKind
@@ -64,8 +71,13 @@ async def _demo(args) -> int:
             if args.auto_approve:
                 for req in rt.approvals.pending():
                     opt = next((o for o in req.options if o.recommended), req.options[0] if req.options else None)
+                    reason = "demo auto-approve"
+                    pick = DEMO_SUPERVISOR_PICKS.get(str(s.scenario), {}).get(req.round)
+                    if pick and any(o.id == pick[0] for o in req.options):
+                        opt = next(o for o in req.options if o.id == pick[0])
+                        reason = pick[1]
                     rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE,
-                                                         option_id=opt.id if opt else None, reason="demo auto-approve",
+                                                         option_id=opt.id if opt else None, reason=reason,
                                                          via="auto", decided_at=rt.now()))
             if sec % 60 == 0:
                 await asyncio.sleep(0.01)
@@ -81,6 +93,10 @@ async def _demo(args) -> int:
                 print(f"  {t.ts:%H:%M:%S} [{t.actor}] {t.text}")
         if snap.focus:
             print("FOCUS", snap.focus.title, "|", snap.focus.detail, "|", snap.focus.schedule_impact)
+        for req in rt.approvals.all():
+            print(f"CARD {req.id} 第 {req.round} 輪「{req.title}」 已做：{'；'.join(req.done) or '—'}")
+            for line in req.actions:
+                print(f"  核准內容 {line}")
         for p in snap.pending_approvals:
             print("PENDING", p.id, p.title, [o.label for o in p.options])
     finally:

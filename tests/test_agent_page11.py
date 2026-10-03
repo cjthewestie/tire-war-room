@@ -174,7 +174,9 @@ async def test_page11_timeline(tmp_path):
     revoke = tools.calls_of(ToolName.NOTIFY_TEAMS)[-1]
     assert revoke.args["message"].startswith("撤回：") and "夜班加班" in revoke.args["message"]
     assert revoke.args["teams"] == tools.calls_of(ToolName.NOTIFY_TEAMS)[0].args["teams"]   # same teams as the move
-    _find(tl, "系統", "撤回先前已執行的「從 2 線調 1 人」")
+    _find(tl, "系統", "依主管改選「夜班加班」", "撤回第 1 輪已執行的「從 2 線調 1 人」")
+    assert not any("人力沿用" in t.text for t in tl)     # round 1 ran the transfer, not overtime
+    assert not any(d.startswith("將做") for d in r2.done), r2.done
     _find(tl, "系統", "排程 v3 人力依主管決定改為「夜班加班」", "取代「從 2 線調 1 人」")
     # the outcome and the live schedule carry the supervisor's decision, not the solver's transfer
     assert "從 2 線調 1 人" not in ev.outcome.replace("撤回從 2 線調 1 人", "")

@@ -137,7 +137,7 @@ Only numbers actually measured are listed. Mac rows are an Apple M4 Max 64 GB ru
 - OpenShell/NemoClaw sandboxing (`deploy/openshell/`) needs the OpenShell CLI and gateway on the Spark; on the Mac the offline proof is a process-level `sandbox-exec` block.
 - On the Mac the 3-concurrent and 32k-TTFT targets fail: Ollama on MLX does not batch concurrent requests and its prefix cache is less consistent than vLLM's. These are judged again on the Spark.
 - The first run needs internet once to download the SOP embedding model (fastembed); the Spark installer pre-fetches it.
-- UI wording nits seen in the final screenshots: on the phone card the 已做 row reads 「將做：…」 before anything is executed, and after the supervisor switches to A in round 2 the timeline says 「人力沿用先前已執行的『夜班加班』」 although round 1 executed the line-2 transfer (the next line correctly says v3 now uses overtime instead).
+- Page 11 round 1: the solver moves #A-311 to press 9 and, as a knock-on, one later #M-201 tire from press 9 to press 8, so the timeline and the round-2 已做 row also name 「#M-201 改 8 號」. #A-311 is a large (L) tire in the seed and the Excel workbook; its 34 h cure pushes press 9's own queue. Seeding it as a medium tire removes the knock-on but breaks the page-2 100/100/100 totals and makes round 2 move #A-311 again, so the seed is left as is.
 - Activation energy 85 kJ/mol is the proposal's assumed value, not a measured compound property.
 
 ### Layout
