@@ -121,18 +121,82 @@ def test_already_stopped_machine_is_not_stopped_again():
 
 
 def test_latency_well_under_200ms():
+    """Page 9: reading -> action < 0.2 s, measured from the FIRST violating reading's ts (contract)."""
     st = states()
     core = RuleSafetyCore()
-    readings = [rd(m, 130.0 if m.startswith("CURE") else 125.0) for m in MACHINE_IDS]
     worst = 0.0
+    acts_all = []
     for k in range(200):
+        # every machine ramps 1 °C/s from under its line (120 compound, 130 press): a plausible crossing
+        readings = [rd(m, 125.0 + k if m.startswith("CURE") else 105.0 + k, k) for m in MACHINE_IDS]
         t0 = time.perf_counter()
-        acts = core.check([r.model_copy(update={"ts": T0 + timedelta(seconds=k)}) for r in readings], st)
+        acts = core.check(readings, st)
         worst = max(worst, time.perf_counter() - t0)
-        for a in acts:
-            assert a.latency_ms < LATENCY_SAFETY_S * 1000
+        acts_all += acts
+    assert acts_all
+    for a in acts_all:
+        assert a.latency_ms < LATENCY_SAFETY_S * 1000, a
     assert worst < LATENCY_SAFETY_S
     assert core.last_check_ms < 5.0
+
+
+def test_jump_needs_confirm_and_latency_reports_the_wait():
+    """A jump (or a cold start) is confirmed by a second sample; the 1 s it costs at 1 Hz is reported."""
+    st = states()
+    core = RuleSafetyCore()
+    assert core.check([rd("A-BIGOPEN", 100.0, 0)], st) == []
+    assert core.check([rd("A-BIGOPEN", 125.0, 1)], st) == []        # 25 °C/s: confirm first
+    acts = core.check([rd("A-BIGOPEN", 125.5, 2)], st)
+    assert len(acts) == 1 and 1000.0 <= acts[0].latency_ms < 1000.0 + LATENCY_SAFETY_S * 1000
+
+
+def test_plausible_crossing_trips_on_first_violating_sample():
+    st = states()
+    core = RuleSafetyCore()
+    for k, t in enumerate([117.0, 118.0, 119.0]):
+        assert core.check([rd("A-BIGOPEN", t, k)], st) == []
+    acts = core.check([rd("A-BIGOPEN", 120.1, 3)], st)
+    assert len(acts) == 1 and acts[0].latency_ms < LATENCY_SAFETY_S * 1000
+
+
+def test_intermittent_sensor_still_trips():
+    """Review r3 #3: missing / garbage samples between good violating ones must not reset the confirm."""
+    st = states()
+    for bad in (None, 400.0, float("nan")):
+        core = RuleSafetyCore()
+        acts = []
+        for k in range(120):
+            acts += core.check([rd("A-BIGOPEN", 135.0 if k % 2 == 0 else bad, k)], st)
+        assert [a.rule_id for a in acts] == ["SR-COMPOUND-120"], bad
+    # a valid sample under the line still resets the confirm (spike filter unchanged)
+    core = RuleSafetyCore()
+    assert feed(core, "A-BIGOPEN", [100.0, 125.0, None, 100.0, 126.0, None, 100.0], st) == []
+
+
+def test_missing_data_does_not_rearm():
+    st = states()
+    core = RuleSafetyCore(rearm_samples=3)
+    for k, t in enumerate([118.0, 119.0, 121.0]):
+        core.check([rd("A-BIGOPEN", t, k)], st)
+    assert len(core.actions) == 1
+    for k in range(3, 20):
+        core.check([rd("A-BIGOPEN", None, k)], st)
+    assert len(core.check([rd("A-BIGOPEN", 121.0, 20)], st)) == 0      # still latched: same episode
+
+
+def test_data_loss_near_limit_raises_alarm_once():
+    st = states()
+    core = RuleSafetyCore(data_loss_s=5)
+    core.check([rd("A-BIGOPEN", 117.0, 0)], st)                          # within 5 °C of 120
+    acts = []
+    for k in range(1, 20):
+        acts += core.check([rd("A-BIGOPEN", None, k)], st)
+    assert [(a.rule_id, a.action) for a in acts] == [("SR-DATA-LOSS", SafetyActionKind.ALARM_ONLY)]
+    assert acts[0].ts == T0 + timedelta(seconds=5)
+    # far from the limit: no alarm
+    core = RuleSafetyCore(data_loss_s=5)
+    core.check([rd("A-BIGOPEN", 90.0, 0)], st)
+    assert all(not core.check([rd("A-BIGOPEN", None, k)], st) for k in range(1, 20))
 
 
 def test_page11_red_path_acts_before_verify():
