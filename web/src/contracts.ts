@@ -485,7 +485,7 @@ export type WsMessage =
   | { type: "anomaly"; ts: ISODate; data: Anomaly }
   | { type: "safety_action"; ts: ISODate; data: SafetyAction }
   | { type: "event"; ts: ISODate; data: Event }
-  | { type: "alert_card"; ts: ISODate; data: { event_id: string; card: AlertCard } }
+  | { type: "alert_card"; ts: ISODate; data: { event_id: string; card: AlertCard; source?: "detector" | "commander" } }
   | { type: "approval_request"; ts: ISODate; data: ApprovalRequest }
   | { type: "approval_resolved"; ts: ISODate; data: ApprovalRequest }
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }

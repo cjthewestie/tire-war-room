@@ -3,7 +3,7 @@
 Every version is one JSON file `v0001.json` under `root` (data/runtime/schedules/ in the app).
 Exactly one version is ACTIVE. propose() adds a PROPOSED version whose parent is the current
 ACTIVE one; activate() supersedes the old ACTIVE; rollback() re-activates the previous ACTIVE
-(or a named version) and marks the current one ROLLED_BACK. Nothing is ever deleted.
+(or a named, previously active version) and marks the current one ROLLED_BACK. Nothing is ever deleted.
 """
 from __future__ import annotations
 
@@ -100,7 +100,11 @@ class FileScheduleStore:
             return new
 
     def rollback(self, to_version: int | None = None) -> ScheduleVersion:
-        """None = the ACTIVE version before the current one (一鍵回復)."""
+        """None = the ACTIVE version before the current one (一鍵回復).
+
+        Only a version that was ACTIVE before (SUPERSEDED or ROLLED_BACK) can be rolled back to.
+        A PROPOSED or DRAFT version has not passed the gate and approval, so rolling "back" to it
+        would activate an unapproved schedule; that raises ValueError (the API answers 409)."""
         with self._lock:
             cur = self.current()
             if to_version is None:
@@ -111,6 +115,9 @@ class FileScheduleStore:
             target = self.get(to_version)
             if target.version == cur.version:
                 return cur
+            if target.status not in (ScheduleStatus.SUPERSEDED, ScheduleStatus.ROLLED_BACK):
+                raise ValueError(f"version {target.version} is {target.status.value}; rollback only re-activates a "
+                                 "version that was approved and active before (superseded or rolled_back)")
             self._write(cur.model_copy(update={"status": ScheduleStatus.ROLLED_BACK}))
             new = target.model_copy(update={"status": ScheduleStatus.ACTIVE})
             self._write(new)

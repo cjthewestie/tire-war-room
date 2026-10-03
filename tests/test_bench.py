@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -275,11 +276,114 @@ def test_tokens_per_watt_runner(env_fake, tmp_path):
 
 
 def test_unplug_runner_direct(env_fake, tmp_path):
-    out = unplug_test.main(["--runs", "2", "--out-dir", str(tmp_path)])
+    out = unplug_test.main(["--runs", "2", "--watch", "0", "--out-dir", str(tmp_path)])
     v = {x["name"]: x for x in out["verdicts"]}
     assert v["alert_offline"]["passed"] is True
-    assert v["outbound_connections"]["measured"] == out["sockets"]["outbound_connections"]
+    assert v["outbound_connections"]["extra"]["socket_samples"] == out["sockets"]["outbound_connections"]
     assert out["block"]["applied"] is False
+    # no block applied -> socket samples are not evidence of 0 outbound: verdict is None, never True
+    assert v["outbound_connections"]["passed"] is None
+    assert out["egress"]["firewall_dropped_packets"] is None
+
+
+def test_unplug_watch_window_is_fixed(env_fake, tmp_path):
+    out = unplug_test.main(["--runs", "1", "--watch", "1.5", "--out-dir", str(tmp_path)])
+    assert out["watched_for_s"] >= 1.5 and out["sockets"]["samples"] >= 10
+
+
+def _hex4(ip: str, port: int) -> str:
+    import ipaddress as _ip
+    return _ip.IPv4Address(ip).packed[::-1].hex().upper() + f":{port:04X}"
+
+
+def test_linux_proc_reader_uses_the_process_own_netns(tmp_path):
+    """Container sockets live in /proc/<pid>/net/tcp of that pid's namespace, not the host /proc/net/tcp."""
+    pid = 4242
+    fd = tmp_path / str(pid) / "fd"
+    fd.mkdir(parents=True)
+    os.symlink("socket:[111]", fd / "3")
+    os.symlink("socket:[222]", fd / "4")
+    os.symlink("/dev/null", fd / "5")
+    net = tmp_path / str(pid) / "net"
+    net.mkdir()
+    hdr = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n"
+    rows = [
+        f"   0: {_hex4('0.0.0.0', 6333)} {_hex4('0.0.0.0', 0)} 0A 00000000:00000000 00:00000000 00000000  1000 0 111",
+        f"   1: {_hex4('172.18.0.3', 51000)} {_hex4('140.82.112.3', 443)} 02 00000000:00000000 00:00000000 00000000  1000 0 222",
+        f"   2: {_hex4('172.18.0.3', 51001)} {_hex4('8.8.8.8', 53)} 01 00000000:00000000 00:00000000 00000000  1000 0 999",
+    ]
+    (net / "tcp").write_text(hdr + "\n".join(rows) + "\n")
+    six = "0000000000000000FFFF00000100000A"          # ::ffff:10.0.0.1, 4 little-endian words
+    (net / "tcp6").write_text(hdr + f"   0: {six}:1F90 {'0' * 32}:0000 0A 0:0 0:0 0 0 0 333\n")
+    conns = unplug_test.linux_inet_conns(pid, proc=tmp_path)
+    assert {(c["lport"], c["status"]) for c in conns} == {(6333, "LISTEN"), (51000, "SYN_SENT")}
+    out = [c for c in conns if c["rip"] and unplug_test.is_outbound(c["rip"])]
+    assert out == [{"proto": "tcp", "lip": "172.18.0.3", "lport": 51000, "rip": "140.82.112.3", "rport": 443,
+                    "status": "SYN_SENT"}]                # inode 999 belongs to another process: ignored
+    assert unplug_test.listen_ports(conns) == {6333}
+    assert unplug_test._hex_addr(f"{six}:1F90") == ("::ffff:10.0.0.1", 8080)
+
+
+def test_firewall_and_conntrack_parsers():
+    nft = "table inet warroom_offline {\n\tcounter dropped_egress {\n\t\tpackets 3 bytes 180\n\t}\n}"
+    assert unplug_test.parse_nft_counter(nft) == {"packets": 3, "bytes": 180}
+    assert unplug_test.parse_nft_counter("Error: No such file") is None
+    pf = ("pass out quick to <lan> flags S/SA keep state\n"
+          "  [ Evaluations: 100       Packets: 50        Bytes: 4000        States: 2     ]\n"
+          "block drop out log quick all\n"
+          "  [ Evaluations: 30        Packets: 7         Bytes: 420         States: 0     ]\n")
+    assert unplug_test.parse_pf_block_packets(pf) == 7
+    assert unplug_test.parse_pf_block_packets("") is None
+    ct = ("tcp      6 117 SYN_SENT src=172.18.0.3 dst=140.82.112.3 sport=51000 dport=443 [UNREPLIED] "
+          "src=140.82.112.3 dst=192.168.1.5 sport=443 dport=51000 mark=0 use=1\n"
+          "udp      17 29 src=192.168.1.5 dst=192.168.1.1 sport=5353 dport=53 src=192.168.1.1 dst=192.168.1.5\n")
+    assert unplug_test.parse_conntrack(ct) == {("tcp", "140.82.112.3", 443)}
+
+
+def _unplug_out(applied, socks=0, dropped=None, flows=None, app=None):
+    return {"block": {"applied": applied}, "sockets": {"outbound_connections": socks},
+            "egress": {"firewall_dropped_packets": dropped, "conntrack_available": flows is not None,
+                       "conntrack_outbound_flows": [{}] * (flows or 0)},
+            "internet_reachable_during_test": not applied, "app": app or {}}
+
+
+def test_unplug_verdicts_use_firewall_evidence_and_commander_card():
+    v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(False), 0.5, False)}
+    assert v["outbound_connections"]["passed"] is None and "internet_blocked" not in v
+    v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(True, dropped=0, flows=0), 0.5, False)}
+    assert v["outbound_connections"]["passed"] is True and v["internet_blocked"]["passed"] is True
+    v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(True, dropped=4, flows=0), 0.5, False)}
+    assert v["outbound_connections"]["passed"] is False and v["outbound_connections"]["measured"] == 4
+    v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(True, dropped=None), 0.5, False)}
+    assert v["outbound_connections"]["passed"] is None
+    # app path: the 2 s target is judged on the commander card; placeholder kept as extra; TTFT from audit
+    app = {"placeholder_after_anomaly_s": 0.017, "alert_after_anomaly_s": 10.1, "source_flag_present": True,
+           "commander_call": {"mode": "llm", "ttft_ms": 3193, "total_ms": 10118}}
+    v = {x["name"]: x for x in unplug_test.verdicts(_unplug_out(False, app=app), 10.1, True)}
+    assert v["alert_offline"]["passed"] is False and v["alert_offline"]["extra"]["placeholder_after_anomaly_s"] == 0.017
+    assert v["commander_ttft"]["measured"] == 3.193 and v["commander_ttft"]["passed"] is False
+
+
+def test_card_source():
+    assert unplug_test.card_source({"source": "detector"}, 3) == "detector"
+    assert unplug_test.card_source({"source": "commander"}, 0) == "commander"
+    assert unplug_test.card_source({}, 0) == "detector" and unplug_test.card_source({}, 1) == "commander"
+
+
+async def test_state_machine_tags_alert_card_source(tmp_path):
+    """The instant detector placeholder and the commander's card are told apart on /ws (source flag)."""
+    from tests.test_agent import auto_approve, make_sm, page11_anomaly
+    from warroom.contracts import WsType
+    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path)
+    sup = asyncio.create_task(auto_approve(approvals, 3))
+    try:
+        await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
+    except Exception:  # noqa: BLE001 - only the published cards matter here
+        pass
+    sup.cancel()
+    cards = [m.data for m in sm.bus.history if m.type is WsType.ALERT_CARD]
+    assert cards[0]["source"] == "detector" and cards[0]["card"]["title"].endswith("異常")
+    assert any(c["source"] == "commander" for c in cards[1:])
 
 
 def test_report_builds_table(env_fake, tmp_path):

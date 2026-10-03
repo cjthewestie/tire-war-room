@@ -960,7 +960,7 @@ class WsType(StrEnum):
     ANOMALY = "anomaly"                 # data: Anomaly
     SAFETY_ACTION = "safety_action"     # data: SafetyAction
     EVENT = "event"                     # data: Event (on every state change)
-    ALERT_CARD = "alert_card"           # data: {"event_id": str, "card": AlertCard}
+    ALERT_CARD = "alert_card"           # data: {"event_id": str, "card": AlertCard, "source": "detector"|"commander"}
     APPROVAL_REQUEST = "approval_request"   # data: ApprovalRequest
     APPROVAL_RESOLVED = "approval_resolved" # data: ApprovalRequest (with decision)
     SCHEDULE = "schedule"               # data: ScheduleVersion

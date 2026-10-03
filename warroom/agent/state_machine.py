@@ -345,14 +345,16 @@ class StateMachine:
         self._note(ev, "事件偵測", f"[工具] {a.message} → 喚醒指揮官", "tool", ts=a.ts)
         # Instant card from detector data (no LLM) so the screen shows something at once; the
         # commander's card replaces it as soon as it streams in.
-        self._set_alert(ev, AlertCard(title=f"{machine_label(a.machine_id)}異常", summary=a.message))
+        self._set_alert(ev, AlertCard(title=f"{machine_label(a.machine_id)}異常", summary=a.message),
+                        source="detector")
         self._set_status(a.machine_id, MachineStatus.ALARM, a.message)
         self._safety_status_note(ev)
         return ev
 
-    def _set_alert(self, ev: Event, card: AlertCard) -> None:
+    def _set_alert(self, ev: Event, card: AlertCard, source: str = "commander") -> None:
+        """source: "detector" = instant no-LLM placeholder, "commander" = the LLM-written card (page 9 target)."""
         ev.alert_card = card
-        self._publish(WsType.ALERT_CARD, {"event_id": ev.id, "card": card.model_dump(mode="json")})
+        self._publish(WsType.ALERT_CARD, {"event_id": ev.id, "card": card.model_dump(mode="json"), "source": source})
 
     def _safety_status_note(self, ev: Event) -> None:
         """Report what the deterministic safety core is doing for this machine (it acts on its own)."""
