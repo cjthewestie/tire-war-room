@@ -10,8 +10,16 @@
 #   KV_DTYPE=fp8 | auto        KV cache dtype
 #   MAX_MODEL_LEN=32768        p.9/p.10: 32k context incl. supervisor dialogue
 #   MAX_NUM_SEQS=4             3 concurrent anomalies + 1 spare
-#   GPU_MEM_UTIL=0.28          fraction of the 128 GB pool vLLM pre-allocates (~36 GB). Page-9 budget for the
-#                              model server is 19+2+4+5 = 30 GB; the model card's 0.85 would take ~109 GB.
+#   GPU_MEM_UTIL=0.23          fraction of the 128 GB pool vLLM pre-allocates (0.23 x 128 = ~29.4 GB). Page-9 budget
+#                              for the model server is 19+2+4+5 = 30 GB; with Qdrant 3 + app 6 + DGX OS 10 the stack
+#                              lands at ~48-49 GB, inside the page-9 36-50 GB band (0.28 gave ~55 GB, outside it).
+#                              The model card's 0.85 would take ~109 GB.
+#                              Real weight sizes (HF API ?blobs=true, 2026-10-03): NVFP4 checkpoint 21.6 GB (page 9
+#                              says 19), DSpark draft 1.3 GB (page 9 says 2) -> ~22.9 GB, leaving ~6.5 GB of the
+#                              fraction for KV + activations + CUDA graphs. KV for 4 x 32k is small (hybrid Mamba:
+#                              only a few attention layers carry KV, fp8), but this is NOT yet measured on a Spark:
+#                              run `bench.memory_check` there with nvidia-smi at MAX_MODEL_LEN=32768 before quoting
+#                              the band. If vLLM reports "not enough KV cache", raise to 0.25 (~32 GB, stack ~51 GB).
 #
 # Sources (read 2026-10-03):
 #   model card + DGX Spark command: https://huggingface.co/nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4
@@ -31,7 +39,7 @@ PREFIX_CACHE="${PREFIX_CACHE:-1}"
 KV_DTYPE="${KV_DTYPE:-fp8}"
 MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
 MAX_NUM_SEQS="${MAX_NUM_SEQS:-4}"
-GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.28}"
+GPU_MEM_UTIL="${GPU_MEM_UTIL:-0.23}"
 PORT="${PORT:-8000}"
 
 NVFP4_CKPT="${NVFP4_CKPT:-nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4}"

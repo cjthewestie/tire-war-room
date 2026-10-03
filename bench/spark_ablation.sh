@@ -26,7 +26,7 @@ wait_up() { for _ in $(seq 1 240); do curl -fsS "$URL/health" >/dev/null 2>&1 &&
 for c in $CONFIGS; do
   read -r q s p k <<<"${CFG[$c]}"
   echo "=== $c: QUANT=$q SPEC=$s PREFIX_CACHE=$p KV_DTYPE=$k"
-  QUANT=$q SPEC=$s PREFIX_CACHE=$p KV_DTYPE=$k GPU_MEM_UTIL=$([[ $q == fp8 ]] && echo 0.45 || echo 0.28) \
+  QUANT=$q SPEC=$s PREFIX_CACHE=$p KV_DTYPE=$k GPU_MEM_UTIL=$([[ $q == fp8 ]] && echo 0.45 || echo 0.23) \
     $COMPOSE up -d --force-recreate vllm
   wait_up || { echo "vllm did not come up for $c" >&2; continue; }
   export BASE_URL="$URL/v1" MODEL=nemotron

@@ -80,6 +80,13 @@ def test_spark_compose_structure():
     assert env["LLM_FALLBACK_TO_MOCK"] == "true"
     assert s["vllm-fp8"]["profiles"] == ["control"]
     assert s["vllm-fp8"]["environment"]["QUANT"] == "fp8" and s["vllm-fp8"]["environment"]["SPEC"] == "off"
+    # control group must not inherit production's :8001 (extends merges port lists)
+    assert s["vllm-fp8"]["ports"] == ["127.0.0.1:8002:8000"]
+    assert s["vllm-fp8"]["environment"]["HF_HUB_OFFLINE"] == "1"
+    # page 9: vLLM fraction + Qdrant + app + DGX OS must stay <= 50 GB of the 128 GB pool
+    util = float(s["vllm"]["environment"]["GPU_MEM_UTIL"].split(":-")[1].rstrip("}"))
+    b = MEMORY_BUDGET_GB
+    assert util * 128 + b["qdrant"] + b["sched_app"] + b["dgx_os"] <= 50
     for svc in ("vllm", "qdrant", "app"):
         assert s[svc]["restart"] == "unless-stopped"
 

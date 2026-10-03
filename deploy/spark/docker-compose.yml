@@ -26,12 +26,12 @@ x-offline-env: &offline-env
   DO_NOT_TRACK: "1"
 
 services:
-  vllm:
+  vllm: &vllm-svc
     image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.28.0}
     # NVIDIA's own Spark build is the fallback if the upstream arm64 image lacks GB10 (sm_121) kernels:
     #   VLLM_IMAGE=nvcr.io/nvidia/vllm:<yy.mm>-py3
     entrypoint: ["/bin/bash", "/opt/warroom/vllm-serve.sh"]
-    environment:
+    environment: &vllm-env
       <<: *offline-env
       QUANT: ${QUANT:-nvfp4}
       SPEC: ${SPEC:-dspark}
@@ -39,7 +39,7 @@ services:
       KV_DTYPE: ${KV_DTYPE:-fp8}
       MAX_MODEL_LEN: ${MAX_MODEL_LEN:-32768}
       MAX_NUM_SEQS: ${MAX_NUM_SEQS:-4}
-      GPU_MEM_UTIL: ${GPU_MEM_UTIL:-0.28}
+      GPU_MEM_UTIL: ${GPU_MEM_UTIL:-0.23}   # ~29.4 GB; budget math in vllm-serve.sh
       HF_HOME: /root/.cache/huggingface
     volumes:
       - ./vllm-serve.sh:/opt/warroom/vllm-serve.sh:ro
@@ -58,12 +58,16 @@ services:
       interval: 10s
       timeout: 5s
       retries: 6
-      start_period: 600s          # first boot loads 19 GB of weights + CUDA graph capture
+      start_period: 600s          # first boot loads ~23 GB of weights (21.6 NVFP4 + 1.3 draft) + CUDA graph capture
 
   vllm-fp8:                       # page-10 control group: FP8, no prefix cache, no speculative decoding
+    # YAML merge (<<), not `extends`: `extends` MERGES port lists, so the control group would also publish the
+    # parent's :8001 and either clash with production or answer on the production port that the watchdog,
+    # preload and bench defaults use. With a YAML merge the `ports` key below replaces the parent's list.
+    <<: *vllm-svc
     profiles: [control]
-    extends: { service: vllm }
     environment:
+      <<: *vllm-env
       QUANT: fp8
       SPEC: "off"
       PREFIX_CACHE: "0"
