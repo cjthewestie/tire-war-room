@@ -560,11 +560,11 @@ class StateMachine:
                 if tool is ToolName.SOLVE_SCHEDULE:      # CP-SAT may take seconds: keep the loop free
                     self.compute_inflight += 1           # the Runtime holds sim time while > 0
                     try:
-                        res = await asyncio.to_thread(self.tools.call, call)
+                        res = await self._invoke(tool, call)
                     finally:
                         self.compute_inflight -= 1
                 else:
-                    res = self.tools.call(call)
+                    res = await self._invoke(tool, call)
             except Exception as e:  # noqa: BLE001 - registry should never raise; be safe anyway
                 res = ToolResult(call_id=call.id, tool=tool, ok=False, error=f"{type(e).__name__}: {e}",
                                  attempt=attempt)
@@ -580,6 +580,17 @@ class StateMachine:
         assert res is not None
         await self._pace(started, model_s)
         return res
+
+    async def _invoke(self, tool: ToolName, call: ToolCall) -> ToolResult:
+        """Never block the loop on a tool: a cold KB / slow Qdrant once froze the Runtime tick (and so
+        safety_pass) for 3 s. Registry.acall awaits read tools off-loop; a registry without acall gets
+        read/compute tools pushed to a thread. Write tools stay on the loop (the bus is loop-bound)."""
+        acall = getattr(self.tools, "acall", None)
+        if acall is not None:
+            return await acall(call)
+        if tool in WRITE_TOOLS:
+            return self.tools.call(call)
+        return await asyncio.to_thread(self.tools.call, call)
 
     # ------------------------------------------------------------------ CLASSIFY / context
     async def _classify_async(self, run: _Run) -> dict[str, Any]:

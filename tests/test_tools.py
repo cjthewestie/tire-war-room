@@ -174,3 +174,98 @@ def test_confirm_rejects_stale_proposal(tmp_path):
     fresh = call(reg, "solve_schedule", cure_overrides_h={"CURE-03": 30.0}, time_limit_s=5)
     assert fresh.ok and store.get(fresh.data["schedule_version"]).parent_version == va
     assert call(reg, "confirm_schedule", schedule_version=fresh.data["schedule_version"], reason="rebased").ok
+
+
+# ---------------------------------------------------------------- loop never blocked by a tool
+async def test_acall_does_not_block_event_loop():
+    """A slow read tool (cold KB) awaited via acall must leave the loop free (red path < 0.2 s)."""
+    import asyncio
+    import time
+
+    from warroom.contracts import SopHit
+
+    class SlowKB:
+        def search(self, query, k=3):
+            time.sleep(0.8)
+            return [SopHit(sop_id="SOP-X", title="t", source="x.md", text="x", score=1.0)]
+
+        def ingest(self):
+            return 0
+
+    reg = build_registry(ToolContext(kb=SlowKB()))
+    gaps: list[float] = []
+    stop = False
+
+    async def ticker():
+        last = time.perf_counter()
+        while not stop:
+            await asyncio.sleep(0.01)
+            now = time.perf_counter()
+            gaps.append(now - last)
+            last = now
+
+    t = asyncio.create_task(ticker())
+    res = await reg.acall(ToolCall(id="slow", tool=ToolName.SOP_SEARCH, args={"query": "硫化中斷"}))
+    stop = True
+    await t
+    assert res.ok, res.error
+    assert res.duration_ms >= 700
+    assert max(gaps) < 0.2, f"loop blocked {max(gaps):.3f} s"
+
+
+async def test_acall_timeout_and_errors_never_raise():
+    import time
+
+    from warroom.contracts import ToolSpec
+    reg = build_registry(ToolContext())
+    spec = TOOL_SPECS[ToolName.SOP_SEARCH].model_copy(update={"timeout_s": 0.2})
+    assert isinstance(spec, ToolSpec)
+    reg.register(spec, lambda ctx, args: time.sleep(1.0) or {})
+    res = await reg.acall(ToolCall(id="to", tool=ToolName.SOP_SEARCH, args={"query": "x"}))
+    assert not res.ok and "timeout" in (res.error or "")
+    bad = await reg.acall(ToolCall(id="bad", tool=ToolName.CURE_FORMULA, args={"nope": 1}))
+    assert not bad.ok and bad.error
+
+
+async def test_runtime_tick_gap_stays_under_red_path_target_with_cold_kb(tmp_path):
+    """Page 9: safety path < 0.2 s. A real press-7 event hitting a slow (cold) SOP search must not
+    freeze the Runtime tick, so safety_pass keeps running while the event task waits on the KB."""
+    import asyncio
+    import time
+
+    from warroom.api.runtime import Runtime
+    from warroom.config import Settings
+
+    rt = Runtime(Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched",
+                          qdrant_path=tmp_path / "qdrant", scenario="press7_temp_drop", llm_mode="mock"),
+                 run_loop=False)
+    if "tools" in rt.degraded or "state_machine" in rt.degraded:
+        pytest.skip(f"degraded: {rt.degraded}")
+    from warroom.contracts import SopHit
+    hits: list[float] = []
+
+    class SlowKB:
+        def search(self, query, k=3):
+            t0 = time.perf_counter()
+            time.sleep(1.0)
+            hits.append(time.perf_counter() - t0)
+            # no real embedder here: loading fastembed/ONNX in a thread holds the GIL ~0.4 s, which
+            # is a separate (boot-time) issue; this test pins the await-blocking bug only
+            return [SopHit(sop_id="SOP-CI-03", title="硫化中斷處置", source="x.md", text="停用", score=0.9)]
+
+        def ingest(self):
+            return 0
+
+    rt.c.tools.ctx.kb = SlowKB()
+    max_gap = 0.0
+    last = time.perf_counter()
+    for _ in range(400):                       # past the 02:14:00 detection + commander steps
+        await rt.tick(1.0, publish=False, hold_compute=False)
+        await asyncio.sleep(0.005)
+        now = time.perf_counter()
+        max_gap = max(max_gap, now - last)
+        last = now
+    for task in list(rt._tasks.values()):
+        task.cancel()
+    assert hits, "event never reached sop_search"
+    assert max_gap < 0.2, f"tick loop blocked {max_gap:.3f} s while sop_search ran"
