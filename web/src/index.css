@@ -1,0 +1,24 @@
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --panel-2: #1f232c;
+  --ink: #e8eaed;
+  --ink-dim: #9aa0a6;
+  --accent: #76b900;      /* NVIDIA green */
+  --alarm: #ff6b5e;
+  --warn: #f2b33d;
+  --line-a: #8bc34a;
+  --line-b: #64b5f6;
+  --line-c: #b39ddb;
+  --line-d: #ff8a50;
+  font-family: "Noto Sans TC", "PingFang TC", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: var(--bg); }
+.shell { padding: 16px; }
+.shell header { display: flex; gap: 12px; align-items: center; }
+.chip { padding: 2px 10px; border-radius: 999px; font-size: 14px; }
+.chip.ok { background: #1f3a10; color: var(--accent); }
+.chip.bad { background: #3a1513; color: var(--alarm); }
