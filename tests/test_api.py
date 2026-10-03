@@ -371,3 +371,26 @@ async def test_real_press7_end_to_end(tmp_path):
         assert rt.audit.verify_chain()
     finally:
         await rt.stop()
+
+
+async def test_sim_sleep_wakes_on_exact_sim_second(tmp_path):
+    rt = Runtime(_settings(tmp_path), use_real=False, run_loop=False)
+    t0 = rt.now()
+    woke = []
+
+    async def sleeper():
+        await rt.sim_sleep(30)
+        woke.append((rt.now() - t0).total_seconds())
+    task = asyncio.create_task(sleeper())
+    await asyncio.sleep(0)
+    await rt.run_seconds(29)
+    assert woke == []
+    await rt.run_seconds(5)
+    await task
+    assert woke == [30.0]
+    # a scenario reload cancels pending sleepers instead of leaking them
+    t2 = asyncio.create_task(rt.sim_sleep(1000))
+    await asyncio.sleep(0)
+    await rt.load_scenario(ScenarioName.NORMAL)
+    with pytest.raises(asyncio.CancelledError):
+        await t2

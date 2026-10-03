@@ -486,7 +486,23 @@ class MinimalStateMachine:
             self.bus.publish(WsType.EVENT, ev)
         return ev
 
+    def on_safety_action(self, action: SafetyAction) -> None:
+        open_ev = next((e for e in self._events.values() if e.machine_id == action.machine_id
+                        and e.state not in (EventState.CLOSED, EventState.SAFE_STOP)), None)
+        if self.audit:
+            self.audit.append(AuditKind.SAFETY_ACTION, "safety", action.model_dump(mode="json"),
+                              open_ev.id if open_ev else None)
+        if open_ev is not None:
+            open_ev.safety_actions.append(action)
+
     async def handle(self, anomaly: Anomaly) -> Event:
+        open_ev = next((e for e in self._events.values() if e.machine_id == anomaly.machine_id
+                        and e.state not in (EventState.CLOSED, EventState.SAFE_STOP)), None)
+        if self.audit:
+            self.audit.append(AuditKind.ANOMALY, "detector", anomaly.model_dump(mode="json"),
+                              open_ev.id if open_ev else None)
+        if open_ev is not None:
+            return open_ev
         ts = self.clock.now() if self.clock else anomaly.ts
         ev = Event(id=f"EV-{ts:%Y%m%d-%H%M%S}-{anomaly.machine_id}", opened_at=ts, machine_id=anomaly.machine_id,
                    anomaly=anomaly, state=EventState.DETECTED,

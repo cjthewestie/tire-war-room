@@ -15,12 +15,15 @@ warroom.api.fallbacks is used and the reason recorded in `Runtime.degraded` (GET
 from __future__ import annotations
 
 import asyncio
+import heapq
+import inspect
+import itertools
 import logging
 import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from warroom import factory as F
@@ -156,7 +159,7 @@ class ComponentBuilder:
         return self._t("capacity", real, lambda: FB.fallback_capacity_report)
 
     # --- per run ---
-    def build(self, scenario: ScenarioName) -> Components:
+    def build(self, scenario: ScenarioName, sleep: Callable[[float], Any] | None = None) -> Components:
         for k in self.PER_RUN:
             self.degraded.pop(k, None)
         clock, bus = self.clock, self.bus
@@ -202,7 +205,11 @@ class ComponentBuilder:
             if None in (self.commander, tools, gate):
                 raise RuntimeError("commander/tools/gate unavailable")
             from warroom.agent import StateMachine
-            return StateMachine(self.commander, tools, gate, approvals, self.audit, sim=sim, bus=bus, clock=clock)
+            extra = {"store": store, "sleep": sleep, "approval_timeout_s": self.s.approval_timeout_s}
+            params = inspect.signature(StateMachine).parameters
+            extra = {k: v for k, v in extra.items() if k in params and v is not None}
+            return StateMachine(self.commander, tools, gate, approvals, self.audit, sim=sim, bus=bus, clock=clock,
+                                **extra)
         sm = self._t("state_machine", sm_real,
                      lambda: FB.MinimalStateMachine(audit=self.audit, bus=bus, clock=clock))
 
@@ -244,7 +251,9 @@ class Runtime:
             self.scenario = ScenarioName(self.settings.scenario)
         except ValueError:
             self.scenario = ScenarioName.NORMAL
-        self.c: Components = components or self.builder.build(self.scenario)
+        self._sleepers: list[tuple[datetime, int, asyncio.Future]] = []
+        self._sleeper_seq = itertools.count()
+        self.c: Components = components or self.builder.build(self.scenario, sleep=self.sim_sleep)
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -355,12 +364,17 @@ class Runtime:
             self.sim.apply_safety_action(a)
             self.safety_log.append(a)
             del self.safety_log[:-100]
-            self.audit.append(AuditKind.SAFETY_ACTION, "safety", a.model_dump(mode="json"),
-                              self._open_event_id(a.machine_id))
+            on_safety = getattr(self.state_machine, "on_safety_action", None)
+            if callable(on_safety):           # state machine audits it and attaches it to the open event
+                on_safety(a)
+            else:
+                self.audit.append(AuditKind.SAFETY_ACTION, "safety", a.model_dump(mode="json"),
+                                  self._open_event_id(a.machine_id))
             self.bus.publish(WsType.SAFETY_ACTION, a)
         self._track_baseline(readings)
         for an in self.c.detector.ingest(readings):
             self._on_anomaly(an)
+        self._wake_sleepers()
         if publish:
             self._publish_periodic(force=True)
         await asyncio.sleep(0)                   # let event tasks progress between sim seconds
@@ -376,15 +390,39 @@ class Runtime:
         self.anomalies.append(an)
         del self.anomalies[:-100]
         self.bus.publish(WsType.ANOMALY, an)
+        if callable(getattr(self.state_machine, "on_safety_action", None)):
+            # full state machine: it audits the anomaly and attaches repeats to the open event itself
+            self._spawn(an)
+            return
         open_id = self._open_event_id(an.machine_id)
         if open_id:
             self.audit.append(AuditKind.ANOMALY, "detector",
                               {**an.model_dump(mode="json"), "note": "attached to open event, no new wake"}, open_id)
             return
         self.audit.append(AuditKind.ANOMALY, "detector", an.model_dump(mode="json"))
+        self._spawn(an)
+
+    def _spawn(self, an: Anomaly) -> None:
         task = asyncio.create_task(self.state_machine.handle(an), name=f"event-{an.id}")
         self._tasks[an.id] = task
         task.add_done_callback(lambda t, aid=an.id: self._event_done(aid, t))
+
+    async def sim_sleep(self, seconds: float) -> None:
+        """Sleep in SIM time: resolves on the first tick at or after now+seconds (paused = no progress).
+        Handed to the state machine so VERIFY reads happen at exact sim seconds at any speed."""
+        if seconds <= 0:
+            await asyncio.sleep(0)
+            return
+        fut = asyncio.get_running_loop().create_future()
+        heapq.heappush(self._sleepers, (self.clock.now() + timedelta(seconds=seconds), next(self._sleeper_seq), fut))
+        await fut
+
+    def _wake_sleepers(self, cancel: bool = False) -> None:
+        now = self.clock.now()
+        while self._sleepers and (cancel or self._sleepers[0][0] <= now):
+            _, _, fut = heapq.heappop(self._sleepers)
+            if not fut.done():
+                fut.cancel() if cancel else fut.set_result(None)
 
     def _event_done(self, anomaly_id: str, t: asyncio.Task) -> None:
         if t.cancelled():
@@ -430,8 +468,9 @@ class Runtime:
         if self.builder is None:
             raise RuntimeError("runtime was built from injected components; cannot rebuild")
         await self._cancel_events()
+        self._wake_sleepers(cancel=True)
         self.scenario = ScenarioName(name)
-        self.c = self.builder.build(self.scenario)
+        self.c = self.builder.build(self.scenario, sleep=self.sim_sleep)
         self.safety_log.clear()
         self.anomalies.clear()
         self._baseline.clear()
