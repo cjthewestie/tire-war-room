@@ -56,14 +56,14 @@ curl -s 127.0.0.1:8000/api/health
 
 完整台詞與點擊順序：[`docs/DEMO-SCRIPT.md`](docs/DEMO-SCRIPT.md)。精簡版：
 
-1. 戰情室點 **展示 → 7 號硫化機溫降 (p.11)**，速度 **10x**。
+1. 戰情室在展示列點 **7 號硫化機溫降（p.11）**，速度 **10×**。用真模型時先暖機（第一次載入約 82 秒），見 DEMO-SCRIPT。
 2. [02:14:00] 事件偵測：7 號 128→122°C，預測穩定 122±1 → 喚醒指揮官。[02:14:01] 安全核心：仍在 120–130，不停機。
 3. 指揮官假設 H1 蒸汽壓不足；拆 S1 硫化公式、S2 訂單班表 → S3 排程 → S4 確認（需核准）→ S5 通知；預期 30 分內 ≥121°C。
 4. S1：122°C 總需 **36.5 h（+8.5 h）**；S2：#A-311 交期 3 天後、10/03 夜班缺 1 人；S3：**#A-311 移到 9 號機**、夜班從 2 線調 1 人，交期全部滿足。
 5. 手機跳出第一輪核准（R3）→ 選 **B 從 2 線調 1 人** → 核准，寫入稽核日誌。
-6. 切 **60x**。[02:28:50] 掉破 120°C，安全核心直接扣模（不等 AI）。[02:31:00] 程式驗證 119.5°C → **H1 不成立**。
+6. 切 **60×**。[02:28:50] 掉破 120°C，安全核心直接扣模（不等 AI）。[02:31:00] 程式驗證 119.5°C → **H1 不成立**。
 7. 指揮官換 **H2 持續洩壓或感測器漂移**，對照同管線 6、8 號機，查 SOP〈硫化中斷處置〉→ 7 號機停用、重排。
-8. 手機第二輪「7 號機停用，重排中」→ 主管改選 **A 夜班加班** → 核准；決定與理由寫入紀錄，排程 v3 生效，舊版可一鍵回復。
+8. 手機第二輪「CURE-07溫度下降，需重排」（將做：7 號機停用）→ 主管改選 **A 夜班加班** → 核准；決定與理由寫入紀錄，排程 v3 生效，舊版可一鍵回復。
 9. **拔網路線**：在 Spark 上拔 WAN 線，戰情室照常、手機走廠內 LAN；Mac 上點 **WAN 斷 / LAN 斷** 示範第 9 頁三層離線（LAN 斷 → 現場觸控螢幕 + 警示燈）。正式判定：`sudo -E bench/py.sh -m bench.unplug_test --unplug <wan介面> --app-url http://127.0.0.1:8000`。
 10. 切到 **排程與人力** 分頁看重排後的甘特圖。
 
@@ -86,7 +86,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Node.js 20+. The first run downloads 
 ./start.sh ollama     # Ollama mode: Nemotron 3.5 Lightning NVFP4 (run deploy/mac/dev.sh pull once, ~23 GB)
 ```
 
-Open `http://localhost:8000` (dashboard) and `http://localhost:8000/phone` (supervisor phone). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT`, `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
+Open `http://localhost:8000` (dashboard) and `http://localhost:8000/phone` (supervisor phone). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
 
 Manual steps, if you prefer: `uv sync` · `cd web && npm ci && npm run build` · `uv run python -m warroom.api serve`. Tests: `uv run pytest -q`. Headless timeline: `uv run python -m warroom.api demo --scenario press7_temp_drop --seconds 1200 --auto-approve`.
 
