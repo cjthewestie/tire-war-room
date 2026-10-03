@@ -8,8 +8,10 @@ restart it (its fake compose sends the SIGTERM), start it again and check that n
 """
 from __future__ import annotations
 
+import http.server
 import json
 import os
+import threading
 import signal
 import socket
 import subprocess
@@ -29,6 +31,25 @@ def _port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+class _Ok(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):  # noqa: N802
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"ok")
+
+    def log_message(self, *a):
+        pass
+
+
+@pytest.fixture
+def healthy_url():
+    """Stand-in for vLLM and Qdrant: always healthy, so the watchdog restarts only the app."""
+    srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Ok)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}/health"
+    srv.shutdown()
 
 
 def _get(base: str, path: str):
@@ -80,7 +101,7 @@ def _stop(p: subprocess.Popen) -> None:
 
 
 @pytest.mark.timeout(240)
-def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path):
+def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path, healthy_url):
     port = _port()
     base = f"http://127.0.0.1:{port}"
     p1 = _serve(tmp_path, port, "serve1.log")
@@ -116,8 +137,8 @@ echo "$@" >> {tmp_path}/calls
 kill -TERM {p1.pid}
 """)
         fake.chmod(0o755)
-        env = {**os.environ, "APP_URL": f"http://127.0.0.1:{_port()}/api/health", "LLM_URL": base + "/api/health",
-               "QDRANT_URL": base + "/api/health", "FAIL_LIMIT": "1", "STATE_DIR": str(tmp_path / "wd"),
+        env = {**os.environ, "APP_URL": f"http://127.0.0.1:{_port()}/api/health", "LLM_URL": healthy_url,
+               "QDRANT_URL": healthy_url, "FAIL_LIMIT": "1", "STATE_DIR": str(tmp_path / "wd"),
                "COMPOSE": str(fake), "LOG": str(tmp_path / "wd.log"), "LLM_GRACE_S": "0",
                "APP_SCHEDULE_DIR": str(tmp_path / "sched")}
         subprocess.run(["bash", str(WATCHDOG)], env=env, timeout=60, check=False)
