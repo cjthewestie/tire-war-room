@@ -51,6 +51,7 @@ from warroom.factory import (
     COMPOUND_STOP_C,
     CURATIVE_STOP_C,
     CURE_HOURS,
+    CURE_PRESS_IDS,
     CURE_TEMP_MAX_C,
     CURE_TEMP_MIN_C,
     CURE_TEMP_NOMINAL_C,
@@ -375,6 +376,10 @@ class MockCommander:
             return self._sop_path(req, hid, rejected_ids)
         if len(req.rejected) >= 2:
             return self._safe_stop(req, hid, rejected_ids, "連續兩個假設不成立")
+        if a.kind is AnomalyKind.SCHEDULE_SLIP:      # page 6 box 4: plan vs actual
+            if req.phase == "replan":
+                return self._safe_stop(req, hid, rejected_ids, "重排未成立，維持原排程")
+            return self._schedule_slip(req, hid)
         if mdef is not None and mdef.line is Line.CURE:
             if "steam_pressure_low" not in rejected_codes and req.phase == "plan":
                 return self._press_h1(req, hid)
@@ -536,6 +541,32 @@ class MockCommander:
             alert_card=AlertCard(title=f"{lbl}降溫無效，建議暫停投料",
                                  summary="放慢投料後膠溫仍上升；疑冷卻水路故障，建議暫停投料（需核准）。"),
             rationale="H1 處置後未達預期，升級為暫停投料。",
+        )
+
+    # page 6 box 4: a late de-mold / mold-in or WIP behind T -> re-solve from the actual state
+    def _schedule_slip(self, req: CommanderRequest, hid: str) -> CommanderPlan:
+        a = req.anomaly
+        mid, lbl = a.machine_id, machine_label(a.machine_id)
+        steps = [
+            PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查受影響訂單交期與班表缺口",
+                     args={"press_ids": [mid]} if mid in CURE_PRESS_IDS else {}),
+            PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"],
+                     purpose="以實際進度重排，保交期", args={"time_limit_s": 10.0}),
+            PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認新排程（需主管核准）",
+                     args={"schedule_version": "$S2.schedule_version",
+                           "reason": f"{lbl}排程延誤 {_fmt(a.value)} 分，依實際進度重排"}),
+            PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S3"], purpose="通知相關組別新排程",
+                     args={"teams": [TeamId.CURING.value, TeamId.BOND.value, TeamId.BODY.value],
+                           "kind": NotifyKind.INFO.value, "machine_id": mid,
+                           "message": f"{lbl}排程延誤，已依實際進度重排，請依新排程作業"}),
+        ]
+        return CommanderPlan(
+            goal=f"{lbl}排程延誤 {_fmt(a.value)} 分，交期不能延誤",
+            hypothesis=Hypothesis(id=hid, statement="作業落後計畫，依實際進度重排可保交期",
+                                  cause_code="schedule_slip", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+            steps=steps,
+            alert_card=AlertCard(title=f"{lbl}排程延誤 {_fmt(a.value)} 分", summary=a.message[:80]),
+            rationale="計畫與實際不符（每分鐘比對）；排程數字由求解器產生，新排程需核准。",
         )
 
     def _generic(self, req: CommanderRequest, hid: str) -> CommanderPlan:

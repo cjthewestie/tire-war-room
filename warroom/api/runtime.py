@@ -69,7 +69,7 @@ CAUSE_TEXT = {
 }
 KIND_TEXT = {"overheat": "溫度過高", "temp_drop": "溫度下降", "pressure_low": "壓力偏低",
              "water_flow_low": "水流偏低", "steam_low": "蒸汽壓偏低", "sensor_fault": "感測器異常",
-             "multi_machine": "多機同時異常"}
+             "multi_machine": "多機同時異常", "schedule_slip": "排程延誤"}
 
 
 @dataclass
@@ -191,6 +191,9 @@ class ComponentBuilder:
         safety = self._t("safety", safety_real, lambda: FB.FallbackSafetyCore(clock=clock))
 
         store = self._store(sim, scenario, fresh_store)
+        attach_plan = getattr(detector, "attach_plan", None)
+        if callable(attach_plan):               # page 6: compare plan with actual every minute
+            attach_plan(store=store, sim=sim)
 
         def appr_real():
             from warroom.agent import ApprovalBrokerImpl

@@ -108,6 +108,7 @@ class AnomalyKind(StrEnum):
     STEAM_LOW = "steam_low"
     SENSOR_FAULT = "sensor_fault"
     MULTI_MACHINE = "multi_machine"  # several machines on one header/line at once
+    SCHEDULE_SLIP = "schedule_slip"  # page 6 box 4: plan vs actual (late de-mold / mold-in / WIP behind T)
 
 
 class Severity(StrEnum):

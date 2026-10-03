@@ -10,6 +10,10 @@ time-series model; here it is plain numpy and runs in well under a millisecond p
 Bad data (range / jump / stale / redundant-sensor mismatch / missing) is dropped per channel
 before it reaches the baseline or the trigger, so it can never wake the commander.
 One Anomaly per machine episode until reset(machine_id) or 5 min back to normal.
+
+Plan vs actual (page 6, box 4): after attach_plan(store, sim) every ingest also compares the
+active schedule with the plant once per sim minute (plan_check.PlanWatcher) and returns a
+SCHEDULE_SLIP anomaly for a late de-mold, a late mold-in or WIP behind its back-propagated T.
 """
 from __future__ import annotations
 
@@ -32,6 +36,7 @@ from warroom.contracts import (
     SensorReading,
     Severity,
 )
+from warroom.detect.plan_check import PlanWatcher
 from warroom.detect.validate import JUMP_PER_S, REDUNDANT_TOL_C, check_channel, validate_reading
 from warroom.factory import (
     COMPOUND_STOP_C,
@@ -220,6 +225,37 @@ class StreamDetector:
         self.last_quality: dict[str, DataQuality] = {}
         self.bad_data_log: deque = deque(maxlen=500)      # (ts, machine_id, channel, quality)
         self.anomalies: list[Anomaly] = []
+        self.plan_watcher = PlanWatcher()
+        self._plan_store = None
+        self._plan_sim = None
+
+    # ------------------------------------------------------------------ plan vs actual (page 6)
+    def attach_plan(self, store=None, sim=None) -> None:
+        """Enable the once-per-minute plan-vs-actual check: store.current().schedule is the plan,
+        sim.machines() / sim.semi_finished() the actual."""
+        self._plan_store, self._plan_sim = store, sim
+
+    def check_plan(self, now: datetime | None = None, *, force: bool = False) -> list[Anomaly]:
+        """Compare plan with actual if a sim minute has passed (or force). Returns new slips."""
+        if self._plan_sim is None:
+            return []
+        if now is None:
+            now = self.clock.now() if self.clock is not None else self._plan_sim.now()
+        if not force and not self.plan_watcher.due(now):
+            return []
+        schedule = None
+        if self._plan_store is not None:
+            try:
+                cur = self._plan_store.current()
+                schedule = getattr(cur, "schedule", cur)
+            except Exception:  # noqa: BLE001 - no active schedule yet: check the plant-side slips only
+                schedule = None
+        semi = None
+        try:
+            semi = self._plan_sim.semi_finished()
+        except Exception:  # noqa: BLE001
+            semi = None
+        return self.plan_watcher.check(now, schedule, self._plan_sim.machines(), semi)
 
     def _track(self, mid: str) -> _Track:
         tr = self._tracks.get(mid)
@@ -547,6 +583,8 @@ class StreamDetector:
             if a is not None:
                 out.append(a)
         out = self._merge_headers(out)
+        if self._plan_sim is not None and readings:
+            out += self.check_plan(max(r.ts for r in readings))
         self.anomalies.extend(out)
         return out
 
@@ -587,6 +625,7 @@ class StreamDetector:
         valid data (the new normal); with None every track starts fresh."""
         if machine_id is None:
             self._tracks.clear()
+            self.plan_watcher.reset()
             return
         tr = self._tracks.get(machine_id)
         if tr is None:
