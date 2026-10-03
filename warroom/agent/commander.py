@@ -191,10 +191,10 @@ def _strip_fences(text: str) -> str:
     return text[a:b + 1] if a >= 0 and b > a else text
 
 
-def parse_plan(text: str) -> tuple[CommanderPlan, list[dict[str, Any]]]:
-    """Validate model output. Steps naming a tool outside the allow-list are removed and returned
-    as `intercepted` (the state machine writes them to the audit log). Raises on anything else."""
-    raw = json.loads(_strip_fences(text))
+def split_intercepted(raw: Any) -> list[dict[str, Any]]:
+    """Remove (in place) and return the steps of a decoded plan that name a tool outside the
+    allow-list. Runs BEFORE schema validation, so an out-of-scope step is caught and audited even
+    when the rest of the plan is malformed and the call falls back to the mock (page 7)."""
     intercepted: list[dict[str, Any]] = []
     if isinstance(raw, dict) and isinstance(raw.get("steps"), list):
         allowed = {t.value for t in ToolName}
@@ -211,6 +211,29 @@ def parse_plan(text: str) -> tuple[CommanderPlan, list[dict[str, Any]]]:
                             s.setdefault(k, v)
                 keep.append(s)
         raw["steps"] = keep
+    return intercepted
+
+
+_TOOL_FIELD = re.compile(r'"tool"\s*:\s*"([^"\\]{1,80})"')
+
+
+def scan_intercepted(text: str) -> list[dict[str, Any]]:
+    """Best effort for output that is not even JSON (truncated, prose around it): every "tool"
+    field naming something off the allow-list, so it still reaches the audit log."""
+    allowed = {t.value for t in ToolName}
+    return [{"tool": name, "partial": True} for name in dict.fromkeys(_TOOL_FIELD.findall(text or ""))
+            if name not in allowed]
+
+
+def parse_plan(text: str, intercepted_out: list[dict[str, Any]] | None = None
+               ) -> tuple[CommanderPlan, list[dict[str, Any]]]:
+    """Validate model output. Steps naming a tool outside the allow-list are removed and returned
+    as `intercepted` (the state machine writes them to the audit log). Raises on anything else;
+    pass ``intercepted_out`` to receive the intercepted steps even when validation then raises."""
+    raw = json.loads(_strip_fences(text))
+    intercepted = split_intercepted(raw)
+    if intercepted_out is not None:
+        intercepted_out.extend(intercepted)
     plan = CommanderPlan.model_validate(raw)
     return plan.model_copy(update={"alert_card": clamp_alert_card(plan.alert_card)}), intercepted
 
@@ -279,6 +302,7 @@ class OpenAICommander:
         self.server_kind = detect_server_kind(settings.base_url, probe=http_client is None)
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw: str = ""
+        self.last_error: str | None = None     # why the latest call fell back (None = it did not)
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
         kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req), temperature=0.0,
@@ -299,7 +323,8 @@ class OpenAICommander:
         ttft: float | None = None
         text, usage = "", None
         alert_sent = False
-        self.last_intercepted = []
+        self.last_intercepted, self.last_raw, self.last_error = [], "", None
+        caught: list[dict[str, Any]] = []
         try:
             stream = await self.client.chat.completions.create(**self.request_kwargs(req))
             async for chunk in stream:
@@ -316,7 +341,7 @@ class OpenAICommander:
                         alert_sent = True
                         on_alert(clamp_alert_card(card))
             self.last_raw = text
-            plan, self.last_intercepted = parse_plan(text)
+            plan, self.last_intercepted = parse_plan(text, caught)
             info = LLMCallInfo(mode=LLMMode.LLM, model=self.model, base_url=self.settings.base_url, ttft_ms=ttft,
                                total_ms=(time.perf_counter() - t0) * 1000,
                                prompt_tokens=getattr(usage, "prompt_tokens", None),
@@ -325,6 +350,11 @@ class OpenAICommander:
                 on_alert(plan.alert_card)
             return plan, info
         except Exception as e:
+            self.last_raw = text
+            self.last_error = f"{type(e).__name__}: {e}"[:500]
+            # out-of-scope steps in a plan that was then rejected as a whole are still intercepted
+            # and logged (page 7); with no parseable JSON, scan the raw text for tool names
+            self.last_intercepted = caught or scan_intercepted(text)
             if not self.settings.llm_fallback_to_mock:
                 raise
             plan, _ = await self._fallback.plan(req, on_alert=None if alert_sent else on_alert)
@@ -333,7 +363,6 @@ class OpenAICommander:
                                prompt_tokens=getattr(usage, "prompt_tokens", None),
                                completion_tokens=getattr(usage, "completion_tokens", None),
                                valid_json=False, fell_back_to_mock=True)
-            self.last_error = f"{type(e).__name__}: {e}"[:500]
             return plan, info
 
     async def ping(self) -> bool:

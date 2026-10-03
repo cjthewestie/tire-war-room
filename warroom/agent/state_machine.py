@@ -38,6 +38,7 @@ it audits it (SAFETY_ACTION) and attaches it to the machine's open event.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import itertools
 import json
@@ -105,7 +106,9 @@ from warroom.contracts import (
     ToolResult,
     WsType,
 )
+from warroom.agent.gate import cure_notice_press
 from warroom.factory import (
+    CURE_PRESS_IDS,
     CURE_TEMP_MAX_C,
     CURE_TEMP_MIN_C,
     CURE_TEMP_NOMINAL_C,
@@ -208,7 +211,10 @@ class _Run:
     plan: CommanderPlan | None = None
     plan_at: datetime | None = None
     results: dict[str, ToolResult] = field(default_factory=dict)
+    # False only when a solve of this round came back infeasible (-> replan). It is NOT the gate's
+    # "simulation feasible": that is per write (_sim_ok) and needs a feasible solve covering it.
     feasible: bool = True
+    auto_ids: set[str] = field(default_factory=set)          # writes the gate let through as R1 (auto)
     approvals_made: int = 0
     done: list[str] = field(default_factory=list)            # 已做 (for the phone card)
     executed: list[str] = field(default_factory=list)        # outcome summary
@@ -523,7 +529,9 @@ class StateMachine:
                 change = self._chosen_change(run, chosen)
                 if change is not None:
                     chosen = self._dedupe_staffing(run, chosen, change)
-                    self._amend_schedule_staffing(run, chosen, change, res)
+                # the schedule put in force carries only staffing that was approved and notified:
+                # the option picked here, or what is already in force (never the solver's own pick)
+                self._amend_schedule_staffing(run, chosen, change, res)
                 self._to(ev, EventState.EXECUTE, f"approved by {res.decision.decided_by}")
                 await self._execute(run, chosen, auto_tag=False)
                 if change is not None and not run.round_problems:
@@ -733,13 +741,27 @@ class StateMachine:
             return None
         finally:
             self.compute_inflight -= 1
-        self.audit.append(AuditKind.LLM_CALL, "commander",
-                          {"phase": phase, **info.model_dump(mode="json"), "hypothesis": plan.hypothesis.id,
-                           "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],
-                           "safe_stop": plan.safe_stop, "rationale": plan.rationale}, event_id=ev.id)
+        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json")}
+        if info.fell_back_to_mock:
+            # the model's output was rejected: what runs is the deterministic fallback's plan, and the
+            # record says so (never credit the mock's steps to the model), with why and what it sent
+            raw = str(getattr(self.commander, "last_raw", "") or "")
+            payload.update({"plan_source": "mock_fallback", "steps": [],
+                            "fallback_steps": [s.id for s in plan.steps],
+                            "fallback_hypothesis": plan.hypothesis.id,
+                            "error": getattr(self.commander, "last_error", None),
+                            "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+                            "raw_chars": len(raw), "raw_excerpt": raw[:600]})
+        else:
+            payload.update({"plan_source": "commander", "hypothesis": plan.hypothesis.id,
+                            "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],
+                            "safe_stop": plan.safe_stop, "rationale": plan.rationale})
+        self.audit.append(AuditKind.LLM_CALL, "commander", payload, event_id=ev.id)
         for s in getattr(self.commander, "last_intercepted", None) or []:
             self.audit.append(AuditKind.INTERCEPTED, "commander",
-                              {"step": s, "reason": "tool not on the allow-list (dropped from plan)"}, event_id=ev.id)
+                              {"step": s, "reason": "tool not on the allow-list (dropped from plan)"
+                               + ("; the rest of the model's plan was invalid, fallback plan used"
+                                  if info.fell_back_to_mock else "")}, event_id=ev.id)
         # the repeat check runs on what the commander proposed, before code bounds the expectation
         # (bounding maps every cure-press temperature test onto the same line, so a genuinely new
         # hypothesis would otherwise look like the rejected one)
@@ -1051,11 +1073,14 @@ class StateMachine:
         return None
 
     @staticmethod
-    def _evidence(run: _Run) -> dict[str, Any]:
+    def _evidence(run: _Run, provisional: list[PlanStep] | None = None) -> dict[str, Any]:
         """What THIS event's own tool results support, for the gate: schedule versions a feasible
-        solve produced (confirm_schedule may only activate those) and cure-formula totals per press
+        solve produced (confirm_schedule may only activate those), cure-formula totals per press
         (set_cure_time and solve_schedule.cure_overrides_h may only carry the formula's value for
-        that press, never an AI guess)."""
+        that press, never an AI guess), the event's machine (an R1 notice must be about it) and
+        cure_notice = the cure time an auto notice may quote: an executed set_cure_time of this event
+        (or, with ``provisional``, one awaiting approval in this round, so the notice waits for it)
+        paired with that press's formula extra hours."""
         feasible_versions: list[int] = []
         cure_h: list[float] = []
         by_press: dict[str, list[float]] = {}
@@ -1070,7 +1095,62 @@ class StateMachine:
                 press = run.formula_press.get(sid)
                 if press:
                     by_press.setdefault(press, []).append(float(res.data["total_cure_h"]))
-        return {"feasible_versions": feasible_versions, "cure_formula_h": cure_h, "cure_formula_by_press": by_press}
+        extra_by_press: dict[str, list[tuple[float, float]]] = {}
+        for sid, res in run.results.items():
+            press = run.formula_press.get(sid)
+            if res.ok and res.tool is ToolName.CURE_FORMULA and press and res.data.get("extra_h") is not None \
+                    and res.data.get("total_cure_h") is not None:
+                extra_by_press.setdefault(press, []).append((float(res.data["total_cure_h"]), float(res.data["extra_h"])))
+        by_id = {sr.step.id: sr.step for sr in run.ev.steps}
+        set_steps = [by_id[sid].args for sid, res in run.results.items()
+                     if res.ok and res.tool is ToolName.SET_CURE_TIME and sid in by_id]
+        set_steps += [p.args for p in provisional or [] if p.tool is ToolName.SET_CURE_TIME]
+        cure_notice: dict[str, dict[str, float]] = {}
+        for a in set_steps:
+            press, total = a.get("press_id"), a.get("total_cure_h")
+            if not isinstance(total, (int, float)):
+                continue
+            extra = next((e for t, e in reversed(extra_by_press.get(str(press), [])) if abs(t - float(total)) <= 0.05), None)
+            if extra is not None:
+                cure_notice[str(press)] = {"total_h": float(total), "extra_h": extra}
+        return {"feasible_versions": feasible_versions, "cure_formula_h": cure_h, "cure_formula_by_press": by_press,
+                "event_machine_id": run.ev.machine_id, "cure_notice": cure_notice}
+
+    def _sim_ok(self, run: _Run, step: PlanStep) -> tuple[bool, str]:
+        """Page 5/7: a write passes the gate only when a simulation shows it is feasible. Here that is
+        a feasible solve_schedule of THIS plan round that covers what the write changes:
+          confirm_schedule   the version came from such a solve
+          set_cure_time      the solve had cure_overrides_h for that press at that value
+          machine_out (press) the solve had that press in unavailable_presses
+          overtime/staff_move a feasible solve exists (its staffing options are where they come from)
+        Notices (maintenance/info) change no capacity. Feed-rate notices (slow/pause feed) and taking
+        a non-press machine out are not modelled by the press-centric solver: they always need the
+        supervisor (R3) and the card says the schedule was not re-solved."""
+        solves = [(sr.step.args, res.data) for sid, res in run.results.items()
+                  if res.ok and res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("feasible")
+                  for sr in run.ev.steps if sr.step.id == sid]
+        a, tool = step.args, step.tool
+        if tool is ToolName.CONFIRM_SCHEDULE:
+            v = a.get("schedule_version")
+            return (any(d.get("schedule_version") == v for _, d in solves),
+                    f"no feasible solve_schedule in this event produced schedule v{v}")
+        if tool is ToolName.SET_CURE_TIME:
+            press, h = a.get("press_id"), a.get("total_cure_h")
+            ok = isinstance(h, (int, float)) and any(
+                isinstance((sa.get("cure_overrides_h") or {}).get(press), (int, float))
+                and abs(float(sa["cure_overrides_h"][press]) - float(h)) <= 0.05 for sa, _ in solves)
+            return ok, f"no feasible solve_schedule in this event re-planned {press} with {fmt_num(h)} h cure"
+        if tool is ToolName.NOTIFY_TEAMS:
+            kind = a.get("kind")
+            if kind == NotifyKind.MACHINE_OUT.value:
+                mid = a.get("machine_id") or run.ev.machine_id
+                if mid in CURE_PRESS_IDS:
+                    return (any(mid in (sa.get("unavailable_presses") or []) for sa, _ in solves),
+                            f"no feasible solve_schedule in this event re-planned without {mid}")
+                return True, ""
+            if kind in STAFFING_KINDS:
+                return bool(solves), "staffing change with no feasible solve_schedule in this event"
+        return True, ""
 
     def _cure_temp(self, run: _Run) -> float:
         """The temperature the press is curing at now: the detector's stable prediction (page 11:
@@ -1121,10 +1201,15 @@ class StateMachine:
                 return step.model_copy(update={"args": {**step.args, "cure_overrides_h": over}})
         return step
 
-    def _check(self, run: _Run, step: PlanStep, **kw: Any) -> GateDecision:
-        if self._gate_takes_evidence and step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
-            kw["evidence"] = self._evidence(run)
-        return self.gate.check(step, EventState.EXECUTE, run.feasible, **kw)
+    def _check(self, run: _Run, step: PlanStep, provisional: list[PlanStep] | None = None,
+               **kw: Any) -> GateDecision:
+        ok, why = self._sim_ok(run, step)
+        if self._gate_takes_evidence and step.tool in WRITE_TOOLS:
+            ev = self._evidence(run, provisional)
+            if not ok:
+                ev["simulation_why"] = why
+            kw["evidence"] = ev
+        return self.gate.check(step, EventState.EXECUTE, ok and run.feasible, **kw)
 
     def _gate(self, run: _Run
               ) -> tuple[list[StepRun], list[StepRun], list[StepRun], list[ApprovalOption], RiskLevel]:
@@ -1154,10 +1239,16 @@ class StateMachine:
             kw = {}
             if step.tool is ToolName.CONFIRM_SCHEDULE and self._gate_takes_cross_team:
                 kw["cross_team"] = self._cross_team(run, resolved.args)
-            gd = self._check(run, resolved, **kw)
+            gd = self._check(run, resolved, provisional=[x.step for x in needs], **kw)
             sr.gate = gd
             self.audit.append(AuditKind.GATE, "gate", {"step_id": step.id, "decision": gd.model_dump(mode="json")},
                               event_id=ev.id)
+            if gd.verdict is GateVerdict.ALLOW and step.tool is ToolName.NOTIFY_TEAMS:
+                press = cure_notice_press(resolved.args)
+                if press is not None and press not in self._evidence(run)["cure_notice"]:
+                    # quotes a cure time that is still awaiting approval: it goes out only after that
+                    # set_cure_time has run, whatever depends_on the commander wrote (re-gated then)
+                    waits = True
             if gd.verdict is GateVerdict.REJECT:
                 sr.state = "rejected"
                 self._log_reject(run, resolved, gd)
@@ -1165,6 +1256,7 @@ class StateMachine:
                                            "why": "；".join(gd.reasons)[:300]})
             elif gd.verdict is GateVerdict.ALLOW:
                 (deferred if waits else auto).append(sr)
+                run.auto_ids.add(step.id)
             else:
                 sr.state = "awaiting_approval"
                 needs.append(sr)
@@ -1172,8 +1264,7 @@ class StateMachine:
                     risk = gd.risk
         options = self._options(run, needs) if needs else []
         for o in options:
-            od = self.gate.check(PlanStep(id=f"opt-{o.id}", tool=o.tool, args=o.args, purpose=o.label),
-                                 EventState.EXECUTE, run.feasible)
+            od = self._check(run, PlanStep(id=f"opt-{o.id}", tool=o.tool, args=o.args, purpose=o.label))
             if od.risk is not None and RISK_ORDER.index(od.risk) > RISK_ORDER.index(risk):
                 risk = od.risk
         if needs:
@@ -1335,7 +1426,7 @@ class StateMachine:
                         return f"不受影響（{semi.tire_label} 仍 {semi.planned_mold_in_at:%H:%M} 入硫化機）"
                 except Exception:  # noqa: BLE001
                     pass
-        return "不受影響（排程未變更）"
+        return "排程未變更（本事件未重排，未經排程模擬）"
 
     def _action_text(self, run: _Run, step: PlanStep, short: bool = False) -> str:
         """One line per gated write, from its validated args (what will actually run), with the
@@ -1385,6 +1476,13 @@ class StateMachine:
             out.append(f"{sr.step.id} {self._action_text(run, sr.step)}")
         if staff_choice:
             out.append("人力：依所選方案（" + "／".join(f"{o.id} {o.label}" for o in options) + "）")
+        offered = [run.option_changes[o.id] for o in options if o.id in run.option_changes]
+        for sr in needs:
+            if sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+                left = self._unapproved_staffing(run, sr.step.args.get("schedule_version"), offered)
+                if left:
+                    out.append("人力：本次不含人力調動（" + "、".join(
+                        f"{self._gap_prefix(c)} {c.get('label')}" for c in left) + " 未列入核准，該班缺口維持原狀）")
         return out
 
     def _request_approval(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption],
@@ -1466,7 +1564,7 @@ class StateMachine:
             step = PlanStep(id=f"{req.id}-{opt.id}", tool=opt.tool, args=args, purpose=f"{opt.id} {opt.label}")
             if opt.id in run.option_changes:
                 run.step_changes[step.id] = run.option_changes[opt.id]
-            gd = self.gate.check(step, EventState.EXECUTE, run.feasible)
+            gd = self._check(run, step)
             sr = StepRun(step=step, state="pending", gate=gd)
             run.ev.steps.append(sr)
             if gd.verdict is GateVerdict.REJECT:
@@ -1509,17 +1607,58 @@ class StateMachine:
             out.append(sr)
         return out
 
-    def _amend_schedule_staffing(self, run: _Run, chosen: list[StepRun], change: dict[str, Any],
+    def _in_force_staffing(self, run: _Run, store, exclude_version: int | None = None) -> list[StaffingChange]:
+        """Staffing already decided: the active schedule's staffing changes (approved earlier) and this
+        event's executed, not revoked staffing notifies."""
+        out: list[StaffingChange] = []
+        try:
+            cur = store.current()
+            if cur.version != exclude_version:
+                out += list(cur.schedule.staffing_changes)
+        except Exception:  # noqa: BLE001 - empty store
+            pass
+        for prev in run.staffing_done:
+            c = run.step_changes.get(prev.get("step_id"))
+            if c is not None and not prev["revoked"]:
+                try:
+                    out.append(StaffingChange.model_validate(c))
+                except Exception:  # noqa: BLE001
+                    pass
+        return out
+
+    def _unapproved_staffing(self, run: _Run, version: Any, offered: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Staffing changes the solver put in schedule ``version`` that this card does not offer as an
+        option and that are not already in force: approving the schedule will NOT put them in force."""
+        store = self.store if self.store is not None else getattr(getattr(self.tools, "ctx", None), "store", None)
+        in_force = {_staff_key(c.model_dump(mode="json")) for c in self._in_force_staffing(run, store)} \
+            if store is not None else set()
+        keys = {_staff_key(c) for c in offered}
+        out = []
+        for _, data in self._solve_steps(run):
+            if data.get("schedule_version") != version:
+                continue
+            for c in (data.get("schedule") or {}).get("staffing_changes") or []:
+                if _staff_key(c) not in keys and _staff_key(c) not in in_force:
+                    out.append(c)
+        return out
+
+    def _amend_schedule_staffing(self, run: _Run, chosen: list[StepRun], change: dict[str, Any] | None,
                                  req: ApprovalRequest) -> None:
-        """The schedule about to be confirmed must carry the staffing the supervisor actually chose,
-        not the solver's own pick (page 11 02:31:30: 否決跨組調人，改選夜班加班)."""
+        """The schedule about to be confirmed carries exactly the staffing that was decided: the option
+        the supervisor picked on this card (page 11 02:31:30: 否決跨組調人，改選夜班加班), and for every
+        other shift whatever is already in force. A staffing change the solver picked on its own (e.g.
+        a cross-team transfer for a shortage this card never offered) is taken out: it was neither
+        approved nor notified (page 7: cross-team moves need human approval), so that shift keeps its
+        gap, exactly as before the event."""
         store = self.store if self.store is not None else getattr(getattr(self.tools, "ctx", None), "store", None)
         if store is None:
             return
-        try:
-            new_c = StaffingChange.model_validate(change)
-        except Exception:  # noqa: BLE001 - malformed solver output: leave the schedule as proposed
-            return
+        new_c: StaffingChange | None = None
+        if change is not None:
+            try:
+                new_c = StaffingChange.model_validate(change)
+            except Exception:  # noqa: BLE001 - malformed solver output: nothing chosen to add
+                new_c = None
         for sr in chosen:
             if sr.step.tool is not ToolName.CONFIRM_SCHEDULE:
                 continue
@@ -1530,16 +1669,42 @@ class StateMachine:
                 continue
             if ver.status is not ScheduleStatus.PROPOSED:
                 continue
+            key = lambda c: _staff_key(c.model_dump(mode="json"))  # noqa: E731
+            in_force = self._in_force_staffing(run, store, exclude_version=ver.version)
             old = list(ver.schedule.staffing_changes)
-            same_gap = [c for c in old if (c.shift_date, c.shift_name, c.to_team)
-                        == (new_c.shift_date, new_c.shift_name, new_c.to_team)]
-            if any(c.kind == new_c.kind and c.label == new_c.label for c in same_gap) and len(same_gap) == 1:
-                continue                                   # the proposal already has the chosen staffing
-            staffing = [c for c in old if c not in same_gap] + [new_c]
+            staffing: list[StaffingChange] = [new_c] if new_c is not None else []
+            handled = {key(new_c)} if new_c is not None else set()
+            replaced: list[StaffingChange] = []      # same shift, the supervisor chose differently
+            dropped: list[StaffingChange] = []       # never offered, not in force: not put in force
+            for c in old:
+                k = key(c)
+                if new_c is not None and k == key(new_c):
+                    if (c.kind, c.label) != (new_c.kind, new_c.label):
+                        replaced.append(c)
+                    continue
+                if k in handled:
+                    continue
+                kept = [x for x in in_force if key(x) == k]
+                if kept:
+                    staffing += [x for x in kept if x not in staffing]
+                    handled.add(k)
+                    if not any((x.kind, x.label) == (c.kind, c.label) for x in kept):
+                        replaced.append(c)
+                else:
+                    dropped.append(c)
+            if staffing == old:
+                continue                                   # the proposal already has exactly that staffing
             reason = ver.reason
-            for c in same_gap:
-                reason = reason.replace(f"→{c.label}", f"→{new_c.label}")
-            if new_c.label not in reason:
+            for c in replaced:
+                to = next((x for x in staffing if key(x) == key(c)), None)
+                if to is not None:
+                    reason = reason.replace(f"→{c.label}", f"→{to.label}", 1)
+            for c in dropped:
+                pre = re.escape(self._gap_prefix(c.model_dump(mode="json")))
+                reason, n = re.subn(rf"({pre}[^；]*?)→{re.escape(c.label)}", r"\1→未補（未經核准，不調動）", reason, count=1)
+                if not n:
+                    reason = reason.replace(f"→{c.label}", "→未補（未經核准，不調動）", 1)
+            if new_c is not None and new_c.label not in reason:
                 reason = f"{reason}；{new_c.shift_date:%m/%d} {new_c.shift_name}→{new_c.label}"
             sched = ver.schedule.model_copy(update={"staffing_changes": staffing})
             amend = getattr(store, "amend_proposed", None)
@@ -1552,15 +1717,21 @@ class StateMachine:
                 for r in run.results.values():
                     if r.tool is ToolName.SOLVE_SCHEDULE and r.data.get("schedule_version") == ver.version:
                         r.data["schedule_version"] = target
-            replaced = "、".join(c.label for c in same_gap)
             self.audit.append(AuditKind.SYSTEM, "state_machine",
                               {"schedule_amended": target, "from_version": ver.version,
                                "staffing": [c.model_dump(mode="json") for c in staffing],
-                               "replaced": [c.model_dump(mode="json") for c in same_gap],
+                               "replaced": [c.model_dump(mode="json") for c in replaced],
+                               "dropped_unapproved": [c.model_dump(mode="json") for c in dropped],
                                "approval_id": req.id, "decision_reason": req.decision.reason if req.decision else None},
                               event_id=run.ev.id)
-            self._note(run.ev, "系統", f"排程 v{target} 人力依主管決定改為「{new_c.label}」"
-                       + (f"（取代「{replaced}」）" if replaced else ""), "dynamic")
+            if new_c is not None and (replaced or new_c not in old):
+                rep_txt = "、".join(c.label for c in replaced if key(c) == key(new_c))
+                self._note(run.ev, "系統", f"排程 v{target} 人力依主管決定改為「{new_c.label}」"
+                           + (f"（取代「{rep_txt}」）" if rep_txt else ""), "dynamic")
+            if dropped:
+                self._note(run.ev, "系統", f"排程 v{target} 不含未經核准的人力調動："
+                           + "、".join(f"{self._gap_prefix(c.model_dump(mode='json'))} {c.label}" for c in dropped)
+                           + "（未列入核准、未通知，該班缺口維持原狀）", "dynamic")
 
     def _revoke_steps(self, run: _Run, change: dict[str, Any], req: ApprovalRequest) -> list[StepRun]:
         """An earlier round's staffing for the same shift that the supervisor has now replaced is
@@ -1614,6 +1785,16 @@ class StateMachine:
                 run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
                                            "why": "a write it depends on did not run"})
                 continue
+            if step.id in run.auto_ids:
+                # an auto (R1) write is checked again right before it runs, against what has actually
+                # executed: a cure-time notice goes out only after its approved set_cure_time ran
+                gd = self._check(run, step)
+                if gd.verdict is not GateVerdict.ALLOW:
+                    sr.gate, sr.state = gd, "rejected"
+                    self._log_reject(run, step, gd)
+                    run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "rejected",
+                                               "why": "；".join(gd.reasons)[:300]})
+                    continue
             sr.state = "running"
             res = await self._call(run, EventState.EXECUTE, step.id, step.tool, step.args)
             sr.result = res
