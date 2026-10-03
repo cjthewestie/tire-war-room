@@ -1,0 +1,290 @@
+{
+  "bench": "full_event",
+  "recorded_at": "2026-10-03T16:27:09.048086+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "target_s": 22.0,
+  "think": false,
+  "runs": [
+    {
+      "total_s": 15.244,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "ttft_s": 0.023165041988249868,
+          "ttft_any_s": 0.023165041988249868,
+          "total_s": 0.613420249952469,
+          "prompt_tokens": 2498,
+          "completion_tokens": 72,
+          "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 62,
+          "decode_tps": 121.98
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 0.027692000032402575,
+          "ttft_any_s": 0.027692000032402575,
+          "total_s": 5.333557917037979,
+          "prompt_tokens": 14727,
+          "completion_tokens": 600,
+          "text": "{\n  \"goal\": \"判斷是單機故障或蒸汽主管路問題，並決定是延長硫化時間還是重排\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_7\",\n    \"statement\": \"溫度下降是由單一機台蒸汽洩漏或感測器漂移引起，非主管路問題\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \"between\",\n      \"value\": 121.0,\n      \"value_hi\": 123.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\"},\n      \"purpose\": \"取得最新溫度與蒸汽壓數值\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"判斷是否符合感測器漂移或單機洩漏模式\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time\": 10,\n        \"total_time\": 28,\n        \"activation_energy\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘所需時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"purpose\": \"依新硫化時間重新排程，檢查人力缺口\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，需判斷是單機問題還是蒸汽主管路問題，並決定是延長硫化時間還是重新排程。依 SOP-CP-02 處理。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 505,
+          "decode_tps": 113.08,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0061,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-10",
+              "J5": "CURE-09"
+            }
+          },
+          "compute_s": 0.1797
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 0.9141942500136793,
+          "ttft_any_s": 0.9141942500136793,
+          "total_s": 5.656641667010263,
+          "prompt_tokens": 14970,
+          "completion_tokens": 541,
+          "text": "{\n  \"goal\": \"延長硫化時間並重排後續模次\",\n  \"hypothesis\": \n  {\n    \"id\": \"H1\",\n    \"statement\": \"溫度下降至 122°C，反應速率約為正常值的 0.679 倍\",\n    \"cause_code\": \"heat_loss\",\n    \"expectation\": \n    {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"T_actual\": 122, \"T_ref\": 128, \"base_h\": 18, \"Ea_kJ_mol\": 85.0},\n      \"purpose\": \"重算剩餘硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"replan\": true, \"size\": \"middle\"},\n      \"purpose\": \"重新分配後續模次\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\"machine\": \"CURE-07\", \"new_total_h\": \"$S1.total_cure_h\", \"new_set_h\": 36.5},\n      \"purpose\": \"更新硫化時間設定\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"targets\": [\"硫化機組\", \"胎體胎面膠組\", \"貼合組\"], \"msg\": \"CURE-07 溫度下降，已延長至 36.5h，後續模次已重排\"},\n      \"purpose\": \"通知相關部門\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，依 SOP-CP-02 延長硫化時間並重排後續模次。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 466,
+          "decode_tps": 114.08,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "ttft_s": 0.725103750010021,
+          "ttft_any_s": 0.725103750010021,
+          "total_s": 3.4564537910046056,
+          "prompt_tokens": 2665,
+          "completion_tokens": 300,
+          "text": "{\n  \"title\": \"硫化機 CURE-07 溫度異常核准卡\",\n  \"reason\": \"CURE-07 溫度下降至 122°C，已硫化 10 h / 28 h（中胎），預測將穩定於 122±1°C，低於正常 128°C 基準。\",\n  \"done\": \"監測近 30 分鐘溫度下降趨勢，確認蒸汽壓力 4.58–4.80 kgf/cm² 正常，檢視安全核心規則未觸發停機條件。\",\n  \"gap\": \"溫度相較正常基準下降 6°C，需確認是否影響硫化品質或需調整後續工序排程。\",\n  \"deadline\": \"2024-06-15T12:00:00+08:00\",\n  \"options\": \"A: 繼續硫化至 28 h 結束，監測溫度波動。\\nB: 提前結束硫化，進行品質檢驗並調整後續 CURE 排",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 254,
+          "decode_tps": 109.84
+        }
+      },
+      "tokens_out": 1513
+    },
+    {
+      "total_s": 14.382,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "ttft_s": 0.022484167013317347,
+          "ttft_any_s": 0.022484167013317347,
+          "total_s": 0.6217119169887155,
+          "prompt_tokens": 2498,
+          "completion_tokens": 72,
+          "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 62,
+          "decode_tps": 120.15
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 0.03710666700499132,
+          "ttft_any_s": 0.03710666700499132,
+          "total_s": 5.385864417010453,
+          "prompt_tokens": 14727,
+          "completion_tokens": 600,
+          "text": "{\n  \"goal\": \"判斷是單機故障或蒸汽主管路問題，並決定是延長硫化時間還是重排\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_7\",\n    \"statement\": \"溫度下降是由單一機台蒸汽洩漏或感測器漂移引起，非主管路問題\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \"between\",\n      \"value\": 121.0,\n      \"value_hi\": 123.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\"},\n      \"purpose\": \"取得最新溫度與蒸汽壓數值\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"判斷是否符合感測器漂移或單機洩漏模式\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time\": 10,\n        \"total_time\": 28,\n        \"activation_energy\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘所需時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"purpose\": \"依新硫化時間重新排程，檢查人力缺口\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，需判斷是單機問題還是蒸汽主管路問題，並決定是延長硫化時間還是重新排程。依 SOP-CP-02 處理。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 505,
+          "decode_tps": 112.18,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0031,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.0036
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 0.3880928749567829,
+          "ttft_any_s": 0.3880928749567829,
+          "total_s": 5.61696029198356,
+          "prompt_tokens": 14970,
+          "completion_tokens": 568,
+          "text": "{\n  \"goal\": \"延長 CURE-07 硫化時間並重排後續模次\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_07\",\n    \"statement\": \"溫度下降至 122°C，依等效硫化公式需延長約 8.5 小時，總時長 36.5 小時\",\n    \"cause_code\": \"CP-02\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"T_actual\": 122, \"T_ref\": 128, \"base_h\": 28, \"Ea_kJ_mol\": 85.0},\n      \"purpose\": \"重算剩餘硫化時間與總時長\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"replan\": true, \"size\": \"middle\"},\n      \"purpose\": \"重新排程後續模次，確認人力缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"total_h\": 36.5, \"extra_h\": 8.5},\n      \"purpose\": \"設定新的建議硫化時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"reason\": \"temp_drop_CP-02\", \"action\": \"延長硫化\"},\n      \"purpose\": \"通知硫化機組與夜班\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，依等效硫化公式需延長 8.5 小時，總時長 36.5 小時。已重排後續模次，等待主管核准。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 498,
+          "decode_tps": 108.63,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "ttft_s": 0.28589329100213945,
+          "ttft_any_s": 0.28589329100213945,
+          "total_s": 2.749212125025224,
+          "prompt_tokens": 2665,
+          "completion_tokens": 298,
+          "text": "{\n  \"title\": \"硫化機 CURE-07 溫度異常核准卡\",\n  \"reason\": \"CURE-07 溫度下降至 122°C，已硫化 10 h / 28 h（中胎），預測將穩定於 122±1°C，低於基準 128°C，需確認產品品質與硫化完整性。\",\n  \"done\": \"監測近 30 分鐘溫度下降趨勢，確認蒸汽壓力 4.58–4.80 kgf/cm²，檢視安全核心規則未觸發強制停機條件。\",\n  \"gap\": \"溫度相對基準下降 6°C，已硫化進度 10/28 h，需評估對產品物性與後續硫化時間的影響。\",\n  \"deadline\": \"下一個硫化週期排程前\",\n  \"options\": \"A. 繼續硫化至 28 h 結束，監測溫度趨勢\\nB. 提前結束硫化並進行品質檢驗\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 249,
+          "decode_tps": 120.98
+        }
+      },
+      "tokens_out": 1538
+    },
+    {
+      "total_s": 14.146,
+      "llm_ok": true,
+      "rounds": {
+        "R1_classify_alert": {
+          "ok": true,
+          "ttft_s": 0.023400625039357692,
+          "ttft_any_s": 0.023400625039357692,
+          "total_s": 0.6091186249977909,
+          "prompt_tokens": 2498,
+          "completion_tokens": 72,
+          "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 62,
+          "decode_tps": 122.93
+        },
+        "R2_plan": {
+          "ok": true,
+          "ttft_s": 0.028161416994407773,
+          "ttft_any_s": 0.028161416994407773,
+          "total_s": 5.281711209041532,
+          "prompt_tokens": 14727,
+          "completion_tokens": 600,
+          "text": "{\n  \"goal\": \"判斷是單機故障或蒸汽主管路問題，並決定是延長硫化時間還是重排\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_7\",\n    \"statement\": \"溫度下降是由單一機台蒸汽洩漏或感測器漂移引起，非主管路問題\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \"between\",\n      \"value\": 121.0,\n      \"value_hi\": 123.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\"},\n      \"purpose\": \"取得最新溫度與蒸汽壓數值\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"判斷是否符合感測器漂移或單機洩漏模式\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time\": 10,\n        \"total_time\": 28,\n        \"activation_energy\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘所需時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"purpose\": \"依新硫化時間重新排程，檢查人力缺口\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，需判斷是單機問題還是蒸汽主管路問題，並決定是延長硫化時間還是重新排程。依 SOP-CP-02 處理。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 505,
+          "decode_tps": 114.21,
+          "plan_valid": true
+        },
+        "compute": {
+          "cure_formula": {
+            "total_cure_h": 36.5,
+            "extra_h": 8.5
+          },
+          "solve_schedule": {
+            "status": "OPTIMAL",
+            "solve_s": 0.0034,
+            "total_lateness_h": 0.0,
+            "placement": {
+              "J1": "CURE-10",
+              "J2": "CURE-09",
+              "J3": "CURE-08",
+              "J4": "CURE-08",
+              "J5": "CURE-10"
+            }
+          },
+          "compute_s": 0.0039
+        },
+        "R3_replan": {
+          "ok": true,
+          "ttft_s": 0.2585321659571491,
+          "ttft_any_s": 0.2585321659571491,
+          "total_s": 5.509266207984183,
+          "prompt_tokens": 14970,
+          "completion_tokens": 600,
+          "text": "{\n  \"goal\": \"延長硫化時間並重排後續模次\",\n  \"hypothesis\": \n  {\n    \"id\": \"H1\",\n    \"statement\": \"溫度下降至 122°C，反應速率約為 128°C 的 0.679 倍\",\n    \"cause_code\": \"Arrhenius 公式\",\n    \"expectation\": \n    {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"T_actual\": 122, \"T_ref\": 128, \"base_h\": 18, \"Ea_kJ_mol\": 85.0},\n      \"purpose\": \"重算剩餘硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"replan\": true, \"size\": \"middle\"},\n      \"purpose\": \"重新分配後續模次\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"new_total_h\": \"$S1.total_cure_h + $S1.extra_h\"},\n      \"purpose\": \"更新硫化時間設定\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"recipients\": \"硫化機組, 胎體組, 生管\", \"msg\": \"CURE-07 溫度下降，已延長至 $S1.total_cure_h + $S1.extra_h 小時，重排後續模次，請依新排程投料\"},\n      \"purpose\": \"通知相關組別\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"中胎溫度從 128°C 下降至 122°C，依等效硫化公式重算剩餘時間並重排後續模次。溫度預測 122±1°C，需在 30 分鐘內回溫至 >=121°C，否則改走 SOP-CP-01 中斷處理。\"\n  }\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 521,
+          "decode_tps": 114.27,
+          "plan_valid": true
+        },
+        "R4_diagnosis": {
+          "ok": true,
+          "ttft_s": 0.2502942499704659,
+          "ttft_any_s": 0.2502942499704659,
+          "total_s": 2.738511874980759,
+          "prompt_tokens": 2665,
+          "completion_tokens": 300,
+          "text": "{\n  \"title\": \"硫化機 CURE-07 溫度異常核准卡\",\n  \"reason\": \"CURE-07 溫度下降至 122°C，已硫化 10 h / 28 h（中胎），預計將穩定於 122±1°C，未觸發強制停機閾值（110°C），但溫度下降超出正常波動範圍\",\n  \"done\": \"監測近 30 分鐘溫度下降趨勢，確認蒸汽壓力 4.58–4.80 kgf/cm² 正常，檢視安全核心規則未強制停機\",\n  \"gap\": \"溫度從 128°C 快速下降至 122°C，降幅 6°C，超出正常控制波動，需確認是否影響硫化品質或需調整工藝參數\",\n  \"deadline\": \"維持當前溫度 122°C 至硫化結束（剩餘 18 h），若溫度繼續下降則需啟動方案 B\",\n  \"option_A\": \"維",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 252,
+          "decode_tps": 120.57
+        }
+      },
+      "tokens_out": 1572
+    }
+  ],
+  "total_s": {
+    "n": 3,
+    "min": 14.146,
+    "p50": 14.382,
+    "p90": 15.0716,
+    "max": 15.244,
+    "mean": 14.5907
+  },
+  "plan_valid_rate": 1.0,
+  "state_machine": {
+    "skipped": "warroom module still a stub: NotImplementedError()"
+  },
+  "verdicts": [
+    {
+      "name": "full_event_p50",
+      "target": "≈ 22.0 s (≤ target)",
+      "measured": 14.382,
+      "passed": true,
+      "note": "",
+      "extra": {}
+    }
+  ]
+}

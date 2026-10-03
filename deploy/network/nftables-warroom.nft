@@ -1,0 +1,39 @@
+#!/usr/sbin/nft -f
+# Factory-only egress allow-list for the DGX Spark (pages 9-10: 資料不出廠, 對外連線 0 次).
+# Load:   sudo nft -f deploy/network/nftables-warroom.nft        (warroom-firewall.service does it at boot)
+# Remove: sudo nft delete table inet warroom_offline              (only for a planned online update window)
+#
+# Allowed destinations: loopback, the factory LAN / OT networks (RFC1918 + link-local), Docker bridges,
+# multicast for local discovery. Everything else leaving the box -- host processes (output hook) and
+# containers (forward hook) -- is dropped and counted, so `nft list table inet warroom_offline` shows
+# any attempt. Inbound is not restricted here; the app port is published on the LAN by docker compose.
+# Edit `lan4` if the plant uses public-range addressing internally (rare, but check with factory IT; the
+# OT network is zoned per IEC 62443 and must reach the Spark only through the data gateway, p.10).
+
+table inet warroom_offline {
+    set lan4 {
+        type ipv4_addr; flags interval;
+        elements = { 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16, 224.0.0.0/4 }
+    }
+    set lan6 {
+        type ipv6_addr; flags interval;
+        elements = { ::1/128, fc00::/7, fe80::/10, ff00::/8 }
+    }
+
+    counter dropped_egress { }
+
+    chain output {
+        type filter hook output priority -10; policy accept;
+        oifname "lo" accept
+        ip daddr @lan4 accept
+        ip6 daddr @lan6 accept
+        counter name dropped_egress log prefix "warroom-egress-drop " level warn drop
+    }
+
+    chain forward {
+        type filter hook forward priority -10; policy accept;
+        ip daddr @lan4 accept
+        ip6 daddr @lan6 accept
+        counter name dropped_egress log prefix "warroom-egress-drop " level warn drop
+    }
+}

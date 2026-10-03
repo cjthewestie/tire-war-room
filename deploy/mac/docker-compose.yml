@@ -1,0 +1,25 @@
+# Mac dev stack in containers: Qdrant + the app; the model stays NATIVE (Ollama uses the Apple GPU through
+# Metal/MLX, which Docker on macOS cannot reach). Start the model first:  deploy/mac/dev.sh ollama
+#   docker compose -f deploy/mac/docker-compose.yml up --build
+#   LLM_MODE=mock docker compose -f deploy/mac/docker-compose.yml up      # no model at all
+name: warroom-dev
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.15.4
+    environment: { QDRANT__TELEMETRY_DISABLED: "true" }
+    ports: ["127.0.0.1:6333:6333"]
+    volumes: [qdrant:/qdrant/storage]
+  app:
+    build: { context: ../.., dockerfile: deploy/Dockerfile }
+    image: warroom-app:dev
+    environment:
+      LLM_MODE: ${LLM_MODE:-llm}
+      BASE_URL: http://host.docker.internal:${WARROOM_OLLAMA_PORT:-11435}/v1
+      MODEL: ${MODEL:-nemotron-3.5-lightning:30b-a3b-nvfp4}
+      LLM_FALLBACK_TO_MOCK: "true"
+      QDRANT_URL: http://qdrant:6333
+      HF_HUB_OFFLINE: "1"
+    ports: ["8000:8000"]
+    depends_on: [qdrant]
+volumes:
+  qdrant: {}

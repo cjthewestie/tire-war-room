@@ -1,0 +1,40 @@
+{"id": "q01", "question": "小胎在硫化機的標準硫化時間是多少？", "choices": ["24 小時", "28 小時", "34 小時", "12 小時"], "answer": "A", "source": "docs/proposal-final.pdf"}
+{"id": "q02", "question": "中胎的標準硫化時間是多少？", "choices": ["24 小時", "28 小時", "34 小時", "36.5 小時"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q03", "question": "大胎的標準硫化時間是多少？", "choices": ["28 小時", "30 小時", "34 小時", "48 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q04", "question": "硫化機的正常溫度範圍是？", "choices": ["100–110°C", "110–120°C", "120–130°C", "140–150°C"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q05", "question": "硫化時的油壓表壓力約為多少？", "choices": ["5 kgf/cm²", "10 kgf/cm²", "20 kgf/cm²", "50 kgf/cm²"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q06", "question": "工廠共有幾台硫化機？", "choices": ["7", "9", "11", "28"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q07", "question": "11 台硫化機中，有幾台是中胎與大胎共用？", "choices": ["2", "4", "7", "11"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q08", "question": "安全核心對未加硫的煉膠設定的停機溫度是？", "choices": ["≥100°C", "≥110°C", "≥120°C", "≥130°C"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q09", "question": "安全核心對已加硫膠料設定的停機溫度是？（防焦燒）", "choices": ["≥100°C", "≥110°C", "≥120°C", "≥125°C"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q10", "question": "大開煉機膠溫 112°C 且該批膠料尚未加硫時，安全核心應該？", "choices": ["立即停機", "不停機，持續監控", "降壓", "通知 LLM 決定是否停機"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q11", "question": "中胎在 128°C 已硫化 10 小時後降到 122°C，以活化能 85 kJ/mol 的 Arrhenius 換算，總硫化時間約為？", "choices": ["28 小時", "32.0 小時", "36.5 小時", "42 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q12", "question": "承上題，需要額外延長多少硫化時間？", "choices": ["4.0 小時", "6.5 小時", "8.5 小時", "12 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q13", "question": "物理與排程的數字應該從哪裡來？", "choices": ["LLM 的經驗估計", "公式與求解器", "主管口頭指示", "上週同一天的數字"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q14", "question": "硫化機出現溫度下降時，誰可以直接讓機台進入保持或停機？", "choices": ["LLM 指揮官", "安全核心（PLC 規則）", "任何作業員手機", "排程求解器"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q15", "question": "下列哪一個是需要主管核准的寫入工具？", "choices": ["讀感測器", "硫化公式", "確認新排程", "SOP 知識庫查詢"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q16", "question": "「跨組調人」屬於哪一個風險等級？", "choices": ["R0", "R1", "R2", "R3"], "answer": "D", "source": "docs/proposal-final.pdf"}
+{"id": "q17", "question": "「通知維修冷卻水路」屬於哪一個風險等級？", "choices": ["R0（讀取）", "R1（自動通知並記錄）", "R2（需核准）", "R3（需核准並記錄選項）"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q18", "question": "連續失敗幾次後，系統要安全停止並保留原排程？", "choices": ["1", "2", "3", "5"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q19", "question": "工具呼叫失敗時，政策是？", "choices": ["不重試", "重試一次後走 SOP 路徑", "無限重試", "交給 LLM 自行決定"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q20", "question": "排程求解器逾時時應該怎麼做？", "choices": ["改用備援求解器", "讓 LLM 猜排程", "直接停產", "等待一小時"], "answer": "A", "source": "docs/proposal-final.pdf"}
+{"id": "q21", "question": "7 號硫化機與哪兩台在同一條蒸汽管線上？", "choices": ["1 號與 2 號", "6 號與 8 號", "9 號與 10 號", "3 號與 11 號"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q22", "question": "驗證 H1（蒸汽壓不足、溫度會穩定）的期望是 30 分鐘內溫度 ≥121°C。實測 119.5°C，H1 應？", "choices": ["成立", "不成立，換假設重排", "忽略", "延長觀察 2 小時"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q23", "question": "排程以哪一個製程為中心往回推？", "choices": ["混煉", "貼合", "硫化機出模時刻", "整修"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q24", "question": "大胎的貼合應在入模時刻 T 前多久開始？", "choices": ["40 分鐘", "1 小時", "1 小時 30 分", "3 小時 30 分"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q25", "question": "大胎的 A 線投料應在 T 前多久？", "choices": ["1 小時 40 分", "2 小時 30 分", "3 小時 30 分", "6 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q26", "question": "中胎每次需要幾片胎側膠／鋼絲圈？", "choices": ["6", "8", "10", "12"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q27", "question": "換模一次大約停機多久？", "choices": ["30 分鐘", "2 小時", "8 小時", "24 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q28", "question": "週末的排程原則是？", "choices": ["週日照常開爐", "不熄火：週六夜班排最後一輪，週一早出模", "全部停機並重新預熱", "只做小胎"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q29", "question": "目前每台硫化機每週可做幾顆大胎？", "choices": ["3", "4.5", "4.9", "6"], "answer": "A", "source": "docs/proposal-final.pdf"}
+{"id": "q30", "question": "以 AI 排出模時刻後，每台每週大胎可做幾顆？", "choices": ["3", "4.5", "4.9", "6"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q31", "question": "中、大胎各 100 顆的交期，目標由 13.3 週縮短到？", "choices": ["11.0 週", "9.3 週", "7.0 週", "2.0 週"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q32", "question": "大胎 18:00 出模，下一次換模要等到隔天 08:00，造成的閒置約是？", "choices": ["2 小時", "8 小時", "14 小時", "24 小時"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q33", "question": "異常偵測從人工巡檢 2 小時縮短為？", "choices": ["1 分鐘", "10 分鐘", "30 分鐘", "1 小時"], "answer": "A", "source": "docs/proposal-final.pdf"}
+{"id": "q34", "question": "第一張告警卡的延遲目標是？", "choices": ["≤0.2 秒", "≤2 秒", "≤22 秒", "≤1 分鐘"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q35", "question": "廠區網路斷線（LAN 斷）時，主管如何核准？", "choices": ["雲端 App", "主管手機經廠內網", "現場觸控螢幕＋警示燈", "Email"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q36", "question": "讀值異常（壞資料）時，系統應？", "choices": ["叫醒 AI 分析", "不叫醒 AI", "立即停機", "刪除該機台"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q37", "question": "系統中唯一的 LLM 是？", "choices": ["事件偵測模型", "事件指揮官", "安全核心", "排程求解器"], "answer": "B", "source": "docs/proposal-final.pdf"}
+{"id": "q38", "question": "LLM 可以直接寫入 PLC 嗎？", "choices": ["可以，經主管核准後", "可以，緊急時", "不可以，沒有任何致動器權限", "只能寫溫度設定"], "answer": "C", "source": "docs/proposal-final.pdf"}
+{"id": "q39", "question": "鋼絲圈線的組裝順序中，尼龍布的角色是？", "choices": ["包住鋼絲圈", "與胎面膠貼合", "單獨硫化", "作為模具"], "answer": "A", "source": "docs/proposal-final.pdf"}
+{"id": "q40", "question": "11 台硫化機中，小胎專用的有幾台？", "choices": ["3", "4", "7", "11"], "answer": "C", "source": "docs/proposal-final.pdf"}

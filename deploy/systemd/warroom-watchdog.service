@@ -1,0 +1,20 @@
+# Watchdog (page 10: watchdog 異常即重啟). Long-running loop; systemd restarts the watchdog itself if it
+# hangs (WatchdogSec) or dies (Restart=always).
+[Unit]
+Description=War room watchdog (health probes, per-service restart)
+After=warroom-stack.service
+Wants=warroom-stack.service
+
+[Service]
+Type=notify
+NotifyAccess=all
+Environment=STATE_DIR=/run/warroom-watchdog INTERVAL_S=15 FAIL_LIMIT=3 LLM_GRACE_S=900
+Environment="COMPOSE=/usr/bin/docker compose --project-directory /opt/warroom/current/deploy/spark"
+ExecStart=/opt/warroom/current/deploy/bin/watchdog.sh --loop
+WatchdogSec=90
+Restart=always
+RestartSec=5
+RuntimeDirectory=warroom-watchdog
+
+[Install]
+WantedBy=multi-user.target

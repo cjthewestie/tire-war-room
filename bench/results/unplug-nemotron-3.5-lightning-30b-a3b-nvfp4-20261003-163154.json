@@ -1,0 +1,116 @@
+{
+  "bench": "unplug",
+  "recorded_at": "2026-10-03T16:31:54.996231+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "is_root": false,
+  "block": {
+    "requested": false,
+    "applied": false
+  },
+  "internet_reachable_during_test": true,
+  "app": {
+    "health": {
+      "ok": true,
+      "llm_mode": "llm",
+      "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+      "llm_reachable": true,
+      "qdrant_ok": false,
+      "sim_running": true,
+      "factory_time": "2026-10-03T08:00:01+08:00",
+      "uptime_s": 1.645049208018463
+    },
+    "phone_page_status": 200,
+    "anomaly": "7 號 128 → 122°C，預測穩定在 122±1°C"
+  },
+  "sockets": {
+    "samples": 1920,
+    "watched_pids": [
+      978,
+      2141,
+      33705,
+      35912,
+      71775,
+      72267,
+      75834,
+      75836,
+      75840,
+      75920,
+      75921,
+      75923,
+      75924,
+      75950,
+      75951,
+      75967,
+      75968,
+      75995,
+      75996,
+      75997,
+      75998,
+      76010,
+      76012,
+      76040,
+      76041,
+      76089,
+      76090,
+      76182,
+      76183,
+      76368,
+      76369,
+      76525,
+      76527,
+      77083,
+      77084,
+      77089,
+      77090,
+      77317,
+      77320,
+      77407,
+      77408,
+      77642,
+      77643,
+      77645,
+      77646,
+      77866,
+      77867,
+      77871,
+      77872,
+      78106,
+      78107
+    ],
+    "outbound_connections": 0,
+    "outbound": [],
+    "errors": []
+  },
+  "verdicts": [
+    {
+      "name": "alert_offline",
+      "target": "≤ 2.0 s",
+      "measured": null,
+      "passed": null,
+      "note": "via app /ws: anomaly seen, no alert_card (tools module still a stub -> state machine fallback)",
+      "extra": {}
+    },
+    {
+      "name": "outbound_connections",
+      "target": "0",
+      "measured": 0,
+      "passed": true,
+      "note": "network NOT blocked (needs root); socket count only",
+      "extra": {}
+    }
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "note": "added after the run: app mode did not record endpoint"
+  }
+}

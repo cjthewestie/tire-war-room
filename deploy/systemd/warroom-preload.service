@@ -1,0 +1,15 @@
+# Model preload after boot (page 10: 模型預先載入, 全部常駐, 事件時不用等載入).
+[Unit]
+Description=War room model preload (weights, CUDA graphs, prefix cache)
+After=warroom-stack.service
+Requires=warroom-stack.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=LLM_URL=http://127.0.0.1:8001/v1 MODEL=nemotron WAIT_S=1200
+ExecStart=/opt/warroom/current/deploy/bin/preload.sh
+TimeoutStartSec=1500
+
+[Install]
+WantedBy=multi-user.target

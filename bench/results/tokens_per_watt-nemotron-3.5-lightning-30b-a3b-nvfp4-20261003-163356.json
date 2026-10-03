@@ -1,0 +1,42 @@
+{
+  "bench": "tokens_per_watt",
+  "recorded_at": "2026-10-03T16:33:56.901424+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "concurrency": 3,
+  "window_unix": [
+    1791016359.579543,
+    1791016436.891902
+  ],
+  "calls": 23,
+  "errors": 0,
+  "plug": {
+    "tokens": 8772,
+    "seconds": 77.311,
+    "tokens_per_s": 113.463,
+    "avg_watts": null,
+    "idle_watts": null
+  },
+  "power_source": "none (tokens/W not computed)",
+  "package_power_powermetrics": {
+    "error": "powermetrics unavailable (needs passwordless sudo)"
+  }
+}

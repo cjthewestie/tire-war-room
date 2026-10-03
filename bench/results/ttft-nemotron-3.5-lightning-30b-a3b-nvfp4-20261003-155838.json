@@ -1,0 +1,292 @@
+{
+  "bench": "ttft",
+  "recorded_at": "2026-10-03T15:58:38.147788+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "targets": {
+    "ttft_s": 0.5,
+    "first_alert_s": 2.0
+  },
+  "alert_card": {
+    "calls": [
+      {
+        "ok": true,
+        "ttft_s": 0.04107591696083546,
+        "ttft_any_s": 0.04107591696083546,
+        "total_s": 1.1699720000033267,
+        "prompt_tokens": 2498,
+        "completion_tokens": 75,
+        "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度從128°C下降至122°C，已硫化10h/28h，需檢查蒸汽管線H2與溫控設定。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 66,
+        "decode_tps": 66.44,
+        "valid_card": true
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.08597566600656137,
+        "ttft_any_s": 0.08597566600656137,
+        "total_s": 1.037940125039313,
+        "prompt_tokens": 2465,
+        "completion_tokens": 66,
+        "text": "{\n  \"title\": \"A-BIGOPEN 過熱異常\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，已觸發 overheat 警報，需緊急停機檢查。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 55,
+        "decode_tps": 69.33,
+        "valid_card": true
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.04929220798658207,
+        "ttft_any_s": 0.04929220798658207,
+        "total_s": 1.2090793749666773,
+        "prompt_tokens": 2498,
+        "completion_tokens": 75,
+        "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度從128°C下降至122°C，已硫化10h/28h，需檢查蒸汽管線H2與溫控設定。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 66,
+        "decode_tps": 64.67,
+        "valid_card": true
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.07131520798429847,
+        "ttft_any_s": 0.07131520798429847,
+        "total_s": 0.9623497910215519,
+        "prompt_tokens": 2465,
+        "completion_tokens": 73,
+        "text": "{\n  \"title\": \"A-BIGOPEN 過熱異常\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，已逾安全上限 120°C。請即檢查冷卻系統與水流量。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 61,
+        "decode_tps": 81.93,
+        "valid_card": true
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.04223066597478464,
+        "ttft_any_s": 0.04223066597478464,
+        "total_s": 1.1082488329848275,
+        "prompt_tokens": 2498,
+        "completion_tokens": 75,
+        "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度從128°C下降至122°C，已硫化10h/28h，需檢查蒸汽管線H2與溫控設定。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 66,
+        "decode_tps": 70.36,
+        "valid_card": true
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.05821533297421411,
+        "ttft_any_s": 0.05821533297421411,
+        "total_s": 0.9994080410106108,
+        "prompt_tokens": 2465,
+        "completion_tokens": 68,
+        "text": "{\n  \"title\": \"A-BIGOPEN 過熱警告\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，逾越 120°C 安全上限，需緊急停機檢查。\"\n}",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 58,
+        "decode_tps": 72.25,
+        "valid_card": true
+      }
+    ],
+    "total_s": {
+      "n": 6,
+      "min": 0.9623,
+      "p50": 1.0731,
+      "p90": 1.1895,
+      "max": 1.2091,
+      "mean": 1.0812
+    },
+    "ttft_s": {
+      "n": 6,
+      "min": 0.0411,
+      "p50": 0.0538,
+      "p90": 0.0786,
+      "max": 0.086,
+      "mean": 0.058
+    },
+    "valid_card_rate": 1.0
+  },
+  "long_context": {
+    "chars_per_token": 1.382,
+    "prompt_tokens_measured": 32621,
+    "cold": [
+      {
+        "ok": true,
+        "ttft_s": 24.649253542011138,
+        "ttft_any_s": 24.649253542011138,
+        "total_s": 24.687149541976396,
+        "prompt_tokens": 32621,
+        "completion_tokens": 3,
+        "text": "收到.",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 5,
+        "decode_tps": 79.16
+      },
+      {
+        "ok": true,
+        "ttft_s": 24.512246916012373,
+        "ttft_any_s": 24.512246916012373,
+        "total_s": 24.535008333041333,
+        "prompt_tokens": 32619,
+        "completion_tokens": 2,
+        "text": "收到",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 4,
+        "decode_tps": 87.87
+      },
+      {
+        "ok": true,
+        "ttft_s": 24.859861458011437,
+        "ttft_any_s": 24.859861458011437,
+        "total_s": 24.899409457982983,
+        "prompt_tokens": 32616,
+        "completion_tokens": 3,
+        "text": "收到.",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 5,
+        "decode_tps": 75.86
+      }
+    ],
+    "warm": [
+      {
+        "ok": true,
+        "ttft_s": 0.09948295797221363,
+        "ttft_any_s": 0.09948295797221363,
+        "total_s": 0.11930887500056997,
+        "prompt_tokens": 32582,
+        "completion_tokens": 2,
+        "text": "確認",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 4,
+        "decode_tps": 100.88
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.08679400000255555,
+        "ttft_any_s": 0.08679400000255555,
+        "total_s": 0.08703908399911597,
+        "prompt_tokens": 32581,
+        "completion_tokens": 1,
+        "text": "OK",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 3,
+        "decode_tps": 4080.23
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.08313108305446804,
+        "ttft_any_s": 0.08313108305446804,
+        "total_s": 0.08372500003315508,
+        "prompt_tokens": 32581,
+        "completion_tokens": 1,
+        "text": "好",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 3,
+        "decode_tps": 1683.74
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.051417750015389174,
+        "ttft_any_s": 0.051417750015389174,
+        "total_s": 0.09318312502000481,
+        "prompt_tokens": 32582,
+        "completion_tokens": 3,
+        "text": "收到.",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 5,
+        "decode_tps": 71.83
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.050688582996372133,
+        "ttft_any_s": 0.050688582996372133,
+        "total_s": 0.06869487499352545,
+        "prompt_tokens": 32582,
+        "completion_tokens": 2,
+        "text": "確認",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 4,
+        "decode_tps": 111.07
+      },
+      {
+        "ok": true,
+        "ttft_s": 0.04929287498816848,
+        "ttft_any_s": 0.04929287498816848,
+        "total_s": 0.049552833021152765,
+        "prompt_tokens": 32581,
+        "completion_tokens": 1,
+        "text": "OK",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 3,
+        "decode_tps": 3846.77
+      }
+    ],
+    "cold_ttft_s": {
+      "n": 3,
+      "min": 24.5122,
+      "p50": 24.6493,
+      "p90": 24.8177,
+      "max": 24.8599,
+      "mean": 24.6738
+    },
+    "warm_ttft_s": {
+      "n": 6,
+      "min": 0.0493,
+      "p50": 0.0673,
+      "p90": 0.0931,
+      "max": 0.0995,
+      "mean": 0.0701
+    }
+  },
+  "verdicts": [
+    {
+      "name": "first_alert_card_p90",
+      "target": "≤ 2.0 s",
+      "measured": 1.1895,
+      "passed": true,
+      "note": "",
+      "extra": {}
+    },
+    {
+      "name": "ttft_warm_32k_p50",
+      "target": "≤ 0.5 s",
+      "measured": 0.0673,
+      "passed": true,
+      "note": "prompt_tokens=32621",
+      "extra": {}
+    }
+  ]
+}

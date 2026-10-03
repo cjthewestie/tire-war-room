@@ -1,0 +1,19 @@
+# Boot self-start (page 10: 開機自啟): vLLM + Qdrant + app via docker compose, restarted if it dies.
+[Unit]
+Description=War room stack (vLLM Nemotron + Qdrant + app)
+Requires=docker.service
+After=docker.service network-online.target warroom-firewall.service
+Wants=network-online.target warroom-firewall.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/warroom/current/deploy/spark
+ExecStartPre=/usr/bin/docker compose config --quiet
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStop=/usr/bin/docker compose down
+TimeoutStartSec=300
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

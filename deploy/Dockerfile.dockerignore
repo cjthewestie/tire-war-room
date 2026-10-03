@@ -1,0 +1,13 @@
+# BuildKit per-Dockerfile ignore (context = repo root)
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+.git
+data/runtime
+web/dist
+legacy
+docs
+bench/results
+deploy/releases
+*.tar.gz

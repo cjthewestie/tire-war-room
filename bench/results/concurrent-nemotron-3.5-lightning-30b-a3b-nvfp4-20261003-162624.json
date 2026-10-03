@@ -1,0 +1,353 @@
+{
+  "bench": "concurrent",
+  "recorded_at": "2026-10-03T16:26:24.738008+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "target_each_s": 4.0,
+  "n": 3,
+  "sequential_each_s": [
+    2.3303,
+    2.0681,
+    1.1544
+  ],
+  "rounds": [
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.3156164579559118,
+            "ttft_any_s": 1.3156164579559118,
+            "total_s": 1.9010057499981485,
+            "prompt_tokens": 2498,
+            "completion_tokens": 72,
+            "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 62,
+            "decode_tps": 123.0
+          },
+          "alert_wall_s": 1.9021,
+          "plan": {
+            "ok": true,
+            "ttft_s": 26.47624662501039,
+            "ttft_any_s": 26.47624662501039,
+            "total_s": 31.95998729096027,
+            "prompt_tokens": 14727,
+            "completion_tokens": 562,
+            "text": "{\n  \"goal\": \"判定溫度下降原因並決定處置方案\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"感測器漂移或單機洩漏\",\n    \"cause_code\": \"SOP-SN-01\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"取得最新溫度與蒸汽壓數值\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"判定是否符合感測器漂移條件\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time_h\": 10,\n        \"total_time_h\": 28,\n        \"activity_energy_kj_mol\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘硫化時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"reason\": \"temp_drop_cure_time_extend\"},\n      \"purpose\": \"重新排程以適應延長的硫化時間\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，預測穩定在 122±1°C。依 SOP-CP-02 處理，需重算硫化時間並確認是否影響排程。若感測器漂移，改走 SOP-SN-01。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 481,
+            "decode_tps": 102.48
+          },
+          "plan_wall_s": 33.8645
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.04770204098895192,
+            "ttft_any_s": 0.04770204098895192,
+            "total_s": 0.5899802499916404,
+            "prompt_tokens": 2465,
+            "completion_tokens": 66,
+            "text": "{\n  \"title\": \"A-BIGOPEN 過熱異常\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，已觸發 overheat 警報，需緊急停機檢查。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 55,
+            "decode_tps": 121.71
+          },
+          "alert_wall_s": 0.5921,
+          "plan": {
+            "ok": true,
+            "ttft_s": 11.091170584026258,
+            "ttft_any_s": 11.091170584026258,
+            "total_s": 16.472887792042457,
+            "prompt_tokens": 14694,
+            "completion_tokens": 618,
+            "text": "{\n  \"goal\": \"判定是否觸發 SOP-OM-01，並決定是否放慢投料或停機\",\n  \"hypothesis\": {\n    \"id\": \"A-BIGOPEN-112C\",\n    \"statement\": \"膠溫 112°C 持續上升，未達安全核心停機線 120°C，但已進入放慢投料警戒區\",\n    \"cause_code\": \"冷卻水流量低於正常值，導致熱量積聚\"\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"確認當前溫度與水流狀態\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\", \"window_min\": 30},\n      \"purpose\": \"驗證溫度是否持續上升\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"sop_search\",\n      \"args\": {\"sop_id\": \"SOP-OM-01\"},\n      \"purpose\": \"查閱大開煉機過熱處置步驟\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"T_actual\": 112, \"T_ref\": 95, \"t_ref\": 30, \"Ea\": 85000},\n      \"purpose\": \"計算延長硫化所需時間\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"評估放慢投料對排程的影響\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"team\": \"A-BIGOPEN\", \"action\": \"放慢投料20%\"},\n      \"purpose\": \"通知生產線執行放慢投料\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN 膠溫上升異常\",\n    \"summary\": \"溫度 112°C 持續上升，水流偏低，進入 SOP-OM-01 放慢投料處置流程。需主管核准後方可繼續。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 537,
+            "decode_tps": 114.83
+          },
+          "plan_wall_s": 17.0698
+        },
+        {
+          "machine_id": "CURE-03",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.6294407079694793,
+            "ttft_any_s": 0.6294407079694793,
+            "total_s": 1.2738484169822186,
+            "prompt_tokens": 2496,
+            "completion_tokens": 79,
+            "text": "{\n  \"title\": \"蒸汽壓下降異常\",\n  \"summary\": \"CURE-03 蒸汽壓 3.9 kgf/cm²，溫度 126°C。蒸汽壓低於基準 4.8，需檢查管路或壓力調節。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 66,
+            "decode_tps": 122.59
+          },
+          "alert_wall_s": 1.2768,
+          "plan": {
+            "ok": true,
+            "ttft_s": 20.42850112495944,
+            "ttft_any_s": 20.42850112495944,
+            "total_s": 26.337391624983866,
+            "prompt_tokens": 14725,
+            "completion_tokens": 679,
+            "text": "{\n  \"goal\": \"判斷是否需要重排或啟動蒸汽壓不足處置\",\n  \"hypothesis\": {\n    \"id\": \"steam_low_c03\",\n    \"statement\": \"CURE-03 單機蒸汽壓下降，同管線 H2 其他機台正常\",\n    \"cause_code\": \"SOP-ST-01\"\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"sensor\": \"steam_kgf_cm2\", \"machine\": \"CURE-03\"},\n      \"purpose\": \"確認壓力下降趨勢與底值 3.9 kgf/cm²\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"sensor\": \"steam_kgf_cm2\", \"machine\": \"CURE-06,CURE-08\"},\n      \"purpose\": \"檢查同 H2 管線 CURE-06、CURE-08 壓力是否正常\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"threshold\": \"10%\"},\n      \"purpose\": \"判斷下降幅度是否超過 10%（4.8→3.9 為 18.8%）\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"purpose\": \"依 SOP-ST-01 重算受影響機台硫化時間與排程缺口\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\"approver\": \"supervisor\"},\n      \"purpose\": \"主管核准是否暫停新胎入模或調整排程\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"target\": \"hardening_machine,maintenance\"},\n      \"purpose\": \"通知硫化機組與維修組進入 SOP-ST-01 處理\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-03 蒸汽壓低於基準\",\n    \"summary\": \"3 號硫化機 steam_kgf_cm2 從 4.8 降至 3.9（-18.8%），溫度 126°C 小胎仍在 120~130°C 窗口。同管線 H2 應檢查 CURE-06、CURE-08 壓力。依 SOP-ST-01 處理蒸汽壓不足問題。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 583,
+            "decode_tps": 114.91
+          },
+          "plan_wall_s": 27.6166
+        }
+      ],
+      "batch_wall_s": 33.8646
+    },
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.026969291968271136,
+            "ttft_any_s": 0.026969291968271136,
+            "total_s": 0.6392101249657571,
+            "prompt_tokens": 2498,
+            "completion_tokens": 72,
+            "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 62,
+            "decode_tps": 117.6
+          },
+          "alert_wall_s": 0.6403,
+          "plan": {
+            "ok": true,
+            "ttft_s": 1.304041999974288,
+            "ttft_any_s": 1.304041999974288,
+            "total_s": 8.400268290948588,
+            "prompt_tokens": 14727,
+            "completion_tokens": 813,
+            "text": "{\n  \"goal\": \"判斷是單機故障或蒸汽主管路問題，並決定是延長硫化時間還是重排\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_7\",\n    \"statement\": \"溫度下降是由單一機台蒸汽洩漏或感測器漂移引起，非主管路問題\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \"between\",\n      \"value\": 121.0,\n      \"value_hi\": 123.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"確認最新溫度與趨勢\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-06\", \"channel\": \"temp_c\"},\n      \"purpose\": \"對照同管線 H2 6 號機台溫度\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-08\", \"channel\": \"temp_c\"},\n      \"purpose\": \"對照同管線 H2 8 號機台溫度\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\", \"threshold_c\": 3},\n      \"purpose\": \"判斷溫度下降是否超過異常門檻\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time_h\": 10,\n        \"target_temp\": 122.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘硫化時間\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc_time_h\": \"$S5.total_cure_h\"},\n      \"purpose\": \"重新計算出模時刻與人力缺口\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，需判斷是單機問題還是蒸汽主管路問題。若為單機問題，依 SOP-CP-02 延長硫化時間；若為主管路問題，依 SOP-ST-01 處置。近 30 分鐘溫度呈單調下降趨勢，蒸汽壓從 4.80 kgf/cm² 快速下降至 4.40 kgf/cm²。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 689,
+            "decode_tps": 114.57
+          },
+          "plan_wall_s": 9.043
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.3337507919641212,
+            "ttft_any_s": 1.3337507919641212,
+            "total_s": 1.8893986249458976,
+            "prompt_tokens": 2465,
+            "completion_tokens": 68,
+            "text": "{\n  \"title\": \"A-BIGOPEN 過熱警告\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，逾越 120°C 安全上限，需緊急停機檢查。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 58,
+            "decode_tps": 122.38
+          },
+          "alert_wall_s": 1.8915,
+          "plan": {
+            "ok": true,
+            "ttft_s": 15.585493125021458,
+            "ttft_any_s": 15.585493125021458,
+            "total_s": 21.17797400004929,
+            "prompt_tokens": 14694,
+            "completion_tokens": 641,
+            "text": "{\n  \"goal\": \"判定是否觸發 SOP-OM-01，並決定是否放慢投料或停機\",\n  \"hypothesis\": {\n    \"id\": \"A-BIGOPEN-112C\",\n    \"statement\": \"膠溫 112°C 持續上升，未達安全核心停機線 120°C，但已進入放慢投料警戒區\",\n    \"cause_code\": \"冷卻水流量低於正常值，導致熱量積聚\"\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"確認當前溫度與水流狀態\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\", \"window_min\": 30},\n      \"purpose\": \"預測未來 30 分鐘溫度趨勢\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"sop_search\",\n      \"args\": {\"sop_id\": \"SOP-OM-01\"},\n      \"purpose\": \"查閱大開煉機過熱處置步驟\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"T_actual\": 112, \"T_ref\": 95, \"t_ref\": 30},\n      \"purpose\": \"計算等效硫化時間延長量\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"評估放慢投料對後續排程影響\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"team\": \"A-BIGOPEN\", \"action\": \"reduce_feed_20pct\"},\n      \"purpose\": \"核准放慢投料 20%\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN 膠溫上升異常\",\n    \"summary\": \"溫度 112°C 持續上升，水流偏低，進入 SOP-OM-01 放慢投料處置流程。需主管核准後減料 20%，並檢查冷卻水路。如溫度突破 120°C，安全核心將直接停機。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 554,
+            "decode_tps": 114.62
+          },
+          "plan_wall_s": 23.072
+        },
+        {
+          "machine_id": "CURE-03",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.6578920000465587,
+            "ttft_any_s": 0.6578920000465587,
+            "total_s": 1.3118220830219798,
+            "prompt_tokens": 2496,
+            "completion_tokens": 79,
+            "text": "{\n  \"title\": \"蒸汽壓下降異常\",\n  \"summary\": \"CURE-03 蒸汽壓 3.9 kgf/cm²，溫度 126°C。蒸汽壓低於基準 4.8，需檢查管路或壓力調節。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 66,
+            "decode_tps": 120.81
+          },
+          "alert_wall_s": 1.315,
+          "plan": {
+            "ok": true,
+            "ttft_s": 7.776903374993708,
+            "ttft_any_s": 7.776903374993708,
+            "total_s": 16.110519832989667,
+            "prompt_tokens": 14725,
+            "completion_tokens": 950,
+            "text": "{\n  \"goal\": \"判斷是否需要重排或啟動蒸汽壓不足處置\",\n  \"hypothesis\": {\n    \"id\": \"steam_drop_03\",\n    \"statement\": \"CURE-03 單機蒸汽壓下降，同管線 H2（CURE-06、07、08）其他機台正常\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-03\",\n      \"channel\": \"steam_kgf_cm2\",\n      \"op\": \">=\",\n      \"value\": 4.0,\n      \"within_min\": 5\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-03\", \"channel\": \"steam_kgf_cm2\"},\n      \"purpose\": \"確認實時壓力下降趨勢與底值 3.9 kgf/cm² 是否穩定或持續下降，排除讀數抖動。\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-06\", \"channel\": \"steam_kgf_cm2\"},\n      \"purpose\": \"讀取同管線 H2 對照機台 CURE-06 當前蒸汽壓，判斷是否為單機或管線問題。\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"steam_kgf_cm2\"},\n      \"purpose\": \"讀取同管線 H2 對照機台 CURE-07 當前蒸汽壓，與 CURE-06 共同判斷管線整體狀態。\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-08\", \"channel\": \"steam_kgf_cm2\"},\n      \"purpose\": \"讀取同管線 H2 對照機台 CURE-08 當前蒸汽壓，完成 H2 管線三機對比，確認是否為集管或鍋爐問題。\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"sop_search\",\n      \"args\": {\"sop_id\": \"SOP-ST-01\"},\n      \"purpose\": \"查閱蒸汽壓不足標準作業程序，確認是否符合「同管線 2 台以上同時下降」觸發條件。\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-03\", \"channel\": \"steam_kgf_cm2\", \"threshold\": \"3.0\"},\n      \"purpose\": \"預測壓力是否會在 5 分鐘內跌破安全閾值 3.0 kgf/cm²，若是則標記為緊急處置。\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-03 蒸汽壓下降異常\",\n    \"summary\": \"機台 CURE-03 (小胎) 近 15 分鐘蒸汽壓從 4.8 降至 3.9 kgf/cm²，溫度 126°C 仍在 120–130°C 窗口內。需確認是單機故障還是 H2 管線整體問題。若為單機，依 SOP-CP-01 處理；若為管線問題，依 SOP-ST-01 處理並重排。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 822,
+            "decode_tps": 114.0
+          },
+          "plan_wall_s": 17.4276
+        }
+      ],
+      "batch_wall_s": 23.0721
+    },
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.2712308330228552,
+            "ttft_any_s": 1.2712308330228552,
+            "total_s": 1.8686382920132019,
+            "prompt_tokens": 2498,
+            "completion_tokens": 72,
+            "text": "{\n  \"title\": \"硫化溫度異常\",\n  \"summary\": \"CURE-07溫度驟降至122°C，已硫化10h/28h，需檢視蒸汽管線H2與活化能歸因。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 62,
+            "decode_tps": 120.52
+          },
+          "alert_wall_s": 1.8697,
+          "plan": {
+            "ok": true,
+            "ttft_s": 12.286639374971855,
+            "ttft_any_s": 12.286639374971855,
+            "total_s": 17.50891799997771,
+            "prompt_tokens": 14727,
+            "completion_tokens": 600,
+            "text": "{\n  \"goal\": \"判斷是單機故障或蒸汽主管路問題，並決定是延長硫化時間還是重排\",\n  \"hypothesis\": {\n    \"id\": \"temp_drop_7\",\n    \"statement\": \"溫度下降是由單一機台蒸汽洩漏或感測器漂移引起，非主管路問題\",\n    \"cause_code\": \"single_leak_or_sensor_drift\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \"between\",\n      \"value\": 121.0,\n      \"value_hi\": 123.0,\n      \"within_min\": 30\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"CURE-07\"},\n      \"purpose\": \"取得最新溫度與蒸汽壓數值\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"CURE-07\", \"channel\": \"temp_c\"},\n      \"purpose\": \"判斷是否符合感測器漂移或單機洩漏模式\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"initial_temp\": 128.0,\n        \"current_temp\": 122.0,\n        \"initial_time\": 10,\n        \"total_time\": 28,\n        \"activation_energy\": 85.0\n      },\n      \"purpose\": \"依等效硫化公式重算剩餘所需時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"purpose\": \"依新硫化時間重新排程，檢查人力缺口\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"CURE-07 溫度下降處置\",\n    \"summary\": \"溫度從 128°C 下降至 122°C，需判斷是單機問題還是蒸汽主管路問題，並決定是延長硫化時間還是重新排程。依 SOP-CP-02 處理。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 505,
+            "decode_tps": 114.89
+          },
+          "plan_wall_s": 19.3814
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.024411165970377624,
+            "ttft_any_s": 0.024411165970377624,
+            "total_s": 0.5807991249603219,
+            "prompt_tokens": 2465,
+            "completion_tokens": 68,
+            "text": "{\n  \"title\": \"A-BIGOPEN 過熱警告\",\n  \"summary\": \"膠溫 112°C 持續上升，水流偏低，逾越 120°C 安全上限，需緊急停機檢查。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 58,
+            "decode_tps": 122.22
+          },
+          "alert_wall_s": 0.583,
+          "plan": {
+            "ok": true,
+            "ttft_s": 1.30610941600753,
+            "ttft_any_s": 1.30610941600753,
+            "total_s": 8.19685741601279,
+            "prompt_tokens": 14694,
+            "completion_tokens": 782,
+            "text": "{\n  \"goal\": \"判定是否觸發 SOP-OM-01，並決定是否放慢投料或停機\",\n  \"hypothesis\": {\n    \"id\": \"A-BIGOPEN-112C\",\n    \"statement\": \"膠溫 112°C 持續上升，已逾越 SOP-OM-01 警戒區（100-105°C），可能觸發安全核心或需放慢投料\",\n    \"cause_code\": \"冷卻水流量低於正常值 70%，導致熱量無法帶走\"\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"確認當前溫度與水流狀態\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\", \"temp_c\": 112.0, \"trend\": \"rising\"},\n      \"purpose\": \"驗證是否為真實過熱或感測器漂移\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"sop_search\",\n      \"args\": {\"sop_id\": \"SOP-OM-01\"},\n      \"purpose\": \"查閱大開煉機過熱處置步驟\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\"action\": \"calculate_equivalent_time\", \"temp\": 112.0, \"base\": 128.0},\n      \"purpose\": \"依等效硫化公式評估延長硫化所需時間\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\"machine_id\": \"A-BIGOPEN\"},\n      \"purpose\": \"檢視排程影響，決定是否放慢投料\"\n    },\n    {\n      \"id\": \"S6\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"action\": \"slow_feed\", \"reason\": \"SOP-OM-01 step 4\", \"approver\": \"supervisor\"},\n      \"purpose\": \"核准並通知大開煉機組放慢投料 20%\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN 膠溫 112°C 持續上升\",\n    \"summary\": \"水流偏低，冷卻效能不足，逾越 SOP-OM-01 警戒區（100-105°C）但未達安全核心停機線（120°C）\\n建議：依 SOP-OM-01 step 4 放慢生料投入 20%，需主管核准；如持續上升至 120°C 以上則安全核心直接停機\\n近 30 分鐘溫度上升趨勢：95→112°C，水流從 4.80 降至 4.45 kgf/cm² (-7.3%)\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 682,
+            "decode_tps": 113.49
+          },
+          "plan_wall_s": 8.7821
+        },
+        {
+          "machine_id": "CURE-03",
+          "alert": {
+            "ok": true,
+            "ttft_s": 0.6005039170267992,
+            "ttft_any_s": 0.6005039170267992,
+            "total_s": 1.248673374997452,
+            "prompt_tokens": 2496,
+            "completion_tokens": 79,
+            "text": "{\n  \"title\": \"蒸汽壓下降異常\",\n  \"summary\": \"CURE-03 蒸汽壓 3.9 kgf/cm²，溫度 126°C。蒸汽壓低於基準 4.8，需檢查管路或壓力調節。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 66,
+            "decode_tps": 121.88
+          },
+          "alert_wall_s": 1.2518,
+          "plan": {
+            "ok": true,
+            "ttft_s": 7.549997332971543,
+            "ttft_any_s": 7.549997332971543,
+            "total_s": 12.88334462500643,
+            "prompt_tokens": 14725,
+            "completion_tokens": 609,
+            "text": "{\n  \"goal\": \"判斷是否為蒸汽主管路問題，若是則重排，若否則進單機處置\",\n  \"hypothesis\": {\n    \"id\": \"steam_main_pipe\",\n    \"statement\": \"同管線 CURE-04/05/06/07/08/09/10/11 溫度同時下降\",\n    \"cause_code\": \"steam_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-04\",\n      \"channel\": \"steam_kgf_cm2\",\n      \"op\": \"<=\",\n      \"value\": 4.0,\n      \"within_min\": 5\n    }\n  },\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\"channels\": [\"steam_kgf_cm2\"], \"machine_ids\": [\"CURE-04\",\"CURE-05\",\"CURE-06\",\"CURE-07\",\"CURE-08\",\"CURE-09\",\"CURE-10\",\"CURE-11\"]},\n      \"purpose\": \"蒸汽壓讀取\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"predict_anomaly\",\n      \"args\": {\"threshold\": 0.5, \"window_min\": 5},\n      \"depends_on\": [\"S1\"],\n      \"purpose\": \"異常檢測\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\"recalc\": true},\n      \"depends_on\": [\"S2\"],\n      \"purpose\": \"重新排程\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\"machine\": \"CURE-03\", \"new_time\": \"24h\"},\n      \"depends_on\": [\"S3\"],\n      \"purpose\": \"延長硫化時間\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\"channel\": \"maintenance\", \"msg\": \"steam_low_C03\"},\n      \"depends_on\": [\"S4\"],\n      \"purpose\": \"通知維修\"\n    }\n  ],\n  \"alert_card\": {\n    \"title\": \"steam_low_C03\",\n    \"summary\": \"CURE-03 蒸汽壓 3.9，低於基準 4.8。同管線 H2 機台需確認。\"\n  }\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 535,
+            "decode_tps": 114.19
+          },
+          "plan_wall_s": 14.1374
+        }
+      ],
+      "batch_wall_s": 19.3815
+    }
+  ],
+  "alert_each_s": {
+    "n": 9,
+    "min": 0.583,
+    "p50": 1.2768,
+    "p90": 1.8936,
+    "max": 1.9021,
+    "mean": 1.258
+  },
+  "plan_each_s": {
+    "n": 9,
+    "min": 8.7821,
+    "p50": 17.4276,
+    "p90": 28.8662,
+    "max": 33.8645,
+    "mean": 18.9327
+  },
+  "verdicts": [
+    {
+      "name": "concurrent_3_worst_alert",
+      "target": "each ≤ 4.0 s",
+      "measured": 1.9021,
+      "passed": true,
+      "note": "",
+      "extra": {}
+    }
+  ]
+}

@@ -1,0 +1,123 @@
+# DGX Spark production stack: vLLM (Nemotron 3.5 Lightning 30B-A3B NVFP4) + Qdrant + war-room app.
+# One box, all inside the factory, no outbound traffic (pages 9-10).
+#
+#   cd /opt/warroom/current/deploy/spark
+#   cp .env.example .env                       # once
+#   ../bin/fetch_models.sh                     # once, while still online: weights into ${HF_CACHE}
+#   docker compose up -d                       # systemd unit warroom-stack.service does this at boot
+#   docker compose --profile control up -d vllm-fp8      # page-10 control group on :8002 (stop vllm first)
+#
+# Model id verified on Hugging Face 2026-10-03: nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4
+# (+ ...-NVFP4-DSpark draft, ...-BF16 reference). Flags and sources: deploy/spark/vllm-serve.sh.
+#
+# Networks: `core` is internal (no route out of the host) and carries vllm <-> app <-> qdrant.
+# `edge` is a normal bridge, needed only because Docker cannot publish ports from an internal network:
+# app on the factory LAN (phone + touchscreen), vLLM and Qdrant on 127.0.0.1 only (bench + ops).
+# Because `edge` could route out, egress is enforced on the host by deploy/network/nftables-warroom.nft
+# (output + forward hooks, so container traffic is covered too), and every image runs with
+# HF / telemetry offline switches so nothing even tries.
+
+name: warroom
+
+x-offline-env: &offline-env
+  HF_HUB_OFFLINE: "1"
+  TRANSFORMERS_OFFLINE: "1"
+  VLLM_NO_USAGE_STATS: "1"
+  DO_NOT_TRACK: "1"
+
+services:
+  vllm:
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.28.0}
+    # NVIDIA's own Spark build is the fallback if the upstream arm64 image lacks GB10 (sm_121) kernels:
+    #   VLLM_IMAGE=nvcr.io/nvidia/vllm:<yy.mm>-py3
+    entrypoint: ["/bin/bash", "/opt/warroom/vllm-serve.sh"]
+    environment:
+      <<: *offline-env
+      QUANT: ${QUANT:-nvfp4}
+      SPEC: ${SPEC:-dspark}
+      PREFIX_CACHE: ${PREFIX_CACHE:-1}
+      KV_DTYPE: ${KV_DTYPE:-fp8}
+      MAX_MODEL_LEN: ${MAX_MODEL_LEN:-32768}
+      MAX_NUM_SEQS: ${MAX_NUM_SEQS:-4}
+      GPU_MEM_UTIL: ${GPU_MEM_UTIL:-0.28}
+      HF_HOME: /root/.cache/huggingface
+    volumes:
+      - ./vllm-serve.sh:/opt/warroom/vllm-serve.sh:ro
+      - ${HF_CACHE:-/opt/warroom/hf}:/root/.cache/huggingface
+    ipc: host
+    ulimits: { memlock: -1, stack: 67108864 }
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: all, capabilities: [gpu] }]
+    ports: ["127.0.0.1:8001:8000"]
+    networks: [core, edge]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 600s          # first boot loads 19 GB of weights + CUDA graph capture
+
+  vllm-fp8:                       # page-10 control group: FP8, no prefix cache, no speculative decoding
+    profiles: [control]
+    extends: { service: vllm }
+    environment:
+      QUANT: fp8
+      SPEC: "off"
+      PREFIX_CACHE: "0"
+      KV_DTYPE: auto
+      GPU_MEM_UTIL: ${GPU_MEM_UTIL_FP8:-0.45}
+    ports: ["127.0.0.1:8002:8000"]
+
+  qdrant:
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.15.4}
+    environment:
+      QDRANT__TELEMETRY_DISABLED: "true"
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+    volumes:
+      - ${QDRANT_DATA:-/opt/warroom/data/qdrant}:/qdrant/storage
+    mem_limit: 3g                 # page 9: Qdrant 3 GB
+    ports: ["127.0.0.1:6333:6333"]
+    networks: [core, edge]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  app:
+    image: ${APP_IMAGE:-warroom-app:latest}
+    build:
+      context: ../..
+      dockerfile: deploy/Dockerfile
+    environment:
+      <<: *offline-env
+      LLM_MODE: ${LLM_MODE:-llm}
+      BASE_URL: http://vllm:8000/v1
+      MODEL: nemotron
+      LLM_FALLBACK_TO_MOCK: "true"       # model down -> deterministic commander, logged in audit
+      QDRANT_URL: http://qdrant:6333
+      AUDIT_PATH: /app/data/runtime/audit.jsonl
+      SCHEDULE_DIR: /app/data/runtime/schedules
+      SCENARIO: ${SCENARIO:-normal}
+      SIM_SPEED: ${SIM_SPEED:-1.0}
+      HOST: 0.0.0.0
+      PORT: "8000"
+    volumes:
+      - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
+    mem_limit: 6g                 # page 9: scheduling + app 6 GB
+    ports: ["${LAN_BIND:-0.0.0.0}:8000:8000"]   # supervisor phone + touchscreen over the factory LAN
+    networks: [core, edge]
+    depends_on:
+      qdrant: { condition: service_healthy }
+      vllm: { condition: service_started }      # app starts in mock fallback while the model loads
+    restart: unless-stopped
+
+networks:
+  core:
+    internal: true
+  edge:
+    driver: bridge

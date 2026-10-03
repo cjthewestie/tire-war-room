@@ -1,0 +1,68 @@
+{
+  "bench": "unplug",
+  "recorded_at": "2026-10-03T16:32:38.189373+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "is_root": false,
+  "block": {
+    "requested": false,
+    "applied": false
+  },
+  "internet_reachable_during_test": true,
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "direct_alert_s": [
+    0.6351,
+    0.5808,
+    0.6121,
+    0.5809,
+    0.6116
+  ],
+  "sockets": {
+    "samples": 28,
+    "watched_pids": [
+      978,
+      2141,
+      35912,
+      72267
+    ],
+    "outbound_connections": 0,
+    "outbound": [],
+    "errors": []
+  },
+  "verdicts": [
+    {
+      "name": "alert_offline",
+      "target": "≤ 2.0 s",
+      "measured": 0.6351,
+      "passed": true,
+      "note": "",
+      "extra": {}
+    },
+    {
+      "name": "outbound_connections",
+      "target": "0",
+      "measured": 0,
+      "passed": true,
+      "note": "network NOT blocked (needs root); socket count only",
+      "extra": {}
+    }
+  ]
+}
