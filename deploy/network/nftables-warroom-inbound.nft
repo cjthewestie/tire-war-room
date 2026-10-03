@@ -1,0 +1,49 @@
+#!/usr/sbin/nft -f
+# Inbound allow-list for the two war-room ports meant for the plant LAN (page 10: 網路白名單). A separate
+# table from the egress allow-list (nftables-warroom.nft), so loading or removing one never touches the other.
+# Load:   sudo nft -f deploy/network/nftables-warroom-inbound.nft    (warroom-firewall.service does it at boot)
+# Remove: sudo nft delete table inet warroom_inbound
+#
+#   :8000 the app (host network; touchscreen on loopback, supervisor phone on the LAN) -> only sources in
+#         @app_clients. Default: the RFC1918 ranges. Narrow it to the plant subnet.
+#   :1883 the MQTT broker. Reachable from the LAN only when compose runs with MQTT_BIND=<Spark LAN IP> (the
+#         page-10 gateway -> MQTT path) -> only sources in @mqtt_gateways, EMPTY by default: no LAN host can
+#         publish readings until the data gateway's IP is added. The broker also refuses anonymous clients and
+#         lets user `gateway` publish only to warroom/telemetry/# (deploy/spark/mosquitto); this table is the
+#         second fence, so a stolen gateway password alone is not enough from another LAN host.
+#   Every other port (ssh, ...) is left alone. Loopback (which carries the box's own connections to its LAN IP) is always accepted.
+#   IPv6 to these two ports from off the box is dropped.
+# Hooks: input (host-networked app, docker-proxy) and forward (Docker's DNAT to the mqtt container, matched
+# on the port the client dialled, original direction only so the broker's replies pass).
+# Drops: counter dropped_ingress, log prefix "warroom-ingress-drop in " / "warroom-ingress-drop fwd ".
+# Site values: deploy/bin/set_inbound_allow.sh writes /etc/warroom/inbound.d/allow.nft (flush + add elements);
+# the include at the bottom is a glob, so no file = the defaults above.
+
+table inet warroom_inbound {
+    set app_clients {
+        type ipv4_addr; flags interval;
+        elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }
+    }
+    set mqtt_gateways {
+        type ipv4_addr; flags interval;
+    }
+
+    counter dropped_ingress { }
+
+    chain input {
+        type filter hook input priority -10; policy accept;
+        iifname "lo" accept                  # includes the box dialling its own LAN IP
+        tcp dport 8000 ip saddr @app_clients accept
+        tcp dport 1883 ip saddr @mqtt_gateways accept
+        tcp dport { 8000, 1883 } counter name dropped_ingress log prefix "warroom-ingress-drop in " level warn drop
+    }
+
+    chain forward {
+        type filter hook forward priority -10; policy accept;
+        ct direction reply accept
+        ct status dnat meta l4proto tcp ct original proto-dst 1883 ip saddr @mqtt_gateways accept
+        ct status dnat meta l4proto tcp ct original proto-dst 1883 counter name dropped_ingress log prefix "warroom-ingress-drop fwd " level warn drop
+    }
+}
+
+include "/etc/warroom/inbound.d/*.nft"

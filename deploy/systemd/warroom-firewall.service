@@ -1,6 +1,6 @@
-# Egress allow-list before anything else starts (page 9-10: 資料不出廠, 網路白名單).
+# Egress allow-list + inbound allow-list for :8000/:1883 before anything else starts (page 9-10: 資料不出廠, 網路白名單).
 [Unit]
-Description=War room egress allow-list (nftables)
+Description=War room egress + inbound allow-lists (nftables)
 DefaultDependencies=no
 Before=network-pre.target docker.service warroom-stack.service
 Wants=network-pre.target
@@ -9,7 +9,9 @@ Wants=network-pre.target
 Type=oneshot
 RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /opt/warroom/current/deploy/network/nftables-warroom.nft
-ExecStop=/usr/sbin/nft delete table inet warroom_offline
+ExecStart=/usr/sbin/nft -f /opt/warroom/current/deploy/network/nftables-warroom-inbound.nft
+ExecStop=-/usr/sbin/nft delete table inet warroom_offline
+ExecStop=-/usr/sbin/nft delete table inet warroom_inbound
 
 [Install]
 WantedBy=multi-user.target

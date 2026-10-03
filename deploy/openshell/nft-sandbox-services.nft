@@ -9,9 +9,11 @@
 # compose VLLM_BIND/QDRANT_BIND). This table drops every other source, so a phone or PC on the factory
 # LAN still cannot reach the model or the KB directly.
 #
-# Covered: Docker's DNAT path (forward hook; `ct original` = the address/port the client dialled) and the
-# userland docker-proxy / host-process path (input hook). Not covered: MQTT :1883, which the plant data
-# gateway on the LAN must reach by design (compose MQTT_BIND).
+# Covered: Docker's DNAT path (forward hook; `ct original` = the address/port the client dialled; original
+# direction only, so the services' replies, whose source is the container, are never dropped) and the
+# userland docker-proxy / host-process path (input hook). Not here: MQTT :1883, which the plant data gateway
+# must reach; deploy/network/nftables-warroom-inbound.nft fences it (@mqtt_gateways) and the broker
+# requires a login.
 #   ${SPARK_HOST}  the Spark's LAN IP the services are bound to
 #   ${SANDBOX_SRC} comma-separated sources allowed in: the sandbox's address range + the Spark itself
 # Inspect: sudo nft list table inet warroom_sandbox_svc     Remove: sudo nft delete table inet warroom_sandbox_svc
@@ -31,6 +33,6 @@ table inet warroom_sandbox_svc {
 
     chain forward {
         type filter hook forward priority -5; policy accept;
-        ct original ip daddr ${SPARK_HOST} ct original proto-dst { 8001, 6333 } ip saddr != @sandbox_src counter name dropped_svc drop
+        ct direction original ct original ip daddr ${SPARK_HOST} ct original proto-dst { 8001, 6333 } ip saddr != @sandbox_src counter name dropped_svc drop
     }
 }

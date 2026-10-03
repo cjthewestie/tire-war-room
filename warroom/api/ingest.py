@@ -27,7 +27,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from warroom import factory as F
 from warroom.contracts import DataQuality, SensorReading
@@ -120,12 +120,16 @@ class MqttBridge:
     """Publishes readings to the broker and collects them back from a subscription."""
 
     def __init__(self, url: str = "mqtt://127.0.0.1:1883", client_id: str = "warroom-runtime",
-                 connect_timeout_s: float = 3.0):
+                 connect_timeout_s: float = 3.0, username: str | None = None, password: str | None = None):
         import paho.mqtt.client as mqtt
 
         u = urlparse(url if "://" in url else f"mqtt://{url}")
         self.host, self.port = u.hostname or "127.0.0.1", u.port or 1883
-        self.url = f"mqtt://{self.host}:{self.port}"
+        self.url = f"mqtt://{self.host}:{self.port}"          # never carries the credentials (stats, logs)
+        username = username or (unquote(u.username) if u.username else None)
+        password = password if password is not None else (unquote(u.password) if u.password else None)
+        self.username = username
+        self._refused: str | None = None
         self._q: queue.Queue[SensorReading] = queue.Queue()
         self._connected = threading.Event()
         self._subscribed = threading.Event()
@@ -134,14 +138,19 @@ class MqttBridge:
         self.cli.on_subscribe = lambda *a, **k: self._subscribed.set()
         self.cli.on_message = self._on_message
         self.cli.on_disconnect = lambda *a, **k: self._connected.clear()
+        if username:
+            self.cli.username_pw_set(username, password)
         self.cli.connect(self.host, self.port, keepalive=30)
         self.cli.loop_start()
         if not (self._connected.wait(connect_timeout_s) and self._subscribed.wait(connect_timeout_s)):
             self.close()
-            raise ConnectionError(f"MQTT broker {self.url} not reachable")
+            why = f"refused: {self._refused}" if self._refused else "not reachable"
+            raise ConnectionError(f"MQTT broker {self.url} {why}")
 
     def _on_connect(self, cli, userdata, flags, reason_code, properties=None):
-        if not reason_code.is_failure:
+        if reason_code.is_failure:
+            self._refused = str(reason_code)                  # e.g. "Not authorized" on a bad login
+        else:
             self._connected.set()
             cli.subscribe(f"{TOPIC_PREFIX}/#", qos=0)
 
@@ -189,6 +198,18 @@ class MqttBridge:
             pass
 
 
+def mqtt_credentials_from_env() -> dict:
+    """Broker login for the authenticated Spark broker (deploy/spark/mosquitto): WARROOM_MQTT_USERNAME plus
+    WARROOM_MQTT_PASSWORD or WARROOM_MQTT_PASSWORD_FILE (the file mqtt-init writes). Empty = anonymous,
+    which only the Mac dev broker accepts. An unreadable password file raises, so the pipeline reports it."""
+    user = os.environ.get("WARROOM_MQTT_USERNAME") or None
+    pw = os.environ.get("WARROOM_MQTT_PASSWORD") or None
+    pw_file = os.environ.get("WARROOM_MQTT_PASSWORD_FILE")
+    if pw is None and pw_file:
+        pw = Path(pw_file).read_text().strip()
+    return {"username": user, "password": pw}
+
+
 class IngestPipeline:
     """validation tag + time-series write (+ optional MQTT hop) for every tick's readings."""
 
@@ -207,11 +228,12 @@ class IngestPipeline:
         bridge = None
         if mode == "mqtt":
             url = os.environ.get("WARROOM_MQTT_URL", "mqtt://127.0.0.1:1883")
+            shown = url.split("@")[-1]                        # no credentials in stats / logs
             try:
-                bridge = MqttBridge(url)
+                bridge = MqttBridge(url, **mqtt_credentials_from_env())
             except Exception as e:  # noqa: BLE001 - no broker: direct path, reported in stats
                 p = cls(store)
-                p.stats.last_error = f"mqtt unavailable ({url}): {e}"[:300]
+                p.stats.last_error = f"mqtt unavailable ({shown}): {e}"[:300]
                 log.warning(p.stats.last_error)
                 return p
         return cls(store, bridge)

@@ -38,6 +38,16 @@ esac
 if [[ $DRY -eq 0 && -z "${WARROOM_SUPERVISOR_PIN:-}" ]]; then
   die "set WARROOM_SUPERVISOR_PIN (8+ random chars): behind the forward every client needs it, the touch screen too"
 fi
+# MQTT login: the broker refuses anonymous clients (deploy/spark/mosquitto). The app's password is the one
+# compose's mqtt-init wrote (MQTT_APP_PASSWORD, else ${MQTT_DATA}/app.pass, root/uid-10001 readable only).
+MQTT_DATA="${MQTT_DATA:-/opt/warroom/data/mqtt}"
+MQTT_PW="${MQTT_APP_PASSWORD:-}"
+if [[ -z "$MQTT_PW" ]]; then
+  MQTT_PW="$(cat "$MQTT_DATA/app.pass" 2>/dev/null || sudo -n cat "$MQTT_DATA/app.pass" 2>/dev/null || true)"
+fi
+if [[ $DRY -eq 0 && -z "$MQTT_PW" ]]; then
+  die "no MQTT password: set MQTT_APP_PASSWORD or start compose (mqtt-init writes $MQTT_DATA/app.pass)"
+fi
 
 out="data/runtime/openshell"
 mkdir -p "$out"
@@ -49,11 +59,15 @@ for f in "$out/warroom-policy.yaml" "$out/nft-sandbox-services.nft"; do
 done
 
 nft_load=(sudo nft -f "$out/nft-sandbox-services.nft")
+# The inbound table (deploy/network/nftables-warroom-inbound.nft) admits :1883 only from @mqtt_gateways;
+# the sandbox reaches the broker through Docker's DNAT from SANDBOX_SRC, so add that range for this run.
+mqtt_allow=(sudo nft add element inet warroom_inbound mqtt_gateways "{ ${SANDBOX_SRC} }")
 stop_app=(docker compose -f deploy/spark/docker-compose.yml stop app)
 create=(openshell sandbox create --name "$NAME" --from "$IMAGE" --policy "$out/warroom-policy.yaml"
   --env LLM_MODE=llm --env "BASE_URL=http://${SPARK_HOST}:8001/v1" --env MODEL=nemotron
   --env LLM_FALLBACK_TO_MOCK=true --env "QDRANT_URL=http://${SPARK_HOST}:6333"
   --env WARROOM_INGEST=mqtt --env "WARROOM_MQTT_URL=mqtt://${SPARK_HOST}:1883"
+  --env WARROOM_MQTT_USERNAME=warroom-app --env "WARROOM_MQTT_PASSWORD=${MQTT_PW}"
   --env "WARROOM_SUPERVISOR_PIN=${WARROOM_SUPERVISOR_PIN:-}" --env WARROOM_LOOPBACK_LOCAL=0
   --env HOST=0.0.0.0 --env PORT=8000
   -- /opt/venv/bin/python -m warroom.api)
@@ -62,8 +76,10 @@ forward=(openshell forward start 8000 "$NAME")
 if [[ $DRY -eq 1 ]]; then
   cat "$out/warroom-policy.yaml"; echo "---"; cat "$out/nft-sandbox-services.nft"; echo "---"
   printf '%q ' "${nft_load[@]}"; echo
+  printf '%q ' "${mqtt_allow[@]}"; echo
   printf '%q ' "${stop_app[@]}"; echo
-  printf '%q ' "${create[@]}" | sed -E 's/WARROOM_SUPERVISOR_PIN=[^ ]+/WARROOM_SUPERVISOR_PIN=<set>/'; echo
+  printf '%q ' "${create[@]}" | sed -E -e 's/WARROOM_SUPERVISOR_PIN=[^ ]+/WARROOM_SUPERVISOR_PIN=<set>/' \
+    -e 's/WARROOM_MQTT_PASSWORD=[^ ]*/WARROOM_MQTT_PASSWORD=<set>/'; echo
   printf '%q ' "${forward[@]}"; echo
   exit 0
 fi
@@ -81,6 +97,7 @@ curl -fsS -m 5 "http://${SPARK_HOST}:6333/readyz" >/dev/null \
 # 2. Only the sandbox (and the box itself) may reach :8001/:6333.
 sudo nft delete table inet warroom_sandbox_svc 2>/dev/null || true
 "${nft_load[@]}"
+if sudo nft list table inet warroom_inbound >/dev/null 2>&1; then "${mqtt_allow[@]}"; fi
 
 # 3. One war room on :8000.
 "${stop_app[@]}" || true

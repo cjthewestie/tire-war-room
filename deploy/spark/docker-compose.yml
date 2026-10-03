@@ -21,7 +21,10 @@
 # On the host network the app sees the real address: 127.0.0.1 = touchscreen, LAN IP = phone + PIN.
 # Egress is enforced on the host by deploy/network/nftables-warroom.nft (output hook covers the host-
 # networked app, forward hook the bridged containers), and every image runs with HF / telemetry offline
-# switches so nothing even tries.
+# switches so nothing even tries. INBOUND to the two ports meant for the LAN is filtered by
+# deploy/network/nftables-warroom-inbound.nft (same boot unit): :8000 (app) only from @app_clients (RFC1918
+# by default) and :1883 (MQTT) only from @mqtt_gateways (empty by default). deploy/bin/set_inbound_allow.sh
+# narrows/fills them.
 
 name: warroom
 
@@ -101,11 +104,34 @@ services:
       timeout: 3s
       retries: 5
 
+  mqtt-init:                      # writes the broker password file (users warroom-app, gateway) before mqtt starts
+    image: ${MQTT_IMAGE:-eclipse-mosquitto:2}
+    entrypoint: ["/bin/sh", "/mosquitto/init-auth.sh"]
+    user: "0"
+    environment:
+      MQTT_APP_PASSWORD: ${MQTT_APP_PASSWORD:-}           # empty = random, kept in ${MQTT_DATA}/app.pass
+      MQTT_GATEWAY_PASSWORD: ${MQTT_GATEWAY_PASSWORD:-}   # empty = no gateway user (simulator-only demo)
+    volumes:
+      - ./mosquitto/init-auth.sh:/mosquitto/init-auth.sh:ro
+      - ./mosquitto/acl:/mosquitto/acl.src:ro
+      - ${MQTT_DATA:-/opt/warroom/data/mqtt}:/mosquitto/auth
+    network_mode: none
+    restart: "no"
+
   mqtt:                           # page 10: Modbus/OPC UA gateway -> MQTT -> app (validation + time-series DB)
     image: ${MQTT_IMAGE:-eclipse-mosquitto:2}
-    command: ["mosquitto", "-c", "/mosquitto-no-auth.conf"]
-    ports: ["${MQTT_BIND:-127.0.0.1}:1883:1883"]   # the plant gateway publishes here; LAN-bind only behind the nft allow-list
+    # Authenticated broker: no anonymous clients; deploy/spark/mosquitto/acl lets `gateway` only publish to
+    # warroom/telemetry/# and `warroom-app` read it. MQTT_BIND=<Spark LAN IP> lets a real gateway reach it;
+    # deploy/network/nftables-warroom-inbound.nft then accepts :1883 only from the IPs in @mqtt_gateways
+    # (empty by default = nobody on the LAN; fill it with deploy/bin/set_inbound_allow.sh).
+    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto.conf"]
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ${MQTT_DATA:-/opt/warroom/data/mqtt}:/mosquitto/auth:ro
+    ports: ["${MQTT_BIND:-127.0.0.1}:1883:1883"]
     networks: [core, edge]
+    depends_on:
+      mqtt-init: { condition: service_completed_successfully }
     restart: unless-stopped
 
   app:
@@ -128,17 +154,21 @@ services:
       PORT: "8000"
       WARROOM_INGEST: ${WARROOM_INGEST:-mqtt}            # readings go sim/gateway -> mosquitto -> app; broker down = direct + counted
       WARROOM_MQTT_URL: mqtt://${MQTT_BIND:-127.0.0.1}:1883
+      WARROOM_MQTT_USERNAME: warroom-app
+      WARROOM_MQTT_PASSWORD_FILE: /app/mqtt-auth/app.pass   # written by mqtt-init, readable by uid 10001 only
       # REQUIRED: the supervisor phone sends it as X-Supervisor-Pin over the LAN. compose refuses to start without it.
       WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:?set WARROOM_SUPERVISOR_PIN (8+ random chars) in deploy/spark/.env}
       WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
       WARROOM_LOOPBACK_LOCAL: "1"   # host network: 127.0.0.1 really is the on-box touchscreen (the app turns loopback off by default inside a NAT'd container)
     volumes:
       - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
+      - ${MQTT_DATA:-/opt/warroom/data/mqtt}:/app/mqtt-auth:ro
     mem_limit: 6g                 # page 9: scheduling + app 6 GB
     network_mode: host            # real client addresses; see the header. No `ports:` / `networks:` here.
     depends_on:
       qdrant: { condition: service_healthy }
       vllm: { condition: service_started }      # app starts in mock fallback while the model loads
+      mqtt-init: { condition: service_completed_successfully }
       mqtt: { condition: service_started }
     restart: unless-stopped
 

@@ -14,7 +14,7 @@
 #                  app's attempts (UID=10001) are told apart from timesyncd/snapd/motd-news
 #   dropped_egress = both, kept for older readers. Counters count PACKETS (a blocked TCP connect is the SYN
 #   plus its retransmits); bench/unplug_test.py counts ATTEMPTS from the log lines instead.
-# Inbound is not restricted here; the app port is published on the LAN by docker compose.
+# Inbound is a separate table: deploy/network/nftables-warroom-inbound.nft admits :8000 only from @app_clients and :1883 (MQTT) only from @mqtt_gateways.
 # Edit `lan4` if the plant uses public-range addressing internally (rare, but check with factory IT; the
 # OT network is zoned per IEC 62443 and must reach the Spark only through the data gateway, p.10).
 

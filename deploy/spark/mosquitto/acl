@@ -1,0 +1,11 @@
+# Topic ACL (mosquitto acl_file). Readings are warroom/telemetry/<line>/<machine_id> (warroom/api/ingest.py).
+# warroom-app: the war room. Subscribes to every reading; on the demo it also publishes them (the simulator
+#              stands in for the gateway).
+# gateway:     the plant Modbus/OPC UA -> MQTT data gateway. Publish only, telemetry only: it cannot read
+#              the feed back, and no user can publish anywhere outside warroom/telemetry/.
+# Anything not listed is denied.
+user warroom-app
+topic readwrite warroom/telemetry/#
+
+user gateway
+topic write warroom/telemetry/#
