@@ -18,6 +18,7 @@ Page-11 layout (demo day D = now's date; the proposal's demo day 10/03/2026 is a
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime, time, timedelta
 
 from warroom import factory as F
@@ -197,12 +198,25 @@ def reschedule(store, scheduler: Scheduler, now: datetime, orders: list[Order], 
     return res, ver
 
 
+def _job_label(order_id: str, job_id: str, n_in_plan: int) -> str:
+    """'#M-201 第 3 模' for one tire of a multi-tire order, so a planned batch is never confused
+    with the tire of the same order already curing on that press; '#A-311' when it is the only one."""
+    m = re.search(r"-(\d+)$", job_id)
+    if n_in_plan > 1 and m and not job_id.startswith("J-CURE-"):
+        return f"{order_id} 第 {int(m.group(1))} 模"
+    return order_id
+
+
 def describe(res: SolveResult) -> str:
     """One-line Chinese summary for audit / approval cards."""
     parts = []
+    per_order: dict[str, int] = {}
+    for sj in (res.schedule.jobs if res.schedule else []):
+        per_order[sj.order_id] = per_order.get(sj.order_id, 0) + 1
     for mv in res.moves:
         if mv.from_press != mv.to_press:
-            parts.append(f"{mv.order_id} 由 {mv.from_press} 改到 {mv.to_press}")
+            parts.append(f"{_job_label(mv.order_id, mv.job_id, per_order.get(mv.order_id, 1))} "
+                         f"由 {mv.from_press} 改到 {mv.to_press}")
     if res.staffing_options and res.schedule and res.schedule.staffing_changes:
         parts.append("；".join(f"{g}→{c.label}" for g, c in zip(res.gaps, res.schedule.staffing_changes)))
     # deliveries_met covers this plan's tires only (open-order outlook is in schedule.warnings)

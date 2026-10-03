@@ -549,3 +549,49 @@ def test_delivery_claims_scoped_to_this_plan():
     assert "交期全數達成" not in text and ("本週排程訂單交期滿足" in text or "延遲" in text)
     outlook = [w for w in store_res.schedule.warnings if w.startswith("本週排程外")]
     assert len(outlook) == 1 and "#L-301" in outlook[0]
+
+
+# ---------------------------------------------------------------- review r4: slow press under H1
+@pytest.mark.parametrize("solver", ["cpsat", "heuristic"])
+def test_extended_cure_press_gets_no_tires_from_other_presses(tmp_path, solver):
+    """While H1 says CURE-07 runs at 122 °C (S1: 28 h -> 36.5 h), no tire planned on another press
+    is moved onto it (round 1 once showed '#M-201 由 CURE-09 改到 CURE-07' at 28 h); only #A-311
+    moves off it, to CURE-09. Tires already planned on CURE-07 may stay, and the plan says on what
+    premise."""
+    from warroom.schedule.demo import describe
+    clock, sim, seed = _sim_seed()
+    prev = {j.id: j.press_id for j in seed.jobs}
+    sched = CpSatScheduler() if solver == "cpsat" else HeuristicScheduler()
+    store = FileScheduleStore(tmp_path / "s", initial=seed)
+    res, ver = reschedule(store, sched, clock.now(), sim.orders(), sim.shifts(),
+                          cure_overrides_h={"CURE-07": 36.5})
+    assert res.feasible and res.deliveries_met and ver is not None
+    on7 = [j for j in res.schedule.jobs if j.press_id == "CURE-07" and not j.frozen]
+    assert all(prev.get(j.id) == "CURE-07" for j in on7), [(j.id, prev.get(j.id)) for j in on7]
+    assert not [m for m in res.moves if m.to_press == "CURE-07" and m.from_press != "CURE-07"]
+    a311 = next(m for m in res.moves if m.order_id == "#A-311")
+    assert (a311.from_press, a311.to_press) == ("CURE-07", "CURE-09")
+    assert any(w.startswith("CURE-07 硫化延長中") for w in res.schedule.warnings)
+    text = describe(res)
+    assert "改到 CURE-07" not in text and "#A-311 由 CURE-07 改到 CURE-09" in text
+
+
+def test_shortened_or_unchanged_cure_does_not_close_the_press(tmp_path):
+    """Only a LONGER cure marks the press slow; an override at the recipe value changes nothing."""
+    from warroom.schedule import solver as S
+    clock, sim, seed = _sim_seed()
+    for h in (28.0, 20.0):
+        ctx = S._prepare(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
+                                      cure_overrides_h={"CURE-07": h}))
+        assert not ctx.slow
+    ctx = S._prepare(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
+                                  cure_overrides_h={"CURE-07": 36.5}))
+    assert ctx.slow == {"CURE-07"}
+    assert all("CURE-07" not in j.eligible for j in ctx.free if j.orig_press not in (None, "CURE-07"))
+
+
+def test_describe_names_the_batch_of_a_multi_tire_order():
+    from warroom.schedule.demo import _job_label
+    assert _job_label("#M-201", "J-M-201-03", 5) == "#M-201 第 3 模"
+    assert _job_label("#A-311", "J-A-311-01", 1) == "#A-311"
+    assert _job_label("#M-201", "J-CURE-07-10021614", 5) == "#M-201"

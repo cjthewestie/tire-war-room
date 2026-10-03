@@ -29,7 +29,10 @@ Model, shared by both solvers (built in `_prepare`):
 - Repair, not re-plan: when the request names affected presses (unavailable / cure override),
   jobs of the untouched press pool keep their previous slot if still valid; moving work onto a
   press that shares the affected press's steam header (page 11: 6 and 8 share 7's pipe) costs
-  extra, so #A-311 goes to CURE-09 rather than CURE-08.
+  extra, so #A-311 goes to CURE-09 rather than CURE-08. A press whose cure the request LENGTHENS
+  (page 11 H1: runs at 122 °C) takes no tire planned on another press (hard; only #A-311 moves,
+  off it), and pulling an op into a short-staffed shift the previous plan did not already have
+  there costs PEN_SHORT_NEW, so a repair does not take over a shortage that is not its own.
 - Identical tires of one order are interchangeable: ids are re-matched to the previous plan
   after solving so `moves` lists real moves, not id swaps.
 - Gaps (SOP-HR-01): an op in a night shift with <2 people (or <3 for simultaneous de-molds)
@@ -86,6 +89,7 @@ PEN_MOVE = 4 * 60 * W_DEMOLD          # moving a job to another press ≈ 4 h
 PEN_MOLD_CHANGE = int(F.MOLD_CHANGE_STOP_H * 60 * W_DEMOLD)   # principle 4: ~8 h stop
 MOLD_GAP_MIN = int(F.MOLD_CHANGE_STOP_H * 60)   # hard: de-mold -> next mold-in with another mold
 PEN_SHORT_OP = 60 * W_DEMOLD          # an op inside a short-staffed shift
+PEN_SHORT_NEW = 72 * 60 * W_DEMOLD     # repair: an op a short shift did not already carry in the previous plan
 PEN_SIZE_HOME = 48 * 60 * W_DEMOLD  # principle 4 中大胎固定機台: M on an L press or L on an M press (rush orders exempt)
 PEN_DISTURB = 4 * 60 * W_DEMOLD      # repair: changing a tire on a press the event did not touch at all
 PEN_SAME_HEADER = 12 * 60 * W_DEMOLD  # moving work onto the affected press's steam pipe (page 11: 6, 8 share 7's pipe)
@@ -132,6 +136,7 @@ class _Ctx:
     press_size: dict[str, TireSize] = field(default_factory=dict)     # M/L press -> home size (its in-progress tire)
     suspect: set[str] = field(default_factory=set)   # presses sharing a steam header with an affected one
     affected: set[str] = field(default_factory=set)  # presses the request re-cured or took out
+    slow: set[str] = field(default_factory=set)      # presses assumed to run below recipe temp (cure extended)
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
     now_m: int = 0                  # req.now in minutes from the grid origin t0
@@ -230,6 +235,7 @@ def _prepare(req: SolveRequest) -> _Ctx:
                                  priority=prio(pj.order_id), orig_press=pj.press_id, orig_mold_in=mi))
     if not ctx.free:
         ctx.free = _generate_jobs(ctx, unavailable, due_min, prio, horizon_end)
+    _guard_slow_presses(ctx, unavailable)
     affected = set(req.cure_overrides_h) | unavailable
     ctx.affected = affected
     for p in affected:
@@ -261,6 +267,30 @@ def _prepare(req: SolveRequest) -> _Ctx:
                      (j.orig_mold_in + j.cure_min, j.orig_mold_in + j.cure_min + HALF_MIN)]
     _assign_releases(ctx, [j for j in ctx.frozen if j.press in affected], busy)
     return ctx
+
+
+def _guard_slow_presses(ctx: _Ctx, unavailable: set[str]) -> None:
+    """A cure override that LENGTHENS the in-progress tire means the press is assumed to run below
+    recipe temperature (page 11 H1: CURE-07 holds 122 °C, S1: 28 h -> 36.5 h). While that holds,
+    no tire planned on another press is moved onto it — the plan must not load the suspect press
+    (page 11 moves only #A-311 off it). Tires already planned there keep their slot and recipe
+    cure: they assume the steam is restored before they go in, and the schedule says so; if H1
+    is confirmed the press is re-cured or taken out by the next solve (02:31 H2)."""
+    for p, h in ctx.req.cure_overrides_h.items():
+        if p in unavailable:
+            continue
+        fz = [j for j in ctx.frozen if j.press == p]
+        if fz and float(h) > F.CURE_HOURS[max(fz, key=lambda j: j.mold_in).size]:
+            ctx.slow.add(p)
+    if not ctx.slow:
+        return
+    for j in ctx.free:
+        if j.orig_press is not None:
+            j.eligible = [q for q in j.eligible if q not in ctx.slow or q == j.orig_press]
+    for p in sorted(ctx.slow):
+        if any(j.orig_press == p for j in ctx.free):
+            ctx.warnings.append(f"{p} 硫化延長中：不移入其他機台的模次；已排在 {p} 的後續模次以標準硫化時間排"
+                                f"（前提：蒸汽修復前不入模），若降溫持續須重排")
 
 
 def _prep_ranges(ctx: _Ctx, size: TireSize) -> list[tuple[int, int]]:
@@ -591,12 +621,20 @@ def _relabel(ctx: _Ctx, assign: dict[str, tuple[str, int]]) -> dict[str, tuple[s
     for js in groups.values():
         if len(js) < 2 or any(j.orig_press is None for j in js):
             continue
-        slots = sorted((assign[j.id] for j in js), key=lambda x: (x[1], x[0]))
+        # slots a tire may not take (an extended-cure press is closed to tires from other presses)
+        # are matched first, so the relabel never hands such a slot to an ineligible tire
+        slots = sorted((assign[j.id] for j in js), key=lambda x: (x[0] not in ctx.slow, x[1], x[0]))
         unused = list(js)
+        trial: dict[str, tuple[str, int]] = {}
         for p, t in slots:
-            best = min(unused, key=lambda j: (j.orig_press != p, abs(j.orig_mold_in - t), j.id))
+            cand = [j for j in unused if p in j.eligible]
+            if not cand:
+                break
+            best = min(cand, key=lambda j: (j.orig_press != p, abs(j.orig_mold_in - t), j.id))
             unused.remove(best)
-            out[best.id] = (p, t)
+            trial[best.id] = (p, t)
+        if not unused:
+            out.update(trial)
     return out
 
 
@@ -689,6 +727,7 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
             cost += _size_home_pen(ctx, j, p)
             if _in_ranges(t, short) or _in_ranges(t + j.cure_min, short):
                 cost += PEN_SHORT_OP
+            cost += _short_new_pen(ctx, j, t, t + j.cure_min)
             if j.due is not None:
                 cost += W_LATE * max(0, t + j.cure_min - j.due)
             key = (cost, p != j.orig_press, p)
@@ -703,6 +742,27 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
         mold[p] = _mold_key(j)
         busy.extend([(t + HALF_MIN, t + OP_MIN), (t + j.cure_min, t + j.cure_min + HALF_MIN)])
     return assign
+
+
+def _had_op_in(j: _Job, a: int, b: int) -> bool:
+    """Did the previous plan already put an op of this tire (mold-in or de-mold) in [a, b]?"""
+    if j.orig_mold_in is None:
+        return False
+    return a <= j.orig_mold_in <= b or a <= j.orig_mold_in + j.cure_min <= b
+
+
+def _short_new_pen(ctx: _Ctx, j: _Job, mi: int, de: int) -> int:
+    """Repair only: pulling an op into a short-staffed shift that the previous plan did not
+    already have there costs extra, so an event's re-plan does not add work to (and so take over)
+    a shortage that is not its own; a tire already planned in that shift pays only PEN_SHORT_OP."""
+    if not ctx.affected:
+        return 0
+    pen = 0
+    for a, b, _s in ctx.short_windows:
+        for t in (mi, de):
+            if a <= t <= b and not _had_op_in(j, a, b):
+                pen += PEN_SHORT_NEW
+    return pen
 
 
 def _size_home_pen(ctx: _Ctx, j: _Job, p: str) -> int:
@@ -871,6 +931,8 @@ class CpSatScheduler:
                         m.AddImplication(inw, ge)
                         m.AddImplication(inw, le)
                         obj.append(PEN_SHORT_OP * inw)
+                        if ctx.affected and not _had_op_in(j, a, b):
+                            obj.append(PEN_SHORT_NEW * inw)
                 if use_hint and j.id in hint:
                     hp, ht = hint[j.id]
                     hg = -(-ht // GRID_MIN)
