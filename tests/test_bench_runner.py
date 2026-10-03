@@ -132,3 +132,77 @@ esac
     calls = (tmp_path / "docker-calls").read_text()
     assert "create ghcr.io/astral-sh/uv:0.9" in calls and "cp cid123:/uv" in calls and "rm cid123" in calls
     assert (root / "bin" / "uv").exists() and log.exists()
+
+
+# ---------------------------------------------------------------- page-10 control group: weights + exit status
+NVFP4 = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+DSPARK = NVFP4 + "-DSpark"
+BF16 = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+
+
+def _weights(cache: Path, *ids: str) -> None:
+    for m in ids:
+        snap = cache / "hub" / ("models--" + m.replace("/", "--")) / "snapshots" / "r1"
+        snap.mkdir(parents=True, exist_ok=True)
+        (snap / "config.json").write_text("{}")
+        (snap / "model.safetensors").write_text("x")
+
+
+def _ablation_env(tmp_path: Path, cache: Path) -> dict:
+    """Fake compose records QUANT and the config; fake curl is healthy unless the served QUANT is fp8."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    state, log = tmp_path / "quant", tmp_path / "compose-calls"
+    compose = bindir / "fake-compose"
+    compose.write_text(f'#!/usr/bin/env bash\necho "QUANT=${{QUANT:-prod}} $@" >> {log}\n'
+                       f'printf %s "${{QUANT:-prod}}" > {state}\n')
+    compose.chmod(0o755)
+    curl = bindir / "curl"
+    curl.write_text(f'#!/usr/bin/env bash\n[[ "$(cat {state} 2>/dev/null)" != fp8 ]]\n')
+    curl.chmod(0o755)
+    py = bindir / "py"                       # every bench "succeeds" and writes nothing
+    py.write_text("#!/usr/bin/env bash\nexit 0\n")
+    py.chmod(0o755)
+    return {"PY": str(py), "COMPOSE": str(compose), "HF_CACHE": str(cache), "WAIT_TRIES": "2", "WAIT_SLEEP": "0",
+            "PAUSE_FILE": str(tmp_path / "no-such-dir" / "pause"), "PATH": f"{bindir}:{os.environ['PATH']}"}
+
+
+def _cleanup_results(before: set) -> None:
+    import shutil
+    for d in set((ROOT / "bench" / "results").glob("spark-ablation-*")) - before:
+        shutil.rmtree(d, ignore_errors=True)
+
+
+def test_ablation_refuses_control_without_bf16_before_touching_vllm(tmp_path):
+    cache = tmp_path / "hf"
+    _weights(cache, NVFP4, DSPARK)                    # production only: the default install before the fix
+    env = _ablation_env(tmp_path, cache)
+    before = set((ROOT / "bench" / "results").glob("spark-ablation-*"))
+    try:
+        r = run(["bash", str(ABLATION)], env=env)
+        assert r.returncode == 1, r.stderr
+        assert f"weights MISSING: {BF16}" in r.stderr and "WITH_CONTROL=1" in r.stderr
+        assert not (tmp_path / "compose-calls").exists()        # vllm never recreated
+        # without control in CONFIGS the production weights are enough
+        r = run(["bash", str(ABLATION)], env={**env, "CONFIGS": "full"})
+        assert r.returncode == 0, r.stderr
+    finally:
+        _cleanup_results(before)
+
+
+def test_ablation_exits_nonzero_when_a_config_never_comes_up(tmp_path):
+    cache = tmp_path / "hf"
+    _weights(cache, NVFP4, DSPARK, BF16)
+    env = _ablation_env(tmp_path, cache)
+    before = set((ROOT / "bench" / "results").glob("spark-ablation-*"))
+    try:
+        r = run(["bash", str(ABLATION)], env={**env, "CONFIGS": "full control"})
+        assert r.returncode == 1
+        assert "vllm did not come up for control" in r.stderr and "FAILED: vllm never came up for: control" in r.stderr
+        assert "accuracy gap has no Spark number" in r.stderr
+        calls = (tmp_path / "compose-calls").read_text().splitlines()
+        assert calls[0].startswith("QUANT=nvfp4") and calls[1].startswith("QUANT=fp8") and calls[-1].startswith("QUANT=prod")
+        r = run(["bash", str(ABLATION)], env={**env, "CONFIGS": "full bogus"})
+        assert r.returncode == 2 and "unknown config 'bogus'" in r.stderr
+    finally:
+        _cleanup_results(before)

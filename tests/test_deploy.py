@@ -278,7 +278,8 @@ def test_install_pulls_and_builds_images_before_enabling_units(tmp_path):
     docker = _fake_docker(tmp_path, {"vllm/vllm-openai:v0.28.0", "qdrant/qdrant:v1.15.4", "eclipse-mosquitto:2",
                                      "warroom-app:latest"})
     r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
-           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker)},
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker),
+                "NO_MODELS": "1"},
            timeout=120)
     calls = (tmp_path / "docker-calls").read_text()
     # pull every non-buildable service (mqtt was added later; a hard-coded list missed it), not a fixed list
@@ -306,10 +307,119 @@ def test_install_fails_when_an_image_is_missing(tmp_path):
     sysd.mkdir()
     docker = _fake_docker(tmp_path, {"qdrant/qdrant:v1.15.4", "warroom-app:latest"})
     r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
-           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker)},
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker),
+                "NO_MODELS": "1"},
            check=False, timeout=120)
     assert r.returncode != 0 and "MISSING: vllm/vllm-openai:v0.28.0" in r.stderr
     assert not list(sysd.iterdir())                         # units not linked/enabled
+
+
+# ---------------------------------------------------------------- model weights (HF_HUB_OFFLINE=1)
+NVFP4 = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-NVFP4"
+DSPARK = NVFP4 + "-DSpark"
+BF16 = "nvidia/NVIDIA-Nemotron-3.5-Lightning-30B-A3B-BF16"
+
+
+def _fill_cache(cache: Path, model: str, shards: int = 2, drop: str | None = None) -> Path:
+    """Lay out one model the way `hf download` does: hub/models--org--name/{blobs,snapshots/<rev>}."""
+    d = cache / "hub" / ("models--" + model.replace("/", "--"))
+    snap = d / "snapshots" / "abc123"
+    snap.mkdir(parents=True, exist_ok=True)
+    (d / "blobs").mkdir(exist_ok=True)
+    (snap / "config.json").write_text("{}")
+    names = [f"model-{i:05d}-of-{shards:05d}.safetensors" for i in range(1, shards + 1)]
+    weight_map = ", ".join(f'"w{i}": "{n}"' for i, n in enumerate(names))
+    (snap / "model.safetensors.index.json").write_text('{"weight_map": {%s}}' % weight_map)
+    for n in names:
+        if n != drop:
+            (snap / n).write_text("x")
+    return d
+
+
+def _check(cache: Path, **env) -> subprocess.CompletedProcess:
+    return sh(["bash", str(DEPLOY / "bin" / "fetch_models.sh"), "--check"],
+              env={"HF_CACHE": str(cache), **env}, check=False, timeout=60)
+
+
+def test_fetch_models_check_finds_missing_partial_and_complete_weights(tmp_path):
+    cache = tmp_path / "hf"
+    r = _check(cache)
+    assert r.returncode != 0 and f"weights MISSING: {NVFP4}" in r.stderr
+    _fill_cache(cache, NVFP4)
+    _fill_cache(cache, DSPARK, shards=1, drop="model-00001-of-00001.safetensors")
+    r = _check(cache)
+    assert r.returncode != 0 and f"weights ok: {NVFP4}" in r.stdout and "shard model-00001-of-00001" in r.stderr
+    _fill_cache(cache, DSPARK, shards=1)
+    assert _check(cache).returncode == 0
+    (cache / "hub" / ("models--" + NVFP4.replace("/", "--")) / "blobs" / "deadbeef.incomplete").write_text("")
+    r = _check(cache)
+    assert r.returncode != 0 and "INCOMPLETE" in r.stderr
+    (cache / "hub" / ("models--" + NVFP4.replace("/", "--")) / "blobs" / "deadbeef.incomplete").unlink()
+    r = _check(cache, WITH_CONTROL="1")                       # control group needs the BF16 checkpoint too
+    assert r.returncode != 0 and f"weights MISSING: {BF16}" in r.stderr
+
+
+def test_fetch_models_sizes_match_hugging_face():
+    text = (DEPLOY / "bin" / "fetch_models.sh").read_text()
+    assert "~66 GB" in text and "~60 GB" not in text       # BF16 is 65.85 GB on HF (checked 2026-10-03)
+    assert "uvx" in text and "python3 -m venv" in text     # works on a box without uv
+
+
+def test_install_fails_when_weights_missing(tmp_path):
+    root, sysd = tmp_path / "opt", tmp_path / "systemd"
+    sysd.mkdir()
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
+                "SKIP_FETCH": "1", "HF_CACHE": str(tmp_path / "hf")}, check=False, timeout=120)
+    assert r.returncode != 0 and "weights MISSING" in r.stderr and "install aborted" in r.stderr
+    assert not list(sysd.iterdir())                         # units not linked/enabled
+
+
+def test_install_downloads_weights_then_verifies(tmp_path):
+    root, sysd, cache = tmp_path / "opt", tmp_path / "systemd", tmp_path / "hf"
+    sysd.mkdir()
+    fake_hf = tmp_path / "hf-cli"                          # stands in for `hf download <id>` writing the cache
+    fake_hf.write_text(f"""#!/usr/bin/env bash
+echo "$@" >> {tmp_path}/hf-calls
+python3 - "$2" <<'PY'
+import sys, pathlib
+m = sys.argv[1]
+snap = pathlib.Path("{cache}") / "hub" / ("models--" + m.replace("/", "--")) / "snapshots" / "r1"
+snap.mkdir(parents=True, exist_ok=True)
+(snap / "config.json").write_text("{{}}")
+(snap / "model.safetensors").write_text("x")
+PY
+""")
+    fake_hf.chmod(0o755)
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
+                "HF_CACHE": str(cache), "HF_CLI": str(fake_hf)}, timeout=120)
+    calls = (tmp_path / "hf-calls").read_text()
+    # default fetches the BF16 checkpoint too: after install the firewall blocks HF, and the page-10 FP8
+    # control group in spark_ablation.sh would otherwise never get a Spark number
+    assert f"download {NVFP4}\n" in calls and f"download {DSPARK}\n" in calls and f"download {BF16}\n" in calls
+    assert r.stdout.count("weights ok:") >= 3 and "WITH_CONTROL=0" not in r.stderr
+    assert f"HF_CACHE={cache}" in (root / "current" / "deploy" / "spark" / ".env").read_text()
+    assert {p.name for p in sysd.iterdir()} >= {"warroom-stack.service"}
+
+
+def test_install_without_control_skips_bf16_and_warns_loudly(tmp_path):
+    root, sysd, cache = tmp_path / "opt", tmp_path / "systemd", tmp_path / "hf"
+    sysd.mkdir()
+    _fill_cache(cache, NVFP4)
+    _fill_cache(cache, DSPARK, shards=1)
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
+                "SKIP_FETCH": "1", "WITH_CONTROL": "0", "HF_CACHE": str(cache)}, timeout=120)
+    assert "WARNING: WITH_CONTROL=0" in r.stderr and "control group" in r.stderr
+    assert BF16 not in r.stdout + r.stderr
+    # and the default (control on) refuses the same cache, before any unit is enabled
+    sysd2 = tmp_path / "systemd2"
+    sysd2.mkdir()
+    r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t2"],
+           env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd2), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
+                "SKIP_FETCH": "1", "HF_CACHE": str(cache)}, check=False, timeout=120)
+    assert r.returncode != 0 and f"weights MISSING: {BF16}" in r.stderr and not list(sysd2.iterdir())
 
 
 # ---------------------------------------------------------------- offline update + rollback
@@ -383,7 +493,8 @@ def test_install_script_layout(tmp_path):
     sysd = tmp_path / "systemd"
     sysd.mkdir()
     sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
-       env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1"},
+       env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "NO_IMAGES": "1",
+            "NO_MODELS": "1"},
        timeout=120)
     assert os.readlink(root / "current") == str(root / "releases" / "t1")
     for d in ("data/runtime", "data/qdrant", "hf"):
