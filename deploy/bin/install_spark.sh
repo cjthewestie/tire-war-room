@@ -30,8 +30,9 @@ chown -R 10001 "$ROOT/data/runtime" 2>/dev/null || true   # app container user
 if [[ "${NO_IMAGES:-0}" != 1 ]]; then
   compose=("$DOCKER" compose --project-directory "$ROOT/current/deploy/spark")
   if [[ "${SKIP_PULL:-0}" != 1 ]]; then
-    echo "pulling vllm + qdrant and building app while still online (the boot firewall blocks registries)"
-    "${compose[@]}" pull vllm qdrant
+    echo "pulling every non-buildable compose image (vllm, qdrant, mqtt, ...) and building app while still online"
+    echo "(the boot firewall blocks registries)"
+    "${compose[@]}" pull --ignore-buildable
     "${compose[@]}" build app
   fi
   images=$("${compose[@]}" config --images)

@@ -255,7 +255,7 @@ def _fake_docker(tmp_path: Path, present: set[str]) -> Path:
     fake.write_text(f"""#!/bin/sh
 echo "$@" >> {tmp_path}/docker-calls
 if [ "$1" = compose ]; then
-  for a in "$@"; do [ "$a" = "--images" ] && {{ printf 'vllm/vllm-openai:v0.28.0\\nqdrant/qdrant:v1.15.4\\nwarroom-app:latest\\n'; exit 0; }}; done
+  for a in "$@"; do [ "$a" = "--images" ] && {{ printf 'vllm/vllm-openai:v0.28.0\\nqdrant/qdrant:v1.15.4\\neclipse-mosquitto:2\\nwarroom-app:latest\\n'; exit 0; }}; done
   exit 0
 fi
 if [ "$1" = image ] && [ "$2" = inspect ]; then
@@ -270,14 +270,30 @@ fi
 def test_install_pulls_and_builds_images_before_enabling_units(tmp_path):
     root, sysd = tmp_path / "opt", tmp_path / "systemd"
     sysd.mkdir()
-    docker = _fake_docker(tmp_path, {"vllm/vllm-openai:v0.28.0", "qdrant/qdrant:v1.15.4", "warroom-app:latest"})
+    docker = _fake_docker(tmp_path, {"vllm/vllm-openai:v0.28.0", "qdrant/qdrant:v1.15.4", "eclipse-mosquitto:2",
+                                     "warroom-app:latest"})
     r = sh(["bash", str(DEPLOY / "bin" / "install_spark.sh"), "t1"],
            env={"WARROOM_ROOT": str(root), "SYSTEMD_DIR": str(sysd), "NO_SYSTEMCTL": "1", "DOCKER": str(docker)},
            timeout=120)
     calls = (tmp_path / "docker-calls").read_text()
-    assert "pull vllm qdrant" in calls and "build app" in calls
-    assert calls.index("pull vllm qdrant") < calls.index("config --images")
-    assert r.stdout.count("image ok:") == 3
+    # pull every non-buildable service (mqtt was added later; a hard-coded list missed it), not a fixed list
+    assert "pull --ignore-buildable" in calls and "build app" in calls
+    assert calls.index("pull --ignore-buildable") < calls.index("config --images")
+    assert r.stdout.count("image ok:") == 4
+
+
+def test_install_pulls_every_service_compose_lists():
+    import yaml
+    compose = yaml.safe_load((DEPLOY / "spark" / "docker-compose.yml").read_text())
+    pullable = {n for n, s in compose["services"].items() if "build" not in s}
+    assert {"vllm", "qdrant", "mqtt"} <= pullable
+    text = (DEPLOY / "bin" / "install_spark.sh").read_text()
+    assert "pull --ignore-buildable" in text          # covers whatever services compose gains later
+
+
+def test_bundle_carries_mosquitto_by_default():
+    text = (DEPLOY / "update" / "make_bundle.sh").read_text()
+    assert "${IMAGES-eclipse-mosquitto:2}" in text
 
 
 def test_install_fails_when_an_image_is_missing(tmp_path):

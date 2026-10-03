@@ -4,10 +4,12 @@
 #   deploy/update/make_bundle.sh [version] [out_dir]
 # Bundle = warroom-<ver>.tar containing:
 #   src.tar.gz         git archive of the repo at HEAD (code, deploy/, bench/, web sources)
-#   images.tar         `docker save` of warroom-app:<ver> (+ IMAGES="vllm/vllm-openai:... qdrant/..." if changed)
+#   images.tar         `docker save` of warroom-app:<ver> + IMAGES (default eclipse-mosquitto:2, the small
+#                      broker compose needs; add "vllm/vllm-openai:... qdrant/..." for a first offline install)
 #   MANIFEST           version, git sha, created, image list
 #   SHA256SUMS         checked by offline_update.sh before anything is touched
-# Env: SKIP_IMAGES=1 (code-only bundle, tests), IMAGES="extra images to include", DOCKER=docker,
+# Env: SKIP_IMAGES=1 (code-only bundle, tests), IMAGES="extra images" (default eclipse-mosquitto:2; IMAGES= for none),
+#      DOCKER=docker,
 #      FROM_WORKTREE=1 (bundle the working tree instead of git HEAD)
 set -euo pipefail
 sha256() { if command -v sha256sum >/dev/null; then sha256sum "$@"; else shasum -a 256 "$@"; fi; }
@@ -27,7 +29,11 @@ fi
 images=()
 if [[ "${SKIP_IMAGES:-0}" != 1 ]]; then
   $DOCKER build -f "$SRC/deploy/Dockerfile" -t "warroom-app:$VER" "$SRC"
-  images=("warroom-app:$VER" ${IMAGES:-})
+  extra=(${IMAGES-eclipse-mosquitto:2})
+  for img in ${extra[@]+"${extra[@]}"}; do
+    $DOCKER image inspect "$img" >/dev/null 2>&1 || $DOCKER pull "$img"
+  done
+  images=("warroom-app:$VER" ${extra[@]+"${extra[@]}"})
   $DOCKER save -o "$work/images.tar" "${images[@]}"
 fi
 {
