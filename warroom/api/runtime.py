@@ -715,6 +715,23 @@ class Runtime:
                     late = data.get("late_orders") or []
                     tail = "交期不受影響" if data.get("deliveries_met", not late) else f"延誤：{'、'.join(late)}"
                     return "；".join(parts) + f"；{tail}"
+                return "無，重排後交期全部滿足" if data.get("deliveries_met", True) else \
+                    f"延誤：{'、'.join(data.get('late_orders') or [])}"
+        # No solver result yet. A press event, or any plan that schedules a solve, is still being
+        # computed; the page-2 "大胎 #07 仍 17:00 入硫化機" sentence belongs only to the
+        # event on the big open mill, where #07's A part is preheating (open_mill_overheat).
+        solve_runs = [sr for sr in ev.steps if sr.step.tool is ToolName.SOLVE_SCHEDULE]
+        plans_solve = bool(solve_runs) or bool(ev.plan and any(
+            st.tool is ToolName.SOLVE_SCHEDULE for st in ev.plan.steps))
+        is_press = F.MACHINE_BY_ID[ev.machine_id].line.value == "CURE"
+        if plans_solve or (is_press and ev.plan is None):
+            if ev.state in TERMINAL_STATES or (solve_runs and all(
+                    sr.state in ("failed", "skipped", "rejected") for sr in solve_runs)):
+                return "保留原排程（未重排）"
+            return "計算中…"
+        preheat = next((p[2] for p in F.PROCESSES if p[1] == "預熱"), None)
+        if ev.machine_id != preheat:        # #07's A part is preheating on the big open mill (page 2)
+            return "無，排程未變更"
         try:
             semi = self.sim.semi_finished()
         except Exception:  # noqa: BLE001

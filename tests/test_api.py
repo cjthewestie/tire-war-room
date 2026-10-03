@@ -465,3 +465,25 @@ async def test_runtime_drives_real_state_machine_page11(tmp_path, monkeypatch):
         print("\nDECIDED", decided, "\nSTATE", ev.state.value, "\nTIMELINE", texts)
     finally:
         await rt.stop()
+
+
+async def test_real_press7_schedule_impact_not_page2_text(tmp_path):
+    """Press-7 focus must say 計算中… until the solver returns, never the page-2 open-mill #07 line."""
+    rt = _real_runtime(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value)
+    await rt.start()
+    try:
+        seen = []
+        for _ in range(25 * 60):
+            await rt.tick(1.0, publish=False)
+            await asyncio.sleep(0)
+            f = rt.focus_panel()
+            if f and f.machine_id == "CURE-07" and (not seen or seen[-1] != f.schedule_impact):
+                seen.append(f.schedule_impact)
+            if rt.approvals.pending():
+                break
+        assert seen, "no CURE-07 focus panel"
+        assert not any("大胎 #07" in s for s in seen), seen
+        assert seen[0] == "計算中…", seen
+        assert any("9 號" in s for s in seen), seen     # #A-311 moved to press 9 once solved
+    finally:
+        await rt.stop()
