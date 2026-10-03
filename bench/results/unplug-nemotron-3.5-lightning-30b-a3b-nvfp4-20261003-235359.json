@@ -1,0 +1,204 @@
+{
+  "bench": "unplug",
+  "recorded_at": "2026-10-03T23:53:59.388636+08:00",
+  "host": {
+    "hostname": "mac-studio.lan",
+    "platform": "macOS-26.4-arm64-arm-64bit",
+    "machine": "arm64",
+    "processor": "arm",
+    "ram_gb": 64.0,
+    "cpu_count": 16
+  },
+  "code": {
+    "git_sha": "fd86423536b9",
+    "deps": [
+      "unplug_test.py",
+      "llm.py",
+      "prompts.py",
+      "memory_check.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "24149f222f0a43b9"
+  },
+  "host_load_avg_1_5_15": [
+    14.85,
+    11.69,
+    28.59
+  ],
+  "platform": "macOS-26.4-arm64-arm-64bit",
+  "is_root": false,
+  "watch_s": 120.0,
+  "block": {
+    "requested": true,
+    "applied": true,
+    "kind": "sandbox",
+    "method": "sandbox-exec",
+    "scope": "process-level: bench + spawned war-room app; outbound allowed to localhost only; model server is outside the sandbox (socket-watched)",
+    "profile": "(version 1)\n(allow default)\n(deny network-outbound)\n(allow network-outbound (remote ip \"localhost:*\"))\n(allow network-outbound (remote unix-socket))\n(deny network-outbound (remote unix-socket (path-literal \"/private/var/run/mDNSResponder\")))\n"
+  },
+  "spawned_app": {
+    "pid": 32751,
+    "url": "http://127.0.0.1:54082",
+    "run_dir": "/var/folders/yh/d4l5fnn57p94pbpll9k6n9s00000gn/T/warroom-unplug-aefro2k3"
+  },
+  "endpoint": {
+    "base_url": "http://127.0.0.1:11435/v1",
+    "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+    "kind": "ollama",
+    "ollama_version": "0.33.2",
+    "ollama_details": {
+      "format": "safetensors",
+      "family": "nemotron_h",
+      "parameter_size": "32.9B",
+      "quantization_level": "nvfp4"
+    }
+  },
+  "app": {
+    "health": {
+      "ok": true,
+      "llm_mode": "llm",
+      "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+      "llm_reachable": true,
+      "qdrant_ok": false,
+      "sim_running": true,
+      "factory_time": "2026-10-03T08:00:00+08:00",
+      "uptime_s": 0.37452062498778105
+    },
+    "phone_page_status": 200,
+    "anomaly": "7 號 128 → 122°C，預測穩定在 122±1°C",
+    "event_id": "EV-20261003-021400-CURE-07",
+    "source_flag_present": true,
+    "placeholder_after_anomaly_s": 0.0001,
+    "placeholder_card": {
+      "title": "7 號機異常",
+      "summary": "7 號 128 → 122°C，預測穩定在 122±1°C"
+    },
+    "alert_after_anomaly_s": 6.8275,
+    "card": {
+      "title": "CURE-07 溫度下降",
+      "summary": "128→122°C，預測穩定 122±1°C，同管線 CURE-06、08 正常"
+    },
+    "commander_call": {
+      "mode": "llm",
+      "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+      "ttft_ms": 5896.555958024692,
+      "total_ms": 14381.71033305116,
+      "prompt_tokens": 5178,
+      "completion_tokens": 828,
+      "valid_json": true,
+      "fell_back_to_mock": false
+    }
+  },
+  "watched_for_s": 120.3,
+  "watch_ports": [
+    6333,
+    6334,
+    11435,
+    54082
+  ],
+  "sockets": {
+    "samples": 1141,
+    "interval_s": 0.1,
+    "watched_pids": [
+      21657,
+      24668,
+      32751
+    ],
+    "ignored_pids": {
+      "978": "model_server",
+      "32479": "model_server"
+    },
+    "outbound_connections": 0,
+    "outbound": [],
+    "errors": []
+  },
+  "egress": {
+    "sandbox_pids": [
+      32748,
+      32751
+    ],
+    "bench_pid": 32748,
+    "window": [
+      "2026-10-03 23:51:58",
+      "2026-10-03 23:53:58.640"
+    ],
+    "firewall_dropped_packets": 0,
+    "conntrack_available": false,
+    "conntrack_snapshots": 0,
+    "conntrack_outbound_flows": [],
+    "notes": [],
+    "denies_by_pid": {},
+    "deny_remotes": [],
+    "dns_by_pid": {},
+    "no_remote_denies_by_pid": {},
+    "pid_roles": {
+      "32748": "bench",
+      "32751": "war-room app"
+    },
+    "counter_source": "kernel Sandbox log: deny(1) network-outbound for the sandboxed pids"
+  },
+  "internet_reachable_during_test": false,
+  "dns_probe": null,
+  "verdicts": [
+    {
+      "name": "alert_offline",
+      "target": "≤ 2.0 s",
+      "measured": 6.8275,
+      "passed": false,
+      "note": "anomaly -> first COMMANDER (LLM) card on /ws",
+      "extra": {
+        "placeholder_after_anomaly_s": 0.0001
+      }
+    },
+    {
+      "name": "commander_ttft_app_prompt",
+      "target": "info (≤ 0.5 s target is at 32k; see ttft bench)",
+      "measured": 5.897,
+      "passed": null,
+      "note": "from the event's llm_call audit entry; prompt_tokens=5178; mode=llm",
+      "extra": {
+        "mode": "llm",
+        "model": "nemotron-3.5-lightning:30b-a3b-nvfp4",
+        "ttft_ms": 5896.555958024692,
+        "total_ms": 14381.71033305116,
+        "prompt_tokens": 5178,
+        "completion_tokens": 828,
+        "valid_json": true,
+        "fell_back_to_mock": false
+      }
+    },
+    {
+      "name": "outbound_connections",
+      "target": "0",
+      "measured": 0,
+      "passed": true,
+      "note": "sandbox-exec deny log (process-level; model server socket-watched only) + socket samples [secondary check: process-level sandbox]",
+      "extra": {
+        "socket_samples": 0,
+        "stack_dropped": 0,
+        "stack_dns_queries": 0,
+        "tier": "secondary check: process-level sandbox",
+        "firewall_dropped_packets_box_wide": 0,
+        "host_other_attempts": 0,
+        "conntrack_outbound_flows": null
+      }
+    },
+    {
+      "name": "internet_blocked",
+      "target": "unreachable",
+      "measured": false,
+      "passed": true,
+      "note": "passes by construction under a firewall/sandbox block; meaningful only with --unplug",
+      "extra": {}
+    },
+    {
+      "name": "page9_unplug",
+      "target": "link down, 0 outbound, no DNS",
+      "measured": null,
+      "passed": null,
+      "note": "not exercised: no --unplug, so the cable was never pulled (LAN, DNS and proxies stayed up); re-run with --unplug <uplink> as root",
+      "extra": {}
+    }
+  ],
+  "saved_to": "/Users/cjthewestie/Documents/CJ-project-vault/tire-war-room/bench/results/unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json"
+}

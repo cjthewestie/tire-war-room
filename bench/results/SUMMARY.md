@@ -11,7 +11,7 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 
 | bench | metric | target | measured | verdict | file |
 |---|---|---|---|---|---|
-| memory | stack_gb | ≤ 50.0 GB incl. OS | 29.240 | PASS | memory-local-20261003-201836.json |
+| memory | stack_plus_os_gb | 36.0–50.0 GB, ctx ≥ 32768 | 37.350 | UNJUDGED (stack 27.350 + OS budget 10.000; ctx 16384; role app not running (no pid/container with memory); model loaded at context 16384 < required 32768) | memory-local-20261003-235148.json |
 
 ## mac-studio.lan · nemotron-3.5-lightning:30b-a3b-nvfp4
 
@@ -19,22 +19,24 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 
 | bench | metric | target | measured | verdict | file |
 |---|---|---|---|---|---|
-| ttft | first_alert_card_p90 | ≤ 2.0 s | 2.864 | FAIL (commander plan stream, alert_card complete; cold: unique event per call, n=6, prompt_tokens≈5644) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203026.json |
-| ttft | first_alert_card_warm_p90 | info (target judged cold) | 0.465 | n/a (warm: identical commander request repeated, full prefix-cache hit) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203026.json |
-| ttft | micro_alert_card_p90 | info (micro-benchmark, not the app's call) | 2.154 | n/a (short standalone alert-card prompt) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203026.json |
-| ttft | ttft_warm_32k_p50 | ≤ 0.5 s | 0.096 | PASS (prompt_tokens=32367) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203026.json |
-| concurrent | concurrent_3_worst_alert | each ≤ 4.0 s, batched | 18.602 | FAIL (commander plan stream, alert_card complete; cold, unique event per call; QUEUED in 3/3 rounds, not batched) | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203143.json |
-| concurrent | concurrent_batched | all rounds batched | 0/3 | FAIL (max first-token skew 16.8859 s) | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203143.json |
+| ttft | first_alert_card_p90 | ≤ 2.0 s | 1.845 | PASS (commander plan stream, alert_card complete; cold: unique event per call, n=5, prompt_tokens≈5651) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json |
+| ttft | first_alert_card_warm_p90 | info (target judged cold) | 0.561 | n/a (warm: identical commander request repeated, full prefix-cache hit) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json |
+| ttft | micro_alert_card_p90 | info (micro-benchmark, not the app's call) | 2.489 | n/a (short standalone alert-card prompt) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json |
+| ttft | ttft_warm_32k_p90 | ≤ 0.5 s | 4.510 | FAIL (prefix-cache hit, n=5, p50=0.1184, max=7.4356, prompt_tokens=32370) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json |
+| ttft | ttft_cold_32k_p50 | info (target judged warm, prefix cache) | 23.053 | n/a (no prefix cache: full 32k prefill, n=3, max=23.525) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json |
+| concurrent | concurrent_3_worst_alert | each ≤ 4.0 s, batched | 22.720 | FAIL (commander plan stream, alert_card complete; cold, unique event per call; QUEUED in 3/3 rounds, not batched) | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235148.json |
+| concurrent | concurrent_batched | all rounds batched | 0/3 | FAIL (max first-token skew 20.4422 s) | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235148.json |
 | full_event | full_event_p50 | ≈ 22.0 s (≤ target), event CLOSED | 16.220 | PASS (real state machine, 3/3 closed) | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203342.json |
 | full_event | pipeline_p50 | ≈ 22.0 s (≤ target) | 14.172 | PASS (scripted breakdown (commander plan + replan calls), synthetic solve; not the state machine) | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203342.json |
 | full_event | state_machine_closed_rate | 1.0 | 1.000 | real Runtime, LLM commander, page-11 script | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203342.json |
 | full_event | plan_valid_rate | 1.0 | 1.000 | reasoning OFF | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203342.json |
 | full_event-think | full_event_p50 | ≈ 22.0 s (≤ target) | 38.727 | STALE, not counted (was FAIL): unstamped run recorded 2026-10-03T16:44:30, before 7b5b225 (2026-10-03T20:14:21) changed bench/full_event.py, bench/llm.py, bench/prompts.py; re-run | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
 | full_event-think | plan_valid_rate | 1.0 | 0.000 | STALE, not counted (was reasoning ON): unstamped run recorded 2026-10-03T16:44:30, before 7b5b225 (2026-10-03T20:14:21) changed bench/full_event.py, bench/llm.py, bench/prompts.py; re-run | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
-| unplug | alert_offline | ≤ 2.0 s | 1.441 | PASS (anomaly -> first COMMANDER (LLM) card on /ws) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json |
-| unplug | commander_ttft | ≤ 0.5 s | 0.460 | PASS (from the event's llm_call audit entry; mode=llm) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json |
-| unplug | outbound_connections | 0 | 0 | PASS (sandbox-exec deny log (process-level; model server socket-watched only) + socket samples) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json |
-| unplug | internet_blocked | unreachable | False | PASS | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json |
+| unplug | alert_offline | ≤ 2.0 s | 6.827 | FAIL (anomaly -> first COMMANDER (LLM) card on /ws) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json |
+| unplug | commander_ttft_app_prompt | info (≤ 0.5 s target is at 32k; see ttft bench) | 5.897 | n/a (from the event's llm_call audit entry; prompt_tokens=5178; mode=llm) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json |
+| unplug | outbound_connections | 0 | 0 | PASS (sandbox-exec deny log (process-level; model server socket-watched only) + socket samples [secondary check: process-level sandbox]) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json |
+| unplug | internet_blocked | unreachable | False | PASS (passes by construction under a firewall/sandbox block; meaningful only with --unplug) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json |
+| unplug | page9_unplug | link down, 0 outbound, no DNS | None | n/a (not exercised: no --unplug, so the cable was never pulled (LAN, DNS and proxies stayed up); re-run with --unplug <uplink> as root) | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json |
 | tokens_per_watt | tokens_per_s | - | 99.786 | measured | tokens_per_watt-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203456.json |
 | tokens_per_watt | tokens_per_joule | publish | None | n/a (no plug reading given) | tokens_per_watt-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-203456.json |
 
@@ -63,7 +65,10 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 - **Stale result, not counted: accuracy-open-book-cite** (accuracy-compare-open-book-cite-20261003-184311.json): unstamped run recorded 2026-10-03T18:43:11, before 7b5b225 (2026-10-03T20:14:21) changed bench/accuracy.py, bench/llm.py, bench/prompts.py. Re-run `bench/py.sh -m bench.accuracy` and regenerate this summary.
 - **Stale result, not counted: full_event-think** (full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json): unstamped run recorded 2026-10-03T16:44:30, before 7b5b225 (2026-10-03T20:14:21) changed bench/full_event.py, bench/llm.py, bench/prompts.py. Re-run `bench/py.sh -m bench.full_event` and regenerate this summary.
 - **No DGX Spark numbers yet.** Every row above is a Mac/Ollama stand-in. The page-10 control group (FP8, no prefix cache, no speculative decoding) and the per-optimisation contributions come from `bench/spark_ablation.sh`, which only runs on the Spark (vLLM) and has not been run.
+- **concurrent measured on a busy host** (concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235148.json: load average 7.9/10.27/30.98 on 16 cores). Latency is inflated by other work sharing the box and the model server; re-run on an idle machine before quoting it.
+- **ttft measured on a busy host** (ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235014.json: load average 7.55/10.92/33.63 on 16 cores). Latency is inflated by other work sharing the box and the model server; re-run on an idle machine before quoting it.
+- **unplug measured on a busy host** (unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json: load average 14.85/11.69/28.59 on 16 cores). Latency is inflated by other work sharing the box and the model server; re-run on an idle machine before quoting it.
 - (From a stale run.) **Reasoning must stay OFF.** With Nemotron reasoning ON the full event takes 38.727 s p50 and plan_valid_rate is 0.000 (full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json), so it fails both the ≈22 s and the valid-plan targets. The commander forces it off on every call (`warroom/agent/commander.py` `thinking_off`: vLLM `enable_thinking=false`, Ollama `reasoning_effort=none`); the demo must not turn it on.
+- **Decode speed not measured.** Page 10 prints 推測解碼 95–108 tok/s; no current single-stream decode result exists. Run `bench/py.sh -m bench.decode --runs 10` (batch 1, the commander's full plan stream); `bench/spark_ablation.sh` runs it per config for the spec-decode gain.
 - **tokens/W not published.** No wall-plug reading has been recorded (tokens/s only). Needs a plug meter on the Spark: `bench/py.sh -m bench.tokens_per_watt --duration 60 --watts <avg> --idle-watts <idle>` (or `--meter-csv`).
-- **Unplug block is process-level (Mac).** unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json ran under sandbox-exec: the bench and the war-room app were offline; the model server (Ollama) was outside the sandbox and only socket-watched. The physical cable pull with the nftables block is still a Spark run.
-- **No attempt to leave the factory** in unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-204014.json: the kernel logged 7 remote-less network-outbound deny(s), which accompany ordinary localhost sockets and name no destination; they are not counted as egress.
+- **Unplug block is process-level (Mac).** unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-235359.json ran under sandbox-exec: the bench and the war-room app were offline; the model server (Ollama) was outside the sandbox and only socket-watched. The physical cable pull with the nftables block is still a Spark run.
