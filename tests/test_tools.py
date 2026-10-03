@@ -147,3 +147,30 @@ def test_sop_search_real_kb(tmp_path):
     r = call(reg, "sop_search", query="硫化中斷處置", k=3)
     assert r.ok, r.error
     assert r.data["hits"][0]["title"] == "硫化中斷處置"
+
+
+def test_confirm_rejects_stale_proposal(tmp_path):
+    """Two events solve against the same active version; confirming the second after the first must
+    not overwrite the first one's approved change (lost update)."""
+    from warroom.schedule import FallbackScheduler, FileScheduleStore, seed_schedule
+    from warroom.sim import Factory
+    clock = SimClock(manual=True)
+    sim = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
+    sched = FallbackScheduler()
+    store = FileScheduleStore(tmp_path, initial=seed_schedule(clock.now(), sim.orders(), sim.shifts(),
+                                                              sim.machines(), scheduler=sched))
+    reg = build_registry(ToolContext(sim=sim, scheduler=sched, store=store, clock=clock))
+    base = store.current().version
+    a = call(reg, "solve_schedule", cure_overrides_h={"CURE-10": 40.0}, time_limit_s=5)
+    b = call(reg, "solve_schedule", cure_overrides_h={"CURE-03": 30.0}, time_limit_s=5)
+    assert a.ok and b.ok, (a.error, b.error)
+    va, vb = a.data["schedule_version"], b.data["schedule_version"]
+    assert store.get(va).parent_version == store.get(vb).parent_version == base
+    assert call(reg, "confirm_schedule", schedule_version=va, reason="first").ok
+    stale = call(reg, "confirm_schedule", schedule_version=vb, reason="second")
+    assert not stale.ok and "stale" in stale.error
+    assert store.current().version == va                     # first event's change survives
+    assert store.get(vb).status is ScheduleStatus.PROPOSED
+    fresh = call(reg, "solve_schedule", cure_overrides_h={"CURE-03": 30.0}, time_limit_s=5)
+    assert fresh.ok and store.get(fresh.data["schedule_version"]).parent_version == va
+    assert call(reg, "confirm_schedule", schedule_version=fresh.data["schedule_version"], reason="rebased").ok

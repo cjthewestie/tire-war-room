@@ -8,6 +8,8 @@ Output keys follow the contracts' *Data models, plus the extra keys the agent re
 (solve_schedule: `schedule_version`; read_sensors summary: `<channel>_now`)."""
 from __future__ import annotations
 
+import contextlib
+
 import math
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -196,11 +198,20 @@ def solve_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
 def confirm_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     a = ConfirmScheduleArgs.model_validate(args)
     store = _need(ctx.store, "schedule store")
-    prev = store.current().version
-    target = store.get(a.schedule_version)
-    if target.status is not ScheduleStatus.PROPOSED:
-        raise ToolError(f"schedule v{a.schedule_version} is {target.status.value}, not proposed")
-    ver = store.activate(a.schedule_version)
+    # Check-and-activate under the store's lock when it has one, so two events cannot both pass the
+    # stale check against the same parent (the file store's lock is re-entrant).
+    lock = getattr(store, "_lock", None) or contextlib.nullcontext()
+    with lock:
+        prev = store.current().version
+        target = store.get(a.schedule_version)
+        if target.status is not ScheduleStatus.PROPOSED:
+            raise ToolError(f"schedule v{a.schedule_version} is {target.status.value}, not proposed")
+        if target.parent_version is not None and target.parent_version != prev:
+            # Lost-update guard: the proposal was solved against an older active schedule. Activating it
+            # would silently drop whatever another event confirmed since (e.g. an approved cure extension).
+            raise ToolError(f"schedule v{a.schedule_version} is stale: solved against v{target.parent_version}, "
+                            f"but v{prev} is active now; re-run solve_schedule and re-approve")
+        ver = store.activate(a.schedule_version)
     if ctx.bus is not None:
         ctx.bus.publish(WsType.SCHEDULE, ver)
     return {"version": ver.version, "status": ver.status.value, "previous_version": prev, "reason": a.reason}
