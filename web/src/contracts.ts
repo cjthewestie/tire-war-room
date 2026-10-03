@@ -108,6 +108,8 @@ export interface SemiFinishedProgress {
   size: TireSize
   parts: SemiFinishedPart[]
   planned_mold_in_at: ISODate | null
+  note?: string | null
+  note_state?: "waiting" | "in_progress" | "done" | "alert" | null
 }
 
 export interface Order {
@@ -426,6 +428,7 @@ export interface OrderProgress {
   total: number
   remaining_h: number
 }
+  note?: string | null
 
 export interface MachineTile {
   machine_id: string

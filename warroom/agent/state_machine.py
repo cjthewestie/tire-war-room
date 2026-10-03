@@ -86,7 +86,7 @@ from warroom.contracts import (
     ToolResult,
     WsType,
 )
-from warroom.factory import CURE_TEMP_MAX_C, CURE_TEMP_MIN_C, MACHINE_BY_ID, MACHINES, TZ, presses_on_header
+from warroom.factory import CURE_TEMP_MAX_C, CURE_TEMP_MIN_C, MACHINE_BY_ID, MACHINES, PROCESSES, TZ, presses_on_header
 
 RISK_ORDER = [RiskLevel.R0_READ, RiskLevel.R1_NOTIFY, RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL]
 STAFFING_KINDS = (NotifyKind.OVERTIME.value, NotifyKind.STAFF_MOVE.value)
@@ -797,11 +797,10 @@ class StateMachine:
         """A/B options for the supervisor. Staffing alternatives come from the solver
         (staffing_options, overtime listed first); otherwise plan staffing steps; otherwise one
         option that approves the gated steps as proposed."""
-        staffing: list[dict[str, Any]] = []
+        _, staffing = self._event_staffing(run)
         chosen_labels: set[str] = set()
         for res in run.results.values():
             if res.tool is ToolName.SOLVE_SCHEDULE:
-                staffing += list(res.data.get("staffing_options") or [])
                 for c in (res.data.get("schedule") or {}).get("staffing_changes") or []:
                     chosen_labels.add(c.get("label"))
         opts: list[ApprovalOption] = []
@@ -845,6 +844,156 @@ class StateMachine:
             opts[0] = opts[0].model_copy(update={"recommended": True})
         return opts
 
+    # ---- approval-card content: only what THIS event's own results say ----
+    def _solve_steps(self, run: _Run) -> list[tuple[PlanStep, dict[str, Any]]]:
+        by_id = {sr.step.id: sr.step for sr in run.ev.steps}
+        return [(by_id[sid], res.data) for sid, res in run.results.items()
+                if res.tool is ToolName.SOLVE_SCHEDULE and res.ok and sid in by_id]
+
+    def _shifts(self) -> list[Any] | None:
+        if self.sim is None or not hasattr(self.sim, "shifts"):
+            return None
+        try:
+            return list(self.sim.shifts())
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _event_staffing(self, run: _Run) -> tuple[list[str], list[dict[str, Any]]]:
+        """(gaps, staffing options) for the card. Only the solver's gaps count (a broad orders/shifts
+        query lists every short shift in the plant), and of those only the shifts in which this
+        event's own changes land: a moved or re-timed job, or a job on a press the event re-cured or
+        took out. A shortage elsewhere in the week stays off this event's card and its A/B options.
+        With no shift data (no sim) every solver gap is kept."""
+        shifts = self._shifts()
+        gaps: list[str] = []
+        staffing: list[dict[str, Any]] = []
+        for step, data in self._solve_steps(run):
+            opts = list(data.get("staffing_options") or [])
+            if shifts is None:
+                gaps += [str(g) for g in data.get("gaps") or []]
+                staffing += opts
+                continue
+            jobs = {j.get("id"): j for j in (data.get("schedule") or {}).get("jobs") or []}
+            presses = set(step.args.get("unavailable_presses") or []) | set(step.args.get("cure_overrides_h") or {})
+            ops: list[datetime] = []
+            for mv in data.get("moves") or []:
+                for t in (mv.get("to_mold_in"), (jobs.get(mv.get("job_id")) or {}).get("demold")):
+                    if t:
+                        ops.append(datetime.fromisoformat(str(t)))
+            for j in jobs.values():
+                if j.get("press_id") in presses:
+                    ops += [datetime.fromisoformat(str(j[k])) for k in ("mold_in", "demold") if j.get(k)]
+            for g in data.get("gaps") or []:
+                g = str(g)
+                g_opts = [c for c in opts if g.startswith(self._gap_prefix(c))]
+                sh = next((s for s in shifts for c in g_opts
+                           if s.name == c.get("shift_name") and s.team.value == c.get("to_team")
+                           and str(s.start.date()) == str(c.get("shift_date"))), None)
+                if sh is not None and not any(sh.start <= t < sh.end for t in ops):
+                    continue                                 # gap not touched by this event's changes
+                gaps.append(g)
+                staffing += g_opts
+        return list(dict.fromkeys(gaps)), staffing
+
+    @staticmethod
+    def _gap_prefix(c: dict[str, Any]) -> str:
+        try:
+            d = datetime.fromisoformat(str(c.get("shift_date"))).strftime("%m/%d")
+        except ValueError:
+            return "\0"
+        return f"{d} {c.get('shift_name') or ''}"
+
+    def _todo_text(self, run: _Run, needs: list[StepRun]) -> str:
+        """'將做：…' — what the supervisor is approving, from this event's own computed results:
+        the Arrhenius cure extension, the presses taken out, the solver's press moves; otherwise the
+        gated steps' purposes (e.g. 放慢生料投入)."""
+        bits: list[str] = []
+        for res in run.results.values():
+            if res.tool is ToolName.CURE_FORMULA and res.ok and res.data.get("total_cure_h") is not None:
+                extra = res.data.get("extra_h")
+                bits.append(f"延長硫化 {fmt_num(res.data['total_cure_h'])} h"
+                            + (f"（+{fmt_num(extra)} h）" if extra is not None else ""))
+        for step, data in self._solve_steps(run):
+            for p in step.args.get("unavailable_presses") or []:
+                bits.append(f"{machine_label(str(p))}停用")
+            for mv in data.get("moves") or []:
+                if mv.get("from_press") == mv.get("to_press"):
+                    continue
+                n = _press_no(str(mv.get("to_press")))
+                bits.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 重排")
+        if not bits:
+            for sr in needs:
+                if sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") in STAFFING_KINDS:
+                    continue                                 # staffing is the A/B choice below
+                bits.append(sr.step.purpose.replace("（需主管核准）", "").strip())
+        bits = [b for b in dict.fromkeys(bits) if b and b not in run.done]
+        return "將做：" + "；".join(bits) if bits else ""
+
+    def _delivery_text(self, run: _Run) -> str:
+        """交期 row: the solver's verdict when this event re-solved; otherwise the schedule is
+        unchanged (the page-2 mill names the tire still going in on time when the sim knows it)."""
+        solves = self._solve_steps(run)
+        if solves:
+            data = solves[-1][1]
+            late = data.get("late_orders") or []
+            return "不受影響" if data.get("deliveries_met") else f"延誤：{'、'.join(late) or '有'}"
+        if self.sim is not None and hasattr(self.sim, "semi_finished"):
+            preheat = next((p[2] for p in PROCESSES if p[1] == "預熱"), None)
+            if run.ev.machine_id == preheat:
+                try:
+                    semi = self.sim.semi_finished()
+                    if semi.planned_mold_in_at:
+                        return f"不受影響（{semi.tire_label} 仍 {semi.planned_mold_in_at:%H:%M} 入硫化機）"
+                except Exception:  # noqa: BLE001
+                    pass
+        return "不受影響（排程未變更）"
+
+    def _action_text(self, run: _Run, step: PlanStep, short: bool = False) -> str:
+        """One line per gated write, from its validated args (what will actually run), with the
+        code-computed reference next to any physics number. short: option label (a notify shows its
+        kind; teams and the full message are in the request's actions)."""
+        a = step.args
+        if step.tool is ToolName.SET_CURE_TIME:
+            ref = self._evidence(run)["cure_formula_h"]
+            txt = f"{machine_label(str(a.get('press_id')))}硫化總時數 {fmt_num(a.get('total_cure_h'))} h"
+            return txt + (f"（公式 {fmt_num(ref[-1])} h）" if ref else "（無公式結果）")
+        if step.tool is ToolName.CONFIRM_SCHEDULE:
+            v = a.get("schedule_version")
+            moves = []
+            for res in run.results.values():
+                if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("schedule_version") == v:
+                    for mv in res.data.get("moves") or []:
+                        if mv.get("from_press") != mv.get("to_press"):
+                            n = _press_no(str(mv.get("to_press")))
+                            moves.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 重排")
+            return f"排程 v{v} 生效" + (f"（{'、'.join(moves)}）" if moves else "")
+        if step.tool is ToolName.NOTIFY_TEAMS:
+            from warroom.agent.narrate import NOTIFY_LABELS, TEAM_LABELS
+            try:
+                kind = NOTIFY_LABELS.get(NotifyKind(a.get("kind")), "通知")
+            except ValueError:
+                kind = "通知"
+            teams = "、".join(TEAM_LABELS.get(t, str(t)) for t in a.get("teams") or [])
+            mid = a.get("machine_id")
+            where = f"［{machine_label(str(mid))}］" if mid else ""
+            if short:
+                return kind                      # page 2: 「放慢生料投入」 (teams + message in actions)
+            return f"{kind} → {teams}{where}：{a.get('message', '')}"
+        return f"{step.tool.value} {json.dumps(a, ensure_ascii=False)[:80]}"
+
+    def _actions(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption]) -> list[str]:
+        """核准內容: every gated write that approving runs, with its key args. A staffing step that
+        the A/B choice replaces is shown once as that choice."""
+        staff_choice = any(o.args.get("kind") in STAFFING_KINDS for o in options) and len(options) > 1
+        out: list[str] = []
+        for sr in needs:
+            if staff_choice and sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") in STAFFING_KINDS:
+                continue
+            out.append(f"{sr.step.id} {self._action_text(run, sr.step)}")
+        if staff_choice:
+            out.append("人力：依所選方案（" + "／".join(f"{o.id} {o.label}" for o in options) + "）")
+        return out
+
     def _request_approval(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption],
                           risk: RiskLevel) -> ApprovalRequest:
         ev, plan = run.ev, run.plan
@@ -860,13 +1009,11 @@ class StateMachine:
         done = list(dict.fromkeys(run.done))
         if ev.safety_actions or self._safety_acted(ev.machine_id):
             done.insert(0, "安全核心已處置")
-        gaps: list[str] = []
-        delivery = ""
-        for res in run.results.values():
-            gaps += [str(g) for g in res.data.get("gaps") or []]
-            if res.tool is ToolName.SOLVE_SCHEDULE:
-                late = res.data.get("late_orders") or []
-                delivery = "不受影響" if res.data.get("deliveries_met") else f"延誤：{'、'.join(late) or '有'}"
+        todo = self._todo_text(run, needs)
+        if todo:
+            done.append(todo)
+        gaps, _ = self._event_staffing(run)
+        delivery = self._delivery_text(run)
         now = self._now()
         req = ApprovalRequest(
             id=f"AP-{ev.id}-{rnd}", event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,

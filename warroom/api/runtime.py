@@ -750,8 +750,11 @@ class Runtime:
         evs = sorted(self.events(), key=lambda e: e.opened_at, reverse=True)
         open_ = [e for e in evs if e.state not in TERMINAL_STATES]
         closed = [e for e in evs if e.state in TERMINAL_STATES][:5]
-        return DashboardSnapshot(header=self.header(), orders=self.sim.order_progress(),
-                                 semi_finished=self.sim.semi_finished(), focus=self.focus_panel(),
+        from warroom.api import progress as P
+        wip = self.__dict__.setdefault("_wip", P.WipTracker())
+        return DashboardSnapshot(header=self.header(), orders=P.order_progress(self.sim, self.events()),
+                                 semi_finished=wip.semi_finished(self.sim, self.focus_event()),
+                                 focus=self.focus_panel(),
                                  machines=self.machine_tiles(), events=open_ + closed,
                                  pending_approvals=list(self.approvals.pending()),
                                  safety_actions=list(reversed(self.safety_log[-20:])))

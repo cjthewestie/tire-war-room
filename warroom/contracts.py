@@ -367,6 +367,8 @@ class SemiFinishedProgress(_M):
     size: TireSize
     parts: list[SemiFinishedPart]
     planned_mold_in_at: datetime | None = None   # "大胎 #07 仍 17:00 入硫化機"
+    note: str | None = None                      # e.g. "7 號機硫化中 10.0／36.5 h" when following a press event's tire
+    note_state: Literal["waiting", "in_progress", "done", "alert"] | None = None
 
 
 class Order(_M):
@@ -919,6 +921,7 @@ class OrderProgress(_M):
     total: int
     remaining_h: float
 
+    note: str | None = None           # why remaining_h moved, e.g. "7 號機停用：可用硫化機 3/4 台…"
 
 class MachineTile(_M):
     machine_id: str

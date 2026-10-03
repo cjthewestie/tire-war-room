@@ -108,6 +108,9 @@ main { background: #16191e; border: 1px solid var(--border); border-top: 0; bord
 .semi-st.alert { color: var(--alarm); }
 .semi-st.done { color: var(--accent); }
 .semi-st.waiting { color: var(--ink-dim); }
+.semi-note { margin: 8px 0 0; }
+.order-h.moved { color: var(--warn, #e0a800); }
+.order-note { margin: 2px 0 6px; color: var(--ink-dim); line-height: 1.4; }
 
 .focus.hot { border-color: var(--alarm); background: #1c1b1f; }
 .focus.hot .panel-h h2 { color: var(--alarm); }

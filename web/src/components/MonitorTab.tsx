@@ -30,8 +30,9 @@ function OrdersPanel({ orders }: { orders: OrderProgress[] }) {
         <div className="order" key={o.size}>
           <div className="order-row">
             <span className="order-l">{o.label}<b>{o.done}</b><small> / {o.total}</small></span>
-            <span className="muted">剩餘約 {fmtNum(o.remaining_h, 0)} 小時</span>
+            <span className={o.note ? 'order-h moved' : 'muted'}>剩餘約 {fmtNum(o.remaining_h, 0)} 小時</span>
           </div>
+          {o.note && <p className="order-note small">{o.note}</p>}
           <div className="bar" role="progressbar" aria-valuenow={o.done} aria-valuemax={o.total} aria-label={`${o.label}進度`}>
             <i style={{ width: `${(100 * o.done) / Math.max(1, o.total)}%` }} />
           </div>
@@ -53,6 +54,7 @@ function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
         ))}
       </ul>
       {semi.planned_mold_in_at && <p className="muted small">預計 {fmtHM(semi.planned_mold_in_at)} 入硫化機</p>}
+      {semi.note && <p className={`small semi-note semi-st ${semi.note_state ?? ''}`}>{semi.note}</p>}
     </Panel>
   )
 }
