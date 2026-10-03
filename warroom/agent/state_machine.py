@@ -9,8 +9,19 @@ One Event per wake-up from the detector. States follow contracts.ALLOWED_TRANSIT
   logs (INTERCEPTED) a tool that is not open in the current state. Writes run only in EXECUTE.
 - The commander (only LLM) is called in PLAN and REPLAN; it returns a CommanderPlan. "$S1.x"
   references in step args are resolved here from earlier ToolResult.data.
-- VERIFY is code: it polls the machine reading and compares it with Hypothesis.expectation. A miss
-  rejects the hypothesis and goes to REPLAN with the evidence (page 11: 119.5 °C → H1 不成立).
+- VERIFY is code: it polls the machine reading and compares it with Hypothesis.expectation, which
+  code builds or bounds (event machine, the anomaly's channel or temperature, a code threshold). A
+  miss rejects the hypothesis and goes to REPLAN with the evidence (page 11: 119.5 °C → H1 不成立).
+  A reading met only because the safety core stopped the machine is inconclusive, never confirmed. A
+  plan that takes the event machine out of service is checked by its status (page 11 H2), an SOP
+  hand-off or a plan-vs-actual event has no reading: those close with the hypothesis unconfirmed.
+- A write that fails, is refused by the gate, or is skipped (confirm_schedule goes first in a round;
+  if it fails, e.g. stale after another event's activation, nothing else of that round runs) is an
+  action miss: counted as a failure, then REPLAN keeps the hypothesis and re-solves against the
+  schedule active now. A supervisor reject or an infeasible solve also keeps the hypothesis.
+- Physics numbers never come from the LLM: cure_formula inputs are taken from the press's live cure
+  job and the detector's prediction, and solve_schedule cure overrides take this event's formula
+  total for that press; the gate ties set_cure_time and overrides to that press's formula result.
 - Failure policy (page 7): a failed tool is retried MAX_TOOL_RETRIES times, then the SOP path
   (REPLAN with sop_path context); solver timeout → backup solver happens inside the scheduler and
   is shown on the timeline; MAX_CONSECUTIVE_FAILURES → SAFE_STOP. Safe stop keeps the schedule in
@@ -42,6 +53,7 @@ from warroom.agent.narrate import (
     expectation_text,
     fmt_num,
     machine_label,
+    moves_text,
     result_text,
     staffing_label,
 )
@@ -70,6 +82,7 @@ from warroom.contracts import (
     DecisionKind,
     Event,
     EventState,
+    Expectation,
     FactorySim,
     GateDecision,
     GateVerdict,
@@ -91,8 +104,20 @@ from warroom.contracts import (
     ToolResult,
     WsType,
 )
-from warroom.factory import CURE_TEMP_MAX_C, CURE_TEMP_MIN_C, MACHINE_BY_ID, MACHINES, PROCESSES, TZ, presses_on_header
+from warroom.factory import (
+    CURE_TEMP_MAX_C,
+    CURE_TEMP_MIN_C,
+    CURE_TEMP_NOMINAL_C,
+    MACHINE_BY_ID,
+    MACHINES,
+    PROCESSES,
+    TZ,
+    presses_on_header,
+)
 
+# anomaly kinds with no sensor outcome to verify (page 6 box 4 plan vs actual): VERIFY checks that the
+# approved writes ran; the hypothesis is never CONFIRMED by it
+UNMEASURED_KINDS = frozenset({"schedule_slip"})
 RISK_ORDER = [RiskLevel.R0_READ, RiskLevel.R1_NOTIFY, RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL]
 STAFFING_KINDS = (NotifyKind.OVERTIME.value, NotifyKind.STAFF_MOVE.value)
 _REF = re.compile(r"^\$(S\d+)\.([\w.\[\]-]+)$")
@@ -194,6 +219,11 @@ class _Run:
     staffing_done: list[dict[str, Any]] = field(default_factory=list)        # executed staffing notifies
     revocations: dict[str, dict[str, Any]] = field(default_factory=dict)     # revoke step id -> staffing_done entry
     activated: list[int] = field(default_factory=list)       # schedule versions THIS event confirmed (approved)
+    formula_press: dict[str, str | None] = field(default_factory=dict)  # cure_formula step id -> press it was run for
+    round_problems: list[dict[str, Any]] = field(default_factory=list)  # writes of this round that failed / were refused
+    replan_why: str = ""                                     # why the current replan happened (narration)
+    newly_rejected: str | None = None                        # hypothesis VERIFY rejected just before this replan
+    sop_handoff: bool = False                                # tools failed: the plan hands the event to people (SOP)
 
 
 class StateMachine:
@@ -441,6 +471,7 @@ class StateMachine:
             return
 
         while True:
+            run.round_problems = []
             # ---------------- SIMULATE
             self._to(ev, EventState.SIMULATE, "run read/compute steps")
             failure = await self._simulate(run)
@@ -482,8 +513,9 @@ class StateMachine:
                         sr.state = "skipped"
                     if self._fail(run, "主管否決"):
                         return
-                    if not await self._replan(run, {"supervisor_rejected": {"reason": res.decision.reason}},
-                                              "主管否決 → 換方案"):
+                    rej = {"reason": res.decision.reason, "approval_id": res.id,
+                           "rejected_options": [o.label for o in res.options]}
+                    if not await self._replan(run, {"supervisor_rejected": rej}, "主管否決 → 換方案"):
                         return
                     continue
                 chosen = self._chosen_steps(run, needs, options, res) + deferred
@@ -493,9 +525,9 @@ class StateMachine:
                     self._amend_schedule_staffing(run, chosen, change, res)
                 self._to(ev, EventState.EXECUTE, f"approved by {res.decision.decided_by}")
                 await self._execute(run, chosen, auto_tag=False)
-                if change is not None:
+                if change is not None and not run.round_problems:
                     await self._execute(run, self._revoke_steps(run, change, res), auto_tag=False)
-                if chosen and not any(sr.state == "failed" for sr in chosen) and ev.consecutive_failures:
+                if chosen and not run.round_problems and ev.consecutive_failures:
                     # an approved round that executed cleanly ends the failure streak (page 7 counts
                     # CONSECUTIVE failures)
                     self.audit.append(AuditKind.SYSTEM, "state_machine",
@@ -507,13 +539,35 @@ class StateMachine:
 
             # ---------------- VERIFY
             self._to(ev, EventState.VERIFY, "compare expectation with readings (code)")
-            ok, observed = await self._verify(run)
             hyp = ev.hypotheses[-1]
-            if ok:
-                hyp.status = HypothesisStatus.CONFIRMED if hyp.expectation else HypothesisStatus.ACTIVE
+            if run.round_problems:
+                # a write that failed, was skipped after a failed schedule confirm, or was refused by
+                # the gate: the plan did not do what it claimed. That is a miss for the ACTION, not a
+                # test of the hypothesis: count the failure and re-plan (re-solve against the schedule
+                # that is active now), keeping the hypothesis.
+                self._action_miss(run)
+                if self._fail(run, "動作未完成"):
+                    return
+                ctx = {"write_failed": {"steps": run.round_problems, "active_version": self._active_version(),
+                                        "at": self._now().isoformat()}}
+                if not await self._replan(run, ctx, "動作未完成 → 重新規劃"):
+                    return
+                continue
+            verdict, observed = await self._verify(run)
+            if verdict == "confirmed":
+                hyp.status = HypothesisStatus.CONFIRMED
                 self._close(run)
                 return
+            if verdict in ("contained", "inconclusive", "handed_off", "unmeasured"):
+                hyp.status = HypothesisStatus.ACTIVE          # not tested by a reading: never CONFIRMED
+                self._close(run, verified=False, why={"inconclusive": "安全核心已停機，無法驗證",
+                                                      "contained": "已停用該機，未以讀值驗證",
+                                                      "handed_off": "已交現場依 SOP 處置",
+                                                      "unmeasured": "無讀值可驗證，核准動作已執行"}[verdict],
+                            clear_alarm=verdict == "unmeasured")
+                return
             hyp.status = HypothesisStatus.REJECTED
+            run.newly_rejected = hyp.id
             if self._fail(run, f"{hyp.id} 不成立"):
                 return
             ctx = {"failed_expectation": {"hypothesis_id": hyp.id, "statement": hyp.statement,
@@ -611,6 +665,10 @@ class StateMachine:
         run.context_tools.append(f"[工具] 讀 30 分鐘{ch}" + ("" if r.ok else "（失敗）"))
         if r.ok:
             ctx["sensors"] = r.data.get("summary", {})
+            first = ((r.data.get("readings") or {}).get(a.machine_id) or [None])[0]
+            if isinstance(first, dict):           # start of the 30-min window: what "normal" read
+                ctx["sensor_baseline"] = {a.machine_id: {c.value: first.get(c.value) for c in Channel
+                                                         if first.get(c.value) is not None}}
         if a.prediction is None:
             p = await self._call(run, EventState.CLASSIFY, None, ToolName.PREDICT_ANOMALY,
                                  {"machine_id": a.machine_id, "channel": a.channel.value, "horizon_min": 30.0})
@@ -681,24 +739,39 @@ class StateMachine:
         for s in getattr(self.commander, "last_intercepted", None) or []:
             self.audit.append(AuditKind.INTERCEPTED, "commander",
                               {"step": s, "reason": "tool not on the allow-list (dropped from plan)"}, event_id=ev.id)
-        if plan.hypothesis.expectation is not None:
-            exp, fixes = self._bound_expectation(ev, plan.hypothesis.expectation)
-            if fixes:
-                self.audit.append(AuditKind.SYSTEM, "state_machine",
-                                  {"expectation_bounded": fixes,
-                                   "from": plan.hypothesis.expectation.model_dump(mode="json"),
-                                   "to": exp.model_dump(mode="json")}, event_id=ev.id)
-                plan = plan.model_copy(update={"hypothesis": plan.hypothesis.model_copy(update={"expectation": exp})})
+        # the repeat check runs on what the commander proposed, before code bounds the expectation
+        # (bounding maps every cure-press temperature test onto the same line, so a genuinely new
+        # hypothesis would otherwise look like the rejected one)
         again = self._repeats_rejected(plan.hypothesis, rejected)
+        run.sop_handoff = phase == "replan" and bool(extra.get("sop_path"))
+        exp, fixes = self._code_expectation(ev, plan, handoff=run.sop_handoff)
+        if fixes:
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"expectation_bounded": fixes,
+                               "from": plan.hypothesis.expectation.model_dump(mode="json")
+                               if plan.hypothesis.expectation else None,
+                               "to": exp.model_dump(mode="json") if exp else None}, event_id=ev.id)
+        if exp != plan.hypothesis.expectation:
+            plan = plan.model_copy(update={"hypothesis": plan.hypothesis.model_copy(update={"expectation": exp})})
         if again and not plan.safe_stop:
             self.audit.append(AuditKind.SYSTEM, "state_machine",
                               {"error": "commander re-proposed a rejected hypothesis", "match": again,
                                "cause_code": plan.hypothesis.cause_code}, event_id=ev.id)
             plan = plan.model_copy(update={"safe_stop": True})
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
-        if hyp.id in {h.id for h in ev.hypotheses}:       # a real model may reuse "H1" on replan
-            hyp = hyp.model_copy(update={"id": f"H{len(ev.hypotheses) + 1}"})
-        ev.hypotheses.append(hyp)
+        cur = ev.hypotheses[-1] if ev.hypotheses else None
+        if phase == "replan" and cur is not None and cur.status is HypothesisStatus.ACTIVE \
+                and hyp.cause_code == cur.cause_code:
+            # same hypothesis re-planned (supervisor reject, failed write, infeasible solve): it was
+            # never disproved, so it keeps its id and its place
+            hyp = hyp.model_copy(update={"id": cur.id, "evidence": list(dict.fromkeys([*cur.evidence, *hyp.evidence]))})
+            ev.hypotheses[-1] = hyp
+        else:
+            if hyp.id in {h.id for h in ev.hypotheses}:       # a real model may reuse "H1" on replan
+                hyp = hyp.model_copy(update={"id": f"H{len(ev.hypotheses) + 1}"})
+            if cur is not None and cur.status is HypothesisStatus.ACTIVE:
+                cur.status = HypothesisStatus.PROPOSED            # superseded without a test
+            ev.hypotheses.append(hyp)
         plan = plan.model_copy(update={"hypothesis": hyp})
         run.plan, run.plan_at = plan, self._now()
         run.results = {}
@@ -713,13 +786,79 @@ class StateMachine:
     # ---- VERIFY must test the event, not whatever the LLM picked ----
     EXPECT_MARGIN_C = 1.0
     EXPECT_WITHIN_MIN = (5.0, 60.0)
+    DEFAULT_WITHIN_MIN = 30.0
+
+    @staticmethod
+    def _takes_machine_out(ev: Event, plan: CommanderPlan) -> bool:
+        """The plan contains the event machine (taken out of service, or removed from the schedule)."""
+        for st in plan.steps:
+            if st.tool is ToolName.NOTIFY_TEAMS and st.args.get("kind") == NotifyKind.MACHINE_OUT.value \
+                    and st.args.get("machine_id") in (None, ev.machine_id):
+                return True
+            if st.tool is ToolName.SOLVE_SCHEDULE and ev.machine_id in (st.args.get("unavailable_presses") or []):
+                return True
+        return False
+
+    def _allowed_channels(self, ev: Event) -> set[Channel]:
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        out = {ev.anomaly.channel}
+        if mdef is not None and (mdef.line is Line.CURE or mdef.handles_compound):
+            out.add(Channel.TEMP)                 # the safety-relevant reading on presses and compound machines
+        return out
+
+    def _code_expectation(self, ev: Event, plan: CommanderPlan, handoff: bool = False) -> tuple[Any, list[str]]:
+        """Code owns what VERIFY tests. A plan that takes the event machine out of service is checked
+        by that status (expectation None, never CONFIRMED). Any other plan gets an expectation on the
+        event machine and the anomaly's channel (or temperature on a press / compound machine), with
+        a code-bound threshold; a missing one is built from the anomaly."""
+        exp = plan.hypothesis.expectation
+        if plan.safe_stop:
+            return exp, []
+        if handoff:     # page 7: tools failed twice -> SOP path, people take over; nothing to read
+            return None, (["SOP hand-off: no reading to verify"] if exp is not None else [])
+        if ev.anomaly.kind.value in UNMEASURED_KINDS:   # plan-vs-actual events: no sensor outcome to test
+            return None, (["no measurable channel for this anomaly kind"] if exp is not None else [])
+        if self._takes_machine_out(ev, plan):
+            return None, (["containment plan: verified by machine status, not a reading"] if exp is not None else [])
+        fixes: list[str] = []
+        a = ev.anomaly
+        if exp is None:
+            exp = self._default_expectation(ev, a.channel, self.DEFAULT_WITHIN_MIN)
+            fixes.append("no expectation -> built from the anomaly")
+        if exp.channel not in self._allowed_channels(ev):
+            fixes.append(f"channel {exp.channel.value} -> {a.channel.value}")
+            exp = self._default_expectation(ev, a.channel, exp.within_min)
+        exp2, more = self._bound_expectation(ev, exp)
+        return exp2, fixes + more
+
+    def _bound_for(self, ev: Event, channel: Channel) -> tuple[str | None, float | None]:
+        """(op, threshold) code requires for a test on this channel of the event machine."""
+        from warroom.contracts import CompoundStage
+        from warroom.factory import COMPOUND_STOP_C, CURATIVE_STOP_C
+        a = ev.anomaly
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        if channel is Channel.TEMP and mdef is not None and mdef.line is Line.CURE:
+            return ">=", CURE_TEMP_MIN_C + self.EXPECT_MARGIN_C                # recover into the cure band
+        if channel is Channel.TEMP and mdef is not None and mdef.handles_compound:
+            st = self._machine_state(ev.machine_id)
+            limit = CURATIVE_STOP_C if st is not None and st.compound_stage is CompoundStage.CURATIVE_ADDED \
+                else COMPOUND_STOP_C
+            return "<=", limit - 2 * self.EXPECT_MARGIN_C                      # back under the stop line
+        if channel is a.channel and a.baseline is not None and a.value != a.baseline:
+            return (">=" if a.value < a.baseline else "<="), a.value           # at least no worse than now
+        return None, None
+
+    def _default_expectation(self, ev: Event, channel: Channel, within: float) -> Expectation:
+        a = ev.anomaly
+        op, bound = self._bound_for(ev, channel)
+        if op is None:
+            op, bound = (">=" if a.value < a.baseline else "<="), a.value
+        return Expectation(machine_id=ev.machine_id, channel=channel, op=op, value=float(bound), within_min=within)
 
     def _bound_expectation(self, ev: Event, exp: Any) -> tuple[Any, list[str]]:
         """Pin the expectation to the event's machine and bound its threshold by code, so VERIFY
         cannot be satisfied trivially (another machine, the wrong direction, a threshold the
         faulty state already meets). Returns (expectation, list of fixes applied)."""
-        from warroom.contracts import CompoundStage
-        from warroom.factory import COMPOUND_STOP_C, CURATIVE_STOP_C
         a = ev.anomaly
         fixes: list[str] = []
         upd: dict[str, Any] = {}
@@ -738,19 +877,7 @@ class StateMachine:
                                                              else exp.value)
             fixes.append(f"between -> {op}")
             upd["value_hi"] = None
-        mdef = MACHINE_BY_ID.get(ev.machine_id)
-        st = self._machine_state(ev.machine_id)
-        need_op: str | None = None
-        bound: float | None = None
-        if channel is Channel.TEMP and mdef is not None and mdef.line is Line.CURE:
-            need_op, bound = ">=", CURE_TEMP_MIN_C + self.EXPECT_MARGIN_C       # recover into the cure band
-        elif channel is Channel.TEMP and mdef is not None and mdef.handles_compound:
-            limit = CURATIVE_STOP_C if st is not None and st.compound_stage is CompoundStage.CURATIVE_ADDED \
-                else COMPOUND_STOP_C
-            need_op, bound = "<=", limit - 2 * self.EXPECT_MARGIN_C             # back under the stop line
-        elif channel is a.channel and a.baseline is not None and a.value != a.baseline:
-            need_op = ">=" if a.value < a.baseline else "<="
-            bound = a.value                                                     # at least no worse than now
+        need_op, bound = self._bound_for(ev, channel)
         if need_op is not None:
             if op != need_op:
                 fixes.append(f"op {op} -> {need_op}")
@@ -791,9 +918,14 @@ class StateMachine:
             self._note(ev, "指揮官", f"{tools} → 假設 {h.id}：{h.statement}" if tools else f"假設 {h.id}：{h.statement}",
                        "decision")
         else:
-            rej = rejected[-1].id if rejected else "?"
             via = " → ".join(run.replan_tools)
-            text = f"推翻 {rej} → {h.id}：{h.statement}"
+            if run.newly_rejected:
+                text = f"推翻 {run.newly_rejected} → {h.id}：{h.statement}"
+            else:
+                # nothing was disproved: a supervisor reject, a failed write or an infeasible solve
+                why = (run.replan_why or "換方案").split(" → ")[0]
+                text = f"{why} → 換方案（{h.id}：{h.statement}）"
+            run.newly_rejected = None
             if via:
                 text += f"；{via}"
             text += f" → {plan.alert_card.title}"
@@ -814,8 +946,13 @@ class StateMachine:
             return False
         self._to(ev, EventState.REPLAN, why)
         ev.replans += 1
+        run.replan_why = why
         a = ev.anomaly
         run.replan_tools = []
+        cur = ev.hypotheses[-1] if ev.hypotheses else None
+        if cur is not None and cur.status is HypothesisStatus.ACTIVE:
+            extra = {**extra, "current_hypothesis": {"id": cur.id, "cause_code": cur.cause_code,
+                                                     "statement": cur.statement}}
         neigh = self._neighbours(a.machine_id)
         r = await self._call(run, EventState.REPLAN, None, ToolName.READ_SENSORS,
                              {"machine_ids": neigh, "minutes": 30.0})
@@ -856,7 +993,11 @@ class StateMachine:
                 sr.state = "skipped"
                 continue
             resolved = step.model_copy(update={"args": resolve_refs(step.args, run.results)})
-            gd = self.gate.check(resolved, EventState.SIMULATE, True)
+            resolved = self._bind_physics(run, resolved)
+            sr.step = resolved
+            kw = {"evidence": self._evidence(run)} if (self._gate_takes_evidence and
+                                                       step.tool is ToolName.SOLVE_SCHEDULE) else {}
+            gd = self.gate.check(resolved, EventState.SIMULATE, True, **kw)
             sr.gate = gd
             if gd.verdict is GateVerdict.REJECT:
                 sr.state = "rejected"
@@ -907,11 +1048,13 @@ class StateMachine:
     @staticmethod
     def _evidence(run: _Run) -> dict[str, Any]:
         """What THIS event's own tool results support, for the gate: schedule versions a feasible
-        solve produced (confirm_schedule may only activate those) and cure-formula totals
-        (set_cure_time may only carry the formula's value, never an AI guess)."""
+        solve produced (confirm_schedule may only activate those) and cure-formula totals per press
+        (set_cure_time and solve_schedule.cure_overrides_h may only carry the formula's value for
+        that press, never an AI guess)."""
         feasible_versions: list[int] = []
         cure_h: list[float] = []
-        for res in run.results.values():
+        by_press: dict[str, list[float]] = {}
+        for sid, res in run.results.items():
             if not res.ok:
                 continue
             if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("feasible") and \
@@ -919,7 +1062,59 @@ class StateMachine:
                 feasible_versions.append(int(res.data["schedule_version"]))
             elif res.tool is ToolName.CURE_FORMULA and res.data.get("total_cure_h") is not None:
                 cure_h.append(float(res.data["total_cure_h"]))
-        return {"feasible_versions": feasible_versions, "cure_formula_h": cure_h}
+                press = run.formula_press.get(sid)
+                if press:
+                    by_press.setdefault(press, []).append(float(res.data["total_cure_h"]))
+        return {"feasible_versions": feasible_versions, "cure_formula_h": cure_h, "cure_formula_by_press": by_press}
+
+    def _cure_temp(self, run: _Run) -> float:
+        """The temperature the press is curing at now: the detector's stable prediction (page 11:
+        122±1 °C), else the anomaly reading, to 0.5 °C."""
+        a = run.ev.anomaly
+        v = a.prediction.predicted_value if a.prediction is not None else a.value
+        return round(float(v) * 2) / 2
+
+    def _bind_physics(self, run: _Run, step: PlanStep) -> PlanStep:
+        """Physics numbers come from the plant and the formula, never from the LLM (page 11):
+        cure_formula gets the event press's live cure job (size, setpoint, hours cured, standard
+        cure hours, Ea = 85 kJ/mol) and the predicted temperature; a solve's cure override for a
+        press takes this event's formula total for that press. Changes are audited."""
+        ev = run.ev
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        is_press = mdef is not None and mdef.line is Line.CURE
+        if step.tool is ToolName.CURE_FORMULA:
+            job = run.base_context.get("cure_job") or {}
+            args = dict(step.args)
+            press: str | None = None
+            if is_press and job.get("size"):
+                from warroom.factory import ACTIVATION_ENERGY_KJ_MOL, CURE_HOURS
+                from warroom.contracts import TireSize
+                size = TireSize(job["size"])
+                args = {"size": size.value, "ref_temp_c": float(job.get("setpoint_c") or CURE_TEMP_NOMINAL_C),
+                        "actual_temp_c": self._cure_temp(run), "elapsed_h": float(job.get("cure_elapsed_h") or 0.0),
+                        "ref_cure_h": float(CURE_HOURS[size]), "activation_energy_kj_mol": float(ACTIVATION_ENERGY_KJ_MOL)}
+                press = ev.machine_id
+            elif is_press and self.sim is None:
+                press = ev.machine_id          # no plant to read (offline test rig): the commander's inputs stand
+            run.formula_press[step.id] = press
+            if args != step.args:
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"cure_formula_args_from_plant": step.id, "from": step.args, "to": args,
+                                   "press": press}, event_id=ev.id)
+            return step.model_copy(update={"args": args})
+        if step.tool is ToolName.SOLVE_SCHEDULE and isinstance(step.args.get("cure_overrides_h"), dict):
+            by_press = self._evidence(run)["cure_formula_by_press"]
+            over = dict(step.args["cure_overrides_h"])
+            changed = {p: (h, by_press[p][-1]) for p, h in over.items()
+                       if by_press.get(p) and (not isinstance(h, (int, float)) or abs(float(h) - by_press[p][-1]) > 1e-9)}
+            if changed:
+                for p, (_, f) in changed.items():
+                    over[p] = f
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"cure_overrides_from_formula": {p: {"from": h, "to": f} for p, (h, f) in changed.items()},
+                                   "step_id": step.id}, event_id=ev.id)
+                return step.model_copy(update={"args": {**step.args, "cure_overrides_h": over}})
+        return step
 
     def _check(self, run: _Run, step: PlanStep, **kw: Any) -> GateDecision:
         if self._gate_takes_evidence and step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
@@ -945,6 +1140,8 @@ class StateMachine:
             write_deps = [by_id[d] for d in step.depends_on if d in by_id and by_id[d].step.tool in WRITE_TOOLS]
             if bad_dep or any(d.state in ("rejected", "skipped", "failed") for d in write_deps):
                 sr.state = "skipped"
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
+                                           "why": "an input step did not produce a result"})
                 continue
             waits = any(d in needs or d in deferred for d in write_deps)
             resolved = step.model_copy(update={"args": resolve_refs(step.args, run.results)})
@@ -959,6 +1156,8 @@ class StateMachine:
             if gd.verdict is GateVerdict.REJECT:
                 sr.state = "rejected"
                 self._log_reject(run, resolved, gd)
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "rejected",
+                                           "why": "；".join(gd.reasons)[:300]})
             elif gd.verdict is GateVerdict.ALLOW:
                 (deferred if waits else auto).append(sr)
             else:
@@ -1105,11 +1304,7 @@ class StateMachine:
         for step, data in self._solve_steps(run):
             for p in step.args.get("unavailable_presses") or []:
                 bits.append(f"{machine_label(str(p))}停用")
-            for mv in data.get("moves") or []:
-                if mv.get("from_press") == mv.get("to_press"):
-                    continue
-                n = _press_no(str(mv.get("to_press")))
-                bits.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 重排")
+            bits += moves_text(data.get("moves"))
         if not bits:
             for sr in needs:
                 if sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") in STAFFING_KINDS:
@@ -1147,15 +1342,19 @@ class StateMachine:
             txt = f"{machine_label(str(a.get('press_id')))}硫化總時數 {fmt_num(a.get('total_cure_h'))} h"
             return txt + (f"（公式 {fmt_num(ref[-1])} h）" if ref else "（無公式結果）")
         if step.tool is ToolName.CONFIRM_SCHEDULE:
+            # what the solver was told (code-filled formula overrides, presses taken out) and what it moved
             v = a.get("schedule_version")
-            moves = []
-            for res in run.results.values():
-                if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("schedule_version") == v:
-                    for mv in res.data.get("moves") or []:
-                        if mv.get("from_press") != mv.get("to_press"):
-                            n = _press_no(str(mv.get("to_press")))
-                            moves.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 重排")
-            return f"排程 v{v} 生效" + (f"（{'、'.join(moves)}）" if moves else "")
+            bits: list[str] = []
+            for sstep, data in self._solve_steps(run):
+                if data.get("schedule_version") != v:
+                    continue
+                for p, h in (sstep.args.get("cure_overrides_h") or {}).items():
+                    bits.append(f"{machine_label(str(p), short=True)}硫化 {fmt_num(h)} h")
+                for p in sstep.args.get("unavailable_presses") or []:
+                    bits.append(f"{machine_label(str(p), short=True)}停用")
+                mv = moves_text(data.get("moves"))
+                bits += mv or ["無機台異動"]
+            return f"排程 v{v} 生效" + (f"（{'；'.join(bits)}）" if bits else "")
         if step.tool is ToolName.NOTIFY_TEAMS:
             from warroom.agent.narrate import NOTIFY_LABELS, TEAM_LABELS
             try:
@@ -1389,20 +1588,40 @@ class StateMachine:
 
     # ------------------------------------------------------------------ EXECUTE
     async def _execute(self, run: _Run, steps: list[StepRun], auto_tag: bool) -> None:
+        """Run approved / auto writes. confirm_schedule goes first: when it fails (e.g. the proposal
+        went stale because another event activated a schedule meanwhile) nothing else of this round
+        runs, so a cure time, a staffing call or a notice never goes out against a schedule that
+        did not take effect. Failures and skips land in run.round_problems (VERIFY counts them)."""
         ev = run.ev
         by_id = {x.step.id: x for x in ev.steps}
-        for sr in steps:
+        ordered = sorted(steps, key=lambda x: 0 if x.step.tool is ToolName.CONFIRM_SCHEDULE else 1)
+        halted: PlanStep | None = None
+        for sr in ordered:
             step = sr.step
+            if halted is not None:
+                sr.state = "skipped"
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
+                                           "why": f"{halted.id} confirm_schedule failed"})
+                continue
             if any(by_id[d].state != "ok" for d in step.depends_on
                    if d in by_id and by_id[d].step.tool in WRITE_TOOLS):
                 sr.state = "skipped"
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "skipped",
+                                           "why": "a write it depends on did not run"})
                 continue
             sr.state = "running"
             res = await self._call(run, EventState.EXECUTE, step.id, step.tool, step.args)
             sr.result = res
             if not res.ok:
                 sr.state = "failed"
+                run.round_problems.append({"step_id": step.id, "tool": step.tool.value, "state": "failed",
+                                           "error": (res.error or "")[:300]})
                 self._note(ev, "工具", f"[工具] {step.id} {step.tool.value} 執行失敗：{(res.error or '')[:60]}", "dynamic")
+                if step.tool is ToolName.CONFIRM_SCHEDULE:
+                    halted = step
+                    rest = [x.step.id for x in ordered if x is not sr and x.state not in ("ok", "failed")]
+                    self._note(ev, "系統", f"排程 v{step.args.get('schedule_version')} 未生效 → 本輪其餘動作不執行"
+                               + (f"（{'、'.join(rest)}）" if rest else "") + "，依現行排程重新求解", "dynamic")
                 continue
             sr.state = "ok"
             run.results[step.id] = res
@@ -1410,17 +1629,27 @@ class StateMachine:
             self._note(ev, "工具", ("✓ 已自動：" if auto_tag else "[工具] ") + txt, "tool")
             self._after_write(run, step)
 
+    def _action_miss(self, run: _Run) -> None:
+        ev = run.ev
+        probs = run.round_problems
+        self.audit.append(AuditKind.SYSTEM, "verifier",
+                          {"hypothesis": ev.hypotheses[-1].id if ev.hypotheses else None, "ok": False,
+                           "action_problems": probs}, event_id=ev.id)
+        n_fail = sum(1 for p in probs if p["state"] == "failed")
+        n_rej = sum(1 for p in probs if p["state"] == "rejected")
+        n_skip = sum(1 for p in probs if p["state"] == "skipped")
+        bits = [f"{n_fail} 項動作執行失敗" if n_fail else "", f"{n_rej} 項動作被把關攔截" if n_rej else "",
+                f"{n_skip} 項動作未執行" if n_skip else ""]
+        self._note(ev, "驗證（程式）", "動作未完成：" + "；".join(b for b in bits if b) + " → 不算完成，重新規劃",
+                   "dynamic")
+
     def _after_write(self, run: _Run, step: PlanStep) -> None:
         ev = run.ev
         if step.tool is ToolName.CONFIRM_SCHEDULE:
             v = step.args.get("schedule_version")
             for res in run.results.values():
                 if res.tool is ToolName.SOLVE_SCHEDULE and res.data.get("schedule_version") == v:
-                    for mv in res.data.get("moves") or []:
-                        if mv.get("from_press") == mv.get("to_press"):
-                            continue                     # time shift on the same press, not a move
-                        n = _press_no(str(mv.get("to_press")))
-                        run.done.append(f"{mv.get('order_id')} 改 {n} 號" if n else f"{mv.get('order_id')} 已重排")
+                    run.done += moves_text(res.data.get("moves"))   # grouped per order; same-press shifts left out
             run.executed.append(f"排程 v{v} 生效")
             if isinstance(v, int):
                 run.activated.append(v)
@@ -1488,27 +1717,38 @@ class StateMachine:
             return v <= exp.value
         return exp.value <= v <= (exp.value_hi if exp.value_hi is not None else exp.value)
 
-    async def _verify(self, run: _Run) -> tuple[bool, float | None]:
+    async def _verify(self, run: _Run) -> tuple[str, float | None]:
+        """Returns (verdict, last reading). verdict: "confirmed" (the reading met the code-bound
+        expectation), "rejected" (it missed), "inconclusive" (it met it only because the safety core
+        stopped / held the machine) or "contained" (no reading to test: the plan took the event's
+        machine out of service, checked here by its status)."""
         ev, plan = run.ev, run.plan
         assert plan is not None
         h = ev.hypotheses[-1]
         exp = h.expectation
-        failed_writes = [sr for sr in ev.steps if sr.state == "failed"]
-        # a write the gate refused (AI-guessed value, unsimulated schedule, out of scope) means the
-        # plan did not do what it claimed: that is a miss, not "nothing to do"
-        gate_refused = [sr for sr in ev.steps if sr.state == "rejected" and sr.step.tool in WRITE_TOOLS
-                        and sr.gate is not None and sr.gate.verdict is GateVerdict.REJECT]
+        if exp is None and ev.anomaly.kind.value in UNMEASURED_KINDS:
+            self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
+                                                             "unmeasured": True}, event_id=ev.id)
+            self._note(ev, "驗證（程式）", f"核准動作已執行完成；{h.id} 無讀值可驗證", "info")
+            return "unmeasured", None
+        if exp is None and run.sop_handoff:
+            self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
+                                                             "handed_off": True}, event_id=ev.id)
+            self._note(ev, "驗證（程式）", f"已依 SOP 交現場人工處置；{h.id} 未以讀值驗證", "dynamic")
+            return "handed_off", None
         if exp is None:
-            ok = not failed_writes and not gate_refused
+            st = self._machine_state(ev.machine_id)
+            held = st is not None and st.status in (MachineStatus.OUT_OF_SERVICE, MachineStatus.STOPPED)
+            ok = held or self.sim is None
             self.audit.append(AuditKind.SYSTEM, "verifier",
-                              {"hypothesis": h.id, "expectation": None, "ok": ok,
-                               "failed_steps": [sr.step.id for sr in failed_writes],
-                               "gate_refused_steps": [sr.step.id for sr in gate_refused]}, event_id=ev.id)
-            self._note(ev, "驗證（程式）", "無數值預期：動作已執行完成" if ok else
-                       "；".join(x for x in (f"{len(failed_writes)} 項動作執行失敗" if failed_writes else "",
-                                            f"{len(gate_refused)} 項動作被把關攔截" if gate_refused else "") if x),
-                       "dynamic" if not ok else "info")
-            return ok, None
+                              {"hypothesis": h.id, "expectation": None, "contained": ok,
+                               "machine_status": st.status.value if st else None}, event_id=ev.id)
+            if ok:
+                self._note(ev, "驗證（程式）", f"{machine_label(ev.machine_id)}已停用（狀態確認）；"
+                           f"{h.id} 未以讀值驗證，交由維修確認", "dynamic")
+                return "contained", None
+            self._note(ev, "驗證（程式）", f"{machine_label(ev.machine_id)}未進入停用狀態 → {h.id} 未完成", "dynamic")
+            return "rejected", None
         start = run.plan_at or self._now()
         deadline = start + timedelta(minutes=exp.within_min)
         violated_since: datetime | None = None
@@ -1536,6 +1776,14 @@ class StateMachine:
                 return self._verify_result(run, h, exp, ok, last)
             await self._sleep(self._grid_wait() or self.verify_poll_s)
 
+    def _stopped_by_safety(self, ev: Event) -> bool:
+        """The safety core stopped this machine or held its batch (a stopped mill cools by itself)."""
+        from warroom.contracts import SafetyActionKind
+        if any(a.action in (SafetyActionKind.STOP_MACHINE, SafetyActionKind.HOLD_BATCH) for a in ev.safety_actions):
+            return True
+        st = self._machine_state(ev.machine_id)
+        return st is not None and st.status is MachineStatus.STOPPED
+
     def _grid_wait(self) -> float:
         """Sim seconds to the next whole multiple of verify_poll_s (0 when already on it)."""
         p = self.verify_poll_s
@@ -1544,14 +1792,22 @@ class StateMachine:
         rem = self._now().timestamp() % p
         return 0.0 if rem < 1e-6 or p - rem < 1e-6 else p - rem
 
-    def _verify_result(self, run: _Run, h: Hypothesis, exp, ok: bool, v: float | None) -> tuple[bool, float | None]:
+    def _verify_result(self, run: _Run, h: Hypothesis, exp, ok: bool, v: float | None) -> tuple[str, float | None]:
         ev = run.ev
         unit = "°C" if exp.channel is Channel.TEMP else ""
         ch = CHANNEL_LABELS.get(exp.channel, "讀值")
+        # met only because the safety core stopped the machine (a stopped mill cools whatever the
+        # cause): that does not test the hypothesis
+        inconclusive = ok and exp.op == "<=" and self._stopped_by_safety(ev)
+        verdict = "inconclusive" if inconclusive else "confirmed" if ok else "rejected"
         self.audit.append(AuditKind.SYSTEM, "verifier",
-                          {"hypothesis": h.id, "expectation": exp.model_dump(mode="json"), "observed": v, "ok": ok},
-                          event_id=ev.id)
-        if ok:
+                          {"hypothesis": h.id, "expectation": exp.model_dump(mode="json"), "observed": v, "ok": ok,
+                           "verdict": verdict}, event_id=ev.id)
+        if inconclusive:
+            h.evidence.append(f"{ch} {fmt_num(v)}{unit}：安全核心已停機，無法驗證")
+            self._note(ev, "驗證（程式）", f"比對預期：{ch} {fmt_num(v)}{unit}，但安全核心已停機 → {h.id} 無法驗證",
+                       "dynamic")
+        elif ok:
             h.evidence.append(f"{ch}維持 {fmt_num(v)}{unit}，符合預期 {expectation_text(exp)}")
             self._note(ev, "驗證（程式）", f"比對預期：{ch} {fmt_num(v)}{unit} → {h.id} 成立", "dynamic")
         else:
@@ -1561,20 +1817,24 @@ class StateMachine:
             if ev.safety_actions or self._safety_acted(ev.machine_id):
                 text += "；安全核心已依規則處置"
             self._note(ev, "驗證（程式）", text, "dynamic")
-        return ok, v
+        return verdict, v
 
     # ------------------------------------------------------------------ terminal states
-    def _close(self, run: _Run) -> None:
+    def _close(self, run: _Run, verified: bool = True, why: str = "", clear_alarm: bool | None = None) -> None:
+        """verified=False: the hypothesis was not tested by a reading (machine taken out, or the safety
+        core stopped it). The event still closes, but the hypothesis is not CONFIRMED and the
+        machine's alarm is not cleared."""
         ev = run.ev
         outcome = "；".join(dict.fromkeys(run.executed)) or "無需動作"
         h = ev.hypotheses[-1]
-        ev.outcome = f"{h.id} {h.statement}：{outcome}"
+        head = f"{h.id} {h.statement}" + ("" if verified else f"（未驗證：{why}）")
+        ev.outcome = f"{head}：{outcome}"
         self._to(ev, EventState.CLOSED, ev.outcome)
         ev.closed_at = self._now()
         st = self._machine_state(ev.machine_id)
-        if st is not None and st.status is MachineStatus.ALARM:
+        if (verified if clear_alarm is None else clear_alarm) and st is not None and st.status is MachineStatus.ALARM:
             self._set_status(ev.machine_id, MachineStatus.RUNNING, None)
-        self._note(ev, "系統", f"事件結案：{outcome}", "info")
+        self._note(ev, "系統", f"事件結案：{outcome}" + ("" if verified else f"（{why}）"), "info")
 
     def _safe_stop(self, run: _Run, reason: str) -> None:
         ev = run.ev

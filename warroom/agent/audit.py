@@ -1,19 +1,28 @@
 """Append-only audit log (page 5 稽核日誌, page 7 操作紀錄).
 
 One JSON object per line, HMAC-SHA256 hash-chained: entry.hash = HMAC(key, prev_hash + canonical
-JSON of every other field, exactly as written). The key lives outside the log (env
-WARROOM_AUDIT_KEY, else ``<log>.key`` created 0600 beside it, on the encrypted disk of page 10), so
-someone who can edit the log cannot recompute a valid chain. Each append is fsync'd before
-returning, and the head (last seq + hash) is anchored in ``<log>.head`` so whole lines cut off the
-end are caught across restarts too.
+JSON of every other field, exactly as written). Each append is fsync'd before returning, and the head
+(last seq + hash) is anchored in ``<log>.head`` (and, when WARROOM_AUDIT_ANCHOR names a path outside
+the data volume, mirrored there too) so whole lines cut off the end are caught across restarts.
+
+What the key protects depends on where it lives (``key_source``):
+- ``env`` (WARROOM_AUDIT_KEY) or ``file`` (WARROOM_AUDIT_KEY_FILE, e.g. a root-owned 0400 file or a
+  systemd credential outside APP_DATA): someone who can edit the log but cannot read the key cannot
+  recompute a valid chain.
+- ``beside_log`` (fallback, ``<log>.key`` created 0600 next to the log): this only catches accidental
+  damage and edits by someone without read access to the data directory. Anyone who can read the key
+  can rewrite the chain. Set WARROOM_AUDIT_REQUIRE_KEY=1 (the Spark deployment should) to refuse to
+  start on this fallback.
 
 Opening an existing log verifies it:
 - a torn LAST line (power cut mid-write, the unplug demo) is moved to ``<log>.corrupt``, the file is
   cut back to the last complete entry, the chain continues from there and a SYSTEM entry records
   the recovery;
 - any other break (an edited, deleted or reordered entry, a wrong key, a head anchor the file no
-  longer reaches) archives the whole file as ``<log>.broken-N`` untouched and starts a new chain
-  whose first entry says why. The log never silently drops to memory and never raises on content.
+  longer reaches, a MISSING head anchor beside a non-empty log) archives the whole file as
+  ``<log>.broken-N`` untouched and starts a new chain whose first entry says why. A log that is gone
+  while the external anchor still names entries is recorded the same way. The log never silently
+  drops to memory and never raises on content.
 """
 from __future__ import annotations
 
@@ -32,6 +41,13 @@ from warroom.factory import TZ
 
 GENESIS_HASH = "0" * 64
 KEY_ENV = "WARROOM_AUDIT_KEY"
+KEY_FILE_ENV = "WARROOM_AUDIT_KEY_FILE"
+REQUIRE_KEY_ENV = "WARROOM_AUDIT_REQUIRE_KEY"
+ANCHOR_ENV = "WARROOM_AUDIT_ANCHOR"
+
+
+class AuditKeyError(RuntimeError):
+    """WARROOM_AUDIT_REQUIRE_KEY is set but no key from outside the data directory is configured."""
 
 
 def _canonical(d: dict[str, Any]) -> str:
@@ -46,17 +62,29 @@ def entry_hash(prev_hash: str, body: dict[str, Any], key: bytes | None = None) -
     return hmac.new(key, msg, hashlib.sha256).hexdigest()
 
 
-def load_or_create_key(log_path: Path) -> bytes:
-    """WARROOM_AUDIT_KEY (hex, or any string) wins; else ``<log>.key`` (32 random bytes, 0600)."""
+def resolve_key(log_path: Path) -> tuple[bytes, str]:
+    """(key, source). WARROOM_AUDIT_KEY (hex, or any string) wins, then WARROOM_AUDIT_KEY_FILE (must
+    exist), else ``<log>.key`` beside the log (32 random bytes, 0600) — refused when
+    WARROOM_AUDIT_REQUIRE_KEY is set, because a key next to the log protects nothing against
+    someone who can write the log's directory."""
     env = os.environ.get(KEY_ENV)
     if env:
         try:
-            return bytes.fromhex(env)
+            return bytes.fromhex(env), "env"
         except ValueError:
-            return env.encode("utf-8")
+            return env.encode("utf-8"), "env"
+    kf = os.environ.get(KEY_FILE_ENV)
+    if kf:
+        data = Path(kf).read_bytes().strip()
+        if not data:
+            raise AuditKeyError(f"{KEY_FILE_ENV}={kf} is empty")
+        return data, "file"
+    if os.environ.get(REQUIRE_KEY_ENV, "").strip().lower() in ("1", "true", "yes"):
+        raise AuditKeyError(f"{REQUIRE_KEY_ENV} is set: provide {KEY_ENV} or {KEY_FILE_ENV} from outside the data "
+                            "volume (the key must not sit beside the audit log)")
     kp = log_path.with_name(log_path.name + ".key")
     if kp.exists():
-        return kp.read_bytes()
+        return kp.read_bytes(), "beside_log"
     key = secrets.token_bytes(32)
     fd = os.open(kp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -64,7 +92,11 @@ def load_or_create_key(log_path: Path) -> bytes:
         os.fsync(fd)
     finally:
         os.close(fd)
-    return key
+    return key, "beside_log"
+
+
+def load_or_create_key(log_path: Path) -> bytes:
+    return resolve_key(log_path)[0]
 
 
 class JsonlAuditLog:
@@ -81,13 +113,24 @@ class JsonlAuditLog:
         self._clock = clock
         self._lock = threading.Lock()
         self._keep = keep_in_memory
-        self._key = key if key is not None else load_or_create_key(self.path)
+        if key is not None:
+            self._key, self.key_source = key, "explicit"
+        else:
+            self._key, self.key_source = resolve_key(self.path)
+        anchor = os.environ.get(ANCHOR_ENV)
+        self.anchor_path: Path | None = Path(anchor) if anchor else None
         self._entries: list[AuditEntry] = []
         self._seq = 0
         self._last_hash = GENESIS_HASH
         self.recovery: list[dict[str, Any]] = []
         if self.path.exists():
             self._open_existing()
+        else:
+            ext = self._read_anchor(self.anchor_path)
+            if ext is not None and ext["seq"] > 0:
+                self.recovery.append({"msg": "audit log missing although the external anchor names entries; "
+                                             "new chain started", "anchor_seq": ext["seq"],
+                                      "anchor": str(self.anchor_path)})
         for note in self.recovery:
             self.append(AuditKind.SYSTEM, "audit", note)
 
@@ -120,12 +163,32 @@ class JsonlAuditLog:
             prev, expect_seq, pos = h, expect_seq + 1, end
         return entries, pos, None
 
-    def _read_head(self) -> dict[str, Any] | None:
-        try:
-            d = json.loads(self.head_path.read_text(encoding="utf-8"))
-            return d if isinstance(d, dict) and isinstance(d.get("seq"), int) else None
-        except Exception:  # noqa: BLE001 - missing or half-written anchor: nothing to compare
+    @staticmethod
+    def _read_anchor(path: Path | None) -> dict[str, Any] | None:
+        if path is None:
             return None
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            return d if isinstance(d, dict) and isinstance(d.get("seq"), int) else None
+        except Exception:  # noqa: BLE001 - missing or unreadable: the caller decides what that means
+            return None
+
+    def _read_head(self) -> dict[str, Any] | None:
+        return self._read_anchor(self.head_path)
+
+    @staticmethod
+    def _anchor_problem(name: str, head: dict[str, Any] | None, entries: list[AuditEntry]) -> str | None:
+        last = entries[-1] if entries else None
+        if head is None:
+            # every append writes the anchor, so a non-empty log without one had it removed
+            return (f"{name} anchor missing or unreadable beside a non-empty log (ends at seq {last.seq}): "
+                    "entries may have been cut off") if entries else None
+        if head["seq"] > 0:
+            at = entries[head["seq"] - 1] if head["seq"] <= len(entries) else None
+            if at is None or at.hash != head.get("hash"):
+                return (f"{name} anchor seq {head['seq']} not found in the log "
+                        f"(log ends at seq {last.seq if last else 0}): entries were cut off or replaced")
+        return None
 
     def _archive(self, why: str, last_seq: int) -> None:
         n = 1
@@ -157,13 +220,11 @@ class JsonlAuditLog:
                                   "continued_from_seq": entries[-1].seq if entries else 0})
             problem = None
         if problem is None:
-            head = self._read_head()
-            last = entries[-1] if entries else None
-            if head is not None and head["seq"] > 0:
-                at = entries[head["seq"] - 1] if head["seq"] <= len(entries) else None
-                if at is None or at.hash != head.get("hash"):
-                    problem = (f"head anchor seq {head['seq']} not found in the log "
-                               f"(log ends at seq {last.seq if last else 0}): entries were cut off or replaced")
+            problem = self._anchor_problem("head", self._read_head(), entries)
+        if problem is None and self.anchor_path is not None:
+            ext = self._read_anchor(self.anchor_path)
+            if ext is not None or entries:
+                problem = self._anchor_problem("external", ext, entries)
         if problem is not None:
             self._archive(problem, entries[-1].seq if entries else 0)
             return
@@ -172,9 +233,17 @@ class JsonlAuditLog:
             self._seq, self._last_hash = entries[-1].seq, entries[-1].hash
 
     def _write_head(self) -> None:
-        tmp = self.head_path.with_name(self.head_path.name + ".tmp")
-        tmp.write_text(json.dumps({"seq": self._seq, "hash": self._last_hash}), encoding="utf-8")
-        os.replace(tmp, self.head_path)
+        body = json.dumps({"seq": self._seq, "hash": self._last_hash})
+        for p in (self.head_path, self.anchor_path):
+            if p is None:
+                continue
+            try:
+                tmp = p.with_name(p.name + ".tmp")
+                tmp.write_text(body, encoding="utf-8")
+                os.replace(tmp, p)
+            except OSError:
+                if p == self.head_path:
+                    raise
 
     # ------------------------------------------------------------------ API
     def _now(self) -> datetime:

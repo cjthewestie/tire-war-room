@@ -121,6 +121,11 @@ def _tool_catalogue() -> str:
     ])
 
 
+def _r1_templates_text() -> str:
+    from warroom.agent.gate import R1_TEMPLATES
+    return "；".join(f"{k.value}「{t}」" for k, v in R1_TEMPLATES.items() for t in v)
+
+
 SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系統中唯一的 LLM。你只輸出一個 JSON 物件（CommanderPlan），不輸出其他文字。
 
 工廠事實：4 條產線、28 台機台、11 台硫化機（每台一顆胎；CURE-07..10 可做中／大胎，其餘只做小胎）。硫化 S 24 h / M 28 h / L 34 h，{CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C，標稱 {CURE_TEMP_NOMINAL_C:.0f}°C。蒸汽管線：H1=CURE-01..05、H2=CURE-06..08、H3=CURE-09..11。活化能 {ACTIVATION_ENERGY_KJ_MOL:.0f} kJ/mol（假設值）。
@@ -136,7 +141,11 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 4. phase=replan 時：rejected 內的假設已被程式驗證推翻，必須換假設（不可重提），rejected_hypothesis_ids 列出它們。
 5. 跨組調人、暫停／放慢投料、機台停用屬 R3，必須由主管核准；你只能提出，不能執行。
 6. 無法安全處理時，設 safe_stop=true（維持原排程）。
-7. goal 一句話；purpose 與 rationale 用繁體中文、簡短。"""
+7. goal 一句話；purpose 與 rationale 用繁體中文、簡短。
+8. maintenance／info 通知（自動 R1）只能用固定句型，{{m}} 為該機台名稱（如「7 號機」「A 線大開煉機」），必須帶 machine_id，只發給 maintenance／qc／supervisor 或該機台所屬組：{_r1_templates_text()}；其他任何文字都會送主管核准。
+9. cure_formula 的輸入與 solve_schedule 的 cure_overrides_h 由程式依該硫化機現場模次與公式結果填入；你只需引用 "$S1.total_cure_h"。
+10. 若方案讓事件機台停用（machine_out 或 unavailable_presses 含該機），程式以「停用已完成」驗證，expectation 可為 null；其餘方案的 expectation 一律由程式依異常通道定界。
+11. phase=replan 且 context 有 supervisor_rejected（主管否決）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。"""
 
 
 def build_user_message(req: CommanderRequest) -> str:
@@ -348,8 +357,11 @@ class MockCommander:
     S3 solve_schedule(dep S1,S2), S4 confirm_schedule, S5 set_cure_time ($S1.total_cure_h),
     S6 notify_teams; replan with H1 rejected ->
     H2 steam_leak_or_sensor_drift (header neighbours compared, SOP 「硫化中斷處置」 in context),
-    press out of service, reschedule. Page 2: cooling_insufficient, notify maintenance (R1) +
-    slow_feed (R3). Third miss -> safe_stop (keep the original schedule)."""
+    press out of service, reschedule. Page 2: cooling_insufficient when the water flow really is low
+    (else overheat_unknown), notify maintenance (R1, fixed template) + slow_feed (R3). A replan after a
+    supervisor reject, a failed write or an infeasible solve keeps the current hypothesis (re-solve;
+    after a reject without cross-team moves, or without the feed change on the mill); only a failed
+    expectation swaps it. Third miss -> safe_stop (keep the original schedule)."""
     mode = LLMMode.MOCK
     model = "mock-rules"
 
@@ -380,21 +392,43 @@ class MockCommander:
             if req.phase == "replan":
                 return self._safe_stop(req, hid, rejected_ids, "重排未成立，維持原排程")
             return self._schedule_slip(req, hid)
+        # A replan only swaps the hypothesis when VERIFY rejected it (failed_expectation). A supervisor
+        # reject, a failed write (stale schedule) or an infeasible solve leaves the current hypothesis
+        # standing: re-plan it (re-solve against the schedule now active, or offer another option).
+        current = (ctx.get("current_hypothesis") or {}).get("cause_code")
+        redo = req.phase == "replan" and not ctx.get("failed_expectation") and current and current not in rejected_codes
+        rejected_by_sup = bool(ctx.get("supervisor_rejected"))
         if mdef is not None and mdef.line is Line.CURE:
-            if "steam_pressure_low" not in rejected_codes and req.phase == "plan":
+            if req.phase == "plan" and "steam_pressure_low" not in rejected_codes:
                 return self._press_h1(req, hid)
-            return self._press_h2(req, hid, rejected_ids)
+            if redo and current == "steam_pressure_low":
+                return self._press_h1(req, hid, no_cross_team=rejected_by_sup)
+            if redo and current == "steam_leak_or_sensor_drift":
+                return self._press_h2(req, hid, rejected_ids, no_cross_team=rejected_by_sup)
+            if "steam_leak_or_sensor_drift" not in rejected_codes:
+                return self._press_h2(req, hid, rejected_ids)
+            return self._safe_stop(req, hid, rejected_ids, "無可用替代假設")
         if mdef is not None and (mdef.handles_compound or a.kind in (AnomalyKind.OVERHEAT,
                                                                       AnomalyKind.WATER_FLOW_LOW)):
-            if "cooling_insufficient" not in rejected_codes and req.phase == "plan":
-                return self._mill_h1(req, hid)
-            return self._mill_h2(req, hid, rejected_ids)
+            first = self._mill_h1(req, hid)
+            if req.phase == "plan" and first.hypothesis.cause_code not in rejected_codes:
+                return first
+            if redo and current == first.hypothesis.cause_code:
+                return self._mill_h1(req, hid, observe_only=rejected_by_sup)
+            second = self._mill_h2(req, hid, rejected_ids)
+            if redo and current == second.hypothesis.cause_code:
+                return self._mill_h2(req, hid, rejected_ids, observe_only=rejected_by_sup)
+            if second.hypothesis.cause_code not in rejected_codes:
+                return second
+            return self._safe_stop(req, hid, rejected_ids, "無可用替代假設")
         if req.phase == "replan":
+            if redo and current == "unknown" and not rejected_by_sup:
+                return self._generic(req, hid)
             return self._safe_stop(req, hid, rejected_ids, "無可用替代假設")
         return self._generic(req, hid)
 
     # page 11, first round
-    def _press_h1(self, req: CommanderRequest, hid: str) -> CommanderPlan:
+    def _press_h1(self, req: CommanderRequest, hid: str, no_cross_team: bool = False) -> CommanderPlan:
         a, ctx = req.anomaly, req.context or {}
         mid, lbl = a.machine_id, machine_label(a.machine_id)
         job = ctx.get("cure_job") or {}
@@ -413,7 +447,8 @@ class MockCommander:
                      args={"press_ids": [mid]}),
             PlanStep(id="S3", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1", "S2"],
                      purpose="延長硫化後重排，保大胎交期",
-                     args={"cure_overrides_h": {mid: "$S1.total_cure_h"}, "time_limit_s": 10.0}),
+                     args={"cure_overrides_h": {mid: "$S1.total_cure_h"}, "time_limit_s": 10.0,
+                           **({"allow_cross_team": False} if no_cross_team else {})}),
             PlanStep(id="S4", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S3"], purpose="確認新排程（需主管核准）",
                      args={"schedule_version": "$S3.schedule_version",
                            "reason": f"{lbl}降溫，延長硫化至 ${{S1.total_cure_h}} h 後重排"}),
@@ -444,7 +479,8 @@ class MockCommander:
         )
 
     # page 11, second round
-    def _press_h2(self, req: CommanderRequest, hid: str, rejected_ids: list[str]) -> CommanderPlan:
+    def _press_h2(self, req: CommanderRequest, hid: str, rejected_ids: list[str],
+                  no_cross_team: bool = False) -> CommanderPlan:
         a, ctx = req.anomaly, req.context or {}
         mid, lbl = a.machine_id, machine_label(a.machine_id)
         failed = ctx.get("failed_expectation") or {}
@@ -463,7 +499,8 @@ class MockCommander:
             evidence.append(f"依 SOP「{sop}」：停用並重排")
         steps = [
             PlanStep(id="S1", tool=ToolName.SOLVE_SCHEDULE, purpose=f"{lbl}停用，重排其模次",
-                     args={"unavailable_presses": [mid], "time_limit_s": 10.0}),
+                     args={"unavailable_presses": [mid], "time_limit_s": 10.0,
+                           **({"allow_cross_team": False} if no_cross_team else {})}),
             PlanStep(id="S2", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S1"], purpose="確認重排（需主管核准）",
                      args={"schedule_version": "$S1.schedule_version",
                            "reason": f"{lbl}持續降溫，停用重排"}),
@@ -472,21 +509,35 @@ class MockCommander:
                            "kind": NotifyKind.MACHINE_OUT.value, "machine_id": mid,
                            "message": f"{lbl}停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管"}),
         ]
-        reason = f"溫度續降至 {_fmt(observed)}°C" if observed is not None else "驗證未達預期"
+        last = rejected_ids[-1] if rejected_ids else "H1"
+        summary = (f"{last} 不成立：溫度續降至 {_fmt(observed)}°C；改判持續洩壓或感測器漂移，停用重排。"
+                   if observed is not None else "持續洩壓或感測器漂移：停用並重排。")
         return CommanderPlan(
             goal=f"{machine_label(mid, short=True)}降溫，大胎不能延誤",
             hypothesis=Hypothesis(id=hid, statement="持續洩壓或感測器漂移", cause_code="steam_leak_or_sensor_drift",
                                   status=HypothesisStatus.ACTIVE, expectation=None, evidence=evidence),
             rejected_hypothesis_ids=rejected_ids,
             steps=steps,
-            alert_card=AlertCard(title=f"{lbl}停用，重排中",
-                                 summary=f"{rejected_ids[-1] if rejected_ids else 'H1'} 不成立：{reason}；"
-                                         f"改判持續洩壓或感測器漂移，停用重排。"),
+            alert_card=AlertCard(title=f"{lbl}停用，重排中", summary=summary),
             rationale="同管線其他機台正常，排除總管蒸汽不足；依 SOP 停用該機並重排。",
         )
 
+    @staticmethod
+    def _flow_low(req: CommanderRequest) -> bool:
+        """Is the cooling water flow actually low? Only from the anomaly or the readings (now vs the start
+        of the 30-min window, the same 85 % line the dashboard tile uses), never assumed."""
+        a, ctx = req.anomaly, req.context or {}
+        if a.kind is AnomalyKind.WATER_FLOW_LOW or a.channel is Channel.WATER_FLOW:
+            return True
+        now = ((ctx.get("sensors") or {}).get(a.machine_id) or {}).get("water_flow_lpm_now")
+        base = ((ctx.get("sensor_baseline") or {}).get(a.machine_id) or {}).get(Channel.WATER_FLOW.value)
+        try:
+            return now is not None and base is not None and float(base) > 0 and float(now) < 0.85 * float(base)
+        except (TypeError, ValueError):
+            return False
+
     # page 2
-    def _mill_h1(self, req: CommanderRequest, hid: str) -> CommanderPlan:
+    def _mill_h1(self, req: CommanderRequest, hid: str, observe_only: bool = False) -> CommanderPlan:
         a = req.anomaly
         mid, lbl = a.machine_id, machine_label(a.machine_id)
         mdef = MACHINE_BY_ID[mid]
@@ -494,52 +545,69 @@ class MockCommander:
             CompoundStage.CURATIVE_ADDED.value else COMPOUND_STOP_C
         team = TeamId.BIGOPEN if mid == "A-BIGOPEN" else {Line.A: TeamId.BODY, Line.B: TeamId.SIDE,
                                                           Line.C: TeamId.BEAD_NYLON}.get(mdef.line, TeamId.BODY)
+        flow_low = self._flow_low(req)
+        if flow_low:
+            statement, code, cause = "冷卻能力不足（水流偏低）", "cooling_insufficient", "冷卻能力不足"
+            notice, why = f"{lbl}冷卻水流偏低，請檢修冷卻水路", "冷卻水流偏低"
+        else:
+            statement, code, cause = "膠溫過高，冷卻水流正常，原因待查", "overheat_unknown", "原因待查（水流正常）"
+            notice, why = f"{lbl}膠溫偏高，請檢查冷卻系統", "冷卻水流正常"
         steps = [
             PlanStep(id="S1", tool=ToolName.READ_SENSORS, purpose="讀膠溫與冷卻水流 30 分鐘趨勢",
                      args={"machine_ids": [mid], "minutes": 30.0}),
-            PlanStep(id="S2", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="確認對大胎 #07 入硫化時間的影響", args={}),
-            PlanStep(id="S3", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"], purpose="通知維修冷卻水路（自動）",
-                     args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value,
-                           "machine_id": mid, "message": f"{lbl}冷卻水流偏低，請檢修冷卻水路"}),
-            PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1", "S2"],
-                     purpose="放慢生料投入（需主管核准）",
-                     args={"teams": [team.value], "kind": NotifyKind.SLOW_FEED.value, "machine_id": mid,
-                           "message": f"{lbl}膠溫偏高，請放慢生料投入直到冷卻恢復"}),
         ]
+        if not observe_only:
+            steps += [
+                PlanStep(id="S2", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="確認對大胎 #07 入硫化時間的影響", args={}),
+                PlanStep(id="S3", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"],
+                         purpose="通知維修冷卻水路（自動）" if flow_low else "通知維修檢查冷卻系統（自動）",
+                         args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value,
+                               "machine_id": mid, "message": notice}),
+                PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1", "S2"],
+                         purpose="放慢生料投入（需主管核准）",
+                         args={"teams": [team.value], "kind": NotifyKind.SLOW_FEED.value, "machine_id": mid,
+                               "message": f"{lbl}膠溫偏高，請放慢生料投入直到冷卻恢復"}),
+            ]
+        summary = (f"膠溫 {_fmt(a.value)}°C 且持續上升（上限 {limit:.0f}°C）；原因：{cause}。"
+                   + ("主管否決放慢投料，持續監看膠溫。" if observe_only else "已通知維修，建議放慢生料投入。"))
         return CommanderPlan(
             goal=f"{lbl}降溫，避免整批膠料提早硬化",
             hypothesis=Hypothesis(
-                id=hid, statement="冷卻能力不足（水流偏低）", cause_code="cooling_insufficient",
-                status=HypothesisStatus.ACTIVE,
+                id=hid, statement=statement, cause_code=code, status=HypothesisStatus.ACTIVE,
                 expectation=Expectation(machine_id=mid, channel=Channel.TEMP, op="<=", value=limit - 2,
                                         within_min=20.0),
-                evidence=[f"膠溫 {_fmt(a.value)}°C 且持續上升（上限 {limit:.0f}°C）", "冷卻水流偏低"]),
+                evidence=[f"膠溫 {_fmt(a.value)}°C 且持續上升（上限 {limit:.0f}°C）", why]),
             steps=steps,
-            alert_card=AlertCard(title=f"異常：{lbl} 溫度過高",
-                                 summary=f"膠溫 {_fmt(a.value)}°C 且持續上升（上限 {limit:.0f}°C）；原因：冷卻能力不足。"
-                                         f"已通知維修，建議放慢生料投入。"),
-            rationale="水流偏低與升溫同步，判定冷卻不足；通知維修為 R1 自動，放慢投料為 R3 需核准。",
+            alert_card=AlertCard(title=f"異常：{lbl} 溫度過高", summary=summary),
+            rationale=("主管否決放慢投料：不再變更投料，只持續監看。" if observe_only else
+                       ("水流偏低與升溫同步，判定冷卻不足" if flow_low else "水流正常，冷卻水路不是已知原因")
+                       + "；通知維修為 R1 自動，放慢投料為 R3 需核准。"),
         )
 
-    def _mill_h2(self, req: CommanderRequest, hid: str, rejected_ids: list[str]) -> CommanderPlan:
+    def _mill_h2(self, req: CommanderRequest, hid: str, rejected_ids: list[str],
+                 observe_only: bool = False) -> CommanderPlan:
         a = req.anomaly
         mid, lbl = a.machine_id, machine_label(a.machine_id)
-        steps = [
+        flow_low = self._flow_low(req)
+        steps = [] if observe_only else [
             PlanStep(id="S1", tool=ToolName.NOTIFY_TEAMS, purpose="暫停投料（需主管核准）",
                      args={"teams": [TeamId.BIGOPEN.value, TeamId.BODY.value], "kind": NotifyKind.PAUSE_FEED.value,
-                           "machine_id": mid, "message": f"{lbl}冷卻水路疑似故障，請暫停投料並出料降溫"}),
+                           "machine_id": mid, "message": f"{lbl}膠溫未回落，請暫停投料並出料降溫"}),
             PlanStep(id="S2", tool=ToolName.NOTIFY_TEAMS, purpose="維修優先處理冷卻水路",
                      args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value,
                            "machine_id": mid, "message": f"{lbl}膠溫未回落，冷卻水路列為最優先檢修"}),
         ]
+        statement, code = (("冷卻水路故障，放慢投料不足以降溫", "cooling_failure") if flow_low else
+                           ("持續過熱，放慢投料不足以降溫", "overheat_persistent"))
         return CommanderPlan(
             goal=f"{lbl}降溫，避免整批膠料提早硬化",
-            hypothesis=Hypothesis(id=hid, statement="冷卻水路故障，放慢投料不足以降溫", cause_code="cooling_failure",
+            hypothesis=Hypothesis(id=hid, statement=statement, cause_code=code,
                                   status=HypothesisStatus.ACTIVE, expectation=None,
                                   evidence=["放慢投料後膠溫仍未回落"]),
             rejected_hypothesis_ids=rejected_ids, steps=steps,
             alert_card=AlertCard(title=f"{lbl}降溫無效，建議暫停投料",
-                                 summary="放慢投料後膠溫仍上升；疑冷卻水路故障，建議暫停投料（需核准）。"),
+                                 summary=("放慢投料後膠溫仍上升；" + ("疑冷卻水路故障，" if flow_low else "")
+                                          + ("主管否決暫停投料，持續監看。" if observe_only else "建議暫停投料（需核准）。"))),
             rationale="H1 處置後未達預期，升級為暫停投料。",
         )
 
@@ -580,7 +648,7 @@ class MockCommander:
                             args={"machine_ids": [mid], "minutes": 30.0}),
                    PlanStep(id="S2", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"], purpose="通知維修巡檢",
                             args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value,
-                                  "machine_id": mid, "message": f"{lbl}：{a.message}，請現場確認"})],
+                                  "machine_id": mid, "message": f"{lbl}異常，請現場確認"})],
             alert_card=AlertCard(title=f"{lbl}異常", summary=a.message),
             rationale="無對應規則，先通知維修確認。",
         )
@@ -600,7 +668,7 @@ class MockCommander:
             steps=[PlanStep(id="S1", tool=ToolName.NOTIFY_TEAMS, purpose="依 SOP 通知現場人工處置",
                             args={"teams": [TeamId.MAINTENANCE.value, TeamId.SUPERVISOR.value],
                                   "kind": NotifyKind.INFO.value, "machine_id": mid,
-                                  "message": f"{lbl}：系統工具失敗，請依 SOP「{title}」處置，排程維持原版"})],
+                                  "message": f"{lbl}：系統工具失敗，請依 SOP 人工處置，排程維持原版"})],
             alert_card=AlertCard(title=f"{lbl}：改走 SOP", summary=f"工具重試仍失敗，依 SOP「{title}」人工處置，排程不變。"),
             rationale="工具重試一次仍失敗（page 7）：改走 SOP。",
         )

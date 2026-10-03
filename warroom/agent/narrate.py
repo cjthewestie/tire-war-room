@@ -180,6 +180,28 @@ def solver_text(data: dict[str, Any]) -> str:
     return "、".join(bits) or "排程無需變動"
 
 
+def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
+    """Press moves grouped by order and target press, one phrase per order (page 11: '#A-311 改 9 號';
+    many molds of one order: '#M-201 ×2 → 8 號、×3 → 9 號'). Same-press time shifts are left out."""
+    per_order: dict[str, dict[str, int]] = {}
+    for mv in moves or []:
+        to = mv.get("to_press")
+        if not to or mv.get("from_press") == to:
+            continue
+        tgt = per_order.setdefault(str(mv.get("order_id")), {})
+        tgt[str(to)] = tgt.get(str(to), 0) + 1
+    out: list[str] = []
+    for oid, targets in per_order.items():
+        def where(p: str) -> str:
+            n = press_no(p)
+            return f"{n} 號" if n else machine_label(p)
+        if len(targets) == 1 and next(iter(targets.values())) == 1:
+            out.append(f"{oid} 改 {where(next(iter(targets)))}")
+        else:
+            out.append(f"{oid} " + "、".join(f"×{n} → {where(p)}" for p, n in targets.items()))
+    return out
+
+
 def staffing_label(c: dict[str, Any]) -> str:
     label = c.get("label") or ""
     name = c.get("shift_name") or ""

@@ -104,10 +104,10 @@ def step(tool, args, sid="S1"):
 
 
 @pytest.mark.parametrize("tool,args,risk,verdict", [
-    (ToolName.NOTIFY_TEAMS, {"teams": ["maintenance"], "kind": "maintenance", "message": "m"}, RiskLevel.R1_NOTIFY,
-     GateVerdict.ALLOW),
-    (ToolName.NOTIFY_TEAMS, {"teams": ["curing"], "kind": "info", "message": "m"}, RiskLevel.R1_NOTIFY,
-     GateVerdict.ALLOW),
+    (ToolName.NOTIFY_TEAMS, {"teams": ["maintenance"], "kind": "maintenance", "machine_id": "A-BIGOPEN",
+                             "message": "A 線大開煉機冷卻水流偏低，請檢修冷卻水路"}, RiskLevel.R1_NOTIFY, GateVerdict.ALLOW),
+    (ToolName.NOTIFY_TEAMS, {"teams": ["curing"], "kind": "info", "machine_id": "CURE-07",
+                             "message": "7 號機異常處置中，請留意後續通知"}, RiskLevel.R1_NOTIFY, GateVerdict.ALLOW),
     (ToolName.NOTIFY_TEAMS, {"teams": ["curing"], "kind": "overtime", "message": "m"}, RiskLevel.R2_CHANGE,
      GateVerdict.NEEDS_APPROVAL),
     (ToolName.SET_CURE_TIME, {"press_id": "CURE-07", "total_cure_h": 36.5, "reason": "r"}, RiskLevel.R2_CHANGE,
@@ -266,12 +266,20 @@ def mill_anomaly():
 
 
 async def test_mock_commander_page2():
-    plan, _ = await MockCommander().plan(_req_plan(mill_anomaly(), context={"machine": {
-        "compound_stage": "unvulcanized"}}))
+    low_flow = {"machine": {"compound_stage": "unvulcanized"},
+                "sensors": {"A-BIGOPEN": {"water_flow_lpm_now": 22.0}},
+                "sensor_baseline": {"A-BIGOPEN": {"water_flow_lpm": 40.0}}}
+    plan, _ = await MockCommander().plan(_req_plan(mill_anomaly(), context=low_flow))
     assert plan.hypothesis.cause_code == "cooling_insufficient"
     kinds = [s.args.get("kind") for s in plan.steps if s.tool is ToolName.NOTIFY_TEAMS]
     assert kinds == ["maintenance", "slow_feed"]
     assert "冷卻能力不足" in plan.alert_card.summary
+    # flow normal (review r2 #4): no 水流偏低 claim, a generic overheating hypothesis instead
+    normal = {**low_flow, "sensors": {"A-BIGOPEN": {"water_flow_lpm_now": 40.2}}}
+    plan2, _ = await MockCommander().plan(_req_plan(mill_anomaly(), context=normal))
+    assert plan2.hypothesis.cause_code == "overheat_unknown"
+    assert not any("水流偏低" in str(s.args) for s in plan2.steps)
+    assert "水流偏低" not in plan2.hypothesis.statement and "水流偏低" not in plan2.alert_card.summary
 
 
 def test_prompt_prefix_is_stable():

@@ -11,17 +11,19 @@ unresolved "$S.." references, and for writes the simulation was feasible. Then a
 Anything not on the allow-list or not open in that state is REJECT with risk None; the state
 machine writes it to the audit log as INTERCEPTED. There are no actuator / PLC tools to allow.
 
-R1 is earned by content, not by the label the commander picks: a maintenance/info notify whose
-free text gives an R3-type instruction (pause/slow feed, stop or take out a machine, move people,
-overtime) or runs long is R3 and waits for the supervisor.
+R1 is earned by content, not by the label the commander picks: a maintenance/info notify is R1
+only when its text is one of the fixed notice templates (R1_TEMPLATES) for the machine it names and
+it goes to maintenance/QC/supervisor or that machine's own team. Free text is R3 (supervisor).
 
-With ``evidence`` (the state machine passes what THIS event computed) two more checks apply:
-confirm_schedule only for a version a feasible solve_schedule produced in this event, and
-set_cure_time only with the cure_formula's own value (physics numbers never come from the LLM).
+With ``evidence`` (the state machine passes what THIS event computed) more checks apply:
+confirm_schedule only for a version a feasible solve_schedule produced in this event;
+set_cure_time and every solve_schedule.cure_overrides_h value only with the cure_formula's own
+value for that same press (physics numbers never come from the LLM).
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
@@ -46,9 +48,12 @@ from warroom.contracts import (
     SetCureTimeArgs,
     SolveScheduleArgs,
     SopSearchArgs,
+    TeamId,
     ToolName,
 )
-from warroom.factory import CURE_PRESS_IDS, MACHINE_IDS
+from warroom.contracts import Line
+from warroom.factory import CURE_PRESS_IDS, MACHINE_BY_ID, MACHINE_IDS
+from warroom.agent.narrate import machine_label
 
 ARGS_MODELS: dict[ToolName, type[BaseModel]] = {
     ToolName.READ_SENSORS: ReadSensorsArgs,
@@ -73,23 +78,78 @@ NOTIFY_RISK: dict[NotifyKind, RiskLevel] = {
 }
 
 
-# R1 notify text must be a notice, not an instruction that page 7 reserves for the supervisor.
-R1_MAX_CHARS = 120
-R1_DENY = re.compile(
-    r"暫停|停機|停用|停止|關機|關閉|投料|進料|放慢|減速|調\s*\d*\s*[個名位]?\s*人|調人|調派|支援|人力|加班|跨組|撤離|"
-    r"pause|stop|shut\s*down|halt|overtime|transfer|feed", re.IGNORECASE)
+# R1 (auto, 已自動) is earned by a FIXED notice, never by free text: an R1 notify must be one of the
+# code-owned templates below for the machine it names, sent only to maintenance / QC / supervisor or
+# that machine's own team. Anything else (an instruction in free text, a homoglyph or spaced-out
+# word, a notice to every team) is R3 and waits for the supervisor. Before matching, the text is
+# NFKC-normalised and stripped of whitespace and invisible format characters (zero-width etc.).
+R1_TEMPLATES: dict[NotifyKind, tuple[str, ...]] = {
+    NotifyKind.MAINTENANCE: (
+        "{m}冷卻水流偏低，請檢修冷卻水路",
+        "{m}膠溫偏高，請檢查冷卻系統",
+        "{m}膠溫未回落，冷卻水路列為最優先檢修",
+        "{m}溫度下降，請檢查蒸汽供應與溫度計",
+        "{m}疑持續洩壓或感測器漂移，請檢查蒸汽管路與溫度計",
+        "{m}異常，請現場確認",
+    ),
+    NotifyKind.INFO: (
+        "{m}延長硫化至 {n} h（+{n} h），已依新排程調整下一模",
+        "{m}：系統工具失敗，請依 SOP 人工處置，排程維持原版",
+        "{m}異常處置中，請留意後續通知",
+    ),
+}
+R1_ALWAYS_TEAMS = frozenset({TeamId.MAINTENANCE, TeamId.QC, TeamId.SUPERVISOR})
 CURE_H_TOLERANCE = 0.05            # h; the formula rounds to 0.1 h
 
 
+def _norm(text: str) -> str:
+    t = unicodedata.normalize("NFKC", text or "")
+    return "".join(ch for ch in t if not ch.isspace() and unicodedata.category(ch) not in ("Cf", "Cc", "Zs",
+                                                                                            "Zl", "Zp"))
+
+
+def _compile(tpl: str) -> re.Pattern[str]:
+    """Template -> full-match regex: {m} = the machine label (checked against machine_id), {n} = a number."""
+    parts = re.split(r"(\{m\}|\{n\})", _norm(tpl))
+    rx = "".join("(?P<m>.+?)" if p == "{m}" else r"\d+(?:\.\d+)?" if p == "{n}" else re.escape(p) for p in parts)
+    return re.compile(rf"^{rx}$")
+
+
+_R1_RX: dict[NotifyKind, tuple[re.Pattern[str], ...]] = {k: tuple(_compile(t) for t in v)
+                                                          for k, v in R1_TEMPLATES.items()}
+
+
+def own_teams(machine_id: str | None) -> frozenset[TeamId]:
+    """The team(s) that run a machine: R1 notices may go to them (plus maintenance/QC/supervisor)."""
+    m = MACHINE_BY_ID.get(machine_id or "")
+    if m is None:
+        return frozenset()
+    if m.line is Line.CURE:
+        return frozenset({TeamId.CURING, TeamId.BODY})      # night body team also de-molds (page 6)
+    if machine_id == "A-BIGOPEN":
+        return frozenset({TeamId.BIGOPEN, TeamId.BODY})
+    return frozenset({{Line.A: TeamId.BODY, Line.B: TeamId.SIDE, Line.C: TeamId.BEAD_NYLON,
+                       Line.D: TeamId.BEAD_NYLON, Line.BOND: TeamId.BOND}.get(m.line, TeamId.BODY)})
+
+
 def r1_violation(args: NotifyTeamsArgs) -> str | None:
-    """Why an R1 (auto) notify must go to the supervisor instead, or None when it is a plain notice."""
-    msg = args.message or ""
-    if len(msg) > R1_MAX_CHARS:
-        return f"R1 notice longer than {R1_MAX_CHARS} chars"
-    m = R1_DENY.search(msg)
-    if m:
-        return f"R1 notice contains an instruction ({m.group(0)!r}) that needs approval"
-    return None
+    """Why an R1 (auto) notify must go to the supervisor instead, or None when it is one of the
+    fixed R1 notices for its machine and goes only to teams allowed to get it."""
+    kind = NotifyKind(args.kind)
+    if kind not in _R1_RX:
+        return None
+    if not args.machine_id or args.machine_id not in MACHINE_BY_ID:
+        return "R1 notice must name the machine it is about"
+    allowed = R1_ALWAYS_TEAMS | own_teams(args.machine_id)
+    extra = [t.value for t in args.teams if TeamId(t) not in allowed]
+    if extra:
+        return f"R1 notice to team(s) outside maintenance/QC/supervisor and the machine's own team: {', '.join(extra)}"
+    msg, label = _norm(args.message), _norm(machine_label(args.machine_id))
+    for rx in _R1_RX[kind]:
+        m = rx.match(msg)
+        if m and m.groupdict().get("m", label) == label:
+            return None
+    return "R1 notice is not one of the fixed notice templates (free text needs approval)"
 
 
 def has_unresolved_ref(v: Any) -> bool:
@@ -156,8 +216,8 @@ class RuleGate:
     def check(self, step: PlanStep, state: EventState, simulation_feasible: bool,
               *, cross_team: bool | None = None, evidence: dict[str, Any] | None = None) -> GateDecision:
         """evidence (optional, from the state machine): {"feasible_versions": [int], "cure_formula_h":
-        [float]} = schedule versions a feasible solve produced and cure_formula totals, both from
-        this event's own tool results."""
+        [float], "cure_formula_by_press": {press: [float]}} = schedule versions a feasible solve
+        produced and cure_formula totals (per press when known), all from this event's own results."""
         checks = {"allow_list": False, "state_allowed": False, "format_ok": False, "simulation_feasible": False}
         reasons: list[str] = []
         try:
@@ -198,7 +258,8 @@ class RuleGate:
             if why:
                 checks["evidence_ok"] = False
                 reasons.append(why)
-            elif tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+            elif tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME) or \
+                    (isinstance(parsed, SolveScheduleArgs) and parsed.cure_overrides_h):
                 checks["evidence_ok"] = True
         if isinstance(parsed, NotifyTeamsArgs) and NOTIFY_RISK[parsed.kind] is RiskLevel.R1_NOTIFY:
             why = r1_violation(parsed)
@@ -218,17 +279,42 @@ class RuleGate:
                             reasons=reasons)
 
     @staticmethod
-    def _evidence_problem(a: BaseModel, evidence: dict[str, Any]) -> str | None:
+    def _formula_for(evidence: dict[str, Any], press: str) -> list[float] | None:
+        """Cure-formula totals this event computed for that press. None = the evidence does not say
+        which press a formula result belongs to (old callers): any formula total of the event."""
+        by_press = evidence.get("cure_formula_by_press")
+        if isinstance(by_press, dict):
+            v = by_press.get(press)
+            return [float(x) for x in (v if isinstance(v, list) else [v]) if x is not None] if v is not None else []
+        return None
+
+    @classmethod
+    def _cure_problem(cls, press: str, hours: float, evidence: dict[str, Any], what: str) -> str | None:
+        anywhere = [float(x) for x in evidence.get("cure_formula_h") or [] if x is not None]
+        formula = cls._formula_for(evidence, press)
+        if formula is None:
+            formula = anywhere
+        if not formula:
+            if anywhere:
+                return (f"{what} for {press} has no cure_formula result for that press in this event "
+                        "(the formula was run for another press)")
+            return f"{what} needs a cure_formula result in this event (never an AI guess)"
+        if not any(abs(hours - f) <= CURE_H_TOLERANCE for f in formula):
+            return f"{what} {hours:g} h for {press} differs from the cure formula ({' / '.join(f'{f:g}' for f in formula)} h)"
+        return None
+
+    @classmethod
+    def _evidence_problem(cls, a: BaseModel, evidence: dict[str, Any]) -> str | None:
         if isinstance(a, ConfirmScheduleArgs):
             ok = {int(v) for v in evidence.get("feasible_versions") or [] if v is not None}
             if a.schedule_version not in ok:
                 return (f"schedule v{a.schedule_version} was not produced by a feasible solve_schedule in this "
                         "event (no simulation for it)")
         elif isinstance(a, SetCureTimeArgs):
-            formula = [float(x) for x in evidence.get("cure_formula_h") or [] if x is not None]
-            if not formula:
-                return "set_cure_time needs a cure_formula result in this event (never an AI guess)"
-            if not any(abs(a.total_cure_h - f) <= CURE_H_TOLERANCE for f in formula):
-                return (f"total_cure_h {a.total_cure_h:g} differs from the cure formula "
-                        f"({' / '.join(f'{f:g}' for f in formula)} h)")
+            return cls._cure_problem(a.press_id, a.total_cure_h, evidence, "total_cure_h")
+        elif isinstance(a, SolveScheduleArgs):
+            for press, hours in a.cure_overrides_h.items():
+                why = cls._cure_problem(press, hours, evidence, "cure_overrides_h")
+                if why:
+                    return why
         return None

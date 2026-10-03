@@ -193,7 +193,8 @@ async def test_info_notice_with_r3_instruction_needs_approval(tmp_path):
 def test_gate_r1_notice_rules():
     g = RuleGate()
     ok = PlanStep(id="S1", tool=ToolName.NOTIFY_TEAMS, purpose="p",
-                  args={"teams": ["maintenance"], "kind": "maintenance", "message": "A 線大開煉機冷卻水流偏低，請檢修冷卻水路"})
+                  args={"teams": ["maintenance"], "kind": "maintenance", "machine_id": "A-BIGOPEN",
+                        "message": "A 線大開煉機冷卻水流偏低，請檢修冷卻水路"})
     assert g.check(ok, EventState.EXECUTE, True).verdict is GateVerdict.ALLOW
     for msg in ("請立即停機", "從 2 線調 1 人到硫化組", "今晚加班", "x" * 200):
         bad = ok.model_copy(update={"args": {**ok.args, "kind": "info", "message": msg}})
