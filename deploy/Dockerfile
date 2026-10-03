@@ -18,7 +18,7 @@ COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /usr/local/bin/uv
 ENV UV_LINK_MODE=copy UV_COMPILE_BYTECODE=1 UV_PYTHON_DOWNLOADS=never UV_PROJECT_ENVIRONMENT=/opt/venv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-# .python-version pins the macOS arm64 interpreter for dev; in Linux we use the image's 3.12.
+# .python-version is a bare "3.12" (no platform) so uv works on the Mac and the Spark; here we pin the image's 3.12.
 RUN uv sync --frozen --no-dev --no-install-project --python /usr/local/bin/python3.12
 COPY warroom/ warroom/
 RUN uv sync --frozen --no-dev --python /usr/local/bin/python3.12

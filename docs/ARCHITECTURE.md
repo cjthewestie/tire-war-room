@@ -83,7 +83,7 @@ One commander, OpenAI-compatible: `LLM_MODE=mock|llm`, `BASE_URL`, `MODEL`, `NVI
 ## Run
 
 ```
-uv sync                         # Python 3.12 arm64 venv (.python-version pins it)
+uv sync                         # Python 3.12 venv (.python-version = 3.12, no platform: arm64 on the Mac, linux on the Spark)
 uv run pytest -q
 cd web && npm install && npm run build   # dist/ served by FastAPI
 uv run python -m warroom.api    # api builder

@@ -9,8 +9,15 @@
 #   mtp         nvfp4 mtp    1 fp8    -> built-in MTP instead of the DSpark draft
 #   control     fp8   off    0 auto   -> page-10 control group
 # Then the accuracy gap: full (NVFP4) vs control (FP8) on the factory quiz.
+# Python: bench/py.sh -- on the Spark that is /opt/warroom/venv (built by install_spark.sh while still online;
+# the host has no uv and the boot firewall blocks PyPI), on a Mac the uv-managed .venv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+PY="${PY:-bench/py.sh}"
+# Fail before touching vLLM if the bench interpreter cannot import every bench this run needs.
+"$PY" -c "import bench.ttft, bench.concurrent, bench.full_event, bench.memory_check, bench.accuracy, ortools, openai" \
+  || { echo "bench interpreter not usable ($PY); on the Spark re-run deploy/bin/install_spark.sh while online" >&2; exit 1; }
+[[ "${PREFLIGHT_ONLY:-0}" == 1 ]] && { echo "preflight ok: $("$PY" -c 'import sys; print(sys.executable)')"; exit 0; }
 COMPOSE="docker compose --project-directory deploy/spark"
 URL="${URL:-http://127.0.0.1:8001}"
 CONFIGS="${CONFIGS:-full no_spec no_cache mtp control}"
@@ -30,11 +37,11 @@ for c in $CONFIGS; do
     $COMPOSE up -d --force-recreate vllm
   wait_up || { echo "vllm did not come up for $c" >&2; continue; }
   export BASE_URL="$URL/v1" MODEL=nemotron
-  uv run python -m bench.ttft --runs 10 --out-dir "$OUT/$c"
-  uv run python -m bench.concurrent --runs 5 --out-dir "$OUT/$c"
-  uv run python -m bench.full_event --runs 3 --out-dir "$OUT/$c"
-  uv run python -m bench.memory_check --out-dir "$OUT/$c"
-  uv run python -m bench.accuracy --quant "$q" --out-dir "$OUT/$c"   # open book (headline), kb + generated quiz
+  "$PY" -m bench.ttft --runs 10 --out-dir "$OUT/$c"
+  "$PY" -m bench.concurrent --runs 5 --out-dir "$OUT/$c"
+  "$PY" -m bench.full_event --runs 3 --out-dir "$OUT/$c"
+  "$PY" -m bench.memory_check --out-dir "$OUT/$c"
+  "$PY" -m bench.accuracy --quant "$q" --out-dir "$OUT/$c"   # open book (headline), kb + generated quiz
 done
 # restore production
 $COMPOSE up -d --force-recreate vllm
@@ -42,7 +49,7 @@ $COMPOSE up -d --force-recreate vllm
 fa=$(ls "$OUT"/full/accuracy-*.json 2>/dev/null | head -1 || true)
 fc=$(ls "$OUT"/control/accuracy-*.json 2>/dev/null | head -1 || true)
 if [[ -n "$fa" && -n "$fc" ]]; then
-  uv run python -m bench.accuracy --pair "$fa" "$fc" --out-dir "$OUT"
+  "$PY" -m bench.accuracy --pair "$fa" "$fc" --out-dir "$OUT"
 else
   echo "accuracy gap not paired: need both full and control runs" >&2
 fi

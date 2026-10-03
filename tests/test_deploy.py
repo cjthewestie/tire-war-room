@@ -50,6 +50,7 @@ def healthy_url():
 
 def sh(cmd: list[str], env: dict[str, str] | None = None, check: bool = True, timeout: float = 60):
     e = os.environ.copy()
+    e["NO_BENCH_VENV"] = "1"          # install_spark.sh's bench venv step syncs from PyPI; tests/test_bench_runner.py covers it
     e["WARROOM_SUPERVISOR_PIN"] = TEST_PIN   # install_spark.sh refuses to finish without one
     e.update(env or {})
     r = subprocess.run(cmd, capture_output=True, text=True, env=e, timeout=timeout)
