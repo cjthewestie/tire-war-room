@@ -9,3 +9,6 @@ data/runtime/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
+
+# review-run screenshot byproducts (keep curated shots under other names)
+docs/screenshots/review-*
