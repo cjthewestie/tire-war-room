@@ -1,30 +1,48 @@
 """Full-event latency (page 9: ≈22 s = 4 tool rounds + solve + diagnosis) for the page-11 press-7 event.
 
-Rounds, each one real LLM call against the endpoint:
-  R1 classify  -> first alert card (≤100 tokens)
-  R2 plan      -> CommanderPlan JSON (H1 steam pressure low, S1..S5)
-  R3 replan    -> CommanderPlan JSON after verify read 119.5°C (H1 rejected -> H2)
-  R4 diagnosis -> supervisor phone card text
-plus the deterministic compute the commander never guesses: Arrhenius cure formula and a CP-SAT solve.
+Headline (--mode state-machine, the default runs both): the real war-room stack end to end. The
+page-11 scenario through warroom.api.Runtime with every module real (sim, detector, safety core,
+tools, CP-SAT scheduler, schedule store, Qdrant SOP KB, gate, approvals, audit, state machine) and
+the LLM commander on the endpoint, no mock fallback. A scripted supervisor approves at 02:16:40 and
+picks night overtime at 02:31:30. full_event_p50 = commander LLM wall + every tool's wall for the
+event (sim-time waits for VERIFY and the supervisor are not wall time).
 
-  uv run python -m bench.full_event --runs 3
-  uv run python -m bench.full_event --via-state-machine     # once warroom.agent/tools are implemented
+Breakdown (--mode pipeline): four hand-built LLM calls (classify/alert card, plan, replan, diagnosis)
+with the verify reading fixed at 119.5 °C and a small synthetic CP-SAT model. It shows per-round
+LLM latency; it is not the state machine and is reported as pipeline_p50 when both run.
 
---via-state-machine drives the real warroom StateMachine (LLM_MODE=llm) instead of the bench pipeline.
+  uv run python -m bench.full_event --runs 3                       # both; headline = state machine
+  uv run python -m bench.full_event --mode state-machine --runs 3
+  uv run python -m bench.full_event --mode pipeline --think        # cost of reasoning (pipeline only)
 """
 from __future__ import annotations
 
 import argparse
-import asyncio
 import math
+import os
 import time
 from pathlib import Path
 from typing import Any
 
-from bench.llm import Endpoint, Verdict, endpoint_info, json_schema_format, parse_json, run, save_result, \
-    stream_chat, summarize
-from bench.prompts import ANOMALIES, alert_card_messages, card_schema, diagnosis_messages, plan_messages, \
-    plan_schema
+from bench.llm import (
+    Endpoint,
+    Verdict,
+    endpoint_info,
+    json_schema_format,
+    parse_json,
+    run,
+    save_result,
+    stream_chat,
+    summarize,
+)
+from bench.prompts import (
+    ANOMALIES,
+    alert_card_messages,
+    card_schema,
+    diagnosis_messages,
+    plan_messages,
+    plan_schema,
+)
 from warroom import factory as F
 from warroom.contracts import CommanderPlan
 from warroom.factory import ALERT_CARD_MAX_TOKENS, LATENCY_FULL_EVENT_S
@@ -124,93 +142,175 @@ def _valid_plan(text: str) -> bool:
         return False
 
 
-async def via_state_machine(ep: Endpoint) -> dict[str, Any]:
-    """Drive the real warroom StateMachine with the real commander over the endpoint. Returns
-    {"skipped": reason} while the agent/tools modules are still stubs."""
+SUPERVISOR_SCRIPT = (            # page 11: approve the solver's plan at 02:16:40, then at 02:31:30 reject the
+    ("02:16:40", "approve", None, "同意"),               # cross-team move and pick night overtime (option A)
+    ("02:31:30", "modify", "夜班加班", "不跨組調人，改夜班加班"),
+)
+
+
+async def via_state_machine(ep: Endpoint, max_wall_s: float = 900.0,
+                            workdir: Path | None = None) -> dict[str, Any]:
+    """The headline full event: the page-11 press-7 scenario through the real Runtime with every
+    module real (sim, detector, safety core, tools, CP-SAT scheduler, schedule store, Qdrant SOP KB,
+    gate, approvals, audit, state machine) and the LLM commander on the endpoint (no mock fallback).
+    The supervisor decides on the page-11 script in sim time.
+
+    The plant runs one sim second per tick and holds while the commander or solver works (the
+    Runtime's accelerated-demo rule), so sim-time waits (VERIFY's 15 min, the supervisor) cost no wall
+    time. compute_s = commander LLM wall + every tool's wall for this event: the page-9 ≈22 s
+    (tool rounds + solve + diagnosis), with no human or verify wait in it. Returns {"skipped": why}
+    when the stack cannot be built."""
+    import tempfile
     try:
+        from warroom.api import Runtime
         from warroom.config import Settings
-        from warroom.contracts import Anomaly, AnomalyKind, Channel, LLMMode, Severity
-        from warroom.agent import ApprovalBrokerImpl, JsonlAuditLog, RuleGate, StateMachine, make_commander
-        from warroom.tools import ToolContext, build_registry
-        from warroom.clock import SimClock
-        from datetime import datetime
-        import tempfile
-        clock = SimClock(start=datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ), manual=True)
+        from warroom.contracts import (
+            TERMINAL_STATES,
+            ApprovalDecision,
+            AuditKind,
+            DecisionKind,
+            LLMMode,
+            ScenarioName,
+        )
+        tmp = workdir or Path(tempfile.mkdtemp(prefix="bench-full-event-"))
         settings = Settings(llm_mode=LLMMode.LLM, base_url=ep.base_url, model=ep.model,
-                            llm_fallback_to_mock=False)
-        tmp = Path(tempfile.mkdtemp())
-        audit = JsonlAuditLog(tmp / "audit.jsonl", clock=clock)
-        approvals = ApprovalBrokerImpl(audit=audit, clock=clock)
-        try:
-            from warroom.sim import Factory
-            from warroom.contracts import ScenarioName
-            sim = Factory(clock=clock, scenario=ScenarioName.PRESS7_TEMP_DROP)
-        except Exception:  # noqa: BLE001
-            sim = None
-        store = None
-        if sim is not None:
-            from warroom.schedule import FallbackScheduler, FileScheduleStore, seed_schedule
-            sched = FallbackScheduler()
-            store = FileScheduleStore(tmp / "schedules", initial=seed_schedule(
-                clock.now(), sim.orders(), sim.shifts(), sim.machines(), scheduler=sched,
-                next_on={"CURE-07": "#A-311"}))
-        else:
-            sched = None
-        tools = build_registry(ToolContext(sim=sim, audit=audit, clock=clock, scheduler=sched, store=store))
-
-        async def sim_sleep(seconds: float) -> None:
-            # VERIFY waits in sim time: step the plant instead of sleeping wall-clock minutes
-            for _ in range(max(1, int(seconds))):
-                if sim is not None:
-                    sim.step(1.0)
-                else:
-                    clock.advance(1.0)
-            await asyncio.sleep(0)
-
-        sm = StateMachine(make_commander(settings), tools, RuleGate(store=store), approvals, audit, sim=sim,
-                          clock=clock, store=store, sleep=sim_sleep)
-        an = Anomaly(id="AN-bench", ts=clock.now(), machine_id=F.press_id(7), kind=AnomalyKind.TEMP_DROP,
-                     channel=Channel.TEMP, value=122.0, baseline=128.0, severity=Severity.CRITICAL,
-                     message=ANOMALIES[0]["message"])
-
-        async def auto_approve():
-            from warroom.contracts import ApprovalDecision, DecisionKind
-            while True:
-                for req in approvals.pending():
-                    approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE,
-                                                      option_id=req.options[0].id if req.options else None,
-                                                      via="auto", reason="bench auto-approve"))
-                await asyncio.sleep(0.05)
-
-        approver = asyncio.create_task(auto_approve())
-        t0 = time.perf_counter()
-        try:
-            ev = await asyncio.wait_for(sm.handle(an), timeout=300)
-        finally:
-            approver.cancel()
-        return {"total_s": round(time.perf_counter() - t0, 3), "final_state": ev.state.value,
-                "replans": ev.replans, "steps": len(ev.steps)}
+                            api_key=ep.api_key, llm_fallback_to_mock=False,
+                            audit_path=tmp / "audit.jsonl", schedule_dir=tmp / "sched",
+                            qdrant_path=tmp / "qdrant", scenario=ScenarioName.PRESS7_TEMP_DROP.value)
+        rt = Runtime(settings, allow_fallback=False, run_loop=False)
     except NotImplementedError as e:
         return {"skipped": f"warroom module still a stub: {e!r}"}
     except Exception as e:  # noqa: BLE001
-        return {"skipped": f"{type(e).__name__}: {e}"}
+        return {"skipped": f"{type(e).__name__}: {e}"[:500]}
+
+    def at(hms: str):
+        h, m, s = map(int, hms.split(":"))
+        return rt.now().replace(hour=h, minute=m, second=s, microsecond=0)
+
+    script = [(at(t), kind, label, reason) for t, kind, label, reason in SUPERVISOR_SCRIPT]
+    decisions: list[dict[str, Any]] = []
+    held_wall = 0.0
+    try:
+        await rt.start()
+        rt._ingest_kb()                                     # index the SOPs before the event, outside the clock
+        t_wall0 = time.perf_counter()
+        t_event0: float | None = None
+        ev = None
+        deadline = at("03:30:00")
+        while rt.now() < deadline and time.perf_counter() - t_wall0 < max_wall_s:
+            await rt.tick(1.0, publish=False, hold_compute=False)
+            th = time.perf_counter()
+            await rt._hold_for_compute()
+            held_wall += time.perf_counter() - th
+            evs = [e for e in rt.events() if e.machine_id == F.press_id(7)]
+            if evs and t_event0 is None:
+                t_event0 = time.perf_counter()
+            ev = evs[0] if evs else None
+            for req in rt.approvals.pending():
+                if not script or rt.now() < script[0][0]:
+                    continue
+                _, kind, label, reason = script.pop(0)
+                opt = next((o for o in req.options if o.label == label), None) if label else \
+                    next((o for o in req.options if o.recommended), req.options[-1] if req.options else None)
+                rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind(kind),
+                                                     option_id=opt.id if opt else None, reason=reason, via="phone"))
+                decisions.append({"at": rt.now().strftime("%H:%M:%S"), "title": req.title, "decision": kind,
+                                  "option": opt.label if opt else None,
+                                  "offered": [o.label for o in req.options]})
+            if ev is not None and ev.state in TERMINAL_STATES:
+                break
+        wall = time.perf_counter() - (t_event0 or t_wall0)
+        if ev is None:
+            return {"skipped": "no press-7 event was raised", "sim_end": rt.now().isoformat()}
+
+        entries = [e for e in rt.audit.tail(0, limit=0) if e.event_id == ev.id]
+        llm = [e.payload for e in entries if e.kind is AuditKind.LLM_CALL]
+        tool_entries = [e for e in entries if e.kind is AuditKind.TOOL_RESULT]
+        tools = [e.payload for e in tool_entries]
+        llm_s = sum((p.get("total_ms") or 0) for p in llm) / 1000
+        tool_s = sum((p.get("duration_ms") or 0) for p in tools) / 1000
+        solve_s = sum((e.payload.get("duration_ms") or 0) for e in tool_entries
+                      if e.actor == "tool:solve_schedule") / 1000
+        timeline = " | ".join(t.text for t in ev.timeline)
+        return {
+            "final_state": ev.state.value,
+            "closed": ev.state.value == "closed",
+            "compute_s": round(llm_s + tool_s, 3),
+            "llm_s": round(llm_s, 3),
+            "tools_s": round(tool_s, 3),
+            "solve_s": round(solve_s, 3),
+            "held_wall_s": round(held_wall, 3),
+            "wall_s_incl_sim_ticks": round(wall, 3),
+            "sim_span": f"{ev.anomaly.ts:%H:%M:%S}->{rt.now():%H:%M:%S}",
+            "replans": ev.replans,
+            "hypotheses": [{"id": h.id, "cause": h.cause_code, "status": h.status.value} for h in ev.hypotheses],
+            "llm_calls": [{k: p.get(k) for k in ("phase", "ttft_ms", "total_ms", "prompt_tokens",
+                                                  "completion_tokens", "valid_json", "fell_back_to_mock", "error",
+                                                  "hypothesis", "steps", "safe_stop")} for p in llm],
+            "llm_fell_back": any(p.get("fell_back_to_mock") for p in llm),
+            "tool_calls": len(tools),
+            "tools_failed": sum(1 for p in tools if not p.get("ok")),
+            "decisions": decisions,
+            "page11_checks": {
+                "h1_rejected": "H1 不成立" in timeline,
+                "cure_36_5h": "36.5" in timeline,
+                "a311_to_press9": "#A-311" in timeline and "9 號機" in timeline,
+                "press7_out_of_service": rt.sim.machine(F.press_id(7)).status.value == "out_of_service",
+                "audit_chain_ok": rt.audit.verify_chain(),
+            },
+            "workdir": str(tmp),
+        }
+    except Exception as e:  # noqa: BLE001
+        return {"skipped": f"{type(e).__name__}: {e}"[:500]}
+    finally:
+        await rt.stop()
 
 
 async def main_async(args) -> dict[str, Any]:
     ep = Endpoint.from_env(args.base_url, args.model)
+    mode = "both" if args.via_state_machine and args.mode == "pipeline" else args.mode
     out: dict[str, Any] = {"endpoint": await endpoint_info(ep), "target_s": LATENCY_FULL_EVENT_S,
-                           "think": args.think}
+                           "think": args.think, "mode": mode, "loadavg_at_start": list(os.getloadavg())}
     await stream_chat(ep, [{"role": "user", "content": "hi"}], max_tokens=1)
-    runs = [await bench_pipeline(ep, args.think) for _ in range(args.runs)]
-    out["runs"] = runs
-    out["total_s"] = summarize([r["total_s"] for r in runs if r["llm_ok"]])
-    out["plan_valid_rate"] = round(sum(r["rounds"]["R2_plan"]["plan_valid"] + r["rounds"]["R3_replan"]["plan_valid"]
-                                       for r in runs) / (2 * len(runs)), 3)
-    p50 = out["total_s"].get("p50")
-    verdicts = [Verdict("full_event_p50", f"≈ {LATENCY_FULL_EVENT_S} s (≤ target)", p50,
-                        None if p50 is None else p50 <= LATENCY_FULL_EVENT_S)]
-    if args.via_state_machine:
-        out["state_machine"] = await via_state_machine(ep)
+    verdicts: list[Verdict] = []
+
+    if mode in ("state-machine", "both"):
+        if args.think:
+            sm_runs = [{"skipped": "--think applies to the scripted pipeline only; the commander forces "
+                                   "reasoning off"}]
+        else:
+            sm_runs = [await via_state_machine(ep) for _ in range(args.runs)]
+        done = [r for r in sm_runs if "compute_s" in r and not r.get("llm_fell_back")]
+        ok = [r for r in done if r.get("closed")]
+        out["state_machine"] = {"runs": sm_runs, "compute_s": summarize([r["compute_s"] for r in ok]),
+                                "compute_s_all_runs": summarize([r["compute_s"] for r in done]),
+                                "llm_s": summarize([r["llm_s"] for r in ok]),
+                                "closed_rate": round(len(ok) / len(sm_runs), 3) if sm_runs else None}
+        target = f"≈ {LATENCY_FULL_EVENT_S} s (≤ target), event CLOSED"
+        if ok:
+            p50 = out["state_machine"]["compute_s"]["p50"]
+            verdicts.append(Verdict("full_event_p50", target, p50, p50 <= LATENCY_FULL_EVENT_S,
+                                    note=f"real state machine, {len(ok)}/{len(sm_runs)} closed"))
+        elif done:                 # it ran end to end but never closed: that is a FAIL, not "not measured"
+            ends = ", ".join(sorted({str(r.get("final_state")) for r in done}))
+            verdicts.append(Verdict("full_event_p50", target, out["state_machine"]["compute_s_all_runs"]["p50"],
+                                    False, note=f"real state machine, 0/{len(sm_runs)} closed (ended {ends}); "
+                                                "measured = compute of the runs that did not close"))
+        else:
+            why = "; ".join(str(r.get("skipped")) for r in sm_runs)[:200]
+            verdicts.append(Verdict("full_event_p50", target, None, None, note=f"state machine not run: {why}"))
+
+    if mode in ("pipeline", "both"):
+        runs = [await bench_pipeline(ep, args.think) for _ in range(args.runs)]
+        out["runs"] = runs                                       # breakdown: per-round LLM latency
+        out["total_s"] = summarize([r["total_s"] for r in runs if r["llm_ok"]])
+        out["plan_valid_rate"] = round(sum(r["rounds"]["R2_plan"]["plan_valid"] + r["rounds"]["R3_replan"]["plan_valid"]
+                                           for r in runs) / (2 * len(runs)), 3)
+        p50 = out["total_s"].get("p50")
+        name = "full_event_p50" if mode == "pipeline" else "pipeline_p50"
+        verdicts.append(Verdict(name, f"≈ {LATENCY_FULL_EVENT_S} s (≤ target)", p50,
+                                None if p50 is None else p50 <= LATENCY_FULL_EVENT_S,
+                                note="scripted 4-call breakdown, synthetic solve; not the state machine"))
     out["verdicts"] = [v.__dict__ for v in verdicts]
     out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
     return out
@@ -222,12 +322,19 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
     p.add_argument("--model")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--think", action="store_true", help="let the model reason on plan/replan rounds")
-    p.add_argument("--via-state-machine", action="store_true")
+    p.add_argument("--mode", choices=("both", "state-machine", "pipeline"), default="both",
+                   help="state-machine = the headline (real Runtime); pipeline = scripted 4-call breakdown")
+    p.add_argument("--via-state-machine", action="store_true", help="kept for old scripts; same as --mode both")
     p.add_argument("--out-dir", type=Path)
     out = run(main_async(p.parse_args(argv)))
-    print(f"full event total: {out['total_s']}  plan_valid_rate={out['plan_valid_rate']}")
     if "state_machine" in out:
-        print("state machine:", out["state_machine"])
+        sm = out["state_machine"]
+        print(f"full event (state machine) compute_s: {sm['compute_s']}  closed_rate={sm['closed_rate']}")
+        for r in sm["runs"]:
+            print("  run:", {k: r.get(k) for k in ("final_state", "compute_s", "llm_s", "tools_s", "solve_s",
+                                                   "replans", "skipped")})
+    if "total_s" in out:
+        print(f"pipeline breakdown total: {out['total_s']}  plan_valid_rate={out['plan_valid_rate']}")
     print("saved", out["saved_to"])
     return out
 

@@ -253,12 +253,33 @@ def test_concurrent_runner(env_fake, tmp_path):
     assert out["verdicts"][0]["passed"] is True
 
 
-def test_full_event_runner(env_fake, tmp_path):
-    out = full_event.main(["--runs", "1", "--via-state-machine", "--out-dir", str(tmp_path)])
+def test_full_event_pipeline_breakdown(env_fake, tmp_path):
+    out = full_event.main(["--runs", "1", "--mode", "pipeline", "--out-dir", str(tmp_path)])
     run = out["runs"][0]
     assert run["llm_ok"] and out["plan_valid_rate"] == 1.0
     assert run["rounds"]["compute"]["cure_formula"] == {"total_cure_h": 36.5, "extra_h": 8.5}
-    assert "state_machine" in out                         # skipped while agent is a stub, or a real run
+    assert "state_machine" not in out
+    assert [v["name"] for v in out["verdicts"]] == ["full_event_p50"]
+
+
+@pytest.mark.timeout(600)
+def test_full_event_headline_is_the_state_machine(env_fake, tmp_path):
+    """Default mode runs the real Runtime (every module real) against the endpoint; the headline
+    full_event_p50 verdict comes from it, the scripted pipeline is only pipeline_p50."""
+    out = full_event.main(["--runs", "1", "--out-dir", str(tmp_path)])
+    sm = out["state_machine"]["runs"][0]
+    assert "skipped" not in sm, sm
+    assert sm["llm_calls"] and all(c["phase"] for c in sm["llm_calls"])     # the commander really went over HTTP
+    assert sm["tool_calls"] > 0 and sm["compute_s"] >= sm["llm_s"] > 0
+    assert sm["page11_checks"]["audit_chain_ok"] is True
+    names = [v["name"] for v in out["verdicts"]]
+    assert names == ["full_event_p50", "pipeline_p50"]
+    head = out["verdicts"][0]
+    if out["state_machine"]["closed_rate"]:
+        assert head["measured"] == out["state_machine"]["compute_s"]["p50"]
+    else:                                   # the fake model's toy plan need not close the event: a FAIL
+        assert head["passed"] is False and "0/1 closed" in head["note"]
+        assert head["measured"] == out["state_machine"]["compute_s_all_runs"]["p50"]
 
 
 def test_accuracy_compare_runner(env_fake, tmp_path):

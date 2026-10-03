@@ -22,8 +22,10 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 | ttft | first_alert_card_p90 | ≤ 2.0 s | 1.190 | PASS | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-155838.json |
 | ttft | ttft_warm_32k_p50 | ≤ 0.5 s | 0.067 | PASS (prompt_tokens=32621) | ttft-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-155838.json |
 | concurrent | concurrent_3_worst_alert | each ≤ 4.0 s | 1.902 | PASS | concurrent-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162624.json |
-| full_event | full_event_p50 | ≈ 22.0 s (≤ target) | 14.382 | PASS | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162709.json |
-| full_event | plan_valid_rate | 1.0 | 1.000 | reasoning OFF | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-162709.json |
+| full_event | full_event_p50 | ≈ 22.0 s (≤ target), event CLOSED | 22.580 | FAIL (real state machine, 0/3 closed (ended safe_stop); measured = compute of the runs that did not close) | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-184402.json |
+| full_event | pipeline_p50 | ≈ 22.0 s (≤ target) | 63.944 | FAIL (scripted 4-call breakdown, synthetic solve; not the state machine) | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-184402.json |
+| full_event | state_machine_closed_rate | 1.0 | 0.000 | real Runtime, LLM commander, page-11 script | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-184402.json |
+| full_event | plan_valid_rate | 1.0 | 1.000 | reasoning OFF | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-184402.json |
 | full_event-think | full_event_p50 | ≈ 22.0 s (≤ target) | 38.727 | FAIL | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
 | full_event-think | plan_valid_rate | 1.0 | 0.000 | reasoning ON | full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json |
 | unplug | alert_offline | ≤ 2.0 s | 0.635 | PASS | unplug-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-163238.json |
@@ -40,6 +42,18 @@ macOS-26.4-arm64-arm-64bit · 64.0 GB RAM
 | accuracy | nvfp4_vs_fp8_gap | ≤ 3.0 points | 0.000 | PASS (nemotron-3.5-lightning:30b-a3b-nvfp4=63.64 vs nemotron-3.5-lightning:30b-a3b-mxfp8=63.64 on n=44) | accuracy-compare-20261003-162021.json |
 | accuracy | quiz_nemotron-3.5-lightning:30b-a3b-nvfp4 | - | 63.64 pts | n=44 | accuracy-compare-20261003-162021.json |
 | accuracy | quiz_nemotron-3.5-lightning:30b-a3b-mxfp8 | - | 63.64 pts | n=44 | accuracy-compare-20261003-162021.json |
-| accuracy-open-book | nvfp4_vs_fp8_gap | ≤ 3.0 points | 9.090 | FAIL (nemotron-3.5-lightning:30b-a3b-nvfp4=81.82 vs nemotron-3.5-lightning:30b-a3b-mxfp8=90.91 on n=44) | accuracy-compare-open-book-20261003-162451.json |
-| accuracy-open-book | quiz_nemotron-3.5-lightning:30b-a3b-nvfp4 | - | 81.82 pts | n=44 | accuracy-compare-open-book-20261003-162451.json |
-| accuracy-open-book | quiz_nemotron-3.5-lightning:30b-a3b-mxfp8 | - | 90.91 pts | n=44 | accuracy-compare-open-book-20261003-162451.json |
+| accuracy-open-book | nvfp4_vs_fp8_gap | ≤ 3.0 points | 4.550 | FAIL (nemotron-3.5-lightning:30b-a3b-nvfp4=86.36 vs nemotron-3.5-lightning:30b-a3b-mxfp8=90.91 on n=44) | accuracy-compare-open-book-20261003-181444.json |
+| accuracy-open-book | quiz_nemotron-3.5-lightning:30b-a3b-nvfp4 | - | 86.36 pts | n=44 | accuracy-compare-open-book-20261003-181444.json |
+| accuracy-open-book | quiz_nemotron-3.5-lightning:30b-a3b-mxfp8 | - | 90.91 pts | n=44 | accuracy-compare-open-book-20261003-181444.json |
+| accuracy-open-book-cite | nvfp4_vs_mxfp8_gap | ≤ 3.0 points | 0.390 | PASS (open-book (headline); nemotron-3.5-lightning:30b-a3b-nvfp4 [NVFP4]=90.16 vs nemotron-3.5-lightning:30b-a3b-mxfp8 [MXFP8]=90.55 on n=254 (1 item = 0.39 pts); MXFP8 (Ollama/MLX 8-bit microscaling) is a Mac stand-in, not the page-10 FP8 control; run vLLM QUANT=fp8 on the Spark (bench/spark_ablation.sh) for the real control) | accuracy-compare-open-book-cite-20261003-184311.json |
+| accuracy-open-book-cite | nvfp4_vs_mxfp8_noninferiority_ci95 | 95% CI of nvfp4−mxfp8 > −3.0 points | [-3.45, 2.67] | n/a (diff -0.39 pts, discordant 7/8, McNemar p=1.0; inconclusive: CI straddles −3, needs more items) | accuracy-compare-open-book-cite-20261003-184311.json |
+| accuracy-open-book-cite | quiz_nemotron-3.5-lightning:30b-a3b-nvfp4 | - | 90.16 pts | n=254 | accuracy-compare-open-book-cite-20261003-184311.json |
+| accuracy-open-book-cite | quiz_nemotron-3.5-lightning:30b-a3b-mxfp8 | - | 90.55 pts | n=254 | accuracy-compare-open-book-cite-20261003-184311.json |
+
+## Open against page 10
+
+- **No DGX Spark numbers yet.** Every row above is a Mac/Ollama stand-in. The page-10 control group (FP8, no prefix cache, no speculative decoding) and the per-optimisation contributions come from `bench/spark_ablation.sh`, which only runs on the Spark (vLLM) and has not been run.
+- **Reasoning must stay OFF.** With Nemotron reasoning ON the full event takes 38.727 s p50 and plan_valid_rate is 0.000 (full_event-nemotron-3.5-lightning-30b-a3b-nvfp4-20261003-164430.json), so it fails both the ≈22 s and the valid-plan targets. The commander forces it off on every call (`warroom/agent/commander.py` `thinking_off`: vLLM `enable_thinking=false`, Ollama `reasoning_effort=none`); the demo must not turn it on.
+- **Accuracy gap accuracy-open-book: 4.55 points > 3** (accuracy-compare-open-book-20261003-181444.json, n=44; one item = 2.27 points).
+- **tokens/W not published.** No wall-plug reading has been recorded (tokens/s only). Needs a plug meter on the Spark: `uv run python -m bench.tokens_per_watt --duration 60 --watts <avg> --idle-watts <idle>` (or `--meter-csv`).
+- **Unplug test without a real block.** No unplug result has the network actually blocked. On a Mac without root: `uv run python -m bench.unplug_test --sandbox --spawn-app`; on the Spark: `sudo -E uv run python -m bench.unplug_test --block --app-url http://127.0.0.1:8000`.
