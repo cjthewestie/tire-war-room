@@ -148,7 +148,9 @@ ALLOWED_TRANSITIONS: dict[EventState, frozenset[EventState]] = {
     EventState.GATE: frozenset({EventState.AWAIT_APPROVAL, EventState.EXECUTE, EventState.REPLAN,
                                 EventState.SAFE_STOP}),
     EventState.AWAIT_APPROVAL: frozenset({EventState.EXECUTE, EventState.REPLAN, EventState.SAFE_STOP}),
-    EventState.EXECUTE: frozenset({EventState.VERIFY, EventState.SAFE_STOP}),
+    # EXECUTE -> AWAIT_APPROVAL: auto (R1) writes run first, then the event waits for the R2/R3
+    # ones (page 2: "✓ 已自動 通知維修" while "☐ 待核准 放慢生料投入").
+    EventState.EXECUTE: frozenset({EventState.VERIFY, EventState.AWAIT_APPROVAL, EventState.SAFE_STOP}),
     EventState.VERIFY: frozenset({EventState.CLOSED, EventState.REPLAN, EventState.SAFE_STOP}),
     EventState.REPLAN: frozenset({EventState.SIMULATE, EventState.SAFE_STOP}),
     EventState.CLOSED: frozenset(),

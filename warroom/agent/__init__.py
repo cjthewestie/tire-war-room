@@ -8,5 +8,12 @@ from warroom.agent.commander import MockCommander, OpenAICommander, make_command
 from warroom.agent.gate import RuleGate
 from warroom.agent.state_machine import StateMachine
 
-__all__ = ["StateMachine", "make_commander", "OpenAICommander", "MockCommander", "RuleGate",
-           "JsonlAuditLog", "ApprovalBrokerImpl"]
+__all__ = [
+           "ApprovalBrokerImpl",
+           "JsonlAuditLog",
+           "MockCommander",
+           "OpenAICommander",
+           "RuleGate",
+           "StateMachine",
+           "make_commander",
+]
