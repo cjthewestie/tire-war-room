@@ -114,11 +114,20 @@ async def test_page11_timeline(tmp_path):
     i = _find(tl, "事件偵測", "128 → 122°C", "預測穩定在 122±1°C", "喚醒指揮官")
     assert tl[i].ts == at("02:14:00")
     i = _find(tl, "安全核心", "仍在 120–130°C", "不停機", start=i)
+    assert tl[i].ts == at("02:14:01")
     i = _find(tl, "指揮官", "讀 30 分鐘溫度", "查 SOP", "假設 H1：蒸汽壓不足，溫度會穩定", start=i)
+    assert tl[i].ts == at("02:14:03")
     i = _find(tl, "指揮官", "拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知",
               "預期：30 分內 ≥121°C", start=i)
+    assert tl[i].ts == at("02:14:09")
     i = _find(tl, "工具", "S1：122°C 總需 36.5 h（+8.5 h）", "S2：下一模 #A-311 交期 3 天後", "夜班缺 1 人", start=i)
+    assert tl[i].ts == at("02:14:11")
     i = _find(tl, "求解器", "S3：#A-311 移到 9 號機", "夜班從 2 線調 1 人", "交期全部滿足", start=i)
+    assert tl[i].ts == at("02:14:25")
+    g = _find(tl, "系統", "動作把關", start=i)
+    assert tl[g].tag == "human"            # gate row is 權限＋人工, not 任務分解
+    # timestamps never run backwards between the commander's beats
+    assert all(a.ts <= b.ts for a, b in zip(tl[:g], tl[1:g + 1]))
     i = _find(tl, "主管", "動作把關確認可行", "主管核准", "寫入稽核日誌", start=i)
     assert tl[i].ts == at("02:16:40")
     i = _find(tl, "驗證（程式）", "119.5°C", "H1 不成立", "安全核心已依規則處置", start=i)

@@ -96,6 +96,17 @@ _REF = re.compile(r"^\$(S\d+)\.([\w.\[\]-]+)$")
 _INLINE_REF = re.compile(r"\$\{(S\d+)\.([\w.\[\]-]+)\}")
 _MISSING = object()
 
+# Edge latency model (pages 10-11). Sim time does not move while the commander or solver runs in an
+# accelerated demo (Runtime holds it), and the mock commander answers in microseconds, so without a
+# model every row of the event would carry the detection second. The state machine paces itself in
+# SIM time: each beat lasts max(measured, modelled) seconds, so the timeline reads like the Spark run
+# on page 11 (02:14:00 detect, :01 safety, :03 H1, :09 decomposition, :11 S1/S2, :25 solver + gate).
+# The plant keeps running during the pause, exactly as it would while the edge box is thinking.
+MODEL_SENSOR_TICK_S = 1.0          # safety core reports on the next 1-s sensor tick (:00 -> :01)
+MODEL_TOOL_ROUND_S = 1.0           # one read/compute tool round (sensors, SOP, formula, orders)
+MODEL_SOLVE_S = 14.0               # OR-Tools solve incl. feasibility check (page 11 :11 -> :25)
+MODEL_LLM_PLAN_S = 6.0             # commander JSON plan after the first streamed tokens (:03 -> :09)
+
 
 # =====================================================================================
 # "$S1.total_cure_h" resolution
@@ -193,6 +204,8 @@ class StateMachine:
                          4.5 min of a 30-s mean below the expectation, so sensor noise near the threshold of a slow thermal
                          mass does not reject a 30-min hypothesis (hard limits are the safety core's).
       max_replans        hypothesis swaps allowed before SAFE_STOP.
+      pace               pace each beat to max(measured, modelled edge latency) in sim time, so the
+                         timeline keeps the page-11 rhythm (False: stamp everything at sim now).
     """
 
     def __init__(self, commander: CommanderClient, tools: ToolRegistry, gate: ActionGate,
@@ -200,7 +213,7 @@ class StateMachine:
                  bus: Bus | None = None, clock: Clock | None = None, *, store=None,
                  sleep: Callable[[float], Awaitable[None]] | None = None, approval_timeout_s: float = 600.0,
                  verify_poll_s: float = 5.0, verify_confirm_s: float = 270.0, max_replans: int = 3,
-                 max_events_kept: int = 200):
+                 max_events_kept: int = 200, pace: bool = True):
         self.commander, self.tools, self.gate = commander, tools, gate
         self.approvals, self.audit, self.sim, self.bus = approvals, audit, sim, bus
         self.clock = clock or (getattr(sim, "clock", None) if sim is not None else None)
@@ -209,6 +222,7 @@ class StateMachine:
         self.approval_timeout_s = approval_timeout_s
         self.verify_poll_s, self.verify_confirm_s = verify_poll_s, verify_confirm_s
         self.max_replans = max_replans
+        self.pace = pace                         # sim-time latency model (see MODEL_* above)
         self._max_kept = max_events_kept
         self._events: dict[str, Event] = {}
         self._open: dict[str, str] = {}          # machine_id -> open event id
@@ -285,6 +299,14 @@ class StateMachine:
             remaining = (target - self.clock.now()).total_seconds()
             await asyncio.sleep(min(0.25, max(0.01, remaining / speed)))
 
+    async def _pace(self, since: datetime, seconds: float) -> None:
+        """Let sim time reach since+seconds (no-op when already past or pacing is off)."""
+        if not self.pace or self.clock is None or seconds <= 0:
+            return
+        remaining = (since + timedelta(seconds=seconds) - self._now()).total_seconds()
+        if remaining > 1e-6:
+            await self._sleep(remaining)
+
     def _publish(self, kind: WsType, data: Any) -> None:
         if self.bus is not None:
             try:
@@ -354,7 +376,6 @@ class StateMachine:
         self._set_alert(ev, AlertCard(title=f"{machine_label(a.machine_id)}異常", summary=a.message),
                         source="detector")
         self._set_status(a.machine_id, MachineStatus.ALARM, a.message)
-        self._safety_status_note(ev)
         return ev
 
     def _set_alert(self, ev: Event, card: AlertCard, source: str = "commander") -> None:
@@ -390,6 +411,8 @@ class StateMachine:
     # ------------------------------------------------------------------ main loop
     async def _run(self, run: _Run) -> None:
         ev = run.ev
+        await self._pace(ev.anomaly.ts, MODEL_SENSOR_TICK_S)
+        self._safety_status_note(ev)
         self._to(ev, EventState.CLASSIFY, "gather sensor window, prediction and SOP")
         run.base_context = await self._classify_async(run)
         self._to(ev, EventState.PLAN, "ask commander")
@@ -497,6 +520,10 @@ class StateMachine:
             return ToolResult(call_id=f"blocked-{next(self._ids)}", tool=tool, ok=False,
                               error=f"{tool.value} not open in {state.value}")
         res: ToolResult | None = None
+        started = self._now()
+        model_s = 0.0
+        if tool not in WRITE_TOOLS and state is not EventState.VERIFY:
+            model_s = MODEL_SOLVE_S if tool is ToolName.SOLVE_SCHEDULE else MODEL_TOOL_ROUND_S
         for attempt in range(1, MAX_TOOL_RETRIES + 2):
             call = ToolCall(id=f"{ev.id}:{step_id or 'ctx'}:{next(self._ids)}", event_id=ev.id, step_id=step_id,
                             tool=tool, args=args, attempt=attempt)
@@ -520,10 +547,12 @@ class StateMachine:
                                "duration_ms": res.duration_ms, "attempt": attempt, "data": _brief(res.data)},
                               event_id=ev.id)
             if res.ok:
+                await self._pace(started, max(model_s * attempt, res.duration_ms / 1000.0))
                 return res
             if attempt <= MAX_TOOL_RETRIES:
                 self._note(ev, "工具", f"[工具] {tool.value} 失敗（{(res.error or '')[:60]}）→ 重試一次", "dynamic")
         assert res is not None
+        await self._pace(started, model_s)
         return res
 
     # ------------------------------------------------------------------ CLASSIFY / context
@@ -593,6 +622,7 @@ class StateMachine:
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
+        llm_started = self._now()
         self.compute_inflight += 1                   # LLM thinking time: Runtime may hold sim time
         try:
             if self._commander_streams:
@@ -628,10 +658,13 @@ class StateMachine:
         run.results = {}
         ev.plan, ev.goal = plan, plan.goal
         ev.steps = [StepRun(step=s, state="pending") for s in plan.steps]
-        self._narrate_plan(run, phase, rejected)
+        self._narrate_hypothesis(run, phase, rejected)
+        if not plan.safe_stop:
+            await self._pace(llm_started, max(MODEL_LLM_PLAN_S, info.total_ms / 1000.0))
+            self._narrate_steps(run)
         return plan
 
-    def _narrate_plan(self, run: _Run, phase: str, rejected: list[Hypothesis]) -> None:
+    def _narrate_hypothesis(self, run: _Run, phase: str, rejected: list[Hypothesis]) -> None:
         ev, plan = run.ev, run.plan
         assert plan is not None
         h = plan.hypothesis
@@ -650,7 +683,11 @@ class StateMachine:
                 text += f"；{via}"
             text += f" → {plan.alert_card.title}"
             self._note(ev, "指揮官", text, "decision")
-        exp = expectation_text(h.expectation)
+
+    def _narrate_steps(self, run: _Run) -> None:
+        ev, plan = run.ev, run.plan
+        assert plan is not None
+        exp = expectation_text(plan.hypothesis.expectation)
         self._note(ev, "指揮官", f"拆步驟：{decompose_text(plan.steps)}" + (f"；預期：{exp}" if exp else ""), "info")
 
     async def _replan(self, run: _Run, extra: dict[str, Any], why: str) -> bool:
@@ -712,6 +749,9 @@ class StateMachine:
                 continue
             sr.state = "running"
             self._publish(WsType.EVENT, ev)
+            if step.tool is ToolName.SOLVE_SCHEDULE and line_bits:
+                self._note(ev, "工具", "　".join(line_bits), "tool")   # S1/S2 land before the solve starts
+                line_bits = []
             res = await self._call(run, EventState.SIMULATE, step.id, step.tool, resolved.args)
             sr.result = res
             if not res.ok:
@@ -721,9 +761,6 @@ class StateMachine:
             sr.state = "ok"
             run.results[step.id] = res
             if step.tool is ToolName.SOLVE_SCHEDULE:
-                if line_bits:
-                    self._note(ev, "工具", "　".join(line_bits), "tool")
-                    line_bits = []
                 self._note(ev, "求解器", f"[工具] {step.id}：{result_text(step.tool, resolved.args, res.data)}", "tool")
                 if res.data.get("fell_back"):
                     self._note(ev, "求解器", "求解逾時 → 切換備援求解器（heuristic）", "dynamic")
@@ -800,9 +837,9 @@ class StateMachine:
                 risk = od.risk
         if needs:
             self._note(ev, "系統", f"動作把關：格式正確、模擬可行 → {len(needs)} 項需主管核准（{risk.value}）"
-                       + (f"，{len(auto)} 項自動執行" if auto else ""), "info")
+                       + (f"，{len(auto)} 項自動執行" if auto else ""), "human")
         elif auto:
-            self._note(ev, "系統", f"動作把關：格式正確、模擬可行 → {len(auto)} 項自動執行（R1）", "info")
+            self._note(ev, "系統", f"動作把關：格式正確、模擬可行 → {len(auto)} 項自動執行（R1）", "human")
         return auto, deferred, needs, options, risk
 
     def _options(self, run: _Run, needs: list[StepRun]) -> list[ApprovalOption]:

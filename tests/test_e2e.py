@@ -51,8 +51,9 @@ async def _pending(client) -> list[dict]:
 async def test_page11_press7_full_timeline(tmp_path):
     rt, client = await _start(tmp_path, "press7_temp_drop")
     try:
-        # 02:14:00 detection (within 1 sim-minute of the fault), commander wakes, plan + simulate + gate
-        await _run_until(rt, "02:14:10")
+        # 02:14:00 detection (within 1 sim-minute of the fault), commander wakes, plan + simulate + gate;
+        # the state machine paces the page-11 beats in sim time, so the gate lands at 02:14:25
+        await _run_until(rt, "02:14:30")
         an = next(a for a in rt.anomalies if a.machine_id == "CURE-07")
         assert an.ts == _at(rt, "02:14:00")
         assert an.detection_latency_s is not None and an.detection_latency_s <= 60
@@ -71,6 +72,10 @@ async def test_page11_press7_full_timeline(tmp_path):
         assert "下一模 #A-311 交期 3 天後" in text and "10/03 夜班缺 1 人" in text
         assert "#A-311 移到 9 號機" in text and "交期全部滿足" in text
         assert "動作把關" in text and "模擬可行" in text
+        beats = [(t["actor"], t["ts"][11:19]) for t in ev["timeline"]]
+        assert ("安全核心", "02:14:01") in beats and ("求解器", "02:14:25") in beats, beats
+        assert any(a == "指揮官" and ts == "02:14:09" for a, ts in beats), beats
+        assert next(t for t in ev["timeline"] if "動作把關" in t["text"])["tag"] == "human"
 
         # 02:16:40 supervisor approves the solver's plan from the phone
         await _run_until(rt, "02:16:40")
