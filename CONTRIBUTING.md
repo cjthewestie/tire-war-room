@@ -2,6 +2,36 @@
 
 實心胎智慧製造戰情室的程式碼都在這個 repo。這份指南讓你在 30 分鐘內從零跑起來，並照同一套規則改程式。影片版：`docs/onboarding/team-onboarding.mp4`（約 3 分鐘 20 秒；投影片與旁白稿在同一個資料夾）。
 
+## 0. 最簡單：叫 Claude 做（推薦）
+
+只要裝一個東西：Claude Code。之後把下面的句子貼給它，它會照這份指南幫你做完。影片版：`docs/onboarding/claude-onboarding.mp4`（約 1 分鐘）。
+
+**裝 Claude Code（一次）**：打開「終端機」，貼上
+
+```bash
+curl -fsSL https://claude.ai/install.sh | bash
+```
+
+裝好後輸入 `claude`，照畫面登入。
+
+**1. 第一次下載並跑起來**（在家目錄打 `claude`，貼上）：
+
+> 幫我把 https://github.com/cjthewestie/tire-war-room 下載到 ~/Documents，缺什麼工具就幫我裝（包括 GitHub CLI 並帶我登入），然後照 repo 裡的 CONTRIBUTING.md 把戰情室跑起來，打開戰情室和手機頁給我看。
+
+**2. 開始改一個前端體驗**（之後都在 `tire-war-room` 資料夾裡打 `claude`）：
+
+> 我想改：（用一兩句話描述，例如「手機頁的核准按鈕太小，不好按」）。照 CONTRIBUTING.md：先開 issue，開分支，只改 web/ 裡的前端，跑測試，截改前和改後的圖，開 PR 給我看。
+
+**3. 更新到最新版**：
+
+> 幫我更新到 main 最新版，重新啟動戰情室。
+
+**4. 卡住了**：
+
+> （貼上錯誤訊息或截圖）這是什麼問題？幫我修好，但不要改 web/ 以外的檔案。
+
+Claude 開的 PR 一樣要另一個人看過才能 merge。下面第 1–8 節是給想自己動手的人看的完整版。
+
 ## 1. 第一次：拿到權限、裝工具（約 15 分鐘）
 
 1. 收 GitHub 邀請信，按 **Accept invitation**。沒收到請找 CJ。

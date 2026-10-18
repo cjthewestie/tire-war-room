@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:#101317;color:#eef1f4;font-family:'Noto Sans TC',sans-serif}
+.s{display:none;width:1280px;height:720px;padding:56px 72px;flex-direction:column;gap:22px;position:relative}
+.s.on{display:flex}
+.k{font:700 18px 'JetBrains Mono',monospace;color:#7ac142;letter-spacing:.08em}
+h1{font-size:54px;font-weight:900;margin:0;line-height:1.15}
+h2{font-size:42px;font-weight:900;margin:0}
+p,li{font-size:26px;line-height:1.5;margin:0;color:#c9d1d9}
+ul,ol{margin:0;padding-left:34px;display:flex;flex-direction:column;gap:10px}
+pre{margin:0;background:#1b2026;border:1px solid #2c333b;border-radius:12px;padding:20px 24px;font:500 23px/1.55 'JetBrains Mono',monospace;color:#e6edf3}
+pre b{color:#7ac142}
+.foot{position:absolute;left:72px;right:72px;bottom:30px;display:flex;justify-content:space-between;font:500 16px 'JetBrains Mono',monospace;color:#6e7781}
+.row{display:flex;gap:24px;align-items:flex-start}
+.row img{border-radius:10px;border:1px solid #2c333b}
+.chain{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.chain span{background:#1b2026;border:2px solid #7ac142;border-radius:10px;padding:14px 18px;font-size:24px;font-weight:700}
+.chain i{color:#7ac142;font-style:normal;font-size:28px}
+table{border-collapse:collapse;font-size:24px}
+td,th{padding:10px 16px;border-bottom:1px solid #2c333b;text-align:left}
+th{color:#7ac142;font-size:18px}
+code{font-family:'JetBrains Mono',monospace;color:#f0b35a}
+.warn{color:#ff7b72;font-weight:700}
+</style></head><body>
+
+<section class="s" data-n="1">
+  <div class="k">TEAM WESTIE · 最簡單的版本</div>
+  <h1>叫 Claude 做<br>就好</h1>
+  <p>只裝一個東西，之後貼一句話。約 1 分鐘。</p>
+</section>
+
+<section class="s" data-n="2">
+  <div class="k">只做一次</div>
+  <h2>裝 Claude Code</h2>
+  <p>打開「終端機」，貼上：</p>
+<pre>curl -fsSL https://claude.ai/install.sh | bash
+<b>claude</b>        # 照畫面登入</pre>
+</section>
+
+<section class="s" data-n="3">
+  <div class="k">第一次</div>
+  <h2>貼這句，它幫你下載、安裝、跑起來</h2>
+<pre style="white-space:pre-wrap">幫我把 https://github.com/cjthewestie/tire-war-room
+下載到 ~/Documents，缺什麼工具就幫我裝（包括 GitHub CLI
+並帶我登入），然後照 CONTRIBUTING.md 把戰情室跑起來，
+打開戰情室和手機頁給我看。</pre>
+</section>
+
+<section class="s" data-n="4">
+  <div class="k">每次要改東西</div>
+  <h2>在 tire-war-room 裡打 claude，貼這句</h2>
+<pre style="white-space:pre-wrap">我想改：<b>（一兩句話，例如：手機頁的核准按鈕太小）</b>
+照 CONTRIBUTING.md：先開 issue，開分支，
+只改 web/ 裡的前端，跑測試，
+截改前和改後的圖，開 PR 給我看。</pre>
+</section>
+
+<section class="s" data-n="5">
+  <div class="k">規則</div>
+  <h2>Claude 會自己守規則</h2>
+  <ul>
+    <li>repo 裡的 <code>CLAUDE.md</code> 告訴它：只改前端、不碰 main、不加能動機台的工具</li>
+    <li>它開的 PR 一樣要<span class="warn">另一個人看過</span>才能 merge</li>
+    <li>完整句子在 <code>CONTRIBUTING.md</code> 第 0 節</li>
+  </ul>
+</section>
+
+<script>
+const n = new URLSearchParams(location.search).get('s') || '1';
+const all = document.querySelectorAll('.s');
+all.forEach(s => {
+  s.classList.toggle('on', s.dataset.n === n);
+  const f = document.createElement('div'); f.className = 'foot';
+  f.innerHTML = `<span>tire-war-room · CONTRIBUTING.md</span><span>${s.dataset.n} / ${all.length}</span>`;
+  s.appendChild(f);
+});
+</script>
+</body></html>

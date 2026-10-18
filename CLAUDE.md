@@ -1,6 +1,23 @@
-# tire-war-room — project instructions
+# tire-war-room — instructions for any Claude working in this repo
 
-Rules CJ gave while working in this project, quoted and dated. Cross-project rules live in `~/.claude/CLAUDE.md`; this file only holds what is specific to this repo.
+Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` section 0). Follow `CONTRIBUTING.md` for every step; it is the source of truth for setup, issues, branches, commits, PRs and the rules. Reply to teammates in Traditional Chinese, plain words, one step at a time.
 
-- Teammates work on the front-end customer experience (`web/`); backend, deploy and `warroom/contracts.py` changes go through an issue to CJ. CJ, 2026-10-18: 「我希望他們改的是前端客戶體驗」.
-- The team guide is `CONTRIBUTING.md` (Traditional Chinese, for teammates); keep it, `.github/` templates and `docs/onboarding/` in step when the workflow changes.
+## Always
+
+- Work on an issue: open one with `gh issue create` (template 前端體驗改進 for UX work) before changing code, unless the request names an existing issue.
+- Branch `座位/issue號-簡述` (teammates: `d/<n>-<slug>`); never commit or push to `main`.
+- Teammates change the front end only: `web/`. Anything in `warroom/`, `deploy/`, `bench/` or `warroom/contracts.py` → open an issue for CJ instead of editing. CJ, 2026-10-18: 「我希望他們改的是前端客戶體驗」.
+- Before a PR: `cd web && npm run build && npm run lint`, then `uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py`; all green. Attach before/after screenshots at 1440 and 390 width (headless browser).
+- PR body: what changed, `Closes #<n>`, the test output, the screenshots.
+
+## Never
+
+- Add any tool or code path that can move a machine; writes only through the Action Gate (`warroom/agent/gate.py`).
+- Import agent, tools, api or an LLM client into `warroom/safety/`.
+- Commit `data/runtime/`, `.env`, keys or the supervisor PIN.
+- Put a number in docs or slides without a file in `bench/results/`, labelled Mac or DGX Spark.
+- Merge your own PR.
+
+## Notes for CJ's sessions
+
+- The team guide is `CONTRIBUTING.md` (Traditional Chinese); keep it, `.github/` templates and `docs/onboarding/` in step when the workflow changes.
