@@ -63,7 +63,9 @@ nft_load=(sudo nft -f "$out/nft-sandbox-services.nft")
 # the sandbox reaches the broker through Docker's DNAT from SANDBOX_SRC, so add that range for this run.
 mqtt_allow=(sudo nft add element inet warroom_inbound mqtt_gateways "{ ${SANDBOX_SRC} }")
 stop_app=(docker compose -f deploy/spark/docker-compose.yml stop app)
-create=(openshell sandbox create --name "$NAME" --from "$IMAGE" --policy "$out/warroom-policy.yaml"
+# --detach: without it `sandbox create -- <cmd>` attaches and streams the server until it exits, so the
+# forward and the health check below would never run.
+create=(openshell sandbox create --detach --name "$NAME" --from "$IMAGE" --policy "$out/warroom-policy.yaml"
   --env LLM_MODE=llm --env "BASE_URL=http://${SPARK_HOST}:8001/v1" --env MODEL=nemotron
   --env LLM_FALLBACK_TO_MOCK=true --env "QDRANT_URL=http://${SPARK_HOST}:6333"
   --env WARROOM_INGEST=mqtt --env "WARROOM_MQTT_URL=mqtt://${SPARK_HOST}:1883"

@@ -1,9 +1,10 @@
 # OpenShell sandbox policy for the war-room app (page 5: 「NemoClaw（OpenShell 沙箱）」, no internet,
 # no PLC writes, allow-listed tools only). Schema: https://docs.nvidia.com/openshell/latest/how-it-works/policies/schema
 #
-# What is used: OpenShell itself, the runtime that NemoClaw is built on. NemoClaw is NVIDIA's bundle of
-# the OpenClaw agent on OpenShell; the war room runs its own agent (warroom.agent state machine), so
-# the app goes straight into an OpenShell sandbox with this policy. Tool allow-listing stays in the
+# What is used: OpenShell itself, the runtime that NemoClaw is built on. NemoClaw onboards only its
+# listed agents (OpenClaw, Hermes, Deep Agents Code; Pi as a release candidate) and marks other
+# harnesses Unsupported; the war room runs its own agent (warroom.agent state machine), so the app
+# goes straight into a plain OpenShell sandbox with this policy. Tool allow-listing stays in the
 # Action Gate (warroom.agent.gate); this file is the kernel/network layer under it.
 #
 # ${SPARK_HOST} is filled in by run_sandboxed.sh: the Spark's LAN IP, never loopback (127.0.0.1 inside the
@@ -40,6 +41,9 @@ network_policies:
           - allow: {method: GET, path: /health}
         allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
+      # OpenShell matches the real executable, not a symlink: /opt/venv/bin/python is a uv symlink to
+      # the image's /usr/local/bin/python3.12 (deploy/Dockerfile), so the real path is what counts.
+      - path: /usr/local/bin/python3.12
       - path: /opt/venv/bin/python*
   sop_kb:
     name: Qdrant SOP knowledge base
@@ -51,6 +55,9 @@ network_policies:
         access: read-write
         allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
+      # OpenShell matches the real executable, not a symlink: /opt/venv/bin/python is a uv symlink to
+      # the image's /usr/local/bin/python3.12 (deploy/Dockerfile), so the real path is what counts.
+      - path: /usr/local/bin/python3.12
       - path: /opt/venv/bin/python*
   sensor_mqtt:
     name: MQTT sensor feed from the plant data gateway
@@ -60,4 +67,7 @@ network_policies:
         protocol: tcp
         allowed_ips: ["${SPARK_HOST}/32"]
     binaries:
+      # OpenShell matches the real executable, not a symlink: /opt/venv/bin/python is a uv symlink to
+      # the image's /usr/local/bin/python3.12 (deploy/Dockerfile), so the real path is what counts.
+      - path: /usr/local/bin/python3.12
       - path: /opt/venv/bin/python*
