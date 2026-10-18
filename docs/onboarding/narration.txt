@@ -2,6 +2,7 @@
 第一步，先到信箱接受 GitHub 的邀請。然後安裝三個工具：git、u v，和 Node 二十以上。畫面上的三行指令，照著貼進終端機就可以。
 第二步，用 git clone 把 repo 下載下來，進到資料夾，執行 start 點 s h。打開 localhost 八千，就是戰情室；後面加斜線 phone，就是主管手機頁。
 第三步是選用的。如果要用真的 Nemotron，先執行一次 dev 點 s h pull，大約二十三 G B，然後用 start 點 s h ollama 啟動。第一個問題大約三十秒，之後每題兩到三秒。
+你們的重點是前端的客戶體驗。進到 web 資料夾，執行 npm run dev，打開 localhost 五一七三，加上問號 mock 等於一，不用開後端就能看到畫面，存檔就會自動更新。戰情室在 components 資料夾，手機頁在 phone 資料夾。開 issue 選前端體驗改進，PR 要附改前和改後的截圖。
 每天的工作流程是這樣：先 git pull，開一個 issue，開分支，改程式，跑測試，push，開 PR，請另一個人看過，再 merge。記得，不要直接 push 到 main。
 每件工作都要先開 issue。選任務或 Bug 範本，標題寫座位加一句話，貼上座位標籤。最重要的是寫清楚做完的樣子，也就是一個可以檢查的條件。
 改程式有三個格式。分支名稱是座位、issue 號碼、加簡述。commit 用 Conventional Commits，類型加範圍加做了什麼。測試全部通過以後再 push，開 PR，說明裡寫 Closes 加 issue 號碼。

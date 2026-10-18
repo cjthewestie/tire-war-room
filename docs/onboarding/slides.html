@@ -73,13 +73,26 @@ cd tire-war-room
 </section>
 
 <section class="s" data-n="5">
+  <div class="k">你們的重點</div>
+  <h2>主要改前端客戶體驗</h2>
+<pre>cd web
+npm ci
+<b>npm run dev</b>
+<b># 打開 localhost:5173/?mock=1   不用開後端</b></pre>
+  <ul>
+    <li>戰情室：<code>web/src/components/</code> · 手機頁：<code>web/src/phone/Phone.tsx</code></li>
+    <li>開 issue 選「前端體驗改進」，PR 附改前、改後截圖</li>
+  </ul>
+</section>
+
+<section class="s" data-n="6">
   <div class="k">每天</div>
   <h2>工作流程</h2>
   <div class="chain"><span>git pull</span><i>→</i><span>開 issue</span><i>→</i><span>開分支</span><i>→</i><span>改程式</span><i>→</i><span>跑測試</span><i>→</i><span>push</span><i>→</i><span>開 PR</span><i>→</i><span>別人看過</span><i>→</i><span>merge</span></div>
   <p class="warn">不要直接 push 到 main。</p>
 </section>
 
-<section class="s" data-n="6">
+<section class="s" data-n="7">
   <div class="k">ISSUE</div>
   <h2>每件工作先開 issue</h2>
   <ul>
@@ -91,7 +104,7 @@ cd tire-war-room
   --label seat-C --assignee @me</pre>
 </section>
 
-<section class="s" data-n="7">
+<section class="s" data-n="8">
   <div class="k">分支 · COMMIT · PR</div>
   <h2>改程式的三個格式</h2>
 <pre><b># 分支：座位/issue號-簡述</b>
@@ -104,7 +117,7 @@ git push -u origin c/12-reask-commander
 gh pr create --fill        <b># 說明寫 Closes #12</b></pre>
 </section>
 
-<section class="s" data-n="8">
+<section class="s" data-n="9">
   <div class="k">座位</div>
   <h2>只改自己座位的資料夾</h2>
   <table>
@@ -117,7 +130,7 @@ gh pr create --fill        <b># 說明寫 Closes #12</b></pre>
   </table>
 </section>
 
-<section class="s" data-n="9">
+<section class="s" data-n="10">
   <div class="k">規範</div>
   <h2>五條一定要遵守</h2>
   <ol>
@@ -129,7 +142,7 @@ gh pr create --fill        <b># 說明寫 Closes #12</b></pre>
   </ol>
 </section>
 
-<section class="s" data-n="10">
+<section class="s" data-n="11">
   <div class="k">完成</div>
   <h1>有問題就開 issue</h1>
   <p>完整文字版：repo 根目錄的 <code>CONTRIBUTING.md</code></p>

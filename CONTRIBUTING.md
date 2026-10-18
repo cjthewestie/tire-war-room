@@ -1,6 +1,6 @@
 # 團隊上手指南 · Team Westie
 
-實心胎智慧製造戰情室的程式碼都在這個 repo。這份指南讓你在 30 分鐘內從零跑起來，並照同一套規則改程式。影片版：`docs/onboarding/team-onboarding.mp4`（約 3 分鐘；投影片與旁白稿在同一個資料夾）。
+實心胎智慧製造戰情室的程式碼都在這個 repo。這份指南讓你在 30 分鐘內從零跑起來，並照同一套規則改程式。影片版：`docs/onboarding/team-onboarding.mp4`（約 3 分鐘 20 秒；投影片與旁白稿在同一個資料夾）。
 
 ## 1. 第一次：拿到權限、裝工具（約 15 分鐘）
 
@@ -28,6 +28,36 @@ deploy/mac/dev.sh pull      # 下載 Nemotron 3.5 Lightning NVFP4，只要做一
 ```
 
 畫面上方顯示「即時・LLM 指揮官」就是真模型。第一個問題約 30 秒（載入模型），之後每題 2–3 秒。
+
+## 2.5 你們主要改的是前端客戶體驗
+
+CJ, 2026-10-18：「我希望他們改的是前端客戶體驗」。隊友的工作集中在 `web/`：戰情室畫面和主管手機頁的使用體驗（排版、文字、操作順序、手機上好不好按、評審第一眼看得懂嗎）。後端、部署、`warroom/contracts.py` 要改的話，開 issue 給 CJ。
+
+**只改前端，不用開 Python 後端：**
+
+```bash
+cd web
+npm ci            # 第一次
+npm run dev       # 改了存檔，瀏覽器自動更新
+```
+
+打開 `http://localhost:5173/?mock=1`（戰情室）和 `http://localhost:5173/phone.html?mock=1`（手機頁）。`?mock=1` 用瀏覽器內建的模擬工廠，展示列的情境一樣能點。要接真的後端：另一個終端機先跑 `./start.sh`，再開 `http://localhost:5173/`（不加 `?mock=1`）。
+
+**改哪裡：**
+
+- 戰情室：`web/src/App.tsx`、`web/src/components/`（`MonitorTab.tsx` 產線監控、`ScheduleTab.tsx` 排程與人力、`Header.tsx`、`DemoStrip.tsx` 展示列、`MachineDrawer.tsx` 機台抽屜）
+- 手機頁：`web/src/phone/Phone.tsx`（核准卡、問戰情室）
+- 樣式：`web/src/index.css`
+- 模擬資料：`web/src/mock/`（只影響 `?mock=1`，數字要和企劃書一致，`tests/test_web.py` 會檢查）
+
+**開 PR 前檢查：**
+
+```bash
+cd web && npm run build && npm run lint      # 型別檢查 + 打包 + lint
+cd .. && uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py
+```
+
+PR 裡附**改之前、改之後的截圖**（電腦 1440 寬、手機 390 寬各一張）。
 
 ## 3. 每天的工作流程
 
@@ -88,7 +118,7 @@ gh issue create --title "[C] 指揮官 JSON 錯誤時重問一次" --label seat-
 | A | 隊長・主講 | `docs/`（企劃書、展示稿）、`README.md` |
 | B | 邊緣部署 | `deploy/`、`bench/` |
 | C | Agent・後端 | `warroom/agent/`、`warroom/api/`、`warroom/tools/`、`warroom/schedule/`、`warroom/kb/` |
-| D | 展示操作・前端 | `web/`、`docs/screenshots/` |
+| D | 展示操作・前端（隊友主要在這裡） | `web/`、`docs/screenshots/` |
 | 共用（改前先講） | — | `warroom/contracts.py`、`web/src/contracts.ts`（兩邊要同步）、`warroom/factory.py` |
 
 ## 6. 規範（一定要遵守）
