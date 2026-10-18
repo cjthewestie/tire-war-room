@@ -8,6 +8,8 @@
 
 ## 中文（團隊用）
 
+**新加入？先看 [`CONTRIBUTING.md`](CONTRIBUTING.md)（下載、執行、開 issue、分支、PR、規範）和 3 分鐘影片 [`docs/onboarding/team-onboarding.mp4`](docs/onboarding/team-onboarding.mp4)。**
+
 ### 這是什麼
 
 一個畫面看完整座實心胎工廠：訂單、4 條產線、28 台機台、11 台硫化機，以及每個異常的處置進度。

@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:#101317;color:#eef1f4;font-family:'Noto Sans TC',sans-serif}
+.s{display:none;width:1280px;height:720px;padding:56px 72px;flex-direction:column;gap:22px;position:relative}
+.s.on{display:flex}
+.k{font:700 18px 'JetBrains Mono',monospace;color:#7ac142;letter-spacing:.08em}
+h1{font-size:54px;font-weight:900;margin:0;line-height:1.15}
+h2{font-size:42px;font-weight:900;margin:0}
+p,li{font-size:26px;line-height:1.5;margin:0;color:#c9d1d9}
+ul,ol{margin:0;padding-left:34px;display:flex;flex-direction:column;gap:10px}
+pre{margin:0;background:#1b2026;border:1px solid #2c333b;border-radius:12px;padding:20px 24px;font:500 23px/1.55 'JetBrains Mono',monospace;color:#e6edf3}
+pre b{color:#7ac142}
+.foot{position:absolute;left:72px;right:72px;bottom:30px;display:flex;justify-content:space-between;font:500 16px 'JetBrains Mono',monospace;color:#6e7781}
+.row{display:flex;gap:24px;align-items:flex-start}
+.row img{border-radius:10px;border:1px solid #2c333b}
+.chain{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.chain span{background:#1b2026;border:2px solid #7ac142;border-radius:10px;padding:14px 18px;font-size:24px;font-weight:700}
+.chain i{color:#7ac142;font-style:normal;font-size:28px}
+table{border-collapse:collapse;font-size:24px}
+td,th{padding:10px 16px;border-bottom:1px solid #2c333b;text-align:left}
+th{color:#7ac142;font-size:18px}
+code{font-family:'JetBrains Mono',monospace;color:#f0b35a}
+.warn{color:#ff7b72;font-weight:700}
+</style></head><body>
+
+<section class="s" data-n="1">
+  <div class="k">TEAM WESTIE · 2026 AGENTIC AI ON THE EDGE</div>
+  <h1>戰情室 repo<br>團隊上手指南</h1>
+  <p>下載、執行、開 issue、改程式、規範。不到 3 分鐘。</p>
+  <p>文字版在 repo 裡：<code>CONTRIBUTING.md</code></p>
+</section>
+
+<section class="s" data-n="2">
+  <div class="k">第 1 步 · 約 15 分鐘</div>
+  <h2>拿權限、裝工具</h2>
+  <ol>
+    <li>收 GitHub 邀請信，按 <b>Accept invitation</b></li>
+    <li>裝 git、uv、Node.js 20 以上</li>
+  </ol>
+<pre>xcode-select --install
+curl -LsSf https://astral.sh/uv/install.sh | sh
+brew install node</pre>
+</section>
+
+<section class="s" data-n="3">
+  <div class="k">第 2 步</div>
+  <h2>下載並啟動</h2>
+  <div class="row">
+<pre style="flex:1"><b>git clone</b> https://github.com/
+  cjthewestie/tire-war-room.git
+cd tire-war-room
+<b>./start.sh</b>
+
+戰情室  localhost:8000
+手機    localhost:8000/phone</pre>
+    <img src="final-dashboard.png" width="420">
+    <img src="final-phone.png" width="150">
+  </div>
+</section>
+
+<section class="s" data-n="4">
+  <div class="k">第 3 步 · 選用</div>
+  <h2>用真的 Nemotron</h2>
+<pre>deploy/mac/dev.sh pull    <b># 約 23 GB，只做一次</b>
+./start.sh ollama</pre>
+  <ul>
+    <li>畫面上方顯示「即時・LLM 指揮官」就是真模型</li>
+    <li>第一題約 30 秒載入，之後每題 2 到 3 秒</li>
+  </ul>
+</section>
+
+<section class="s" data-n="5">
+  <div class="k">每天</div>
+  <h2>工作流程</h2>
+  <div class="chain"><span>git pull</span><i>→</i><span>開 issue</span><i>→</i><span>開分支</span><i>→</i><span>改程式</span><i>→</i><span>跑測試</span><i>→</i><span>push</span><i>→</i><span>開 PR</span><i>→</i><span>別人看過</span><i>→</i><span>merge</span></div>
+  <p class="warn">不要直接 push 到 main。</p>
+</section>
+
+<section class="s" data-n="6">
+  <div class="k">ISSUE</div>
+  <h2>每件工作先開 issue</h2>
+  <ul>
+    <li>Issues → New issue → 選「任務」或「Bug」</li>
+    <li>標題：<code>[座位] 一句話</code>，貼標籤 <code>seat-A</code>～<code>seat-D</code></li>
+    <li>寫清楚「做完的樣子」：一個可以檢查的條件</li>
+  </ul>
+<pre>gh issue create --title "[C] 指揮官 JSON 錯誤時重問一次" \
+  --label seat-C --assignee @me</pre>
+</section>
+
+<section class="s" data-n="7">
+  <div class="k">分支 · COMMIT · PR</div>
+  <h2>改程式的三個格式</h2>
+<pre><b># 分支：座位/issue號-簡述</b>
+git switch -c c/12-reask-commander
+<b># commit：類型(範圍): 做了什麼</b>
+git commit -m "feat(agent): 指揮官 JSON 錯誤時重問一次"
+<b># 測試全綠後</b>
+uv run pytest -q
+git push -u origin c/12-reask-commander
+gh pr create --fill        <b># 說明寫 Closes #12</b></pre>
+</section>
+
+<section class="s" data-n="8">
+  <div class="k">座位</div>
+  <h2>只改自己座位的資料夾</h2>
+  <table>
+    <tr><th>座位</th><th>角色</th><th>負責</th></tr>
+    <tr><td>A</td><td>隊長・主講</td><td><code>docs/</code>、<code>README.md</code></td></tr>
+    <tr><td>B</td><td>邊緣部署</td><td><code>deploy/</code>、<code>bench/</code></td></tr>
+    <tr><td>C</td><td>Agent・後端</td><td><code>warroom/agent</code>、<code>api</code>、<code>tools</code>、<code>schedule</code>、<code>kb</code></td></tr>
+    <tr><td>D</td><td>展示・前端</td><td><code>web/</code>、<code>docs/screenshots/</code></td></tr>
+    <tr><td>共用</td><td>改前先講</td><td><code>warroom/contracts.py</code> ＋ <code>web/src/contracts.ts</code></td></tr>
+  </table>
+</section>
+
+<section class="s" data-n="9">
+  <div class="k">規範</div>
+  <h2>五條一定要遵守</h2>
+  <ol>
+    <li><span class="warn">不加任何能動到機台的工具</span>；寫入一定經過動作把關</li>
+    <li>安全核心不碰 LLM</li>
+    <li>不提交 <code>data/runtime/</code>、<code>.env</code>、金鑰、PIN</li>
+    <li>只寫量測過的數字，標明 Mac 還是 DGX Spark</li>
+    <li><code>main</code> 永遠能跑：全部測試綠才 merge</li>
+  </ol>
+</section>
+
+<section class="s" data-n="10">
+  <div class="k">完成</div>
+  <h1>有問題就開 issue</h1>
+  <p>完整文字版：repo 根目錄的 <code>CONTRIBUTING.md</code></p>
+  <p>架構：<code>docs/ARCHITECTURE.md</code> · 展示稿：<code>docs/DEMO-SCRIPT.md</code></p>
+</section>
+
+<script>
+const n = new URLSearchParams(location.search).get('s') || '1';
+const all = document.querySelectorAll('.s');
+all.forEach(s => {
+  s.classList.toggle('on', s.dataset.n === n);
+  const f = document.createElement('div'); f.className = 'foot';
+  f.innerHTML = `<span>tire-war-room · CONTRIBUTING.md</span><span>${s.dataset.n} / ${all.length}</span>`;
+  s.appendChild(f);
+});
+</script>
+</body></html>
