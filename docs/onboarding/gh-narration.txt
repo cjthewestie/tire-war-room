@@ -1,0 +1,12 @@
+這支影片教你在 GitHub 網站上一步一步按：接受邀請、開 issue、開 PR、審核、合併。
+第一步，打開邀請信，按 View invitation，再按綠色的 Accept invitation。
+第二步，進到 repo 首頁，點 CONTRIBUTING 檔案，所有規則都在這裡。
+第三步，點上方的 Issues 分頁，再按右邊綠色的 New issue。每件工作都先開 issue。
+第四步，選範本。要改前端，就選前端體驗改進。
+第五步，填好標題和內容，在右上角按 assign yourself，最後按 Create。記下 issue 的號碼。
+第六步，程式改好並 push 之後，回到 repo 首頁，按黃色條上的 Compare and pull request。
+第七步，確認是從你的分支合到 main，內容寫 Closes 加 issue 號碼，再按 Create pull request。
+第八步，換審核的人。點 Files changed，綠色是新增，紅色是刪除。
+第九步，按 Review changes，選 Approve，再按 Submit review。要對方修改，就選 Request changes。
+第十步，回到 Conversation 分頁，有一個 Approve 之後，按 Merge pull request，再按確認。
+完成。每件工作都走這一圈：issue、分支、PR、審核、合併。改程式的部分，可以交給 Claude。

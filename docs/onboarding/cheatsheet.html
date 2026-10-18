@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:1080px;background:#f6f7f9;color:#14181d;font-family:'Noto Sans TC',sans-serif}
+.page{width:1080px;padding:72px 72px 60px;display:flex;flex-direction:column;gap:30px}
+.k{font:700 22px 'JetBrains Mono',monospace;color:#2f8f3a;letter-spacing:.08em}
+h1{font-size:68px;font-weight:900;margin:6px 0 0;line-height:1.1}
+.sub{font-size:28px;color:#5b6570;margin:0}
+.card{background:#fff;border-radius:24px;padding:34px 38px;display:flex;gap:26px;box-shadow:0 2px 0 #e3e6ea}
+.n{flex:none;width:64px;height:64px;border-radius:50%;background:#14181d;color:#fff;font:900 32px 'JetBrains Mono',monospace;display:flex;align-items:center;justify-content:center}
+.c{display:flex;flex-direction:column;gap:12px;min-width:0;flex:1}
+h2{font-size:36px;font-weight:900;margin:0}
+p{font-size:27px;line-height:1.5;margin:0;color:#3a434c}
+.say{background:#eef6ef;border-left:6px solid #2f8f3a;border-radius:10px;padding:16px 20px;font-size:26px;line-height:1.5;color:#14181d}
+code{font:600 24px 'JetBrains Mono',monospace;background:#14181d;color:#e6edf3;border-radius:10px;padding:14px 18px;display:block;word-break:break-all}
+.path{display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:26px}
+.path span{background:#1f883d;color:#fff;border-radius:10px;padding:8px 14px;font-weight:700}
+.path i{font-style:normal;color:#8a939c}
+.rules{display:flex;flex-direction:column;gap:10px}
+.rules div{font-size:28px;font-weight:700}
+.rules b{color:#d1343e}
+.foot{font-size:22px;color:#6b747d;text-align:center}
+</style></head><body><div class="page">
+  <div class="k">TEAM WESTIE · 戰情室</div>
+  <h1>團隊懶人包</h1>
+  <p class="sub">裝一個東西，貼兩句話，GitHub 按三個地方。</p>
+
+  <div class="card"><div class="n">1</div><div class="c">
+    <h2>裝 Claude Code（只做一次）</h2>
+    <code>curl -fsSL https://claude.ai/install.sh | bash</code>
+    <p>裝好打 <b>claude</b>，照畫面登入。</p>
+  </div></div>
+
+  <div class="card"><div class="n">2</div><div class="c">
+    <h2>第一次：貼這句</h2>
+    <div class="say">幫我把 github.com/cjthewestie/tire-war-room 下載下來、裝好工具、照 CONTRIBUTING.md 跑起來給我看。</div>
+  </div></div>
+
+  <div class="card"><div class="n">3</div><div class="c">
+    <h2>要改東西：貼這句</h2>
+    <div class="say">我想改：<b>（一句話）</b>。照 CONTRIBUTING.md 開 issue、只改前端、跑測試、附截圖、開 PR。</div>
+  </div></div>
+
+  <div class="card"><div class="n">4</div><div class="c">
+    <h2>GitHub 網站上</h2>
+    <p>開 issue</p>
+    <div class="path"><span>Issues</span><i>→</i><span>New issue</span><i>→</i><span>前端體驗改進</span><i>→</i><span>Create</span></div>
+    <p>審別人的 PR</p>
+    <div class="path"><span>Files changed</span><i>→</i><span>Review changes</span><i>→</i><span>Approve</span></div>
+    <p>合併（有 1 個 Approve 才按）</p>
+    <div class="path"><span>Merge pull request</span></div>
+  </div></div>
+
+  <div class="card"><div class="n">!</div><div class="c">
+    <h2>三條規則</h2>
+    <div class="rules">
+      <div>✔ 只改前端 <b>web/</b></div>
+      <div>✔ <b>不推 main</b>，PR 要別人看過</div>
+      <div>✔ <b>不加</b>任何能動到機台的功能</div>
+    </div>
+  </div></div>
+
+  <div class="foot">完整版：repo 裡的 CONTRIBUTING.md　·　影片：docs/onboarding/</div>
+</div></body></html>

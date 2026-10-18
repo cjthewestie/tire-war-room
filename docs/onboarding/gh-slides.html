@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="zh-Hant"><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap">
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;width:1280px;height:720px;overflow:hidden;background:#e9ecef;font-family:'Noto Sans TC',-apple-system,sans-serif;color:#1f2328}
+.s{display:none;width:1280px;height:720px;position:relative}
+.s.on{display:block}
+/* caption bar */
+.cap{position:absolute;left:0;right:0;top:0;height:86px;background:#101317;color:#fff;display:flex;align-items:center;gap:18px;padding:0 36px}
+.cap .no{background:#e5534b;color:#fff;font:900 30px 'JetBrains Mono',monospace;border-radius:50%;width:54px;height:54px;display:flex;align-items:center;justify-content:center;flex:none}
+.cap h2{margin:0;font-size:30px;font-weight:900}
+.cap small{margin-left:auto;font:500 14px 'JetBrains Mono',monospace;color:#8b949e}
+/* fake browser */
+.win{position:absolute;left:36px;right:36px;top:104px;bottom:24px;background:#fff;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.15);overflow:hidden}
+.bar{height:38px;background:#f1f3f5;border-bottom:1px solid #d0d7de;display:flex;align-items:center;gap:8px;padding:0 14px}
+.dot{width:12px;height:12px;border-radius:50%;background:#d0d7de}
+.url{margin-left:12px;flex:1;background:#fff;border:1px solid #d0d7de;border-radius:6px;height:24px;font:500 13px 'JetBrains Mono',monospace;color:#57606a;display:flex;align-items:center;padding:0 10px}
+.ghhead{height:56px;background:#f6f8fa;border-bottom:1px solid #d0d7de;display:flex;align-items:center;gap:10px;padding:0 24px;font-size:18px}
+.ghhead b{font-weight:700}
+.tabs{display:flex;gap:4px;padding:0 24px;border-bottom:1px solid #d0d7de;background:#f6f8fa}
+.tab{padding:10px 14px;font-size:15px;color:#1f2328;border-bottom:2px solid transparent}
+.tab.on{border-bottom-color:#fd8c73;font-weight:700}
+.body{padding:20px 24px;position:relative}
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border-radius:6px;border:1px solid rgba(31,35,40,.15);background:#f6f8fa;font-size:14px;font-weight:600}
+.btn.g{background:#1f883d;color:#fff;border-color:#1a7f37}
+.btn.p{background:#8250df;color:#fff}
+.box{border:1px solid #d0d7de;border-radius:6px}
+.row{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #d0d7de;font-size:15px}
+.row:last-child{border-bottom:0}
+.lbl{font-size:12px;border-radius:999px;padding:2px 8px;font-weight:600}
+input,.ta{border:1px solid #d0d7de;border-radius:6px;padding:8px 10px;font:15px 'Noto Sans TC',sans-serif;width:100%;background:#f6f8fa}
+.ta{height:150px;white-space:pre-wrap;color:#57606a}
+.side{font-size:13px;color:#57606a;border-bottom:1px solid #d0d7de;padding:10px 0}
+.side b{color:#1f2328;display:block;margin-bottom:4px}
+.diff{font:13px/1.6 'JetBrains Mono',monospace}
+.diff .a{background:#dafbe1} .diff .d{background:#ffebe9}
+/* highlight */
+.hl{position:absolute;border:4px solid #e5534b;border-radius:10px;pointer-events:none}
+.hl i{position:absolute;top:-22px;right:-22px;background:#e5534b;color:#fff;font:900 20px 'JetBrains Mono',monospace;font-style:normal;width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.tip{position:absolute!important;left:60px!important;top:auto!important;bottom:44px;background:#101317;color:#fff;font-size:20px;font-weight:700;padding:12px 16px;border-radius:10px;max-width:420px;line-height:1.45}
+.mock{position:absolute;right:46px;bottom:30px;font:500 12px 'JetBrains Mono',monospace;color:#8b949e}
+.title{position:absolute;inset:0;background:#101317;color:#fff;display:flex;flex-direction:column;justify-content:center;padding:0 90px;gap:20px}
+.title h1{font-size:56px;font-weight:900;margin:0}
+.title p{font-size:26px;color:#c9d1d9;margin:0}
+.title .k{font:700 18px 'JetBrains Mono',monospace;color:#7ac142}
+</style></head><body>
+
+<!-- 1 title -->
+<section class="s" data-n="1"><div class="title">
+  <div class="k">TEAM WESTIE · GITHUB 手把手</div>
+  <h1>在 GitHub 網站上<br>一步一步按</h1>
+  <p>接受邀請 → 開 issue → 開 PR → 審核 → 合併。約 3 分鐘。</p>
+  <p style="font-size:20px;color:#8b949e">畫面為示意圖：按鈕名稱和位置與 GitHub 相同，樣式可能略有不同。</p>
+</div></section>
+
+<!-- 2 accept invite -->
+<section class="s" data-n="2">
+  <div class="cap"><div class="no">1</div><h2>打開邀請信，按 Accept invitation</h2><small>只做一次</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/invitations</div></div>
+    <div class="body" style="text-align:center;padding-top:60px">
+      <div style="font-size:22px">cjthewestie invited you to collaborate on</div>
+      <div style="font-size:30px;font-weight:700;margin:10px 0 30px">cjthewestie/tire-war-room</div>
+      <span class="btn g" data-hl="1" style="font-size:18px;padding:12px 26px">Accept invitation</span>
+      <span class="btn" style="font-size:18px;padding:12px 26px;margin-left:10px">Decline</span>
+    </div>
+  </div>
+  <div class="tip" style="left:740px;top:430px">信裡先按 View invitation</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 3 repo page -->
+<section class="s" data-n="3">
+  <div class="cap"><div class="no">2</div><h2>repo 首頁：先讀 CONTRIBUTING.md</h2><small>github.com/cjthewestie/tire-war-room</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room</div></div>
+    <div class="ghhead">cjthewestie / <b>tire-war-room</b> <span class="lbl" style="border:1px solid #d0d7de">Private</span></div>
+    <div class="tabs"><span class="tab on">Code</span><span class="tab">Issues</span><span class="tab">Pull requests</span><span class="tab">Actions</span><span class="tab">Settings</span></div>
+    <div class="body">
+      <div style="display:flex;gap:10px;margin-bottom:14px"><span class="btn">main ▾</span><span style="flex:1"></span><span class="btn g">&lt;&gt; Code ▾</span></div>
+      <div class="box">
+        <div class="row">📁 .github</div><div class="row">📁 docs</div><div class="row">📁 warroom</div><div class="row">📁 web</div>
+        <div class="row" data-hl="2"><b>📄 CONTRIBUTING.md</b><span style="color:#57606a;margin-left:auto">團隊上手指南</span></div>
+        <div class="row">📄 README.md</div>
+      </div>
+    </div>
+  </div>
+  <div class="tip" style="left:620px;top:300px">所有規則都在這個檔案</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 4 issues tab -->
+<section class="s" data-n="4">
+  <div class="cap"><div class="no">3</div><h2>Issues 分頁 → 綠色 New issue</h2><small>每件工作先開 issue</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/issues</div></div>
+    <div class="ghhead">cjthewestie / <b>tire-war-room</b></div>
+    <div class="tabs"><span class="tab">Code</span><span class="tab on">Issues</span><span class="tab">Pull requests</span></div>
+    <div class="body">
+      <div style="display:flex;gap:10px;margin-bottom:14px"><input value="is:issue state:open" style="flex:1"><span class="btn">Labels</span><span class="btn g" data-hl="3">New issue</span></div>
+      <div class="box"><div class="row">⊙ [C] 指揮官 JSON 錯誤時重問一次 <span class="lbl" style="background:#1d76db;color:#fff">seat-C</span></div><div class="row">⊙ [D] 手機頁核准按鈕太小 <span class="lbl" style="background:#5319e7;color:#fff">ux</span></div></div>
+    </div>
+  </div>
+  <div class="tip" style="left:700px;top:420px">每件工作先開 issue</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 5 template chooser -->
+<section class="s" data-n="5">
+  <div class="cap"><div class="no">4</div><h2>選範本：改前端就選「前端體驗改進」</h2><small>repo 裡有三個範本</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/issues/new/choose</div></div>
+    <div class="body" style="padding-top:30px">
+      <div style="font-size:22px;font-weight:700;margin-bottom:16px">Create new issue</div>
+      <div class="box">
+        <div class="row"><div><b>Bug</b><div style="color:#57606a;font-size:14px">壞掉或跟企劃書不一致的地方</div></div><span class="btn" style="margin-left:auto">Get started</span></div>
+        <div class="row"><div><b>任務</b><div style="color:#57606a;font-size:14px">一件要做的事（功能、測試、文件、部署）</div></div><span class="btn" style="margin-left:auto">Get started</span></div>
+        <div class="row" data-hl="4"><div><b>前端體驗改進</b><div style="color:#57606a;font-size:14px">戰情室或手機頁哪裡不好用、看不懂、不好按</div></div><span class="btn g" style="margin-left:auto">Get started</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tip" style="left:300px;top:470px">改前端選這個</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 6 fill form -->
+<section class="s" data-n="6">
+  <div class="cap"><div class="no">5</div><h2>填標題、內容，指派自己，按 Create</h2><small>標題：[座位] 一句話</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/issues/new?template=ux.md</div></div>
+    <div class="body" style="display:flex;gap:24px">
+      <div style="flex:1;display:flex;flex-direction:column;gap:12px">
+        <input value="[D] 手機頁：核准按鈕太小，不好按">
+        <div class="ta">## 哪個畫面
+手機頁：核准卡
+
+## 做完的樣子（可以檢查的條件）
+- [ ] 手機 390 寬，核准按鈕不用捲動就看得到</div>
+        <div style="text-align:right"><span class="btn g" data-hl="5" style="font-size:16px;padding:10px 22px">Create</span></div>
+      </div>
+      <div style="width:250px">
+        <div class="side" data-hl="✓"><b>Assignees</b>No one — <u>assign yourself</u></div>
+        <div class="side"><b>Labels</b><span class="lbl" style="background:#5319e7;color:#fff">ux</span> <span class="lbl" style="background:#fbca04">seat-D</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tip" style="left:120px;top:560px">右上 assign yourself，記下 issue 號碼（例如 #12）</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 7 compare & PR banner -->
+<section class="s" data-n="7">
+  <div class="cap"><div class="no">6</div><h2>改完 push 後，按黃色的 Compare &amp; pull request</h2><small>改程式可以交給 Claude</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room</div></div>
+    <div class="ghhead">cjthewestie / <b>tire-war-room</b></div>
+    <div class="tabs"><span class="tab on">Code</span><span class="tab">Issues</span><span class="tab">Pull requests</span></div>
+    <div class="body">
+      <div style="background:#fff8c5;border:1px solid #d4a72c;border-radius:6px;padding:14px 16px;display:flex;align-items:center;gap:12px;font-size:15px"><b>d/12-approve-button</b> had recent pushes 1 minute ago<span style="flex:1"></span><span class="btn g" data-hl="6">Compare &amp; pull request</span></div>
+      <div class="box" style="margin-top:14px"><div class="row">📁 docs</div><div class="row">📁 web</div><div class="row">📄 CONTRIBUTING.md</div></div>
+    </div>
+  </div>
+  <div class="tip" style="left:120px;top:470px">不要直接改 main</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 8 open PR -->
+<section class="s" data-n="8">
+  <div class="cap"><div class="no">7</div><h2>確認 main ← 你的分支，寫 Closes #12，按 Create pull request</h2></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/compare/main...d/12-approve-button</div></div>
+    <div class="body" style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;gap:8px;align-items:center;font-size:15px" data-hl="7"><span class="btn">base: main ▾</span> ← <span class="btn">compare: d/12-approve-button ▾</span><span style="color:#1a7f37;font-weight:700">✓ Able to merge</span></div>
+      <input value="feat(web): 手機頁核准按鈕放大到 48px">
+      <div class="ta" style="height:170px">## 做了什麼
+核准、修改、駁回按鈕改成 48px 高
+
+Closes #12
+
+## 怎麼驗證
+test_web.py 全過；附改前／改後截圖（1440、390）</div>
+      <div style="text-align:right"><span class="btn g" data-hl="✓" style="font-size:16px;padding:10px 22px">Create pull request</span></div>
+    </div>
+  </div>
+  <div class="tip" style="left:640px;top:220px">內容寫 Closes #12</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 9 files changed -->
+<section class="s" data-n="9">
+  <div class="cap"><div class="no">8</div><h2>審核的人：點 Files changed 看改了什麼</h2><small>不能審自己的 PR</small></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/pull/13</div></div>
+    <div class="ghhead"><b>feat(web): 手機頁核准按鈕放大到 48px</b> <span style="color:#57606a">#13</span> <span class="lbl" style="background:#1f883d;color:#fff;margin-left:8px">Open</span></div>
+    <div class="tabs"><span class="tab">Conversation</span><span class="tab">Commits</span><span class="tab">Checks</span><span class="tab on" data-hl="8">Files changed</span></div>
+    <div class="body">
+      <div class="box diff"><div class="row" style="font-family:'Noto Sans TC'"><b>web/src/index.css</b><span style="flex:1"></span><span class="btn g">Review changes ▾</span></div>
+        <div class="d" style="padding:2px 16px">- .ph-approve { min-height: 40px; }</div>
+        <div class="a" style="padding:2px 16px">+ .ph-approve { min-height: 48px; font-size: 18px; }</div></div>
+    </div>
+  </div>
+  <div class="tip" style="left:120px;top:470px">綠 = 新增，紅 = 刪除</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 10 approve -->
+<section class="s" data-n="10">
+  <div class="cap"><div class="no">9</div><h2>按 Review changes → 選 Approve → Submit review</h2></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/pull/13/files</div></div>
+    <div class="body" style="display:flex;justify-content:flex-end">
+      <div class="box" style="width:520px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,.12)">
+        <b>Finish your review</b>
+        <div class="ta" style="height:80px">看過截圖，手機上好按多了 👍</div>
+        <div>○ Comment　只留言</div>
+        <div style="font-weight:700" data-hl="9">● Approve　同意合併</div>
+        <div>○ Request changes　要先改</div>
+        <div style="text-align:right"><span class="btn g" data-hl="✓">Submit review</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="tip" style="left:90px;top:200px">要改就選 Request changes</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 11 merge -->
+<section class="s" data-n="11">
+  <div class="cap"><div class="no">10</div><h2>Conversation 分頁最下面：Merge pull request → Confirm</h2></div>
+  <div class="win"><div class="bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><div class="url">github.com/cjthewestie/tire-war-room/pull/13</div></div>
+    <div class="tabs" style="margin-top:0"><span class="tab on">Conversation</span><span class="tab">Commits</span><span class="tab">Checks</span><span class="tab">Files changed</span></div>
+    <div class="body">
+      <div class="row box" style="margin-bottom:14px">✅ 1 approval　·　Changes approved</div>
+      <div class="box" style="padding:16px;display:flex;align-items:center;gap:14px"><span style="font-size:15px">This branch has no conflicts with the base branch</span><span style="flex:1"></span><span class="btn g" data-hl="10" style="font-size:16px;padding:10px 20px">Merge pull request ▾</span></div>
+      <div style="margin-top:14px;color:#57606a;font-size:15px">合併後按 <b>Delete branch</b>，issue #12 會自動關掉。</div>
+    </div>
+  </div>
+  <div class="tip" style="left:120px;top:440px">有 1 個 Approve 才按</div>
+  <div class="mock">示意畫面</div>
+</section>
+
+<!-- 12 end -->
+<section class="s" data-n="12"><div class="title">
+  <div class="k">完成</div>
+  <h1>issue → 分支 → PR → 審核 → 合併</h1>
+  <p>每件工作都走這一圈。改程式的部分可以叫 Claude 做。</p>
+  <p style="font-size:20px;color:#8b949e">完整說明：repo 裡的 CONTRIBUTING.md</p>
+</div></section>
+
+<script>
+const n = new URLSearchParams(location.search).get('s') || '1';
+document.querySelectorAll('.s').forEach(s => s.classList.toggle('on', s.dataset.n === n));
+const cur = document.querySelector('.s.on');
+cur.querySelectorAll('[data-hl]').forEach(el => {
+  const r = el.getBoundingClientRect(), p = 8;
+  const h = document.createElement('div'); h.className = 'hl';
+  Object.assign(h.style, {left: (r.left - p) + 'px', top: (r.top - p) + 'px', width: (r.width + 2*p) + 'px', height: (r.height + 2*p) + 'px'});
+  h.innerHTML = '<i>' + el.dataset.hl + '</i>'; cur.appendChild(h);
+});
+</script>
+</body></html>

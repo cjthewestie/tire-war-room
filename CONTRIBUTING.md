@@ -1,6 +1,6 @@
 # 團隊上手指南 · Team Westie
 
-實心胎智慧製造戰情室的程式碼都在這個 repo。這份指南讓你在 30 分鐘內從零跑起來，並照同一套規則改程式。影片版：`docs/onboarding/team-onboarding.mp4`（約 3 分鐘 20 秒；投影片與旁白稿在同一個資料夾）。
+實心胎智慧製造戰情室的程式碼都在這個 repo。這份指南讓你在 30 分鐘內從零跑起來，並照同一套規則改程式。**只想看重點：一頁懶人包 `docs/onboarding/team-cheatsheet.png`**；GitHub 網站怎麼按：`docs/onboarding/github-walkthrough.mp4`（約 1 分 40 秒）。影片版：`docs/onboarding/team-onboarding.mp4`（約 3 分鐘 20 秒；投影片與旁白稿在同一個資料夾）。
 
 ## 0. 最簡單：叫 Claude 做（推薦）
 
