@@ -20,6 +20,10 @@
 - **稽核日誌** 只能追加，有雜湊鏈與簽章，記錄每次狀態轉換、工具呼叫、核准與攔截。
 - 全部跑在一台 DGX Spark 上，不連外網。
 
+### 問戰情室（主管提問，只查不改）
+
+手機頁最下方可以直接問：「7 號機現在怎樣？」「今晚夜班缺誰？」「大開煉機過熱怎麼處理？」。走的是同一套 Agent 架構：同一個 Nemotron 先選要查哪些唯讀工具（最多 4 步），程式只執行 `ASK_TOOLS`（讀感測器、異常預測、硫化公式、訂單班表、SOP），再由 Nemotron 只根據查詢結果回答。寫入工具、`solve_schedule`（會存提案排程）和清單外的名稱一律攔下並記 `INTERCEPTED`；每次提問以 `ASK-nnnn` 寫進同一份稽核日誌。LAN 中斷時只有現場觸控螢幕能問。程式：`warroom/agent/ask.py`、`POST /api/ask`，測試 `tests/test_ask.py`。
+
 ### 一行啟動（Mac，Apple Silicon）
 
 需要：[uv](https://docs.astral.sh/uv/)、Node.js 20+。第一次執行會下載 Python 套件、npm 套件和 SOP 嵌入模型（數百 MB，之後離線可用）。
@@ -106,6 +110,10 @@ Step by step, with what to click and what to say: [`docs/DEMO-SCRIPT.md`](docs/D
 | 2. Tools opened by state | `TOOLS_BY_STATE`, `READ_COMPUTE_TOOLS`, `WRITE_TOOLS` in `warroom/contracts.py`; enforced in `StateMachine._call` (`warroom/agent/state_machine.py`, off-state calls logged `INTERCEPTED`); tools in `warroom/tools/` (`cure.py` Arrhenius, `impl.py`, `registry.py`), CP-SAT in `warroom/schedule/solver.py`, Qdrant SOP KB in `warroom/kb/` |
 | 3. State & dynamic adjustment (miss → swap hypothesis & replan; retry once → SOP path; solver timeout → backup; 2 failures → keep schedule) | `ALLOWED_TRANSITIONS`, `MAX_TOOL_RETRIES=1`, `MAX_CONSECUTIVE_FAILURES=2` in `warroom/contracts.py`; code-only VERIFY and REPLAN in `warroom/agent/state_machine.py`; `FallbackScheduler` (CP-SAT → heuristic, `fell_back=True`) in `warroom/schedule/solver.py`; SAFE_STOP keeps the active schedule |
 | 4. Permissions & risk (approval for feed pause / staff moves, 4 levels, no actuator permission, intercepts logged, feasible-only, one-click rollback) | `RuleGate` in `warroom/agent/gate.py` (R0–R3, allow-list, format, simulation-feasible); `ApprovalBrokerImpl` in `warroom/agent/approvals.py`; append-only hash-chained `JsonlAuditLog` in `warroom/agent/audit.py`; versioned `FileScheduleStore.rollback` in `warroom/schedule/store.py`; Safety Core in `warroom/safety/core.py` (and `plc.py` as a separate process; a test forbids it importing agent/tools/api/LLM clients); no actuator/PLC write tool exists anywhere |
+
+### Ask the war room (read-only supervisor Q&A)
+
+The phone page has a 問戰情室 box. It is not a second agent: the same Nemotron picks up to 4 read steps (JSON, schema-constrained), code runs only `ASK_TOOLS` (read sensors, predict, cure formula, orders/shifts, SOP) through the same registry, and the model then answers from those results only (numbers copied, never estimated). Write tools, `solve_schedule` (it stores a PROPOSED version) and names off the allow-list are refused and logged `INTERCEPTED`; every question, call and answer goes into the same hash-chained audit log under an `ASK-nnnn` id. Same session rule as approvals (PIN on the LAN, on-site only when the LAN is down). Code also checks the answer: a number that is not in the tool results replaces the model's answer with the results, and a change request (停掉, 重排, 調人...) never gets a model-written answer. The check covers numbers only, not wording (a real-model run once called press 7 「正常運作」). Mock mode uses keyword rules and a template answer; an invalid plan or a model failure falls back to them. Real Nemotron on the Mac (Ollama, 2026-10-18): 5 questions, 0 fallbacks, 0.5–3.2 s each once loaded. Code: `warroom/agent/ask.py`, `POST /api/ask`; tests: `tests/test_ask.py`.
 
 ### Measured numbers vs targets
 

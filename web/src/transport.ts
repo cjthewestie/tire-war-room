@@ -2,7 +2,7 @@
 // Mock mode syncs tabs over BroadcastChannel, so approving on /phone updates the dashboard.
 import {
   API, apiPath,
-  type ApprovalDecision, type ApprovalRequest, type AuditEntry, type CapacityReport, type DashboardSnapshot,
+  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type DashboardSnapshot,
   type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
@@ -46,6 +46,8 @@ export interface Transport {
   setNetwork(n: Network): Promise<void>
   /** Mock only: jump factory time. */
   jump?(t: number): Promise<void>
+  /** Live only: 問戰情室, a read-only question answered from the read tools (POST /api/ask). */
+  ask?(question: string): Promise<AskAnswer>
 }
 
 // ---------------- live ----------------
@@ -127,6 +129,7 @@ export class LiveTransport implements Transport {
     return () => { closed = true; clearTimeout(timer); clearInterval(poll); ws?.close() }
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
+  ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   rollback(version?: number, confirm = false) {
     return postJSON<ScheduleVersion>(API.scheduleRollback, { ...(version == null ? {} : { version }), confirm })

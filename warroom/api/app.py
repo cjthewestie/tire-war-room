@@ -52,6 +52,8 @@ from warroom.api.runtime import Runtime
 from warroom.config import ROOT
 from warroom.contracts import (
     Anomaly,
+    AskAnswer,
+    AskRequest,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalStatus,
@@ -345,7 +347,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                pin_guard: PinGuard | None = None, kiosk_token: str | None = None,
                container: bool | None = None, weak_push_delay_s: float | None = None) -> FastAPI:
     """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at / and /phone."""
-    holder: dict[str, Runtime] = {}
+    holder: dict[str, Any] = {}
     access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts, kiosk_token, container)
     guard = pin_guard or PinGuard()
     devices = DeviceRegistry()
@@ -706,6 +708,22 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if kb is None:
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
+
+    # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
+    @app.post("/api/ask", response_model=AskAnswer)
+    async def ask(body: AskRequest, session: Session = Depends(supervisor)) -> AskAnswer:
+        """The supervisor asks a question; the model picks read tools, code runs only ASK_TOOLS and
+        logs everything under an ASK-nnnn id. Same session rule as approvals: LAN down → on-site only."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕提問")
+        if r.c.tools is None:
+            raise HTTPException(status_code=503, detail="tools unavailable (degraded mode)")
+        if "ask" not in holder:
+            from warroom.agent.ask import AskAgent
+            holder["ask"] = AskAgent(r.settings)
+        return await holder["ask"].ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
+                                       now=r.clock.now(), actor=session.actor)
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")

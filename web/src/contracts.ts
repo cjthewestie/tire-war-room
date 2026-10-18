@@ -172,6 +172,27 @@ export interface SafetyAction {
   latency_ms: number
 }
 
+// 問戰情室: the supervisor's read-only question (POST /api/ask)
+export interface AskStepResult {
+  tool: string
+  args: Record<string, unknown>
+  ok: boolean
+  error: string | null
+  summary: string
+}
+
+export interface AskAnswer {
+  id: string // "ASK-0001": the audit entries carry it as event_id
+  question: string
+  answer: string
+  steps: AskStepResult[]
+  intercepted: { tool: string; args: Record<string, unknown>; state: string; reason: string }[]
+  mode: LLMMode
+  fell_back_to_mock: boolean
+  factory_time: string
+  total_ms: number
+}
+
 export interface ToolResult {
   call_id: string
   tool: ToolName
@@ -543,6 +564,7 @@ export const API = {
   audit: "/api/audit", // ?since_seq=N&limit=200
   sopSearch: "/api/sop/search", // ?q=...&k=3
   simControl: "/api/sim/control", // POST SimControl
+  ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
   ws: "/ws",
 } as const
 

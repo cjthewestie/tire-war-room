@@ -963,6 +963,15 @@ class Runtime:
         except Exception:  # noqa: BLE001
             return []
 
+    def ask_context(self) -> dict[str, Any]:
+        """What the 問戰情室 planner sees: factory time, abnormal machines, open events."""
+        abnormal = [t for t in self.machine_tiles() if t.status not in NORMAL_STATUSES]
+        return {"factory_time": self.clock.now().isoformat(),
+                "abnormal": [t.machine_id for t in abnormal],
+                "abnormal_temp_c": {t.machine_id: t.temp_c for t in abnormal},
+                "open_events": [{"id": e.id, "machine_id": e.machine_id, "state": e.state.value, "goal": e.goal}
+                                for e in self.events() if e.closed_at is None]}
+
     def all_approvals(self) -> list[ApprovalRequest]:
         a = self.approvals
         if hasattr(a, "all"):

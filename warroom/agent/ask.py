@@ -1,0 +1,349 @@
+"""問戰情室 (ask the war room): the supervisor's read-only question path.
+
+It reuses the event harness instead of adding a second agent: the same model, the same allow-listed
+tools through the same Registry, the same append-only audit log. Three steps, two of them code:
+
+  1. PLAN    the model (or the mock rules) returns an AskPlan: up to ASK_MAX_STEPS read steps.
+  2. RUN     code runs each step that is open for questions (ASK_TOOLS). Anything else (a write tool,
+             solve_schedule, a name off the allow-list, a step past the limit) is refused and logged
+             INTERCEPTED. Every call and result is logged like an event's.
+  3. ANSWER  the model writes 1-3 sentences from the tool results only. Code checks it: a number that
+             is not in the results replaces the answer with the results themselves (template), and so
+             does a model failure. A change request ("停掉", "重排"...) gets the results only.
+
+Nothing here can write: ASK_TOOLS holds no write tool, and the API refuses the question path when the
+LAN is down for anyone but the on-site seat, like approvals."""
+from __future__ import annotations
+
+import itertools
+import json
+import re
+import time
+from collections.abc import Callable
+from typing import Any
+
+from warroom import factory as F
+from warroom.agent.commander import detect_server_kind, thinking_off
+from warroom.agent.narrate import fmt_num, machine_label
+from warroom.agent.state_machine import _brief
+from warroom.config import Settings
+from warroom.contracts import (
+    ASK_MAX_STEPS,
+    ASK_TOOLS,
+    WRITE_TOOLS,
+    AskAnswer,
+    AskPlan,
+    AskStep,
+    AskStepResult,
+    AuditKind,
+    AuditLog,
+    LLMMode,
+    ToolCall,
+    ToolName,
+    ToolResult,
+)
+
+ContextFn = Callable[[], dict[str, Any]]
+
+_CATALOGUE = """\
+- read_sensors {machine_ids: [id], minutes: float=30} 讀感測器：現值、30 分最低、趨勢
+- predict_anomaly {machine_id, channel='temp_c', horizon_min=30} 時序預測：未來的穩定值與區間
+- cure_formula {size:'S'|'M'|'L', actual_temp_c, elapsed_h} Arrhenius 硫化時間（需要尺寸、實際溫度、已硫化時數）
+- query_orders_shifts {order_ids?, press_ids?} 訂單交期、班表、人力缺口、指定硫化機的下一模
+- sop_search {query, k=3} SOP 知識庫"""
+
+_MACHINES = "；".join(
+    [f"{m.id}={machine_label(m.id)}" for m in F.MACHINES if m.line is not F.Line.CURE]
+    + ["CURE-01..CURE-11 = 1..11 號硫化機（7-10 號可做中大胎）"])
+
+PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一個問題，你只決定要查哪些資料，不回答、不做任何變更。
+只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
+規則：
+1. 最多 {ASK_MAX_STEPS} 步，只能用下列唯讀工具；你沒有任何寫入、排程或通知的權限。
+2. 機台用代號（例如 CURE-07）。問題沒指名機台時，查「目前異常機台」。
+3. 問到人力、班表、交期、下一模 → query_orders_shifts；問到怎麼處理 → sop_search。
+工具：
+{_CATALOGUE}
+機台代號：{_MACHINES}"""
+
+ANSWER_SYSTEM = """你是實心胎工廠戰情室的查詢助理。只根據「查詢結果」用繁體中文回答主管，最多 3 句。
+數字照抄查詢結果，不估算、不補充結果裡沒有的事；查不到就直說查不到。你不能做任何變更，需要變更時請主管走事件核准流程。"""
+
+
+def ask_plan_schema() -> dict[str, Any]:
+    s = AskPlan.model_json_schema()
+    s["required"] = ["steps"]
+    return s
+
+
+# ------------------------------------------------------------------ mock planner (no model)
+_CHANGE_RX = re.compile(r"停掉|停機|關掉|重排|調人|調 ?\d* ?人|加班|核准|改成|設定|通知")
+_PRESS_RX = re.compile(r"(\d{1,2})\s*號(?:硫化)?機?")
+_ID_RX = re.compile(r"\b(?:CURE-\d{2}|[A-D]-[A-Z]+|BOND-01)\b")
+
+
+def machines_in(question: str) -> list[str]:
+    """Machine ids named in a question: 'CURE-07', '7 號機', '7號硫化機', 'A 線大開煉機'."""
+    q = question.upper()
+    found: list[str] = []
+
+    def add(mid: str) -> None:
+        if mid in F.MACHINE_BY_ID and mid not in found:
+            found.append(mid)
+    for mid in _ID_RX.findall(q):
+        add(mid)
+    for n in _PRESS_RX.findall(question):
+        add(f"CURE-{int(n):02d}")
+    compact = question.replace(" ", "")
+    name_count: dict[str, int] = {}
+    for m in F.MACHINES:
+        name_count[m.name] = name_count.get(m.name, 0) + 1
+    # longest first, and a matched name is cut out, so 大開煉機 never also reads as 開煉機
+    for m in sorted((m for m in F.MACHINES if m.line is not F.Line.CURE), key=lambda m: -len(m.name)):
+        label = machine_label(m.id).replace(" ", "")
+        if label in compact:
+            add(m.id)
+            compact = compact.replace(label, "")
+        elif name_count[m.name] == 1 and m.name in compact:   # 大開煉機 alone names A-BIGOPEN
+            add(m.id)
+            compact = compact.replace(m.name, "")
+    return found
+
+
+def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
+    """Keyword rules: what a supervisor asks on the night shift."""
+    q = question
+    named = machines_in(q)
+    orders = re.search(r"訂單|交期|班|人力|缺|排程|下一模|延誤|遲交", q)
+    sop = re.search(r"SOP|sop|怎麼處理|處置|怎麼辦|步驟|程序", q)
+    # no machine named: the abnormal ones, but only for a status question (not staffing or SOP)
+    mids = named or ([] if orders or sop else list(context.get("abnormal", []))[:3])
+    presses = [m for m in mids if m.startswith("CURE-")]
+    steps: list[AskStep] = []
+    if mids:
+        steps.append(AskStep(tool=ToolName.READ_SENSORS.value, args={"machine_ids": mids, "minutes": 30}))
+    if mids and re.search(r"預測|會不會|接下來|之後|趨勢|多久", q):
+        steps.append(AskStep(tool=ToolName.PREDICT_ANOMALY.value, args={"machine_id": mids[0], "horizon_min": 30}))
+    if orders:
+        args: dict[str, Any] = {"press_ids": presses} if presses else {}
+        steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args=args))
+    if sop:
+        steps.append(AskStep(tool=ToolName.SOP_SEARCH.value, args={"query": q, "k": 2}))
+    if not steps:
+        steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args={}))
+    return AskPlan(steps=steps[:ASK_MAX_STEPS], rationale="規則模式：依問題關鍵字選工具")
+
+
+# ------------------------------------------------------------------ result -> one line
+def summarize(tool: ToolName, data: dict[str, Any]) -> str:
+    """One Chinese line per tool result; the answer is built only from these lines."""
+    try:
+        if tool is ToolName.READ_SENSORS:
+            parts = []
+            for mid, s in (data.get("summary") or {}).items():
+                bits = []
+                if "temp_c_now" in s:
+                    bits.append(f"溫度 {fmt_num(s['temp_c_now'])}°C")
+                if "temp_c_min" in s:
+                    bits.append(f"30 分最低 {fmt_num(s['temp_c_min'])}°C")
+                if "trend_c_per_min" in s:
+                    bits.append(f"趨勢 {s['trend_c_per_min']:+.2f}°C/分")
+                if "steam_kgf_cm2_now" in s:
+                    bits.append(f"蒸汽壓 {fmt_num(s['steam_kgf_cm2_now'])} kgf/cm²")
+                if "water_flow_lpm_now" in s:
+                    bits.append(f"水流 {fmt_num(s['water_flow_lpm_now'])} L/分")
+                parts.append(f"{machine_label(mid)}：" + "、".join(bits or [f"{k} {v}" for k, v in list(s.items())[:3]]))
+            return "；".join(parts) or "沒有讀值"
+        if tool is ToolName.PREDICT_ANOMALY:
+            mins = round(float(data.get("horizon_s", 1800)) / 60)
+            return (f"{machine_label(data['machine_id'])} 預測 {mins} 分後 {fmt_num(data['predicted_value'])}"
+                    f"（區間 {fmt_num(data['band_lo'])}–{fmt_num(data['band_hi'])}，現值 {fmt_num(data['now_value'])}）")
+        if tool is ToolName.CURE_FORMULA:
+            return f"硫化總時數 {fmt_num(data['total_cure_h'])} h（多 {fmt_num(data['extra_h'])} h）"
+        if tool is ToolName.QUERY_ORDERS_SHIFTS:
+            bits = []
+            gaps = data.get("gaps") or []
+            bits.append("人力缺口：" + ("、".join(gaps) if gaps else "無"))
+            jobs = data.get("next_jobs") or []
+            if jobs:
+                bits.append("下一模：" + "、".join(
+                    f"{machine_label(j['press_id'], short=True)} {j['order_id']} {str(j['mold_in'])[5:16].replace('T', ' ')} 入模"
+                    for j in jobs[:3]))
+            orders = sorted(data.get("orders") or [], key=lambda o: str(o.get("due")))
+            if orders:
+                o = orders[0]
+                bits.append(f"最近交期 {o['id']}（{o['size']}，{o.get('done', 0)}/{o['qty']}，{o['due']}）")
+            return "；".join(bits)
+        if tool is ToolName.SOP_SEARCH:
+            hits = data.get("hits") or []
+            if not hits:
+                return "SOP：查無相關 SOP"
+            # the text itself, so the answer can quote it instead of inventing steps
+            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{' '.join(str(h.get('text', '')).split())[:160]}"
+                                       for h in hits[:2])
+    except (KeyError, TypeError, ValueError):
+        pass
+    return json.dumps(_brief(data, 300), ensure_ascii=False, default=str)[:300]
+
+
+_NUM_RX = re.compile(r"\d+(?:\.\d+)?")
+
+
+def ungrounded_numbers(answer: str, question: str, results: list[AskStepResult]) -> list[str]:
+    """Numbers in the answer that appear neither in the tool summaries nor in the question.
+    Code checks the model: one invented number and the model's answer is not used."""
+    source = question + " " + " ".join(r.summary for r in results if r.ok)
+    known = set(_NUM_RX.findall(source))
+    known |= {n.split(".")[0] for n in known}            # "122.3" also vouches for "122"
+    return [n for n in _NUM_RX.findall(answer) if n not in known]
+
+
+def template_answer(results: list[AskStepResult]) -> str:
+    ok = [r.summary for r in results if r.ok and r.summary]
+    if not ok:
+        return "查不到資料：本次查詢的工具都沒有成功。"
+    return "查詢結果：" + "。".join(ok) + "。"
+
+
+# ------------------------------------------------------------------ the agent
+class AskAgent:
+    """Read-only Q&A on the event harness. `client` (an AsyncOpenAI) is injectable for tests."""
+
+    def __init__(self, settings: Settings, client: Any = None):
+        self.settings = settings
+        self.mode = LLMMode(settings.llm_mode)
+        self._ids = itertools.count(1)
+        self.client = client
+        self.server_kind = "openai"
+        if self.mode is LLMMode.LLM and client is None:
+            from openai import AsyncOpenAI
+            self.client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key_effective,
+                                      timeout=settings.llm_timeout_s, max_retries=0)
+            self.server_kind = detect_server_kind(settings.base_url)
+
+    def _extra(self) -> dict[str, Any]:
+        extra = thinking_off(self.server_kind)
+        return {"extra_body": extra} if extra else {}
+
+    async def _llm_plan(self, question: str, context: dict[str, Any]) -> AskPlan:
+        user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
+        r = await self.client.chat.completions.create(
+            model=self.settings.model, temperature=0.0, max_tokens=400,
+            messages=[{"role": "system", "content": PLAN_SYSTEM}, {"role": "user", "content": user}],
+            response_format={"type": "json_schema", "json_schema": {"name": "AskPlan", "schema": ask_plan_schema()}},
+            **self._extra())
+        text = (r.choices[0].message.content or "").strip()
+        text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
+        return AskPlan.model_validate_json(text)
+
+    async def _llm_answer(self, question: str, results: list[AskStepResult]) -> str:
+        lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
+        r = await self.client.chat.completions.create(
+            model=self.settings.model, temperature=0.0, max_tokens=300,
+            messages=[{"role": "system", "content": ANSWER_SYSTEM},
+                      {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
+            **self._extra())
+        text = (r.choices[0].message.content or "").strip()
+        if not text:
+            raise ValueError("empty answer")
+        return text
+
+    async def ask(self, question: str, *, tools: Any, audit: AuditLog, context: dict[str, Any],
+                  now: Any, actor: str = "supervisor") -> AskAnswer:
+        t0 = time.perf_counter()
+        ask_id = f"ASK-{next(self._ids):04d}"
+        audit.append(AuditKind.SYSTEM, actor, {"msg": "ask", "question": question}, event_id=ask_id)
+        fell_back = False
+
+        # 1. PLAN
+        tp = time.perf_counter()
+        error: str | None = None
+        if self.mode is LLMMode.LLM:
+            try:
+                plan = await self._llm_plan(question, context)
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"[:300]
+                if not self.settings.llm_fallback_to_mock:
+                    raise
+                plan, fell_back = mock_plan(question, context), True
+        else:
+            plan = mock_plan(question, context)
+        audit.append(AuditKind.LLM_CALL, "ask", {
+            "phase": "plan", "mode": self.mode.value, "model": self.settings.model if self.mode is LLMMode.LLM else None,
+            "total_ms": round((time.perf_counter() - tp) * 1000, 1), "fell_back_to_mock": fell_back, "error": error,
+            "steps": [s.model_dump(mode="json") for s in plan.steps], "rationale": plan.rationale}, event_id=ask_id)
+
+        # 2. RUN: only ASK_TOOLS, at most ASK_MAX_STEPS
+        results: list[AskStepResult] = []
+        intercepted: list[dict[str, Any]] = []
+        for i, step in enumerate(plan.steps, start=1):
+            why = None
+            try:
+                tool = ToolName(step.tool)
+            except ValueError:
+                tool, why = None, "not on the allow-list"
+            if why is None and tool not in ASK_TOOLS:
+                why = "write tool: questions are read-only" if tool in WRITE_TOOLS \
+                    else "not open for questions (side effect)"
+            if why is None and i > ASK_MAX_STEPS:
+                why = f"more than {ASK_MAX_STEPS} steps"
+            if why is not None:
+                rec = {"tool": step.tool, "args": step.args, "state": "ASK", "reason": why}
+                intercepted.append(rec)
+                audit.append(AuditKind.INTERCEPTED, "ask", rec, event_id=ask_id)
+                continue
+            res = await self._run(tools, audit, ask_id, i, tool, step.args)
+            results.append(AskStepResult(tool=tool.value, args=step.args, ok=res.ok, error=res.error,
+                                         summary=summarize(tool, res.data) if res.ok else ""))
+
+        # 3. ANSWER
+        ta = time.perf_counter()
+        error = None
+        answer_fell_back = False
+        ungrounded: list[str] = []
+        change = bool(_CHANGE_RX.search(question))
+        # a change request gets the facts only: the model never phrases what "will happen" to the plant
+        if self.mode is LLMMode.LLM and not fell_back and not change:
+            try:
+                answer = await self._llm_answer(question, results)
+                ungrounded = ungrounded_numbers(answer, question, results)
+                if ungrounded:
+                    error = f"ungrounded numbers {ungrounded}: model answer replaced by the results"
+                    answer = template_answer(results)
+            except Exception as e:
+                error = f"{type(e).__name__}: {e}"[:300]
+                if not self.settings.llm_fallback_to_mock:
+                    raise
+                answer, answer_fell_back = template_answer(results), True
+        else:
+            answer = template_answer(results)
+        fell_back = fell_back or answer_fell_back
+        if intercepted:
+            answer += f"（已攔下 {len(intercepted)} 個不允許的動作：查詢只能讀，不能變更）"
+        elif change:
+            answer += "（問戰情室只能查詢，不能變更；停機、重排、調人請走事件核准流程）"
+        audit.append(AuditKind.LLM_CALL, "ask", {
+            "phase": "answer", "mode": self.mode.value, "total_ms": round((time.perf_counter() - ta) * 1000, 1),
+            "fell_back_to_mock": answer_fell_back, "error": error, "ungrounded": ungrounded,
+            "skipped": "change request: facts only" if change and self.mode is LLMMode.LLM else None},
+            event_id=ask_id)
+        audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": answer}, event_id=ask_id)
+        return AskAnswer(id=ask_id, question=question, answer=answer, steps=results, intercepted=intercepted,
+                         mode=self.mode, fell_back_to_mock=fell_back, factory_time=now,
+                         total_ms=round((time.perf_counter() - t0) * 1000, 1))
+
+    @staticmethod
+    async def _run(tools: Any, audit: AuditLog, ask_id: str, i: int, tool: ToolName,
+                   args: dict[str, Any]) -> ToolResult:
+        call = ToolCall(id=f"{ask_id}:Q{i}", event_id=ask_id, step_id=f"Q{i}", tool=tool, args=args)
+        audit.append(AuditKind.TOOL_CALL, f"tool:{tool.value}",
+                     {"call_id": call.id, "step_id": call.step_id, "args": args, "attempt": 1, "state": "ASK"},
+                     event_id=ask_id)
+        try:
+            res = await tools.acall(call)
+        except Exception as e:  # noqa: BLE001 - the registry never raises; be safe anyway
+            res = ToolResult(call_id=call.id, tool=tool, ok=False, error=f"{type(e).__name__}: {e}")
+        audit.append(AuditKind.TOOL_RESULT, f"tool:{tool.value}",
+                     {"call_id": call.id, "step_id": call.step_id, "ok": res.ok, "error": res.error,
+                      "duration_ms": res.duration_ms, "attempt": 1, "data": _brief(res.data)}, event_id=ask_id)
+        return res

@@ -318,6 +318,10 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-card { background: #1a1c20; border-radius: 22px; padding: 18px 16px 16px; border: 1px solid #2a2d33; box-shadow: 0 10px 30px rgba(0, 0, 0, .35); }
 .ph-card.idle h2 { font-size: 18px; margin: 0 0 8px; }
 .ph-hist { font-size: 13px; color: var(--ink-dim); margin: 6px 0 0; }
+.ph-ask { margin-top: 12px; }
+.ph-ask .ph-opts { flex-wrap: wrap; }
+.ph-answer { border-top: 1px solid #2a2d33; margin-top: 12px; padding-top: 10px; font-size: 14.5px; line-height: 1.55; }
+.ph-answer p { margin: 4px 0; }
 .ph-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
 .ph-risk { font-size: 12px; color: var(--warn); background: var(--warn-soft); padding: 1px 8px; border-radius: 999px; }
 .ph-round { font-size: 12.5px; color: #ffd0cb; background: #5a1f1a; padding: 2px 10px; border-radius: 999px; font-weight: 700; }

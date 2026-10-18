@@ -15,7 +15,7 @@ One directory per owner. Do not edit another owner's directory; ask for a contra
 | `warroom/tools/` | tools | `ToolRegistry` | `Registry`, `ToolContext`, `build_registry`, `TOOL_SPECS`, `arrhenius_cure` |
 | `warroom/schedule/` | schedule | `Scheduler`, `ScheduleStore` | `CpSatScheduler`, `HeuristicScheduler`, `FallbackScheduler`, `FileScheduleStore`, `back_propagate`, `capacity_report` |
 | `warroom/kb/` | kb | `SopKB` | `QdrantSopKB`; corpus `warroom/kb/sop/*.md` |
-| `warroom/agent/` | agent | `CommanderClient`, `ActionGate`, `AuditLog`, `ApprovalBroker`, `EventStateMachine` | `OpenAICommander`, `MockCommander`, `make_commander`, `RuleGate`, `JsonlAuditLog`, `ApprovalBrokerImpl`, `StateMachine` |
+| `warroom/agent/` | agent | `CommanderClient`, `ActionGate`, `AuditLog`, `ApprovalBroker`, `EventStateMachine` | `OpenAICommander`, `MockCommander`, `make_commander`, `RuleGate`, `JsonlAuditLog`, `ApprovalBrokerImpl`, `StateMachine`, `AskAgent` (問戰情室, read-only Q&A on `ASK_TOOLS`) |
 | `warroom/api/` | api | REST + `/ws` (`REST_ENDPOINTS`), `Runtime` wiring + main loop | `create_app`, `Runtime` |
 | `web/` | web | dashboard `index.html` (p.2) + phone `phone.html` (p.11 card) | React + Vite + TS |
 | `deploy/`, `bench/` | deploy | docker-compose for Spark (vLLM Nemotron NVFP4, Qdrant), systemd/watchdog, unplug test, latency/memory benchmarks | — |
@@ -51,6 +51,10 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 - **VERIFY** is code, not LLM: compare the expectation with live readings. Miss → hypothesis REJECTED → **REPLAN** with the rejected list.
 - Failure policy (`MAX_TOOL_RETRIES=1`, `MAX_CONSECUTIVE_FAILURES=2`): retry once, then SOP path; CP-SAT timeout → heuristic backup (`fell_back=True`); 2 consecutive failures → `SAFE_STOP`, previous schedule kept. Schedule versions kept; one-click rollback.
 - Tools opened by state: `TOOLS_BY_STATE`. Write tools only in EXECUTE.
+
+## Ask the war room (read-only)
+
+`POST /api/ask` → `AskAgent.ask`: PLAN (model returns `AskPlan`, ≤ `ASK_MAX_STEPS` steps; mock = keyword rules) → RUN (code runs only `ASK_TOOLS` via the same `Registry.acall`; anything else → `INTERCEPTED`) → ANSWER (model writes from the step summaries only; failure → template). Audit: `SYSTEM ask` → `LLM_CALL plan` → `TOOL_CALL`/`TOOL_RESULT` (state `ASK`) → `LLM_CALL answer` → `SYSTEM answered`, all with `event_id = ASK-nnnn`. No state machine, no gate: nothing in `ASK_TOOLS` writes, so there is nothing to gate.
 
 ## Key numbers
 

@@ -201,6 +201,13 @@ TOOLS_BY_STATE: dict[EventState, frozenset[ToolName]] = {
                                   ToolName.CURE_FORMULA, ToolName.QUERY_ORDERS_SHIFTS}),
 }
 
+# 問戰情室 (ask the war room): the supervisor's read-only question path. Same allow-list, same
+# registry, same audit log as an event, but only these tools are ever open: no write tool, and no
+# solve_schedule (it stores a PROPOSED schedule version, which is a side effect).
+ASK_TOOLS = frozenset({ToolName.READ_SENSORS, ToolName.PREDICT_ANOMALY, ToolName.CURE_FORMULA,
+                       ToolName.SOP_SEARCH, ToolName.QUERY_ORDERS_SHIFTS})
+ASK_MAX_STEPS = 4
+
 
 class RiskLevel(StrEnum):
     """4 risk levels (page 7 threshold 4). Anything not on the allow-list is not a level:
@@ -1049,8 +1056,47 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/audit", None, "AuditEntry[]"),                  # ?since_seq=N&limit=200
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
     ("POST", "/api/sim/control", "SimControl", "{ok: bool}"),
+    ("POST", "/api/ask", "AskRequest", "AskAnswer"),               # 問戰情室: read-only Q&A
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream
 )
+
+
+class AskRequest(_M):
+    question: str = Field(min_length=1, max_length=300)
+
+
+class AskStep(_M):
+    """One step the model asks for. `tool` is a plain string on purpose: a name off the allow-list
+    must reach the code so it can be refused and logged INTERCEPTED, not fail JSON parsing."""
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+
+
+class AskPlan(_M):
+    """What the model returns for a question: up to ASK_MAX_STEPS read steps. It never answers here;
+    the answer is written only from the tool results."""
+    steps: list[AskStep] = Field(default_factory=list)
+    rationale: str | None = None
+
+
+class AskStepResult(_M):
+    tool: str
+    args: dict[str, Any] = Field(default_factory=dict)
+    ok: bool
+    error: str | None = None
+    summary: str = ""                 # one line the answer is built from
+
+
+class AskAnswer(_M):
+    id: str                           # "ASK-0001"; the audit entries carry it as event_id
+    question: str
+    answer: str
+    steps: list[AskStepResult] = Field(default_factory=list)
+    intercepted: list[dict[str, Any]] = Field(default_factory=list)   # refused tool requests
+    mode: LLMMode
+    fell_back_to_mock: bool = False
+    factory_time: datetime
+    total_ms: float = 0.0
 
 
 # =====================================================================================
