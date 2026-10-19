@@ -130,7 +130,8 @@ def test_openshell_policy_follows_schema_and_stays_on_the_spark():
     assert set(p["filesystem_policy"]["read_write"]) == {"/app/data/runtime", "/tmp"}
     ports = set()
     for name, rule in p["network_policies"].items():
-        assert rule["binaries"] == [{"path": "/opt/venv/bin/python*"}], name
+        # OpenShell matches the real executable, so the uv venv symlink's target must be listed too
+        assert rule["binaries"] == [{"path": "/usr/local/bin/python3.12"}, {"path": "/opt/venv/bin/python*"}], name
         for ep in rule["endpoints"]:
             assert ep["host"] == "192.168.10.20"
             assert all(any(ipaddress.ip_network(n).subnet_of(pn) for pn in PRIVATE) for n in ep["allowed_ips"])
@@ -143,7 +144,7 @@ def test_openshell_launcher_dry_run_fills_the_policy(tmp_path):
                        env={"PATH": "/usr/bin:/bin", "SPARK_HOST": "10.1.2.3"}, capture_output=True, text=True,
                        check=True)
     assert "${" not in r.stdout
-    assert "openshell sandbox create --name warroom --from warroom-app:latest --policy" in r.stdout
+    assert "openshell sandbox create --detach --name warroom --from warroom-app:latest --policy" in r.stdout
     assert "BASE_URL=http://10.1.2.3:8001/v1" in r.stdout
 
 
