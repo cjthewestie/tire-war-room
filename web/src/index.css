@@ -497,7 +497,7 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .tabs { display: none; }
   .stages { flex-wrap: wrap; overflow: visible; }
 
-  .bottomnav { display: grid; grid-template-columns: repeat(3, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
+  .bottomnav { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
     height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 0 max(env(safe-area-inset-left), 8px) env(safe-area-inset-bottom) max(env(safe-area-inset-right), 8px);
     background: rgba(14, 16, 20, .94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
   .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 12px; }

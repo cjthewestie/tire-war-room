@@ -22,6 +22,8 @@ export type EventState =
 export type ToolName =
   | "read_sensors" | "predict_anomaly" | "cure_formula" | "solve_schedule" | "sop_search"
   | "query_orders_shifts" | "confirm_schedule" | "set_cure_time" | "notify_teams"
+/** Tools that change the plant (mirrors contracts.py WRITE_TOOLS). */
+export const WRITE_TOOLS: readonly ToolName[] = ["confirm_schedule", "set_cure_time", "notify_teams"]
 export type RiskLevel = "R0" | "R1" | "R2" | "R3"
 export type GateVerdict = "allow" | "needs_approval" | "reject"
 export type ApprovalStatus = "pending" | "approved" | "modified" | "rejected" | "expired"

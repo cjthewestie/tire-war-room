@@ -42,6 +42,8 @@ export interface Transport {
   currentShifts(): Promise<Shift[]>
   capacity(): Promise<CapacityReport>
   audit(): Promise<AuditEntry[]>
+  /** Live only: every audit entry of one event (GET /api/audit?event_id=…), for the agent console backfill. */
+  eventAudit?(eventId: string): Promise<AuditEntry[]>
   /** Simulate the offline tiers (page 9). Live: POST /api/sim/network; the backend then reports `header.network`. */
   setNetwork(n: Network): Promise<void>
   /** Mock only: jump factory time. */
@@ -143,6 +145,7 @@ export class LiveTransport implements Transport {
   async currentShifts() { return shiftInstances(Date.now(), CURRENT_SHIFTS) }
   capacity() { return getJSON<CapacityReport>(API.capacity) }
   audit() { return getJSON<AuditEntry[]>(`${API.audit}?limit=200`) }
+  eventAudit(eventId: string) { return getJSON<AuditEntry[]>(`${API.audit}?event_id=${encodeURIComponent(eventId)}&limit=5000`) }
   async setNetwork(n: Network) { await postJSON('/api/sim/network', { network: n }) }
 }
 

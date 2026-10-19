@@ -1,23 +1,23 @@
-import { useState } from 'react'
-import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
+import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress } from '../contracts'
 import { LINES, LINE_SHORT, ML_PRESSES, machineLabel } from '../factory'
 import { fmtHM, fmtNum } from '../format'
-import { RISK_PLAIN, closedTitle, hypLabel, hypName, plain } from '../plain'
+import { closedTitle, hypLabel, hypName, plain } from '../plain'
 import { isAbnormal, primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, StageChain, TimelineTable } from './common'
 import { TemperatureTrend } from './Trend'
+import { PendingApproval } from '../agent/ApprovalVisual'
 
-export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
+export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void }) {
   const { state } = useWarRoom()
   const s = state.snapshot
   if (!s) return <div className="loading">等待工廠資料…</div>
-  const lanDown = s.header.network === 'lan_down'
   return (
     <div className="monitor-wrap">
       <KpiStrip s={s} pending={state.pending} />
+      <PendingCards pending={state.pending} focusEvent={s.focus?.event_id ?? primaryEvent(s.events)?.id ?? null} onAgent={onAgent} />
       <div className="monitor">
-        <FocusPanelView focus={s.focus} pending={state.pending} lanDown={lanDown} />
+        <FocusPanelView focus={s.focus} pending={state.pending} />
         <div className="col-left">
           <OrdersPanel orders={s.orders} />
           <SemiPanel semi={s.semi_finished} />
@@ -25,6 +25,38 @@ export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
         <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
       </div>
     </div>
+  )
+}
+
+/** One full visual card (the focus event's, else the oldest) above the monitor; any other pending
+ *  approval is a one-line row that opens the Agent tab on its event, so the plant view stays near the top. */
+function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalRequest[]; focusEvent: string | null; onAgent?: (eventId?: string) => void }) {
+  const { state } = useWarRoom()
+  if (!pending.length) return null
+  const main = pending.find((a) => a.event_id === focusEvent) ?? pending[0]
+  const rest = pending.filter((a) => a !== main)
+  const machineOf = (a: ApprovalRequest) => state.snapshot?.events.find((e) => e.id === a.event_id)?.machine_id
+  return (
+    <>
+      <PendingApproval key={main.id} req={main} onAgent={onAgent ? () => onAgent(main.event_id) : undefined} />
+      {rest.length > 0 && (
+        <ul className="apv-more" aria-label="其他待核准" data-testid="pending-more">
+          {rest.map((a) => {
+            const m = machineOf(a)
+            return (
+              <li key={a.id}>
+                <a href="#agent" onClick={(e) => { if (onAgent) { e.preventDefault(); onAgent(a.event_id) } }}>
+                  <span className={`risk r-${a.risk}`}>{a.risk}</span>
+                  {m && <b>{machineLabel(m)}</b>}
+                  <span>{plain(a.title)}</span>
+                  <span className="go">看計畫並核准 →</span>
+                </a>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </>
   )
 }
 
@@ -98,10 +130,8 @@ function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
   )
 }
 
-function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null; pending: ApprovalRequest[]; lanDown: boolean }) {
-  const { transport, state } = useWarRoom()
-  const [sent, setSent] = useState<Record<string, string>>({})
-  const [err, setErr] = useState<string | null>(null)
+function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending: ApprovalRequest[] }) {
+  const { state } = useWarRoom()
   if (!focus) {
     const ev = primaryEvent(state.snapshot?.events)
     return (
@@ -117,15 +147,6 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
       </Panel>
     )
   }
-  const approve = async (p: PendingAction) => {
-    if (!transport) return
-    setErr(null)
-    setSent((x) => ({ ...x, [p.approval_id]: p.option_id ?? 'A' }))
-    try {
-      await transport.decide({ request_id: p.approval_id, decision: 'approve', option_id: p.option_id, via: lanDown ? 'touchscreen' : 'dashboard', decided_by: '主管', reason: '戰情室核准' })
-    } catch (e) { setErr(String(e)); setSent((x) => { const c = { ...x }; delete c[p.approval_id]; return c }) }
-  }
-  const req = (id: string) => pending.find((a) => a.id === id)
   const closed = focus.state === 'closed' || focus.state === 'safe_stop'
   const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
   const view = focusView(focus, ev, [...pending, ...state.resolved])
@@ -159,20 +180,10 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
         {(focus.revoked ?? []).map((r) => (
           <li key={`rv-${r}`} className="revoked"><span className="ck" aria-hidden>↺</span><span><em className="act-k">已撤回<span className="sr">：</span></em>{plain(r)}</span></li>
         ))}
-        {focus.pending.length > 1 && <li className="pick-one">以下方案擇一核准</li>}
-        {focus.pending.map((p) => {
-          const r = req(p.approval_id)
-          const s = sent[p.approval_id]
-          return (
-            <li key={`${p.approval_id}-${p.option_id}`} className="todo">
-              <span className="box" aria-hidden />
-              <span className="todo-l"><em className="act-k">待核准<span className="sr">：</span></em>{plain(p.label)}{r && <small className={`risk r-${r.risk}`}>{RISK_PLAIN[r.risk]}{r.round > 1 ? `・第 ${r.round} 輪` : ''}</small>}</span>
-              <button className="btn-approve" disabled={!!s} onClick={() => approve(p)}>{s === p.option_id ? '送出中…' : '核准'}</button>
-            </li>
-          )
-        })}
+        {focus.pending.length > 0 && (
+          <li className="todo-visual"><span className="ck" aria-hidden>◆</span><span><em className="act-k">待核准<span className="sr">：</span></em>{focus.pending.length > 1 ? `${focus.pending.length} 個方案擇一，` : ''}請在上方核准卡看計畫、排程與方案後決定</span></li>
+        )}
       </ul>
-      {err && <p className="err">核准失敗：{err}</p>}
       <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
       {focus.timeline.length > 0 && (
         <details className="focus-tl">
