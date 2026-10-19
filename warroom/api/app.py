@@ -494,6 +494,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     async def snapshot() -> DashboardSnapshot:
         return rt().snapshot()
 
+    @app.get("/api/world")
+    async def world() -> dict[str, Any]:
+        """The whole plant around the machines (issue #11): orders, materials, dock, people, energy, quality,
+        maintenance. Read only. Shape: warroom.sim.world.WorldSnapshot."""
+        snap = rt().world_snapshot()
+        if snap is None:
+            raise HTTPException(status_code=503, detail="world view unavailable for this sim")
+        return snap.model_dump(mode="json")
+
     @app.get("/api/focus", response_model=FocusPanel | None)
     async def focus() -> FocusPanel | None:
         return rt().focus_panel()

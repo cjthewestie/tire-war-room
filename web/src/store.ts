@@ -1,6 +1,6 @@
 // Client state: one reducer fed by WsMessages (from the live /ws or from the mock engine).
 import type {
-  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, ScheduleVersion, WsMessage,
+  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
 
 export interface ClockState { factory_time: string; speed: number; paused: boolean }
@@ -16,11 +16,22 @@ export interface WarRoomState {
   visited: Record<string, EventState[]>   // per event id, states seen in order
   lastAlert: { event_id: string; title: string; summary: string; ts: string } | null
   lastMessageAt: number
+  /** The whole plant around the machines (orders, materials, dock, people, energy, quality, maintenance). Live only. */
+  world: WorldSnapshot | null
 }
 
 export const initialState: WarRoomState = {
   snapshot: null, pending: [], resolved: [], clock: null, schedule: null, scheduleRev: 0,
-  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0,
+  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null,
+}
+
+/** Apply a WS "world" message: a full one replaces, a delta overwrites only the sections it carries.
+ *  A delta before any full snapshot is ignored (GET /api/world or the on-connect full message fills it). */
+export function mergeWorld(w: WorldSnapshot | null, d: WorldDelta): WorldSnapshot | null {
+  const { full, ...rest } = d
+  if (full) return rest as WorldSnapshot
+  if (!w || d.rev < w.rev) return w
+  return { ...w, ...rest }
 }
 
 function upsertEvent(list: Event[], e: Event): Event[] {
@@ -99,8 +110,12 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
         clock: msg.data,
         snapshot: s.snapshot ? { ...s.snapshot, header: { ...s.snapshot.header, factory_time: msg.data.factory_time } } : s.snapshot,
       }
+    case 'world':
+      return { ...base, world: mergeWorld(s.world, msg.data) }
     case 'anomaly':
       return base
+    default:
+      return base          // a message type this build does not know yet: keep the state
   }
 }
 
