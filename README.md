@@ -47,7 +47,7 @@
 
 打開 `http://localhost:8000`（戰情室）、`http://localhost:8000/phone`（主管手機）和 `http://localhost:8000/factory`（3D 工廠）。用真手機從廠內 Wi-Fi 核准時，先設 `WARROOM_SUPERVISOR_PIN=<8 碼以上>` 再啟動，手機頁會要求輸入。
 
-團隊正式資料集回放（`data/team_dataset_v2/`，隊友做的合成資料）：`WARROOM_REPLAY=team_both ./start.sh`（或 `team_ev1` 大開煉機 112°C、`team_ev2` 7 號硫化機 119.5°C），在「正常生產」情境播放資料集的感測器曲線。
+團隊正式資料集回放（`data/team_dataset/`，隊友做的合成資料）：`WARROOM_REPLAY=team_both ./start.sh`（或 `team_ev1` 大開煉機 112°C、`team_ev2` 7 號硫化機 119.5°C），在「正常生產」情境播放資料集的感測器曲線。
 
 不開瀏覽器、只看時間軸：
 

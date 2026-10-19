@@ -9,7 +9,7 @@ SOP (its best chunk), each carrying the SOP id, title, file and section as the c
 If the embedding model cannot be loaded (no cache and no network), the KB degrades to a
 lexical-only in-memory index instead of failing: `mode` says which one is active.
 
-Team dataset SOPs (data/team_dataset_v2/sop_chunks.jsonl, 60 chunks / 12 SOPs, synthetic; CJ
+Team dataset SOPs (data/team_dataset/sop_chunks.jsonl, 60 chunks / 12 SOPs, synthetic; CJ
 2026-10-20: the team's official dataset) are indexed alongside, in their own collection
 `<collection>_team`, every chunk tagged source="team_dataset". `search()` still ranks only the
 15 house SOPs (the page-11 answers stay exactly as they were); `search_team()` ranks the team

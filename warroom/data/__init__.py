@@ -1,2 +1,1 @@
-"""warroom/data — adapters for external datasets. team_ids: the team dataset V2 id map;
-team_dataset: read-only loaders (replay windows, SOP chunks, past incidents)."""
+"""Team dataset access (issue #11): id mapping (team_ids) and the CSV loader (team_dataset)."""

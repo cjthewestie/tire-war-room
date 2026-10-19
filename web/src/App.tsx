@@ -6,11 +6,14 @@ import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
 import { ScheduleTab } from './components/ScheduleTab'
+import { WorldTab } from './components/WorldTab'
 import { useWarRoom, WarRoomProvider } from './useWarRoom'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 
-function readTab(): Tab { return location.hash === '#schedule' ? 'schedule' : location.hash === '#agent' ? 'agent' : 'monitor' }
+function readTab(): Tab {
+  return location.hash === '#schedule' ? 'schedule' : location.hash === '#agent' ? 'agent' : location.hash === '#world' ? 'world' : 'monitor'
+}
 
 function Dashboard() {
   const [tab, setTab] = useState<Tab>(readTab)
@@ -37,7 +40,7 @@ function Dashboard() {
       </div>
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，警示燈已亮。AI 與安全核心照常在邊緣主機運作。</div>}
-      <main>{tab === 'monitor' ? <MonitorTab onMachine={setMachine} onAgent={openAgent} /> : tab === 'schedule' ? <ScheduleTab />
+      <main>{tab === 'monitor' ? <MonitorTab onMachine={setMachine} onAgent={openAgent} /> : tab === 'schedule' ? <ScheduleTab /> : tab === 'world' ? <WorldTab />
         : <Suspense fallback={<div className="loading">載入 Agent 對話台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測</footer>
@@ -47,6 +50,9 @@ function Dashboard() {
         </button>
         <button className={tab === 'schedule' ? 'on' : ''} aria-current={tab === 'schedule' ? 'page' : undefined} onClick={() => go('schedule')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 6h10M4 12h16M4 18h7" /></svg>排程與人力
+        </button>
+        <button className={tab === 'world' ? 'on' : ''} aria-current={tab === 'world' ? 'page' : undefined} onClick={() => go('world')}>
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M3 20V9l5 3V9l5 3V5h4l1 15zM3 20h18" /></svg>工廠全貌
         </button>
         <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} onClick={() => go('agent')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>Agent 對話台

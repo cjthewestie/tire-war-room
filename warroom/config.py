@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     port: int = 8000
     sim_speed: float = 1.0
     scenario: str = "normal"
-    # Team dataset replay (data/team_dataset_v2): "" off | team_ev1 | team_ev2 | team_both.
+    # Team dataset replay (data/team_dataset): "" off | team_ev1 | team_ev2 | team_both.
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))
     approval_timeout_s: float = 600.0

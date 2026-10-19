@@ -1,4 +1,4 @@
-"""Team dataset V2 (data/team_dataset_v2): id map, files, Arrhenius cross-check, replay, SOP chunks,
+"""Team dataset V2 (data/team_dataset): id map, files, Arrhenius cross-check, replay, SOP chunks,
 past incidents. CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」."""
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from warroom import factory as F
 from warroom.config import Settings
 from warroom.contracts import AuditKind, CureFormulaArgs, SafetyActionKind, ScenarioName, TireSize
 from warroom.data import team_dataset as TD
-from warroom.data.team_ids import TEAM_MACHINE_IDS, UNMAPPED, to_machine_id, to_team_id
+from warroom.data.team_ids import DATASET_MACHINE_ID, MACHINE_ID, UNMAPPED, machine_id
 from warroom.sim import Factory, ReplaySource
 from warroom.sim.physics import STEAM_NOMINAL_KGF_CM2, steam_for_temp
 from warroom.sim.team_replay import REPLAY_MODES, TeamReplayFactory, replay_start
@@ -22,10 +22,10 @@ SIZE = {"小胎": TireSize.S, "中胎": TireSize.M, "大胎": TireSize.L}
 
 # ------------------------------------------------------------------ id map
 def test_id_map_covers_all_28_machines_one_to_one():
-    assert len(TEAM_MACHINE_IDS) == 28 and not UNMAPPED
-    assert len(set(TEAM_MACHINE_IDS.values())) == 28
-    for team, ours in TEAM_MACHINE_IDS.items():
-        assert to_team_id(ours) == team
+    assert len(MACHINE_ID) == 28 and not UNMAPPED
+    assert len(set(MACHINE_ID.values())) == 28
+    for team, ours in MACHINE_ID.items():
+        assert DATASET_MACHINE_ID[ours] == team
 
 
 @pytest.mark.parametrize("label, want", [
@@ -33,8 +33,8 @@ def test_id_map_covers_all_28_machines_one_to_one():
     ("V07", "CURE-07"), ("V08", "CURE-08"), ("V07.T", "CURE-07"), ("A03 大開煉機", "A-BIGOPEN"),
     ("L01 油壓機", "BOND-01"), ("輸送帶", None), ("人工", None), ("X99", None),
 ])
-def test_to_machine_id(label, want):
-    assert to_machine_id(label) == want
+def test_machine_id(label, want):
+    assert machine_id(label) == want
 
 
 def test_every_dataset_equipment_label_maps_to_the_same_process():
@@ -43,7 +43,7 @@ def test_every_dataset_equipment_label_maps_to_the_same_process():
     for r in TD.load_table("tire_step"):
         if r["equipment"].endswith("模具"):           # "V07 模具" = the press's mold (入模/出模), not a machine
             continue
-        mid = to_machine_id(r["equipment"])
+        mid = machine_id(r["equipment"])
         if mid is None:
             assert r["equipment"] in ("輸送帶", "人工", "靜置"), r["equipment"]
             continue
@@ -61,7 +61,7 @@ def test_dataset_files_present_and_validated():
         assert TD.load_table(name), name
     lines = [ln for ln in (d / "validation.txt").read_text(encoding="utf-8").splitlines() if ln.strip()]
     assert len(lines) == 25 and all(ln.startswith("PASS") for ln in lines)
-    assert (d / "README.md").is_file()
+    assert (d / "README.md").is_file() and (d / "SOURCE.txt").is_file()
     assert {r["sensor_id"].split(".")[0] for r in TD.load_table("sensor_meta")} == {"A03", "A04", "A06", "V06",
                                                                                      "V07", "V08"}
 

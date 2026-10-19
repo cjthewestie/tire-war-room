@@ -92,7 +92,7 @@ class TeamReplayFactory(Factory):
         by_ts: dict[datetime, dict[str, SensorReading]] = {}
         for w in self.replay_windows:
             out = cache / f"{w}.jsonl"
-            write_replay_jsonl(w, out, start_at=t0, path=self._dataset_path, lead_s=lead)
+            write_replay_jsonl(w, out, start_at=t0, root=self._dataset_path, lead_s=lead)
             self.replay_files[w] = out
             self.replay_shift[w] = t0 - WINDOWS[w].start
             for tick in ReplaySource(out):

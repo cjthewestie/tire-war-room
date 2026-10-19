@@ -20,7 +20,7 @@ Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` sectio
 
 ## Data
 
-- `data/team_dataset_v2/` is the team's official dataset (synthetic; replay + reference data). CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」. Dataset machine codes map to ours only through `warroom/data/team_ids.py`; read `data/team_dataset_v2/README.md` before using it.
+- `data/team_dataset/` is the team's official dataset (synthetic; replay + reference data). CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」. Dataset machine codes map to ours only through `warroom/data/team_ids.py`; read `data/team_dataset/README.md` before using it.
 
 ## Notes for CJ's sessions
 

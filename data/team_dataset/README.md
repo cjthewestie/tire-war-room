@@ -21,7 +21,7 @@ CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」.
 | `sensor_readings.csv.gz` | 311,072 | ts, sensor_id, value, quality, scenario; 2026-10-21 00:00 → 10-28 03:00. 10 s steps, except 1 Hz in the two event windows (10-22 13:30–15:00 and 10-28 01:30–03:00) |
 | `sop_chunks.jsonl` | 60 | 12 SOPs × 5 chunks (SOP-01..SOP-12) |
 | `validation.txt` | 25 | The generator's checks, all PASS |
-| `team_dataset_v2.xlsx` | — | The workbook: input sheets 1_–9_ (global assumptions, tire specs, machine list, orders, processes, teams, staff) and result sheets D1–D12 |
+| `team_dataset.xlsx` (was 實心胎_合成資料_V2_1.xlsx) | — | The workbook: input sheets 1_–9_ (global assumptions, tire specs, machine list, orders, processes, teams, staff) and result sheets D1–D12 |
 
 ## What was committed and what was not
 
@@ -43,6 +43,7 @@ e7679c2cdd17620372e3787944771c24ff2794a24e032f738a238f79a9985830  synthetic_fact
 ## How the war room uses it
 
 - **Machine ids**: `warroom/data/team_ids.py` maps the dataset codes onto our 28 machines: A01..A07 → A-MIX, A-OPEN, A-BIGOPEN, A-SMALLOPEN, A-CAL, A-COOL, A-WIND; B01..B04 → B-MIX, B-OPEN, B-FORM, B-ASSY; C01..C04 → C-PAYOFF, C-EXTR, C-WIND, C-WRAP; D01 → D-CUT; L01 → BOND-01; V01..V11 → CURE-01..11.
+- **People, molds, history** (#14, factory world): `warroom.data.team_dataset.load()` reads staff, roster, mold_change, history_incident and history_daily, with a per-scenario date offset (page 11 10/03 ↔ EV-2 10/28).
 - **Replay**: `WARROOM_REPLAY=team_ev1|team_ev2|team_both ./start.sh` or `uv run python -m warroom.api demo --scenario normal --replay team_both --seconds 2400 --auto-approve`. In the normal scenario, the mapped machines read the dataset's 1 Hz curves, time-shifted onto the sim clock (date 2026-10-03, the window's own time of day). See `warroom/sim/team_replay.py`.
 - **SOPs**: the 60 chunks are indexed into the SOP knowledge base in their own collection, tagged `source = "team_dataset"`. `sop_search` returns them as `team_hits` beside the house SOPs' `hits`.
 - **Past incidents**: `warroom.data.team_dataset.IncidentStore` (read-only). No agent tool uses it yet.

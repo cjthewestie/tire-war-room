@@ -126,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--llm-mode", choices=["mock", "llm"])
         sp.add_argument("--strict", action="store_true", help="fail instead of using fallback components")
         sp.add_argument("--replay", choices=["team_ev1", "team_ev2", "team_both"],
-                        help="play the team dataset's sensor curves (normal scenario; data/team_dataset_v2)")
+                        help="play the team dataset's sensor curves (normal scenario; data/team_dataset)")
         if name == "serve":
             sp.add_argument("--host")
             sp.add_argument("--port", type=int)

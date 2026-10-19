@@ -443,6 +443,10 @@ class Runtime:
         self._baseline: dict[str, dict[str, float]] = {}
         self._last_machines_pub = 0.0
         self._last_snapshot_pub = 0.0
+        self._last_world_pub = 0.0
+        self._world_obj: Any = None              # the sim's World the last WORLD message described
+        self._world_rev = -1
+        self._world_sent: dict[str, str] = {}    # section -> JSON last published (WORLD deltas)
         self._kb_ok: bool | None = None
         self._llm_probe: tuple[float, bool] = (-1e9, False)
         self.ticks = 0
@@ -676,6 +680,10 @@ class Runtime:
                 self.sync_warning_light()
             except Exception:  # noqa: BLE001 - the light must never break the loop
                 log.exception("warning light")
+        try:
+            self._publish_world(now, force)
+        except Exception:  # noqa: BLE001 - the plant view must never break the loop
+            log.exception("world publish")
         if force or now - self._last_machines_pub >= 0.5:
             self._last_machines_pub = now
             self.bus.publish(WsType.MACHINES, {"machines": [t.model_dump(mode="json") for t in self.machine_tiles()]})
@@ -683,6 +691,32 @@ class Runtime:
         if force or now - self._last_snapshot_pub >= 5.0:
             self._last_snapshot_pub = now
             self.bus.publish(WsType.SNAPSHOT, self.snapshot())
+
+    # ------------------------------------------------------------------ the whole plant (issue #11)
+    def world_snapshot(self) -> Any:
+        """WorldSnapshot of the sim's World (orders, materials, dock, people, energy, quality, maintenance),
+        or None when the sim has none (fallback / replay sims)."""
+        w = getattr(self.sim, "world", None)
+        return w.snapshot() if w is not None else None
+
+    def _publish_world(self, now: float, force: bool) -> None:
+        """WORLD deltas: at most once a second (wall), only when the world moved (it steps every 10 factory
+        seconds), only the sections that changed. A new World (scenario load) is sent in full. Nothing
+        extra is sent on connect (existing clients expect snapshot + clock first): a client reads GET /api/world.
+        Extension point for the agent: World.add_listener (warroom/sim/world.py) sees every world event;
+        nothing here wakes the state machine yet."""
+        w = getattr(self.sim, "world", None)
+        if w is None or (w is self._world_obj and w.rev == self._world_rev):
+            return
+        if not force and now - self._last_world_pub < 1.0:
+            return
+        from warroom.sim.world import WORLD_SECTIONS
+        data = w.snapshot().model_dump(mode="json")
+        full = w is not self._world_obj
+        enc = {k: json.dumps(data[k], ensure_ascii=False, sort_keys=True) for k in WORLD_SECTIONS}
+        changed = {k: data[k] for k in WORLD_SECTIONS if full or enc[k] != self._world_sent.get(k)}
+        self._world_obj, self._world_rev, self._world_sent, self._last_world_pub = w, w.rev, enc, now
+        self.bus.publish(WsType.WORLD, {"full": full, "rev": data["rev"], "factory_time": data["factory_time"], **changed})
 
     # ------------------------------------------------------------------ the pipeline
     def compute_busy(self) -> bool:
