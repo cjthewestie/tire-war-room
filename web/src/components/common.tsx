@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import type { EventState, MachineStatus, RiskLevel, TimelineItem } from '../contracts'
+import type { Event, EventState, MachineStatus, RiskLevel, TimelineItem } from '../contracts'
 import { fmtHMS } from '../format'
 
 /** page 10: why the validation layer rejected a reading */
@@ -102,5 +102,24 @@ export function Sparkline({ values, width = 260, height = 56, lo, hi, band, colo
       ))}
       <path d={d} fill="none" stroke={color} strokeWidth={1.6} vectorEffect="non-scaling-stroke" />
     </svg>
+  )
+}
+
+/** The event state machine in judge words (page 7): one row of stages, the current one lit. */
+const STAGES = ['偵測', '判斷', '排程模擬', '安全把關', '主管核准', '執行', '驗證', '結案'] as const
+const STAGE_OF: Record<EventState, number> = {
+  detected: 0, classify: 1, plan: 1, simulate: 2, gate: 3, await_approval: 4, execute: 5, verify: 6, replan: 6, closed: 7, safe_stop: 7,
+}
+export function StageChain({ ev }: { ev: Event }) {
+  const cur = STAGE_OF[ev.state]
+  return (
+    <ol className="stages" aria-label="事件處理流程">
+      {STAGES.map((s, i) => (
+        <li key={s} className={i < cur ? 'done' : i === cur ? 'cur' : ''} aria-current={i === cur ? 'step' : undefined}>
+          {i === 7 && ev.state === 'safe_stop' ? '安全停止' : s}
+        </li>
+      ))}
+      {(ev.replans > 0 || ev.state === 'replan') && <li className="replan">重新規劃 ×{Math.max(1, ev.replans)}</li>}
+    </ol>
   )
 }

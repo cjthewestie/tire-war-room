@@ -78,18 +78,18 @@ export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void
             <div className="drawer-meta">
               <span className={`state-pill ms-${d.state.status}`}>{STATUS_LABEL[d.state.status]}</span>
               {isPress
-                ? <span className="muted small">在模：{job ? `${job.order_id} ${SIZE_LABEL[job.size]}${out ? '・扣模待 QC' : ''}` : '無'}</span>
+                ? <span className="muted small">在模：{job ? `${job.order_id} ${SIZE_LABEL[job.size]}${out ? '・扣模待品管' : ''}` : '無'}</span>
                 : <span className="muted small">膠料：{STAGE_LABEL[d.state.compound_stage]}</span>}
               {d.state.batch_id && <span className="muted small">批號 {d.state.batch_id}</span>}
               <span className="muted small">更新 {fmtHMS(d.state.last_reading?.ts ?? tick)}</span>
             </div>
             {d.state.note && <p className="note">{d.state.note}</p>}
             <div className="tiles">
-              {d.tiles.map((t) => <div key={t.label} className={`tile ${t.status}`}><span className="tile-l">{t.label}</span><span className="tile-v sm">{t.label === '時間' && job ? (out ? (held ? `停用時 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h` : '扣模待 QC') : `${job.cure_elapsed_h.toFixed(1)} h`) : t.value}</span></div>)}
+              {d.tiles.map((t) => <div key={t.label} className={`tile ${t.status}`}><span className="tile-l">{t.label}</span><span className="tile-v sm">{t.label === '時間' && job ? (out ? (held ? `停用時 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h` : '扣模待品管') : `${job.cure_elapsed_h.toFixed(1)} h`) : t.value}</span></div>)}
             </div>
             {job && out && (
               <div className="cure-job held" data-testid="cure-held">
-                <b>{job.order_id}</b>・{SIZE_LABEL[job.size]}・模具 {job.mold_id}・<b className="alarm-t">扣模待 QC</b>
+                <b>{job.order_id}</b>・{SIZE_LABEL[job.size]}・模具 {job.mold_id}・<b className="alarm-t">扣模待品管</b>
                 <span className="muted small">入模 {fmtMD(job.mold_in_at)} {fmtHM(job.mold_in_at)}{held ? `・${fmtMD(held)} ${fmtHM(held)} 停用（已硫化約 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h）` : ''}・不排出模時間，由品管判定後處置（SOP 硫化中斷處置）</span>
               </div>
             )}
