@@ -75,15 +75,24 @@ QUESTION_RX = re.compile(r"[？?]$|為什麼|為何|怎麼|多少|哪|嗎|呢|�
 CHANGE_HINT_RX = re.compile(r"改|換|調|不要|別|要|請|幫我|應該|必須|先|停|加|減|延|提前")
 
 
+FACTORY_RX = re.compile(r"機|排程|訂單|交期|班|人力|加班|調人|溫度|硫化|方案|計劃|計畫|保養|維修|SOP|sop|延誤|產能|胎|模|核准")
+
+
 def rule_intent(text: str) -> str:
-    """'change' | 'question' | 'unsupported' (sounds like a change, but nothing code can enforce)."""
+    """'chitchat' | 'change' | 'question' | 'unsupported' (sounds like a change, but nothing code can
+    enforce) | 'unclear' (not a factory message: nothing is guessed)."""
+    from warroom.agent.ask import smalltalk_reply
     t = text.strip()
+    if smalltalk_reply(t) is not None:
+        return "chitchat"
     if NO_OT_RX.search(t) or NO_TRANSFER_RX.search(t) or PREFER_RX.search(t) or PREFER_KIND_RX.search(t):
         return "change"
     if DOWN_RX.search(t) and machines_in(t):
         return "change"
     if SHIFT_RX.search(t) and machines_in(t):
         return "change"
+    if not FACTORY_RX.search(t) and not machines_in(t):
+        return "unclear"
     if QUESTION_RX.search(t):
         return "question"
     if CHANGE_HINT_RX.search(t) or DOWN_RX.search(t):

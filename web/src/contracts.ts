@@ -13,7 +13,7 @@ export type MachineStatus = "running" | "idle" | "warning" | "alarm" | "stopped"
 export type CompoundStage = "none" | "unvulcanized" | "curative_added"
 export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_kgf_cm2"
 export type DataQuality = "ok" | "out_of_range" | "jump" | "stale" | "neighbor_mismatch" | "missing"
-export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip"
+export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip" | "supervisor_command"
 export type Severity = "info" | "warn" | "critical"
 export type TileStatus = "normal" | "warn" | "alarm"
 export type EventState =
@@ -26,7 +26,7 @@ export type ToolName =
 export const WRITE_TOOLS: readonly ToolName[] = ["confirm_schedule", "set_cure_time", "notify_teams"]
 export type RiskLevel = "R0" | "R1" | "R2" | "R3"
 export type GateVerdict = "allow" | "needs_approval" | "reject"
-export type ApprovalStatus = "pending" | "approved" | "modified" | "rejected" | "expired"
+export type ApprovalStatus = "pending" | "approved" | "modified" | "rejected" | "expired" | "superseded"
 export type DecisionKind = "approve" | "modify" | "reject"
 export type HypothesisStatus = "proposed" | "active" | "rejected" | "confirmed"
 export type SafetyActionKind = "stop_machine" | "hold_batch" | "cure_hold" | "alarm_only"
@@ -291,6 +291,11 @@ export interface ApprovalRequest {
   status: ApprovalStatus
   decision: ApprovalDecision | null
   expires_at: ISODate | null
+  // issue #10: a plan discussion replaces a waiting card with a new version of the same round
+  version?: number                 // v1, v2, ...
+  supersedes?: string | null       // id of the card this one replaced
+  changes?: string[]               // "#A-311：9 號 → 7 號（10/05 11:00 入模）" (code-built)
+  constraints?: string[]           // chips in force: "9 號機 今晚不可用"
 }
 
 export interface AuditEntry {
@@ -345,7 +350,43 @@ export interface Event {
   prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
   closed_at: ISODate | null
   outcome: string | null
+  // issue #10
+  source?: "detector" | "supervisor"
+  command?: string | null
+  constraints?: PlanConstraint[]
+  discuss_replans?: number
 }
+
+// issue #10: 下新任務 (POST /api/command) and 討論這個計劃 (POST /api/events/{id}/discuss)
+export interface PlanConstraint {
+  kind: "machine_unavailable" | "no_overtime" | "no_transfer" | "prefer_option"
+  machine_id: string | null
+  window_label: string | null
+  start: ISODate | null
+  end: ISODate | null
+  option: string | null
+  label: string                    // chip: "9 號機 今晚不可用"
+  text: string
+  at: ISODate | null
+}
+export interface CommandReply { event_id: string; accepted: boolean; reply: string }
+export interface DiscussReply {
+  id: string
+  event_id: string
+  text: string
+  intent: "question" | "change" | "unsupported" | "capped" | "not_waiting"
+  reply: string
+  constraints: PlanConstraint[]
+  replanned: boolean
+  superseded: string | null
+  approval: ApprovalRequest | null
+  changes: string[]
+  classified_by: "model" | "rules"
+  fell_back: boolean
+  ask: AskAnswer | null
+  factory_time: ISODate | null
+}
+export const MAX_DISCUSS_REPLANS = 3
 
 export interface LaborNeed {
   team: TeamId
@@ -567,6 +608,8 @@ export const API = {
   sopSearch: "/api/sop/search", // ?q=...&k=3
   simControl: "/api/sim/control", // POST SimControl
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
+  command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
+  discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
   ws: "/ws",
 } as const
 

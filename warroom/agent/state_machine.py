@@ -375,10 +375,10 @@ class StateMachine:
         if command_kind(text) == "schedule":       # 「9 號機明天保養，重排」: the same constraints a discussion makes
             ev.constraints = rule_constraints(text, now)[0]
         self._events[eid] = ev
-        self.audit.append(AuditKind.SYSTEM, actor, {"command": text, "source": "supervisor", "machine_id": mid},
-                          event_id=eid)
         self.audit.append(AuditKind.STATE_TRANSITION, "state_machine",
                           {"from": None, "to": EventState.DETECTED.value, "reason": "supervisor command"}, event_id=eid)
+        self.audit.append(AuditKind.SYSTEM, actor, {"command": text, "source": "supervisor", "machine_id": mid},
+                          event_id=eid)
         self._note(ev, "主管", f"[人工] 主管指令：{text}", "human", ts=now)
         self._set_alert(ev, AlertCard(title="主管指令", summary=text[:60]), source="detector")
         return ev
@@ -519,6 +519,10 @@ class StateMachine:
     async def _pace(self, since: datetime, seconds: float) -> None:
         """Let sim time reach since+seconds (no-op when already past or pacing is off)."""
         if not self.pace or self.clock is None or seconds <= 0:
+            return
+        if getattr(self.clock, "paused", False):
+            # a paused demo (e.g. the supervisor discussing a plan with time stopped) must not hang on a
+            # latency model: the beat is only cosmetic, so it is skipped
             return
         remaining = (since + timedelta(seconds=seconds) - self._now()).total_seconds()
         if remaining > 1e-6:

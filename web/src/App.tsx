@@ -1,6 +1,6 @@
 // War-room dashboard (proposal page 2) + 排程與人力 tab (pages 4, 6, 11).
 import { lazy, Suspense, useEffect, useState } from 'react'
-import type { AskItem } from './agent/transcript'
+import type { LocalItem } from './agent/transcript'
 import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
@@ -22,7 +22,7 @@ function Dashboard() {
     return () => window.removeEventListener('hashchange', f)
   }, [])
   const go = (t: Tab) => { history.replaceState(null, '', t === 'monitor' ? location.pathname + location.search : `${location.search}#${t}`); setTab(t) }
-  const [asks, setAsks] = useState<AskItem[]>([])
+  const [asks, setAsks] = useState<LocalItem[]>([])
   const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
   const [demoOpen, setDemoOpen] = useState(false)

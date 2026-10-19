@@ -158,12 +158,22 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
         <div className="apv-tags">
           <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
           <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
+          {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
           {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
           {expires && <span className="apv-exp">{expires}決定</span>}
           {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
         </div>
         <h3 className="apv-title">{plain(req.title)}</h3>
         <p className="apv-reason">{plain(req.reason)}</p>
+        {(req.version ?? 1) > 1 && (
+          <div className="apv-changed" data-testid="card-changes">
+            <b>與 v{(req.version ?? 2) - 1} 相比</b>
+            {(req.changes ?? []).length ? <ul>{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul> : <span>排程內容相同</span>}
+          </div>
+        )}
+        {(req.constraints ?? []).length > 0 && (
+          <p className="apv-chips" data-testid="card-constraints"><small>主管條件：</small>{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</p>
+        )}
       </header>
 
       {side

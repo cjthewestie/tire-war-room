@@ -1,8 +1,9 @@
 // Agent 對話台 (issue #8, part A): a Claude-Code-style live transcript of what the AI commander did for
 // one event (state changes, the plan the model returned, every tool call and result, the gate, the
-// supervisor), plus 問戰情室 at the bottom (read-only questions, POST /api/ask).
+// supervisor), plus the input bar at the bottom with three modes (issue #10): 討論這個計劃 (POST
+// /api/events/{id}/discuss), 下新任務 (POST /api/command) and 只查不改 (POST /api/ask).
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AskAnswer, Event } from '../contracts'
+import type { AskAnswer, CommandReply, DiscussReply, Event } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHMS } from '../format'
 import { RISK_PLAIN, hypName, plain } from '../plain'
@@ -15,7 +16,8 @@ import { currentRoundTools, planNodes, toolUses } from './approvalView'
 import { ToolIcon } from './ToolIcon'
 import {
   expectationText, inFilter, thinkContext, withAsks,
-  type ApprovalItem, type AskItem, type Filter, type GateItem, type Item, type ThinkItem, type ToolItem,
+  type ApprovalItem, type AskItem, type ChatItem, type ChipsItem, type Filter, type GateItem, type Item, type LocalItem,
+  type ThinkItem, type ToolItem, type VersionItem,
 } from './transcript'
 import { useTranscript } from './useTranscript'
 import './agent.css'
@@ -25,11 +27,11 @@ const FILTERS: { id: Filter; label: string }[] = [{ id: 'all', label: '全部' }
 const ASK_EXAMPLES = ['7 號機現在怎樣？', '今晚夜班缺誰？', '9 號機下一模是哪張訂單？']
 const PHASE: Record<string, string> = { plan: '規劃', replan: '重新規劃' }
 const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需主管核准', reject: '拒絕' }
-const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回' }
+const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回', superseded: '作廢此卡（討論後改版）', expired: '逾時' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
 
 export function AgentTab({ asks, setAsks, picked, setPicked }: {
-  asks: AskItem[]; setAsks: React.Dispatch<React.SetStateAction<AskItem[]>>
+  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   picked: string | null; setPicked: (id: string) => void
 }) {
   const { state } = useWarRoom()
@@ -70,7 +72,7 @@ function EventSummary({ ev, items, tools }: { ev: Event; items: Item[]; tools: T
 
 function Console({ ev, events, onPick, items, asks, setAsks }: {
   ev: Event | null; events: Event[]; onPick: (id: string) => void; items: Item[]
-  asks: AskItem[]; setAsks: React.Dispatch<React.SetStateAction<AskItem[]>>
+  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
 }) {
   const { state } = useWarRoom()
   const [filter, setFilter] = useState<Filter>('all')
@@ -131,7 +133,7 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
         )}
       </div>
       {!pinned && <button className="con-jump" onClick={jump}>↓ 跳到最新</button>}
-      <AskBar setAsks={setAsks} />
+      <ChatBar ev={ev} waiting={!!waiting && state.pending.some((p) => p.event_id === ev?.id)} setAsks={setAsks} onPick={onPick} />
     </section>
   )
 }
@@ -139,7 +141,7 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
 function Row({ it, ev, nth }: { it: Item; ev: Event | null; nth: number }) {
   switch (it.k) {
     case 'state':
-      return <div className="r-state" data-kind="state"><span>{STATE_LABEL[it.to as keyof typeof STATE_LABEL] ?? it.to}</span>{it.reason && <small>{reasonText(it.reason)}</small>}<time>{fmtHMS(it.ts)}</time></div>
+      return <div className="r-state" data-kind="state" data-to={it.to}><span>{STATE_LABEL[it.to as keyof typeof STATE_LABEL] ?? it.to}</span>{it.reason && <small>{reasonText(it.reason)}</small>}<time>{fmtHMS(it.ts)}</time></div>
     case 'think': return <ThinkRow it={it} ev={ev} nth={nth} />
     case 'tool': return <ToolRow it={it} />
     case 'gate': return <GateRow it={it} />
@@ -156,7 +158,48 @@ function Row({ it, ev, nth }: { it: Item; ev: Event | null; nth: number }) {
     case 'note':
       return <div className={`r-line r-note ${it.tone}`} data-kind="note"><span className="r-dot" /><span>{plain(it.text)}</span><time>{fmtHMS(it.ts)}</time></div>
     case 'ask': return <AskRow it={it} />
+    case 'chat': return <ChatRow it={it} />
+    case 'chips': return <ChipsRow it={it} />
+    case 'version': return <VersionRow it={it} />
   }
+}
+
+function ChatRow({ it }: { it: ChatItem }) {
+  if (it.role === 'me') {
+    return (
+      <div className={`r-chat me ${it.pending ? 'pending' : ''}`} data-kind="chat" data-role="me" data-testid="chat-me">
+        <div className="r-q"><span>{it.text}</span><small>{it.kind === 'command' ? '主管・下新任務' : '主管・討論計劃'}・{fmtHMS(it.ts)}</small></div>
+      </div>
+    )
+  }
+  const head = it.kind === 'summary' ? `AI 指揮官${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'AI 指揮官・無法執行' : 'AI 指揮官・回覆'
+  return (
+    <div className={`r-chat agent k-${it.kind}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : 'chat-agent'}>
+      <header><ToolIcon name="think" /><b>{head}</b>
+        {it.classifiedBy && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        <time>{fmtHMS(it.ts)}</time></header>
+      {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
+      {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
+    </div>
+  )
+}
+
+function ChipsRow({ it }: { it: ChipsItem }) {
+  return (
+    <div className="r-line r-chipsrow" data-kind="chips" data-testid="constraint-chips"><ToolIcon name="gate" />
+      <span><b>主管條件</b>　{it.labels.map((c) => <span key={c} className="chip-c">{c}</span>)}
+        {it.inForce.length > it.labels.length && <small>（目前共 {it.inForce.length} 項：{it.inForce.join('、')}）</small>}<small>程式會套用到每次排程並檢查結果</small></span>
+      <time>{fmtHMS(it.ts)}</time></div>
+  )
+}
+
+function VersionRow({ it }: { it: VersionItem }) {
+  return (
+    <div className="r-version" data-kind="version" data-testid="card-version">
+      <header><ToolIcon name="human" /><b>核准卡 v{it.from} → v{it.to}</b><small>v{it.from} 已作廢，不能再核准</small><time>{fmtHMS(it.ts)}</time></header>
+      {it.changes.length ? <ul>{it.changes.map((c, i) => <li key={i}>{plain(c)}</li>)}</ul> : <p className="muted small">排程內容與上一版相同</p>}
+    </div>
+  )
 }
 
 function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: number }) {
@@ -284,39 +327,102 @@ function reasonText(r: string): string {
 
 let askSeq = 0
 
-function AskBar({ setAsks }: { setAsks: React.Dispatch<React.SetStateAction<AskItem[]>> }) {
+type BarMode = 'discuss' | 'command' | 'ask'
+const MODES: { id: BarMode; label: string; hint: string }[] = [
+  { id: 'discuss', label: '討論這個計劃', hint: '提出現場條件，AI 會重排並發新版核准卡' },
+  { id: 'command', label: '下新任務', hint: '交辦一件事，走計畫 → 把關 → 核准' },
+  { id: 'ask', label: '只查不改', hint: '答案只來自感測器、訂單班表與 SOP' },
+]
+const EXAMPLES: Record<BarMode, string[]> = {
+  discuss: ['9 號機今晚要保養', '不要跨組調人', '為什麼用 9 號機？'],
+  command: ['通知維修組明早檢查 3 號機', '9 號機明天要保養，重排'],
+  ask: ASK_EXAMPLES,
+}
+const PLACEHOLDER: Record<BarMode, string> = {
+  discuss: '跟 AI 討論等待核准的計劃，例如：9 號機今晚要保養（Enter 送出）',
+  command: '交辦新任務，例如：通知維修組明早檢查 3 號機（Enter 送出）',
+  ask: '問戰情室，例如：9 號機下一模是哪張訂單？（Enter 送出）',
+}
+
+function ChatBar({ ev, waiting, setAsks, onPick }: {
+  ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+}) {
   const { transport, state } = useWarRoom()
   const [q, setQ] = useState('')
-  const [busy, setBusy] = useState(false)
-  const can = !!transport?.ask
+  const [busy, setBusy] = useState<string | null>(null)
+  const [picked, setPicked] = useState<BarMode | null>(null)
+  const mode: BarMode = picked === 'discuss' && !waiting ? 'ask' : picked ?? (waiting ? 'discuss' : 'ask')
+  const can = mode === 'ask' ? !!transport?.ask : mode === 'command' ? !!transport?.command : !!transport?.discuss && waiting
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? ''
-  const send = async (question: string) => {
-    const text = question.trim()
-    if (!transport?.ask || !text || busy) return
+  const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, key: string, n: number, ts: string): ChatItem => ({
+    k: 'chat', key, ts, seq: 1e9 + n, role, kind, text, by: 'supervisor', intent: null, version: null,
+    changes: [], constraints: [], classifiedBy: null, fellBack: false, pending: true,
+  })
+  const send = async (raw: string) => {
+    const text = raw.trim()
+    if (!text || busy || !can || !transport) return
     const n = ++askSeq
-    const key = `ask-${n}`
-    setAsks((xs) => [...xs, { k: 'ask', key, ts: ft || new Date().toISOString(), seq: 1e9 + n, question: text, answer: null, error: null }])
-    setQ(''); setBusy(true)
+    setQ('')
+    if (mode === 'ask' && transport.ask) {
+      const key = `ask-${n}`
+      setAsks((xs) => [...xs, { k: 'ask', key, ts: ft || new Date().toISOString(), seq: 1e9 + n, question: text, answer: null, error: null }])
+      setBusy('查詢中…')
+      try {
+        const a: AskAnswer = await transport.ask(text)
+        setAsks((xs) => xs.map((x) => (x.key === key && x.k === 'ask' ? { ...x, answer: a, ts: a.factory_time || x.ts } : x)))
+      } catch (e) {
+        setAsks((xs) => xs.map((x) => (x.key === key && x.k === 'ask' ? { ...x, error: `查詢失敗：${String(e)}` } : x)))
+      } finally { setBusy(null) }
+      return
+    }
+    // discuss / command: shown at once, then replaced by the server's audit rows (the record of truth)
+    const keys = [`me-${n}`, `ag-${n}`]
+    setAsks((xs) => {
+      const ts = ft || new Date().toISOString()
+      return [...xs, chat('me', mode === 'command' ? 'command' : 'discuss', text, keys[0], n, ts),
+        { ...chat('agent', 'reply', mode === 'command' ? 'AI 指揮官接下任務中…' : 'AI 指揮官判讀中；若要改計劃，會重新求解排程並發新版核准卡…', keys[1], n + 0.5, ts), by: 'agent' }]
+    })
+    setBusy(mode === 'command' ? '交辦中…' : '重新規劃中…')
+    const drop = () => setAsks((xs) => xs.filter((x) => !keys.includes(x.key)))
     try {
-      const a: AskAnswer = await transport.ask(text)
-      setAsks((xs) => xs.map((x) => (x.key === key ? { ...x, answer: a, ts: a.factory_time || x.ts } : x)))
+      if (mode === 'command' && transport.command) {
+        const r: CommandReply = await transport.command(text)
+        if (r.event_id) { drop(); onPick(r.event_id) } else {
+          // not a task (e.g. a greeting): the reply stays here, no event was opened
+          setAsks((xs) => xs.map((x) => (x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply } : x)))
+        }
+      } else if (ev && transport.discuss) {
+        const r: DiscussReply = await transport.discuss(ev.id, text)
+        void r
+        drop()
+      }
     } catch (e) {
-      setAsks((xs) => xs.map((x) => (x.key === key ? { ...x, error: `查詢失敗：${String(e)}` } : x)))
-    } finally { setBusy(false) }
+      setAsks((xs) => xs.map((x) => (x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: `送出失敗：${String(e)}` } : x)))
+    } finally { setBusy(null) }
   }
   return (
-    <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }}>
+    <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }} data-mode={mode}>
+      <div className="askbar-modes" role="radiogroup" aria-label="輸入模式">
+        {MODES.map((m) => {
+          const off = m.id === 'discuss' && !waiting
+          return (
+            <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} disabled={off || !!busy}
+              title={off ? '目前沒有等待核准的計劃' : m.hint} onClick={() => setPicked(m.id)} data-testid={`mode-${m.id}`}>{m.label}</button>
+          )
+        })}
+        <span className="askbar-hint">{MODES.find((m) => m.id === mode)?.hint}{mode === 'discuss' && ev ? `・${machineLabel(ev.machine_id)}` : ''}</span>
+      </div>
       <div className="askbar-ex">
-        <span className="ro" title="答案只來自感測器、訂單班表與 SOP；停機、重排、調人請走事件核准流程">只查不改</span>
-        {ASK_EXAMPLES.map((x) => <button type="button" key={x} disabled={!can || busy} onClick={() => void send(x)}>{x}</button>)}
+        {EXAMPLES[mode].map((x) => <button type="button" key={x} disabled={!can || !!busy} onClick={() => void send(x)}>{x}</button>)}
       </div>
       <div className="askbar-in">
-        <textarea rows={1} maxLength={300} value={q} disabled={!can || busy} aria-label="問戰情室"
-          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕提問' : '問戰情室，例如：9 號機下一模是哪張訂單？（Enter 送出）') : '模擬資料模式不支援提問，需連線後端'}
+        <textarea rows={1} maxLength={300} value={q} disabled={!can || !!busy} aria-label={MODES.find((m) => m.id === mode)?.label}
+          data-testid="chat-input"
+          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : PLACEHOLDER[mode]) : transport?.mode === 'mock' ? '模擬資料模式不支援，需連線後端' : '目前沒有等待核准的計劃'}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(q) } }} />
-        <button type="submit" className="btn-send" disabled={!can || busy || !q.trim()}>{busy ? '查詢中…' : '送出'}</button>
+        <button type="submit" className="btn-send" disabled={!can || !!busy || !q.trim()} data-testid="chat-send">{busy ?? '送出'}</button>
       </div>
     </form>
   )

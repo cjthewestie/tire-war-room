@@ -754,6 +754,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if r.network == "lan_down" and not session.local:
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕下指令")
         _sm_ready(r)
+        from warroom.agent.ask import smalltalk_reply
+        chat = smalltalk_reply(body.text)
+        if chat is not None:       # a greeting is not a task: no event, no tool; still audited
+            r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
+                                                             "reply": chat, "event": None})
+            return CommandReply(event_id="", accepted=False, reply=chat)
         ev = r.start_command(body.text.strip(), session.actor)
         from warroom.agent.talk import physical_request
         refusal = physical_request(body.text)

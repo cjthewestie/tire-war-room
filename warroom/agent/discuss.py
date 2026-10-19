@@ -36,7 +36,7 @@ from warroom.contracts import (
 from warroom.factory import CURE_PRESS_IDS
 
 CLASSIFY_SYSTEM = """你是實心胎工廠戰情室的計劃討論助理。主管正在看一張「等待核准」的處置計劃，他說了一句話。
-判斷這句話是 question（問問題、要解釋，不改計劃）、change（要求改計劃的條件）或 other。
+判斷這句話是 chitchat（打招呼、道謝、閒聊）、question（問工廠或計劃的問題、要解釋，不改計劃）、change（要求改計劃的條件）或 other（看不懂、與工廠無關）。
 change 時把條件轉成 constraints，只能用這四種：
 - machine_unavailable：某台機某段時間不能用（保養、維修、停機）。machine 用代號：硫化機 CURE-01..CURE-11（「9 號機」= CURE-09）。when 用 tonight|tomorrow_night|tomorrow_morning|tomorrow|today|now|this_week|unspecified。
 - no_overtime：不要加班。
@@ -49,7 +49,7 @@ def classify_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "intent": {"type": "string", "enum": ["question", "change", "other"]},
+            "intent": {"type": "string", "enum": ["chitchat", "question", "change", "other"]},
             "constraints": {"type": "array", "items": {
                 "type": "object",
                 "properties": {
@@ -95,7 +95,7 @@ class PlanTalk:
         raw = (r.choices[0].message.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
         out = json.loads(raw)
-        if not isinstance(out, dict) or out.get("intent") not in ("question", "change", "other"):
+        if not isinstance(out, dict) or out.get("intent") not in ("chitchat", "question", "change", "other"):
             raise ValueError(f"bad classification {raw[:200]!r}")
         out["_raw"] = raw[:600]
         return out
@@ -103,6 +103,9 @@ class PlanTalk:
     async def classify(self, text: str, card: Any, now: Any) -> dict[str, Any]:
         """{intent, constraints, why, by, fell_back, error, model_output, dropped}"""
         res: dict[str, Any] = {"by": "rules", "fell_back": False, "error": None, "model_output": None, "dropped": []}
+        from warroom.agent.ask import smalltalk_reply
+        if smalltalk_reply(text) is not None:          # a greeting / thanks: code answers, no model, no tool
+            return {**res, "intent": "chitchat", "constraints": [], "why": None}
         if self.mode is LLMMode.LLM:
             try:
                 got = await self._llm_classify(text, card)
@@ -119,8 +122,12 @@ class PlanTalk:
                     return {**res, "intent": "change", "constraints": cons, "why": None, "by": "model"}
                 if intent == "question":
                     return {**res, "intent": "question", "constraints": [], "why": None, "by": "model"}
+                if intent == "chitchat":
+                    return {**res, "intent": "chitchat", "constraints": [], "why": None, "by": "model"}
                 if intent == "other":
-                    return {**res, "intent": "unsupported", "constraints": [], "why": None, "by": "model"}
+                    ri = rule_intent(text)
+                    return {**res, "intent": "unsupported" if ri == "unsupported" else "unclear", "constraints": [],
+                            "why": None, "by": "model"}
                 # a change the model could not encode (or encoded wrongly): the rules get one try
                 res["fell_back"] = True
                 res["error"] = "model change had no valid constraint" + (f": {res['dropped']}" if res["dropped"] else "")
@@ -153,7 +160,18 @@ class PlanTalk:
         out = DiscussReply(id=did, event_id=event_id, text=text, intent="question", reply="",
                            classified_by=cls["by"], fell_back=cls["fell_back"], factory_time=now)
         intent = cls["intent"]
-        if intent == "question":
+        if intent in ("chitchat", "unclear"):
+            from warroom.agent.ask import HELLO_REPLY, smalltalk_reply
+            out.intent = intent
+            hint = "「9 號機今晚要保養」「不要加班」，或問「為什麼用 9 號機？」" if card is not None else \
+                "「7 號機現在怎樣？」「今晚夜班缺誰？」"
+            if intent == "chitchat":
+                out.reply = smalltalk_reply(text) or HELLO_REPLY
+                if card is not None:
+                    out.reply += f"目前有一張等待核准的計劃 v{card.version}，你可以說{hint}"
+            else:
+                out.reply = f"我不確定你的意思，所以沒有查資料，也沒有改計劃。你可以說{hint}"
+        elif intent == "question":
             ans = await ask_agent.ask(text, tools=tools, audit=audit, context=context, now=now, actor=actor)
             out.ask = ans
             plan = ""

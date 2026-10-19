@@ -374,8 +374,9 @@ async def test_command_opens_an_event_through_gate_approval_and_audit(tmp_path):
         await p.until(lambda: ev.state is EventState.CLOSED)
         assert "已通知維修" in ev.outcome
         rows = p.audit(ev.id)
-        assert rows[0].kind is AuditKind.SYSTEM and rows[0].payload["command"] == "通知維修組明早檢查 3 號機"
-        assert rows[0].payload["source"] == "supervisor"
+        cmd = next(e for e in rows if e.kind is AuditKind.SYSTEM and "command" in e.payload)
+        assert cmd.payload["command"] == "通知維修組明早檢查 3 號機" and cmd.payload["source"] == "supervisor"
+        assert cmd.actor == "supervisor"
         states = [e.payload["to"] for e in rows if e.kind is AuditKind.STATE_TRANSITION]
         assert states[:4] == ["detected", "classify", "plan", "simulate"] and "await_approval" in states
         assert states[-1] == "closed"
@@ -423,3 +424,79 @@ def test_discussion_window_survives_into_solve_args():
     bad = step.model_copy(update={"args": {"press_blackouts": {"A-BIGOPEN": blk["CURE-09"]}}})
     assert not RuleGate().check(bad, EventState.SIMULATE, True).checks["format_ok"]
     assert timedelta(hours=9) == cons[0].end - cons[0].start
+
+
+# ================================================================ small talk / unclear: converse, never guess a machine
+from warroom.agent.ask import AskAgent, COLD_REPLY, HELLO_REPLY, THANKS_REPLY, UNCLEAR_REPLY  # noqa: E402
+
+
+class CountingTools:
+    def __init__(self):
+        self.calls = []
+
+    async def acall(self, call):
+        self.calls.append(call)
+        from warroom.contracts import ToolResult
+        return ToolResult(call_id=call.id, tool=call.tool, ok=True, data={"summary": {}})
+
+
+def _ask_agent(mode, *contents):
+    if mode == "rules":
+        return AskAgent(Settings(llm_mode="mock"))
+    return AskAgent(Settings(llm_mode="llm", base_url="http://x/v1", model="nemotron"), client=FakeLLM(*contents))
+
+
+@pytest.mark.parametrize("mode", ["rules", "llm"])
+@pytest.mark.parametrize("text,reply", [("哈摟", HELLO_REPLY), ("你好", HELLO_REPLY), ("謝謝", THANKS_REPLY)])
+async def test_ask_small_talk_gets_a_reply_and_no_tool_call(tmp_path, mode, text, reply):
+    from warroom.agent import JsonlAuditLog
+    audit, tools = JsonlAuditLog(tmp_path / "a.jsonl"), CountingTools()
+    agent = _ask_agent(mode)            # the model is never called: an empty FakeLLM would raise
+    a = await agent.ask(text, tools=tools, audit=audit, context={"abnormal": ["A-BIGOPEN"]}, now=NOW)
+    assert a.intent == "chitchat" and a.answer == reply and a.steps == [] and tools.calls == []
+    rows = audit.tail(0, 50)
+    assert rows[-1].payload["intent"] == "chitchat" and rows[-1].payload["tool_calls"] == 0
+    assert not any(e.kind is AuditKind.TOOL_CALL for e in rows)
+
+
+async def test_ask_gibberish_rules_never_guess_a_machine(tmp_path):
+    from warroom.agent import JsonlAuditLog
+    audit, tools = JsonlAuditLog(tmp_path / "a.jsonl"), CountingTools()
+    a = await _ask_agent("rules").ask("asdkjh qwe", tools=tools, audit=audit, context={"abnormal": ["A-BIGOPEN"]}, now=NOW)
+    assert a.intent == "unclear" and a.answer == UNCLEAR_REPLY and tools.calls == []
+
+
+async def test_ask_gibberish_model_empty_plan_is_unclear(tmp_path):
+    from warroom.agent import JsonlAuditLog
+    audit, tools = JsonlAuditLog(tmp_path / "a.jsonl"), CountingTools()
+    agent = _ask_agent("llm", json.dumps({"steps": []}))
+    a = await agent.ask("asdkjh qwe", tools=tools, audit=audit, context={"abnormal": ["A-BIGOPEN"]}, now=NOW)
+    assert a.intent == "unclear" and tools.calls == [] and not a.fell_back_to_mock
+
+
+async def test_ask_cold_model_says_wait_instead_of_guessing(tmp_path):
+    from warroom.agent import JsonlAuditLog
+    audit, tools = JsonlAuditLog(tmp_path / "a.jsonl"), CountingTools()
+    agent = _ask_agent("llm", TimeoutError("Request timed out."))
+    a = await agent.ask("嗯嗯那個", tools=tools, audit=audit, context={"abnormal": ["A-BIGOPEN"]}, now=NOW)
+    assert a.intent == "model_cold" and a.answer == COLD_REPLY and tools.calls == [] and a.fell_back_to_mock
+    # a clear question still gets answered by the rules, and says the model was loading
+    agent = _ask_agent("llm", TimeoutError("Request timed out."))
+    a = await agent.ask("7 號機現在怎樣？", tools=tools, audit=audit, context={}, now=NOW)
+    assert a.intent == "query" and tools.calls and "模型還在載入" in a.answer
+
+
+@pytest.mark.parametrize("mode", ["rules", "llm"])
+@pytest.mark.parametrize("text", ["哈摟", "你好", "謝謝"])
+async def test_discuss_small_talk_changes_nothing(mode, text):
+    t = PlanTalk(Settings(llm_mode="mock")) if mode == "rules" else _llm_talk()   # no model call
+    got = await t.classify(text, None, NOW)
+    assert got["intent"] == "chitchat" and got["constraints"] == []
+
+
+async def test_discuss_gibberish_is_unclear_in_both_modes():
+    assert (await PlanTalk(Settings(llm_mode="mock")).classify("asdkjh qwe", None, NOW))["intent"] == "unclear"
+    got = await _llm_talk(json.dumps({"intent": "other", "constraints": []})).classify("asdkjh qwe", None, NOW)
+    assert got["intent"] == "unclear" and got["by"] == "model"
+    got = await _llm_talk("broken").classify("asdkjh qwe", None, NOW)
+    assert got["intent"] == "unclear" and got["fell_back"]

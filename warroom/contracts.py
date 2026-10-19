@@ -1118,6 +1118,9 @@ class AskAnswer(_M):
     fell_back_to_mock: bool = False
     factory_time: datetime
     total_ms: float = 0.0
+    # chitchat: a greeting / thanks, answered with no tool call; unclear: not sure what to look up (no
+    # machine is guessed); model_cold: the model did not answer in time and the rules could not tell
+    intent: Literal["query", "chitchat", "unclear", "model_cold"] = "query"
 
 
 # =====================================================================================
@@ -1155,7 +1158,7 @@ class DiscussReply(_M):
     id: str                               # "DIS-0001"
     event_id: str
     text: str
-    intent: Literal["question", "change", "unsupported", "capped", "not_waiting"]
+    intent: Literal["question", "change", "unsupported", "capped", "not_waiting", "chitchat", "unclear"]
     reply: str                            # plain Chinese, numbers only from tool results
     constraints: list[PlanConstraint] = Field(default_factory=list)   # added by this message
     replanned: bool = False
