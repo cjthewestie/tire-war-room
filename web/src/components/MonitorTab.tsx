@@ -1,5 +1,5 @@
 import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress } from '../contracts'
-import { LINES, LINE_SHORT, ML_PRESSES, machineLabel } from '../factory'
+import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, machineLabel } from '../factory'
 import { fmtHM, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
 import { isAbnormal, primaryEvent } from '../store'
@@ -157,7 +157,7 @@ function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending:
       <p className="focus-detail">{plain(view.detail)}</p>
       <div className={`focus-grid ${ev && ev.hypotheses.length > 0 ? 'has-judge' : ''}`}>
         <div className="focus-main">
-          <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} />
+          {focus.machine_id in MACHINE_META && <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} />}
           <div className="tiles">
             {focus.tiles.map((t) => (
               <div className={`tile ${t.status}`} key={t.label}>

@@ -14,6 +14,7 @@ export type CompoundStage = "none" | "unvulcanized" | "curative_added"
 export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_kgf_cm2"
 export type DataQuality = "ok" | "out_of_range" | "jump" | "stale" | "neighbor_mismatch" | "missing"
 export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip" | "supervisor_command"
+  | "shift_start" | "order_rush" | "staffing_short"  // issue #17 plant events
 export type Severity = "info" | "warn" | "critical"
 export type TileStatus = "normal" | "warn" | "alarm"
 export type EventState =
@@ -34,10 +35,11 @@ export type ScheduleStatus = "draft" | "proposed" | "active" | "superseded" | "r
 export type SolverName = "cp-sat" | "heuristic"
 export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
+  | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
-  | "rollback" | "notify" | "system"
+  | "rollback" | "notify" | "system" | "task"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
   | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world"
@@ -351,7 +353,7 @@ export interface Event {
   closed_at: ISODate | null
   outcome: string | null
   // issue #10
-  source?: "detector" | "supervisor"
+  source?: "detector" | "supervisor" | "plant"  // plant = issue #17 plant event (machine_id "PLANT")
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
@@ -576,7 +578,7 @@ export interface HealthStatus {
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
 export type WorldOrderStatus = "待排程" | "生產中" | "完成" | "待出貨" | "已出貨"
-export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁" | "下班" | "請假"
+export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁" | "下班" | "請假" | "前往中" | "執行中"  // 前往中/執行中: on a task (issue #17)
 export type WorldZone =
   | "war_room" | "staff" | "line_A" | "line_B" | "line_C" | "line_D" | "line_BOND" | "line_CURE"
   | "break" | "toilet" | "dock" | "off_site"
@@ -627,7 +629,30 @@ export interface WorldSnapshot {
   quality: { inspected_today: number; defects_today: number; yield_pct: number | null; recent: Inspection[]; incidents: IncidentRecord[]; daily: DailyRecord[] }
   maintenance: { in_progress: MaintenanceItem[]; upcoming: MaintenanceItem[]; recent: MaintenanceItem[] }
   events: WorldEvent[]
+  tasks: TasksView
+  goods: GoodsView
 }
+// ---------------- issue #17: worker tasks and goods status (warroom/sim/work.py) ----------------
+export type TaskStatus = "待派" | "前往中" | "執行中" | "完成"
+export type GoodsStatus = "待補料" | "備料中" | "生產中" | "硫化中" | "完成" | "待出貨" | "已出貨"
+export interface WorkTask {
+  id: string; event_id: string | null; approval_id: string | null; step_id: string | null; kind: string; title: string
+  team: TeamId; team_label: string; worker_id: string | null; worker_name: string | null; machine_id: string | null
+  zone: string; where: string; status: TaskStatus; created_at: ISODate; assigned_at: ISODate | null
+  started_at: ISODate | null; done_at: ISODate | null; eta: ISODate | null; walk_min: number; work_min: number
+  progress: number; after: string | null; order_ids: string[]; source: "code"
+}
+export interface TasksView { items: WorkTask[]; counts: Record<TaskStatus, number>; open: number }
+export interface GoodsItem {
+  id: string; order_id: string; size: TireSize; status: GoodsStatus; progress: number; machine_id: string | null
+  press_id: string | null; zone: string; mold_in: ISODate | null; stage_end: ISODate | null; note: string | null
+  rush: boolean; blocked: boolean; late: boolean
+}
+export interface OrderGoods {
+  order_id: string; size: TireSize; qty: number; done: number; in_press: number; queued: number; status: string
+  progress: number; rush: boolean; due: string; next_mold_in: ISODate | null; moved_h: number | null; late: boolean
+}
+export interface GoodsView { items: GoodsItem[]; orders: OrderGoods[]; counts: Record<GoodsStatus, number>; schedule_id: string | null }
 /** WS "world": full = every section; otherwise only the sections that changed since the last message. */
 export type WorldDelta = { full: boolean; rev: number; factory_time: ISODate } & Partial<Omit<WorldSnapshot, "factory_time" | "rev">>
 

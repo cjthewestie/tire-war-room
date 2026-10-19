@@ -13,6 +13,7 @@ import { LINES } from '../factory'
 import type { WarRoomState } from '../store'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
+import { GoodsRings } from './GoodsRings'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
   ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
@@ -610,7 +611,7 @@ function Ambient() {
 }
 
 /** Background workers walking their loops (Minimotive walker). */
-function Walkers() {
+function Walkers({ count = WALKER_LOOPS.length }: { count?: number }) {
   const { group, ticks } = useMemo(() => {
     const group = new THREE.Group()
     const looks = [
@@ -618,14 +619,14 @@ function Walkers() {
       { shirt: '#e8c15a', pants: '#5b4a3a', hair: '#7a4a24' },
       { shirt: '#a993d6', pants: '#4a4a5a', hat: '#f6f1e8' },
     ]
-    const ticks = WALKER_LOOPS.map((pts, i) => {
+    const ticks = WALKER_LOOPS.slice(0, count).map((pts, i) => {
       const f = makeFigure(looks[i])
       f.root.scale.setScalar(0.85)
       if (i === 1) f.handR.add(box(0.14, 0.12, 0.14, '#c9a06a', 0, -0.04, 0.07))
       group.add(f.root)
       const segs = pts.map((p, k) => { const q = pts[(k + 1) % pts.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]) })
       const total = segs.reduce((a, b) => a + b, 0)
-      let s = (i / WALKER_LOOPS.length) * total
+      let s = (i / count) * total
       const speed = 0.55 + i * 0.08
       return (t: number, dt: number) => {
         s = (s + dt * speed) % total
@@ -639,8 +640,15 @@ function Walkers() {
       }
     })
     return { group, ticks }
-  }, [])
+  }, [count])
   useFrame(({ clock }, dt) => { const t = clock.elapsedTime; for (const tk of ticks) tk(t, Math.min(dt, 0.05)) })
+  // test hook (headless e2e only): how many patrol figures walk the aisles
+  useEffect(() => {
+    if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
+    const w = window as unknown as Record<string, unknown>
+    w.__patrol3d = () => ticks.length
+    return () => { delete w.__patrol3d }
+  }, [ticks])
   return <primitive object={group} />
 }
 
@@ -719,7 +727,12 @@ export function World({ state, focusId, active, fp }: { state: WarRoomState; foc
       <BigScreen active={active} />
       <WarRoomScreen />
       {/* live world (issue #11): workers go where the sim says, the truck comes and goes; without it, the idle diorama */}
-      {state.world ? <WorldPeople world={state.world} /> : <><StaffCorner /><Walkers /></>}
+      {/* CJ 2026-10-20 「恢復人力待命 有一兩個人巡邏」: people stand by in the staff corner and two walk a patrol loop;
+          a worker leaves standby only for a real task (issue #17) and walks back when it is done */}
+      <StaffCorner />
+      <Walkers count={state.world ? 2 : WALKER_LOOPS.length} />
+      {state.world && <WorldPeople world={state.world} />}
+      {state.world?.goods && <GoodsRings goods={state.world.goods} />}
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <Ambient />
     </group>
