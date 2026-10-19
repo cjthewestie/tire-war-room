@@ -110,6 +110,26 @@ class ApprovalBrokerImpl:
         self._signal(req.id).set()
         return req
 
+    def supersede(self, request_id: str, by: str = "supervisor", reason: str = "") -> ApprovalRequest:
+        """Issue #10: the supervisor discussed the waiting plan and the agent re-plans it. The card is
+        retired (SUPERSEDED, audited, published) and can no longer be decided; the waiting event wakes
+        up and issues a new version. Only a PENDING card can be superseded."""
+        req = self._reqs.get(request_id)
+        if req is None:
+            raise ApprovalError(f"unknown approval request {request_id}")
+        if req.status is not ApprovalStatus.PENDING:
+            raise ApprovalError(f"approval {req.id} already {req.status.value}")
+        req = req.model_copy(update={"status": ApprovalStatus.SUPERSEDED})
+        self._reqs[req.id] = req
+        if self._audit is not None:
+            self._audit.append(AuditKind.APPROVAL_DECISION, by,
+                               {"request_id": req.id, "decision": "superseded", "reason": reason,
+                                "round": req.round, "version": req.version, "risk": req.risk.value},
+                               event_id=req.event_id)
+        self._publish(WsType.APPROVAL_RESOLVED, req)
+        self._signal(req.id).set()
+        return req
+
     def pending(self) -> list[ApprovalRequest]:
         return [r for r in self._reqs.values() if r.status is ApprovalStatus.PENDING]
 

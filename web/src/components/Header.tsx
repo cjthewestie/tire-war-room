@@ -19,9 +19,9 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
         <h1>實心胎智慧製造戰情室</h1>
       </div>
       <nav className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'agent'} className={tab === 'agent' ? 'on' : ''} onClick={() => onTab('agent')} data-testid="tab-agent">Agent 對話台</button>
         <button role="tab" aria-selected={tab === 'monitor'} className={tab === 'monitor' ? 'on' : ''} onClick={() => onTab('monitor')}>產線監控</button>
         <button role="tab" aria-selected={tab === 'schedule'} className={tab === 'schedule' ? 'on' : ''} onClick={() => onTab('schedule')}>排程與人力</button>
-        <button role="tab" aria-selected={tab === 'agent'} className={tab === 'agent' ? 'on' : ''} onClick={() => onTab('agent')} data-testid="tab-agent">Agent 對話台</button>
       </nav>
       <div className="top-right">
         {net !== 'online' && <span className={`chip net ${net}`} title="離線分層（p.9）">{NET_LABEL[net]}</span>}

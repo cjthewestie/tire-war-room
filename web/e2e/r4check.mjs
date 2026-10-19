@@ -20,7 +20,7 @@ const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezon
 const d = await ctx.newPage()
 d.on('pageerror', (e) => errors.push(e.message))
 const post = (body) => d.evaluate((b) => fetch('/api/sim/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then((r) => r.ok), body)
-await d.goto(BASE + '/', { waitUntil: 'networkidle' })
+await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 
 // ---- 3 bad data
 await post({ action: 'scenario', scenario: 'bad_data' }); await post({ action: 'speed', speed: 30 })

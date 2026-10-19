@@ -145,7 +145,9 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 8. maintenance／info 通知（自動 R1）只能用固定句型，{{m}} 為該機台名稱（如「7 號機」「A 線大開煉機」），必須帶 machine_id，只發給 maintenance／qc／supervisor 或該機台所屬組：{_r1_templates_text()}；其他任何文字都會送主管核准。
 9. cure_formula 的輸入與 solve_schedule 的 cure_overrides_h 由程式依該硫化機現場模次與公式結果填入；你只需引用 "$S1.total_cure_h"。
 10. 若方案讓事件機台停用（machine_out 或 unavailable_presses 含該機），程式以「停用已完成」驗證，expectation 可為 null；其餘方案的 expectation 一律由程式依異常通道定界。
-11. phase=replan 且 context 有 supervisor_rejected（主管否決）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。"""
+11. phase=replan 且 context 有 supervisor_rejected（主管否決）、supervisor_discussion（主管討論）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。
+12. context.source=supervisor 時，這不是異常，是主管下的指令（context.command）：hypothesis.cause_code 填 supervisor_command、statement 寫要完成的事、expectation 為 null；只用工具做得到的部分（通知某組用 notify_teams，message 寫清楚要做什麼、何時、哪台機；排程變更用 solve_schedule 再 confirm_schedule；只想知道狀況用讀取工具）。工具做不到的事（搬動機台、改機台設定、開關閥、任何 PLC 動作）不可假裝能做：steps=[]，rationale 說明做不到的原因與可行的替代做法。
+13. context 有 supervisor_discussion 時：主管在核准前提出的條件（constraints，例如某台機某時段保養、不加班、不跨組調人）由程式在每次 solve_schedule 強制套用並檢查結果；你只需保留原計畫的步驟（含 solve_schedule、confirm_schedule 與同一輪的寫入步驟），重新求解。"""
 
 
 def build_user_message(req: CommanderRequest) -> str:
@@ -413,6 +415,8 @@ class MockCommander:
         rejected_ids = [h.id for h in req.rejected]
         hid = f"H{len(req.rejected) + 1}"
         ctx = req.context or {}
+        if a.kind is AnomalyKind.SUPERVISOR_COMMAND:          # issue #10: a task the supervisor typed
+            return self._command(req, hid)
         if ctx.get("sop_path"):
             return self._sop_path(req, hid, rejected_ids)
         if len(req.rejected) >= 2:
@@ -713,6 +717,57 @@ class MockCommander:
                                   "machine_id": mid, "message": f"{lbl}異常，請現場確認"})],
             alert_card=AlertCard(title=f"{lbl}異常", summary=a.message),
             rationale="無對應規則，先通知維修確認。",
+        )
+
+    def _command(self, req: CommanderRequest, hid: str) -> CommanderPlan:
+        """Issue #10, rule mode: map the supervisor's command onto the tools (notify / re-solve /
+        read). Free-text notices are not R1 templates, so the gate sends them to the supervisor.
+        Anything else gets no step and says why (never an invented action)."""
+        from warroom.agent.talk import command_kind, command_teams
+        a, ctx = req.anomaly, req.context or {}
+        text = str(ctx.get("command") or a.message)
+        mid = a.machine_id if a.machine_id in MACHINE_BY_ID else None
+        lbl = machine_label(mid) if mid else "全廠"
+        kind = command_kind(text)
+        why = ""
+        if req.phase == "replan" and (ctx.get("supervisor_rejected") or ctx.get("sop_path")):
+            kind, why = "stop", ("主管否決，不執行這個指令" if ctx.get("supervisor_rejected") else "工具失敗，不執行，請人工處理")
+        steps: list[PlanStep] = []
+        if kind == "notify":
+            teams = command_teams(text) or [TeamId.MAINTENANCE]
+            if mid:
+                steps.append(PlanStep(id="S1", tool=ToolName.READ_SENSORS, purpose=f"先讀{lbl}現況",
+                                      args={"machine_ids": [mid], "minutes": 30.0}))
+            nk = NotifyKind.MAINTENANCE if teams == [TeamId.MAINTENANCE] else NotifyKind.INFO
+            steps.append(PlanStep(id=f"S{len(steps) + 1}", tool=ToolName.NOTIFY_TEAMS,
+                                  depends_on=[s.id for s in steps], purpose="依主管指令通知（需主管核准）",
+                                  args={"teams": [t.value for t in teams], "kind": nk.value,
+                                        **({"machine_id": mid} if mid else {}), "message": f"主管指示：{text}"}))
+            why = "主管指令：通知相關組別；自由文字通知需主管核准"
+        elif kind == "schedule":
+            steps = [
+                PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查受影響訂單與班表",
+                         args={"press_ids": [mid]} if mid in CURE_PRESS_IDS else {}),
+                PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"], purpose="依主管條件重排",
+                         args={"time_limit_s": 10.0}),
+                PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認新排程（需主管核准）",
+                         args={"schedule_version": "$S2.schedule_version", "reason": f"主管指令：{text}"[:120]}),
+            ]
+            why = "主管指令：排程條件由程式套用，求解器重排，新排程需核准"
+        elif kind == "query":
+            steps = [PlanStep(id="S1", tool=ToolName.READ_SENSORS, purpose=f"讀{lbl}現況",
+                              args={"machine_ids": [mid], "minutes": 30.0})] if mid else \
+                [PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查訂單與班表", args={})]
+            why = "主管指令：只需查詢，不變更"
+        elif kind != "stop":
+            why = "規則模式無法把這個指令對應到工具（通知某組、依條件重排、查詢）；請改用這些說法，或交由現場處理"
+        return CommanderPlan(
+            goal=f"完成主管指令：{text}"[:80],
+            hypothesis=Hypothesis(id=hid, statement=f"主管指令：{text}"[:120], cause_code="supervisor_command",
+                                  status=HypothesisStatus.ACTIVE, expectation=None, evidence=[]),
+            steps=steps,
+            alert_card=AlertCard(title=f"主管指令：{text}"[:20], summary=why[:60] or text[:60]),
+            rationale=why,
         )
 
     def _sop_path(self, req: CommanderRequest, hid: str, rejected_ids: list[str]) -> CommanderPlan:

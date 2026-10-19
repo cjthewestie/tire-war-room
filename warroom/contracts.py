@@ -109,6 +109,7 @@ class AnomalyKind(StrEnum):
     SENSOR_FAULT = "sensor_fault"
     MULTI_MACHINE = "multi_machine"  # several machines on one header/line at once
     SCHEDULE_SLIP = "schedule_slip"  # page 6 box 4: plan vs actual (late de-mold / mold-in / WIP behind T)
+    SUPERVISOR_COMMAND = "supervisor_command"  # issue #10: a task the supervisor typed (POST /api/command)
 
 
 class Severity(StrEnum):
@@ -162,6 +163,8 @@ ALLOWED_TRANSITIONS: dict[EventState, frozenset[EventState]] = {
 # solver; 2 consecutive failures -> SAFE_STOP keeping the previous schedule.
 MAX_TOOL_RETRIES = 1
 MAX_CONSECUTIVE_FAILURES = 2
+# issue #10: a waiting plan may be re-planned from the supervisor's discussion at most this many times
+MAX_DISCUSS_REPLANS = 3
 
 
 class ToolKind(StrEnum):
@@ -234,6 +237,7 @@ class ApprovalStatus(StrEnum):
     MODIFIED = "modified"
     REJECTED = "rejected"
     EXPIRED = "expired"
+    SUPERSEDED = "superseded"   # issue #10: replaced by a newer card after a plan discussion; cannot be decided
 
 
 class DecisionKind(StrEnum):
@@ -584,6 +588,9 @@ class SolveScheduleArgs(_M):
     time_limit_s: float = Field(default=10.0, gt=0, le=30)
     allow_overtime: bool = True
     allow_cross_team: bool = True
+    # issue #10: press -> [[start, end], ...] when it may hold no tire (maintenance). Filled by CODE from
+    # the supervisor's constraints, never by the model; the solver keeps every new tire out of it.
+    press_blackouts: dict[str, list[tuple[datetime, datetime]]] = Field(default_factory=dict)
 
 
 class NotifyKind(StrEnum):
@@ -687,6 +694,7 @@ class SolveRequest(_M):
     time_limit_s: float = 10.0
     allow_overtime: bool = True
     allow_cross_team: bool = True
+    press_blackouts: dict[str, list[tuple[datetime, datetime]]] = Field(default_factory=dict)
 
 
 class SolveResult(_M):
@@ -835,6 +843,11 @@ class ApprovalRequest(_M):
     status: ApprovalStatus = ApprovalStatus.PENDING
     decision: "ApprovalDecision | None" = None
     expires_at: datetime | None = None
+    # issue #10: a plan discussion replaces a waiting card with a new version of the same round
+    version: int = 1                  # v1, v2, ... within this round
+    supersedes: str | None = None     # id of the card this one replaced
+    changes: list[str] = Field(default_factory=list)      # "#A-311：9 號 → 8 號" (code-built, vs the replaced card)
+    constraints: list[str] = Field(default_factory=list)  # chips in force: "9 號機 今晚不可用"
 
 
 class ApprovalDecision(_M):
@@ -903,6 +916,12 @@ class Event(_M):
     prior_rounds: list[StepRound] = Field(default_factory=list)   # earlier rounds' steps, oldest first
     closed_at: datetime | None = None
     outcome: str | None = None
+    # issue #10: who opened it (the detector, or a task the supervisor typed) and what the supervisor
+    # asked the agent to honour while discussing its plan
+    source: Literal["detector", "supervisor"] = "detector"
+    command: str | None = None
+    constraints: list["PlanConstraint"] = Field(default_factory=list)
+    discuss_replans: int = 0
 
 
 # =====================================================================================
@@ -1057,6 +1076,8 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
     ("POST", "/api/sim/control", "SimControl", "{ok: bool}"),
     ("POST", "/api/ask", "AskRequest", "AskAnswer"),               # 問戰情室: read-only Q&A
+    ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
+    ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream
 )
 
@@ -1097,6 +1118,57 @@ class AskAnswer(_M):
     fell_back_to_mock: bool = False
     factory_time: datetime
     total_ms: float = 0.0
+    # chitchat: a greeting / thanks, answered with no tool call; unclear: not sure what to look up (no
+    # machine is guessed); model_cold: the model did not answer in time and the rules could not tell
+    intent: Literal["query", "chitchat", "unclear", "model_cold"] = "query"
+
+
+# =====================================================================================
+# Issue #10: supervisor commands and plan discussion
+# =====================================================================================
+class PlanConstraint(_M):
+    """A change the supervisor asked for while a plan waits, in a form CODE enforces (the model may
+    propose one; code validates it, applies it to every solve and checks the result honours it)."""
+    kind: Literal["machine_unavailable", "no_overtime", "no_transfer", "prefer_option"]
+    machine_id: str | None = None         # machine_unavailable
+    window_label: str | None = None       # "今晚"
+    start: datetime | None = None         # machine_unavailable window (factory time)
+    end: datetime | None = None
+    option: str | None = None             # prefer_option: "A" / "B" / "overtime" / "transfer"
+    label: str                            # chip text: "9 號機 今晚不可用"
+    text: str = ""                        # the supervisor's words it came from
+    at: datetime | None = None
+
+
+class CommandRequest(_M):
+    text: str = Field(min_length=1, max_length=300)
+
+
+class CommandReply(_M):
+    event_id: str
+    accepted: bool                        # False: nothing the tools can do; the event closed with `reply`
+    reply: str
+
+
+class DiscussRequest(_M):
+    text: str = Field(min_length=1, max_length=300)
+
+
+class DiscussReply(_M):
+    id: str                               # "DIS-0001"
+    event_id: str
+    text: str
+    intent: Literal["question", "change", "unsupported", "capped", "not_waiting", "chitchat", "unclear"]
+    reply: str                            # plain Chinese, numbers only from tool results
+    constraints: list[PlanConstraint] = Field(default_factory=list)   # added by this message
+    replanned: bool = False
+    superseded: str | None = None         # old card id
+    approval: ApprovalRequest | None = None   # the new card (v2...)
+    changes: list[str] = Field(default_factory=list)
+    classified_by: Literal["model", "rules"] = "rules"
+    fell_back: bool = False               # the model failed or its answer was not usable
+    ask: AskAnswer | None = None          # a question: the read-only answer
+    factory_time: datetime | None = None
 
 
 # =====================================================================================
@@ -1227,5 +1299,6 @@ class Bus(Protocol):
 
 QueryOrdersShiftsData.model_rebuild()
 ApprovalRequest.model_rebuild()
+Event.model_rebuild()
 
 __all__ = [n for n in dir() if not n.startswith("_")]

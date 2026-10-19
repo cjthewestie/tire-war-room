@@ -100,7 +100,7 @@ function AskBox({ disabled }: { disabled: boolean }) {
   )
 }
 
-const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時' }
+const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時', superseded: '已改版（討論後由新版取代）' }
 
 function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }) {
   const { transport, state } = useWarRoom()
@@ -143,8 +143,15 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
       <div className="ph-top">
         <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>
         <span className="ph-round">{ROUND[a.round] ?? `第${a.round}輪`}核准</span>
+        {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
       </div>
       <h2 className="ph-title">{plain(a.title)}</h2>
+      {(a.version ?? 1) > 1 && (
+        <div className="ph-changed" data-testid="phone-changes">
+          <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
+          {(a.constraints ?? []).length > 0 && <div className="muted">主管條件：{(a.constraints ?? []).join('、')}</div>}
+        </div>
+      )}
       {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       <dl className="ph-info">
         <dt>原因</dt><dd>{plain(a.reason)}</dd>

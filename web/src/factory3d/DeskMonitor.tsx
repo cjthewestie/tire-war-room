@@ -1,5 +1,5 @@
 // Sitting down at the war-room computer (F at the desk): the REAL dashboard page (/) full-size, framed as the desk
-// monitor, fully usable (產線監控 / 排程與人力 tabs, the 展示 strip, approvals). Same origin, so it talks to the same
+// monitor, fully usable (Agent 對話台 first, 產線監控 / 排程與人力 tabs, the 展示 strip, approvals). Same origin, so it talks to the same
 // backend through its own code. Mounted only while open, so the page holds one extra /ws connection only then.
 // Esc or F (outside a text field) inside the page stands up again.
 import { useEffect, useRef } from 'react'
