@@ -341,6 +341,14 @@ class StateMachine:
     def _now(self) -> datetime:
         return self.clock.now() if self.clock else datetime.now(TZ)
 
+    def _approval_expires_at(self, now: datetime) -> datetime:
+        """The card's expiry in FACTORY time. The wait itself is approval_timeout_s of WALL time
+        (approvals.wait), so at SIM_SPEED x the card must show now + timeout x speed; showing
+        now + timeout made a 10x run print an expiry 10x too early (F2, issue #6). A speed change
+        or pause mid-wait can still shift it; the wall-time wait stays the authority."""
+        speed = float(getattr(self.clock, "speed", 1.0) or 1.0) if self.clock is not None else 1.0
+        return now + timedelta(seconds=self.approval_timeout_s * max(speed, 0.0))
+
     async def _sleep(self, seconds: float) -> None:
         if self._sleep_fn is not None:
             await self._sleep_fn(seconds)
@@ -1672,7 +1680,7 @@ class StateMachine:
             id=f"AP-{ev.id}-{rnd}", event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,
             risk=risk, title=plan.alert_card.title, reason=reason, done=done, gaps=list(dict.fromkeys(gaps)),
             delivery_impact=delivery, options=options, actions=self._actions(run, needs, options),
-            expires_at=now + timedelta(seconds=self.approval_timeout_s))
+            expires_at=self._approval_expires_at(now))
         req = self.approvals.request(req)
         ev.approvals.append(req.id)
         self._publish(WsType.EVENT, ev)
@@ -1843,7 +1851,7 @@ class StateMachine:
         req = old.model_copy(update={
             "id": rid, "step_id": needs[0].step.id, "created_at": now, "options": options,
             "actions": self._actions(run, needs, options), "status": ApprovalStatus.PENDING, "decision": None,
-            "expires_at": now + timedelta(seconds=self.approval_timeout_s)})
+            "expires_at": self._approval_expires_at(now)})
         self.approvals.request(req)
         run.ev.approvals.append(rid)
         from warroom.contracts import ApprovalDecision
