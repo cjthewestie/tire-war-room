@@ -557,15 +557,22 @@ export interface DockEntry { ts: ISODate; kind: "arrive" | "depart"; direction: 
 export interface WorldWorker {
   id: string; name: string; team: TeamId; team_label: string; role: "作業員" | "組長" | "維修" | "品管" | "主管"; shift: string
   state: WorkerState; zone: WorldZone; machine_id: string | null; since: ISODate
+  /** team_dataset = data/team_dataset (team's official synthetic dataset); generated = sim assumption */
+  source: "team_dataset" | "generated"; note: string | null
 }
 export interface Inspection {
   id: string; ts: ISODate; stage: "inline" | "final"; line: string; machine_id: string; batch: string; order_id: string | null
   result: "合格" | "不良"; cause: string | null; disposition: string | null; inspector: string
 }
 export interface MaintenanceItem {
-  id: string; machine_id: string; kind: "planned" | "repair"; title: string; start: ISODate; end: ISODate | null
-  status: "planned" | "in_progress" | "done"; assignee: string | null
+  id: string; machine_id: string; kind: "planned" | "repair" | "mold_change"; title: string; start: ISODate; end: ISODate | null
+  status: "planned" | "in_progress" | "done"; assignee: string | null; source: "team_dataset" | "generated"
 }
+export interface IncidentRecord {
+  id: string; date: string; machine_id: string | null; equipment: string; symptom: string; action: string
+  downtime_min: number; outcome: string; source: "team_dataset"
+}
+export interface DailyRecord { date: string; tires_done: number; flex_util_pct: number; ot_hours: number; downtime_min: number; source: "team_dataset" }
 export interface WorldSnapshot {
   factory_time: ISODate
   rev: number
@@ -576,7 +583,7 @@ export interface WorldSnapshot {
   dock: { trucks: WorldTruck[]; next_departure: ISODate | null; next_arrival: ISODate | null; log: DockEntry[] }
   people: { workers: WorldWorker[]; by_zone: Partial<Record<WorldZone, number>>; by_state: Partial<Record<WorkerState, number>>; on_duty: number; total: number }
   energy: { total_kw: number; by_line: Record<string, number>; base_kw: number; contract_kw: number; peak: boolean; kwh_today: number; history: [ISODate, number][] }
-  quality: { inspected_today: number; defects_today: number; yield_pct: number | null; recent: Inspection[] }
+  quality: { inspected_today: number; defects_today: number; yield_pct: number | null; recent: Inspection[]; incidents: IncidentRecord[]; daily: DailyRecord[] }
   maintenance: { in_progress: MaintenanceItem[]; upcoming: MaintenanceItem[]; recent: MaintenanceItem[] }
   events: WorldEvent[]
 }

@@ -13,6 +13,8 @@ from warroom.api.app import create_app
 from warroom.api.runtime import Runtime
 from warroom.config import Settings
 from warroom.contracts import MachineStatus, ScenarioName, TeamId, WsType
+from warroom.data import team_dataset
+from warroom.data.team_ids import MACHINE_ID, WORK_GROUP_MACHINES, machine_id
 from warroom.sim import Factory
 from warroom.sim.world import MATERIALS, ORDER_STAGES, WORLD_SECTIONS, ZONE_LABELS, World
 
@@ -87,22 +89,41 @@ def test_three_days_of_plant_life():
     assert s.quality.recent and all(i.result in ("合格", "不良") for i in s.quality.recent)
 
 
-def test_page11_night_shift_and_supervisor():
-    """Page 11 runs at 02:12 on 10/03; the night supervisor watches from the war room, the day shift is off.
-    The 胎體／胎面膠組 night shift that STARTS on 10/03 (20:00) is the one short (Factory.shifts(): 10/03 夜班缺 1 人)."""
+def test_page11_night_shift_from_team_dataset():
+    """Page 11 (10/03 02:12) plays the dataset's EV-2 night (10/28 02:14): 貼合組 S11 is on sick leave per the team
+    roster, the rest of that night shift is at work, the day shift is off, the night supervisor is in the war room."""
     f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
     s = f.world.snapshot()
+    by_id = {w.id: w for w in s.people.workers}
+    assert by_id["S11"].state == "請假" and by_id["S11"].source == "team_dataset" and "病假" in (by_id["S11"].note or "")
+    assert by_id["S12"].state not in ("下班", "請假") and by_id["S12"].team_label == "貼合組"
+    assert all(by_id[i].state == "下班" for i in ("S01", "S02", "S05", "S13"))       # 早班 staff
     sup = [w for w in s.people.workers if w.team is TeamId.SUPERVISOR and w.state not in ("下班", "請假")]
-    assert len(sup) == 1 and sup[0].zone == "war_room"
-    day = [w for w in s.people.workers if w.shift == "早班"]
-    assert day and all(w.state == "下班" and w.zone == "off_site" for w in day)
-    body_night = [w for w in s.people.workers if w.team is TeamId.BODY and w.shift == "夜班"]
-    assert all(w.state not in ("下班", "請假") for w in body_night)          # 10/02's night shift, full
-    f.step(19 * 3600)                                                       # 10/03 21:12
-    body_night = [w for w in f.world.snapshot().people.workers if w.team is TeamId.BODY and w.shift == "夜班"]
-    assert sorted(w.state == "請假" for w in body_night) == [False, True]
-    gap = next(sh for sh in f.shifts() if sh.team is TeamId.BODY and sh.name == "夜班" and sh.start.day == 3)
-    assert gap.headcount == gap.required - 1
+    assert len(sup) == 1 and sup[0].zone == "war_room" and sup[0].source == "generated"
+
+
+def test_team_dataset_sources_and_dates():
+    ds = team_dataset.load()
+    assert ds is not None and len(ds.staff) == 20
+    f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    s = f.world.snapshot()
+    assert sum(w.source == "team_dataset" for w in s.people.workers) == 20
+    # dataset dates shifted onto the sim clock: EV-2 10/28 <-> page 11 10/03; EV-1 10/22 <-> page 2 10/22
+    assert ds.dataset_date(f.now().date(), ScenarioName.PRESS7_TEMP_DROP, f.now().date()) == team_dataset.EV2_DATE
+    g = Factory(scenario=ScenarioName.OPEN_MILL_OVERHEAT)
+    assert ds.dataset_date(g.now().date(), ScenarioName.OPEN_MILL_OVERHEAT, g.now().date()) == team_dataset.EV1_DATE
+    molds = [m for m in s.maintenance.upcoming if m.kind == "mold_change"]
+    assert molds and molds[0].source == "team_dataset" and molds[0].machine_id.startswith("CURE-")
+    assert len(s.quality.incidents) == 8 and all(i.date < f.now().date() for i in s.quality.incidents)
+    assert {i.machine_id for i in s.quality.incidents} >= {"A-BIGOPEN", "CURE-09"}
+    assert s.quality.daily and all(d.date < f.now().date() for d in s.quality.daily)
+
+
+def test_team_id_mapping_covers_every_machine():
+    from warroom.factory import MACHINE_IDS
+    assert sorted(MACHINE_ID.values()) == sorted(MACHINE_IDS)
+    assert machine_id("A03 大開煉機") == "A-BIGOPEN" and machine_id("V07 硫化機") == "CURE-07" and machine_id("人工") is None
+    assert all(set(ms) <= set(MACHINE_IDS) for ms in WORK_GROUP_MACHINES.values())
 
 
 def test_page11_abnormal_cure_is_flagged_for_inspection():

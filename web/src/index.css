@@ -619,6 +619,9 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .w-log li:last-child, .w-mini li:last-child { border-bottom: 0; }
 .w-mini { margin-bottom: 8px; }
 .w-mini .warn, .w-log .warn { color: var(--warn); }
+.w-mini li.warn { color: var(--ink); }
+.w-mini li.warn b { color: var(--warn); }
+.w-quality .sub { margin-top: 12px; }
 .dir { display: inline-block; width: 18px; text-align: center; border-radius: 4px; font-size: 11.5px; background: var(--panel-3); }
 .dir.inbound { color: var(--info); }
 .dir.outbound { color: var(--accent); }

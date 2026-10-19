@@ -14,8 +14,15 @@ Extension point for the agent (not wired yet, by design): `World.add_listener(fn
 for every world event (new / rush order, delivery late or short, stock-out, defect, repair opened ...).
 A later change can turn chosen kinds into detector-style wake-ups for the state machine there.
 
-Every number below is an assumption for a small solid-tyre plant (no real company data); each constant
-says what it stands for.
+Sources (every item carries `source`):
+- team_dataset (data/team_dataset, the team's official synthetic dataset; ids mapped in warroom/data/team_ids.py,
+  dates shifted per scenario in warroom/data/team_dataset.py): the 20 production staff and their roster (shifts,
+  overtime, rest days, S11 sick on the EV-2 night = page 11), mold changes, the incident history and the daily
+  output history.
+- generated (this module): orders arriving over time, materials and purchasing, shipping, energy, inspections,
+  planned maintenance windows, and the support staff the dataset does not list (maintenance, QC, supervisors).
+Every generated number is an assumption for a small solid-tyre plant (no real company data); each constant says
+what it stands for.
 """
 from __future__ import annotations
 
@@ -30,7 +37,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict
 
-from warroom.contracts import Line, MachineKind, MachineStatus, TeamId, TireSize
+from warroom.contracts import Line, MachineKind, MachineStatus, ScenarioName, TeamId, TireSize
+from warroom.data import team_dataset
+from warroom.data.team_ids import WORK_GROUP_MACHINES, WORK_GROUP_TEAM
 from warroom.factory import (
     CURE_HOURS,
     CURE_TEMP_MIN_C,
@@ -295,6 +304,8 @@ class Worker(_W):
     zone: str
     machine_id: str | None = None
     since: datetime
+    source: Literal["team_dataset", "generated"] = "generated"
+    note: str | None = None          # roster note (sick leave, overtime)
 
 
 class PeopleView(_W):
@@ -329,22 +340,46 @@ class Inspection(_W):
     inspector: str
 
 
+class IncidentRecord(_W):
+    id: str
+    date: date
+    machine_id: str | None
+    equipment: str
+    symptom: str
+    action: str
+    downtime_min: int
+    outcome: str
+    source: Literal["team_dataset"] = "team_dataset"
+
+
+class DailyRecord(_W):
+    date: date
+    tires_done: int
+    flex_util_pct: float
+    ot_hours: float
+    downtime_min: int
+    source: Literal["team_dataset"] = "team_dataset"
+
+
 class QualityView(_W):
     inspected_today: int
     defects_today: int
     yield_pct: float | None
     recent: list[Inspection]
+    incidents: list[IncidentRecord] = []      # team dataset history, dates shifted to the sim clock
+    daily: list[DailyRecord] = []             # team dataset daily output before today
 
 
 class MaintenanceItem(_W):
     id: str
     machine_id: str
-    kind: Literal["planned", "repair"]
+    kind: Literal["planned", "repair", "mold_change"]
     title: str
     start: datetime
     end: datetime | None
     status: Literal["planned", "in_progress", "done"]
     assignee: str | None = None
+    source: Literal["team_dataset", "generated"] = "generated"
 
 
 class MaintenanceView(_W):
@@ -399,6 +434,10 @@ class _Worker:
     sd: ShiftDef
     slot: int                        # index inside its shift (meal break stagger, home machine)
     home: str | None                 # home machine id
+    machines: tuple[str, ...] = ()   # machines this worker's group runs
+    group: str | None = None         # team dataset work group (貼合組 ...)
+    staff_id: str | None = None      # team dataset staff id
+    note: str | None = None
     state: str = "下班"
     zone: str = "off_site"
     machine_id: str | None = None
@@ -442,6 +481,7 @@ class _Maint:
     end: datetime | None
     assignee: str | None = None
     announced: int = 0               # 0 none, 1 start logged, 2 end logged
+    source: str = "generated"
 
 
 def _shift_instance(sd: ShiftDef, t: datetime) -> datetime | None:
@@ -485,6 +525,13 @@ class World:
         self._trucks: list[_Truck] = []
         self._dock_log: deque[DockEntry] = deque(maxlen=12)
         self._outbound_done: set[str] = set()       # dispatch slots already handled
+        self.ds = team_dataset.load()
+        try:
+            scen = ScenarioName(factory.scenario.name)
+        except (AttributeError, ValueError):
+            scen = ScenarioName.NORMAL
+        self._scenario = scen
+        self._ds_cache: dict[date, date] = {}
         self._init_workers()
         self._kw: dict[str, float] = {}
         self._kwh_today = 0.0
@@ -498,7 +545,7 @@ class World:
         self._seed_done: dict[str, int] = {}
         self._seed_completed: dict[str, datetime] = {}
         self._seed_shipped: dict[str, datetime] = {}
-        self._maint: list[_Maint] = self._plan_maintenance(t0)
+        self._maint: list[_Maint] = self._plan_maintenance(t0) + self._dataset_mold_changes(t0)
         self._repairs: dict[str, _Maint] = {}
         self._closed_repairs: deque[_Maint] = deque(maxlen=8)
         self._observe_factory(t0, first=True)
@@ -936,8 +983,20 @@ class World:
         d, n, bad = self._q_today
         if d != self._t.date():
             n, bad = 0, 0
+        incidents: list[IncidentRecord] = []
+        daily: list[DailyRecord] = []
+        if self.ds is not None:
+            shift = self._ds_date(self.t0.date()) - self.t0.date()
+            today = self._t.date()
+            incidents = [IncidentRecord(id=i.incident_id, date=i.date - shift, machine_id=i.machine_id, equipment=i.equipment,
+                                        symptom=i.symptom, action=i.action, downtime_min=i.downtime_min, outcome=i.outcome)
+                         for i in self.ds.incidents if i.date - shift < today]
+            incidents.sort(key=lambda r: r.date, reverse=True)
+            daily = [DailyRecord(date=x.date - shift, tires_done=x.tires_done, flex_util_pct=x.flex_util_pct,
+                                 ot_hours=x.ot_hours, downtime_min=x.downtime_min)
+                     for x in self.ds.daily if x.date - shift < today]
         return QualityView(inspected_today=n, defects_today=bad, yield_pct=round(100.0 * (n - bad) / n, 1) if n else None,
-                           recent=list(reversed(self._inspections)))
+                           recent=list(reversed(self._inspections)), incidents=incidents, daily=daily)
 
     # ------------------------------------------------------------------ maintenance
     def _plan_maintenance(self, t0: datetime) -> list[_Maint]:
@@ -968,6 +1027,21 @@ class World:
                 x.announced = 2
             elif x.start <= t0:
                 x.announced = 1
+        return out
+
+    def _dataset_mold_changes(self, t0: datetime) -> list[_Maint]:
+        """Team dataset mold changes (data/team_dataset/mold_change.csv), moved onto the sim clock."""
+        if self.ds is None:
+            return []
+        shift = self._ds_date(t0.date()) - t0.date()
+        out = []
+        for i, mc in enumerate(self.ds.mold_changes):
+            start, end = mc.start - shift, mc.end - shift
+            x = _Maint(id=f"MC-{start:%m%d}-{mc.machine_id}-{i}", machine_id=mc.machine_id, kind="mold_change",
+                       title=f"換模 {mc.from_mold}→{mc.to_mold}（停機 {(mc.end - mc.start).total_seconds() / 3600:g} h）",
+                       start=start, end=end, source="team_dataset")
+            x.announced = 2 if end <= t0 else 1 if start <= t0 else 0
+            out.append(x)
         return out
 
     def _maint_staff(self) -> str | None:
@@ -1003,21 +1077,45 @@ class World:
         def item(x: _Maint) -> MaintenanceItem:
             st = "done" if x.end is not None and x.end <= t else "in_progress" if x.start <= t else "planned"
             return MaintenanceItem(id=x.id, machine_id=x.machine_id, kind=x.kind, title=x.title, start=x.start,  # type: ignore[arg-type]
-                                   end=x.end, status=st, assignee=x.assignee)  # type: ignore[arg-type]
+                                   end=x.end, status=st, assignee=x.assignee, source=x.source)  # type: ignore[arg-type]
         running = [item(x) for x in self._maint if x.start <= t and (x.end is None or t < x.end)]
         running += [item(x) for x in self._repairs.values()]
-        upcoming = sorted((x for x in self._maint if x.start > t), key=lambda x: x.start)[:8]
+        ahead = sorted((x for x in self._maint if x.start > t), key=lambda x: x.start)
+        upcoming = ahead[:7]
+        nxt_mold = next((x for x in ahead if x.kind == "mold_change"), None)   # always show the next dataset mold change
+        if nxt_mold is not None and nxt_mold not in upcoming:
+            upcoming.append(nxt_mold)
         done = sorted((x for x in self._maint if x.end is not None and x.end <= t), key=lambda x: x.end or t)[-5:]
         recent = [item(x) for x in list(self._closed_repairs)[-3:] + done]
         recent.sort(key=lambda i: i.end or i.start, reverse=True)
         return MaintenanceView(in_progress=running, upcoming=[item(x) for x in upcoming], recent=recent[:8])
 
     # ------------------------------------------------------------------ people
+    def _ds_date(self, d: date) -> date:
+        if d not in self._ds_cache:
+            assert self.ds is not None
+            self._ds_cache[d] = self.ds.dataset_date(d, self._scenario, self.t0.date())
+        return self._ds_cache[d]
+
     def _init_workers(self) -> None:
         self._workers: list[_Worker] = []
         names = iter(NAMES)
         n = 0
-        for sd in OPTIMISED_SHIFTS + SUPPORT_SHIFTS:
+        production = OPTIMISED_SHIFTS
+        if self.ds is not None:      # the team dataset's 20 staff replace the generated production teams
+            production = ()
+            slots: dict[tuple[str, str], int] = {}
+            for st in self.ds.staff:
+                k = slots.get((st.work_group, st.shift), 0)
+                slots[(st.work_group, st.shift)] = k + 1
+                machines = WORK_GROUP_MACHINES.get(st.work_group, ())
+                sd = ShiftDef(WORK_GROUP_TEAM.get(st.work_group, TeamId.BODY), "早班" if st.shift == "早" else "夜班",
+                              time(8) if st.shift == "早" else time(20), time(17) if st.shift == "早" else time(5))
+                self._workers.append(_Worker(
+                    id=st.staff_id, name=st.staff_id, team=sd.team, role="作業員", sd=sd, slot=k,
+                    home=machines[k % len(machines)] if machines else None, machines=machines,
+                    group=st.work_group, staff_id=st.staff_id, since=self.t0))
+        for sd in production + SUPPORT_SHIFTS:
             machines = TEAM_MACHINES.get(sd.team, ())
             for k in range(sd.headcount):
                 n += 1
@@ -1025,7 +1123,38 @@ class World:
                     sd.team, "組長" if k == 0 else "作業員")
                 home = machines[k % len(machines)] if machines else None
                 self._workers.append(_Worker(id=f"P{n:02d}", name=next(names), team=sd.team, role=role, sd=sd, slot=k,
-                                             home=home, since=self.t0))
+                                             home=home, machines=machines, since=self.t0))
+
+    def _duty(self, w: _Worker, t: datetime) -> tuple[datetime | None, bool]:
+        """(start of the shift covering t, absent). Team-dataset staff follow their roster (dates shifted to the
+        sim clock); generated staff follow their ShiftDef."""
+        if w.staff_id is None or self.ds is None:
+            start = _shift_instance(w.sd, t)
+            return start, start is not None and self._absent(w, start)
+        w.note = None
+        for back in (0, 1):
+            d = t.date() - timedelta(days=back)
+            row = self.ds.roster.get((w.staff_id, self._ds_date(d)))
+            if row is None:
+                continue
+            if row.code == "病":        # sick: the shift they would have worked
+                start = datetime.combine(d, w.sd.start, tzinfo=TZ)
+                end = datetime.combine(d, w.sd.end, tzinfo=TZ)
+            elif row.start is not None and row.end is not None:
+                start = datetime.combine(d, row.start, tzinfo=TZ)
+                end = start + timedelta(hours=row.hours) if row.code == "加" else datetime.combine(d, row.end, tzinfo=TZ)
+            else:
+                continue
+            if end <= start:
+                end += timedelta(days=1)
+            if start <= t < end:
+                if row.code == "病":
+                    w.note = f"病假：{row.note}" if row.note else "病假"
+                    return start, True
+                if row.code == "加":
+                    w.note = f"加班 {row.ot_hours:g} h" + (f"：{row.note}" if row.note else "")
+                return start, False
+        return None, False
 
     def _absent(self, w: _Worker, start: datetime) -> bool:
         """Page 11: the 胎體／胎面膠組 night shift of the scenario date is one operator short (10/03 夜班缺 1 人)."""
@@ -1052,6 +1181,9 @@ class World:
             else:
                 self._set(w, t, "待命", "staff")
             return
+        if w.group == "修邊組":          # 整修 (manual finishing) by the presses
+            self._set(w, t, "在機台", "line_CURE")
+            return
         if w.team is TeamId.QC:
             lines = ("A", "B", "C", "D", "BOND", "CURE")
             ln = lines[(t.hour + w.slot * 3) % len(lines)]
@@ -1059,7 +1191,9 @@ class World:
             self._set(w, t, "在機台", f"line_{ln}", mid)
             return
         # night 胎體／胎面膠組 also de-molds / molds in (page 6): a press changing molds pulls one of them over
-        if w.team in (TeamId.CURING, TeamId.BODY) and (w.team is TeamId.CURING or w.sd.name == "夜班") and w.slot == 0:
+        movers = w.team in (TeamId.CURING, TeamId.BOND) if w.staff_id else \
+            (w.team is TeamId.CURING or (w.team is TeamId.BODY and w.sd.name == "夜班"))
+        if movers and w.slot == 0:
             changing = [pid for pid, ps in self.f._press.items() if ps.job is None and self._status(pid) is MachineStatus.IDLE]
             if changing:
                 self._set(w, t, "在機台", "line_CURE", changing[0])
@@ -1068,7 +1202,7 @@ class World:
         if home is not None and self._status(home) in WORKING:
             self._set(w, t, "在機台", zone_of(home), home)
             return
-        team = TEAM_MACHINES.get(w.team, ())
+        team = w.machines or TEAM_MACHINES.get(w.team, ())
         live = [mid for mid in team if self._status(mid) in WORKING]
         if live:
             mid = live[w.slot % len(live)]
@@ -1080,11 +1214,11 @@ class World:
         rng = self.rng
         dock_busy = bool(self._trucks)
         for w in self._workers:
-            start = _shift_instance(w.sd, t)
+            start, absent = self._duty(w, t)
             if start is None:
                 self._set(w, t, "下班", "off_site")
                 continue
-            if self._absent(w, start):
+            if absent:
                 self._set(w, t, "請假", "off_site")
                 continue
             if w.state in ("下班", "請假"):
@@ -1116,9 +1250,10 @@ class World:
                 self._work(w, t)
 
     def _people_view(self) -> PeopleView:
-        workers = [Worker(id=w.id, name=w.name, team=w.team, team_label=TEAM_LABELS[w.team], role=w.role,  # type: ignore[arg-type]
-                          shift=w.sd.name, state=w.state, zone=w.zone, machine_id=w.machine_id,  # type: ignore[arg-type]
-                          since=w.since or self.t0) for w in self._workers]
+        workers = [Worker(id=w.id, name=w.name, team=w.team, team_label=w.group or TEAM_LABELS[w.team],
+                          role=w.role, shift=w.sd.name, state=w.state, zone=w.zone,  # type: ignore[arg-type]
+                          machine_id=w.machine_id, since=w.since or self.t0, note=w.note,
+                          source="team_dataset" if w.staff_id else "generated") for w in self._workers]
         by_zone: dict[str, int] = {}
         by_state: dict[str, int] = {}
         for w in workers:

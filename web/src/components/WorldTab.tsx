@@ -37,6 +37,7 @@ export function WorldTab() {
         <MaintenancePanel w={w} />
         <FeedPanel w={w} />
       </div>
+      <p className="foot-note" data-testid="world-sources">資料來源：人員與班表（含加班、病假）、換模、異常紀錄、每日產出＝<b>團隊資料集</b>（日期依情境對齊）；訂單到達、原料採購、出貨、用電、檢驗、計畫保養、維修／品管／主管人員＝<b>模擬生成</b>（假設值）</p>
     </div>
   )
 }
@@ -154,7 +155,7 @@ function PeoplePanel({ w }: { w: WorldSnapshot }) {
   const p = w.people
   const max = Math.max(1, ...Object.values(p.by_zone).map((n) => n ?? 0))
   return (
-    <Panel title="人員分布" className="w-people" right={<span className="muted small">在廠 {p.on_duty}・全員 {p.total}</span>}>
+    <Panel title="人員分布" className="w-people" right={<span className="muted small">在廠 {p.on_duty}・全員 {p.total}（資料集 {p.workers.filter((x) => x.source === 'team_dataset').length}）</span>}>
       <ul className="zones" data-testid="people-zones">
         {ZONE_ORDER.filter((z) => p.by_zone[z]).map((z) => (
           <li key={z}><span>{ZONE_LABEL[z]}</span><span className="zbar"><i style={{ width: `${(100 * (p.by_zone[z] ?? 0)) / max}%` }} /></span><b>{p.by_zone[z]}</b></li>
@@ -164,8 +165,11 @@ function PeoplePanel({ w }: { w: WorldSnapshot }) {
         {STATE_ORDER.filter((s) => p.by_state[s]).map((s) => <span key={s} className={`st st-${s}`}>{s} {p.by_state[s]}</span>)}
       </div>
       <ul className="w-mini">
-        {p.workers.filter((x) => x.role === '主管' || x.state === '請假' || x.role === '維修').filter((x) => x.state !== '下班').slice(0, 4).map((x) => (
-          <li key={x.id}><b>{x.name}</b> <span className="muted">{x.team_label}・{x.shift}</span>・{x.state}{x.state !== '請假' ? `（${ZONE_LABEL[x.zone]}${x.machine_id ? ` ${machineLabel(x.machine_id)}` : ''}）` : ''}</li>
+        {p.workers.filter((x) => x.role === '主管' || x.state === '請假' || x.role === '維修' || x.note).filter((x) => x.state !== '下班')
+          .sort((a, b) => Number(b.state === '請假') - Number(a.state === '請假')).slice(0, 4).map((x) => (
+          <li key={x.id} className={x.state === '請假' ? 'warn' : ''}><b>{x.name}</b> <span className="muted">{x.team_label}・{x.shift}</span>・{x.state}
+            {x.state !== '請假' ? `（${ZONE_LABEL[x.zone]}${x.machine_id ? ` ${machineLabel(x.machine_id)}` : ''}）` : ''}{x.note ? `・${x.note}` : ''}
+            {x.source === 'team_dataset' && <i className="tag">資料集</i>}</li>
         ))}
       </ul>
     </Panel>
@@ -201,6 +205,8 @@ function EnergyPanel({ w }: { w: WorldSnapshot }) {
 
 function QualityPanel({ w }: { w: WorldSnapshot }) {
   const q = w.quality
+  const recent = q.daily.slice(-5)
+  const avg = recent.length ? recent.reduce((a, d) => a + d.tires_done, 0) / recent.length : null
   return (
     <Panel title="品質檢驗" className="w-quality" right={<span className="muted small">今日 {q.inspected_today} 批・不良 {q.defects_today}</span>}>
       <ul className="w-log" data-testid="inspections">
@@ -211,6 +217,15 @@ function QualityPanel({ w }: { w: WorldSnapshot }) {
           </li>
         ))}
       </ul>
+      {q.incidents.length > 0 && <>
+        <p className="sub">歷史異常 <i className="tag">資料集</i></p>
+        <ul className="w-log" data-testid="incidents">
+          {q.incidents.slice(0, 3).map((i) => (
+            <li key={i.id}><span className="muted">{fmtMD(i.date)}</span> {i.machine_id ? machineLabel(i.machine_id) : i.equipment}・{i.symptom} → {i.action}（停 {i.downtime_min} 分・{i.outcome}）</li>
+          ))}
+        </ul>
+      </>}
+      {avg != null && <p className="muted small w-note">近 {recent.length} 個工作日平均產出 {fmtNum(avg, 1)} 條／日・停機 {recent.reduce((a, d) => a + d.downtime_min, 0)} 分（資料集）</p>}
     </Panel>
   )
 }
@@ -228,8 +243,8 @@ function MaintenancePanel({ w }: { w: WorldSnapshot }) {
       )}
       <p className="sub">接下來的計畫保養</p>
       <ul className="w-log">
-        {m.upcoming.slice(0, 4).map((x) => (
-          <li key={x.id}><span className="muted">{fmtMD(x.start)} {fmtHM(x.start)}</span> {machineLabel(x.machine_id)}・{x.title}</li>
+        {[...m.upcoming.slice(0, 4), ...m.upcoming.slice(4).filter((x) => x.kind === 'mold_change')].map((x) => (
+          <li key={x.id}><span className="muted">{fmtMD(x.start)} {fmtHM(x.start)}</span> {machineLabel(x.machine_id)}・{x.title}{x.source === 'team_dataset' && <i className="tag">資料集</i>}</li>
         ))}
       </ul>
     </Panel>

@@ -127,6 +127,21 @@ try {
   await p3.screenshot({ path: `${OUT}/world-390.png`, fullPage: true })
   await p3.screenshot({ path: `${OUT}/world-390-viewport.png` })
 
+  // team dataset: page 11 plays the dataset's EV-2 night, where 貼合組 S11 is on sick leave
+  check('sources footnote names the team dataset', (await p3.locator('[data-testid=world-sources]').innerText()).includes('團隊資料集'))
+  await api('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
+  const w11 = await api('/api/world')
+  const s11 = w11.people.workers.find((x) => x.id === 'S11')
+  check('p.11: S11 on sick leave from the team roster', s11?.state === '請假' && s11?.source === 'team_dataset', `${s11?.state} ${s11?.note}`)
+  await page.bringToFront()
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector('[data-testid=world-tab]', { timeout: 15000 })
+  const ppl = await until(async () => { const t = await page.locator('.w-people').innerText(); return t.includes('S11') ? t : null }, 10000)
+  check('dashboard shows S11 病假 on the p.11 night', !!ppl && ppl.includes('病假'), (ppl ?? '').split('\n').filter((l) => l.includes('S11')).join(' '))
+  check('incident history from the dataset', (await page.locator('[data-testid=incidents] li').count()) === 3)
+  await page.screenshot({ path: `${OUT}/world-1440-p11.png`, fullPage: true })
+  await api('/api/sim/control', { action: 'scenario', scenario: 'normal' })
+
   check('no console errors', errors.length === 0, errors.slice(0, 3).join(' | '))
 } catch (e) {
   failed++
