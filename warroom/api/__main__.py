@@ -102,6 +102,12 @@ async def _demo(args) -> int:
                 print(f"  核准內容 {line}")
         for p in snap.pending_approvals:
             print("PENDING", p.id, p.title, [o.label for o in p.options])
+        w = rt.world_snapshot()
+        if w is not None:                           # issue #17: worker tasks and goods
+            for t in w.tasks.items:
+                print(f"TASK {t.id} {t.status} {t.kind} {t.worker_name or '—'} @ {t.where}: {t.title}"
+                      f"（{t.event_id}）")
+            print("GOODS", w.goods.counts)
     finally:
         await rt.stop()
     return 0
@@ -121,7 +127,7 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("serve", "demo", "check"):
         sp = sub.add_parser(name)
         sp.add_argument("--scenario", choices=["normal", "press7_temp_drop", "open_mill_overheat", "bad_data",
-                                               "concurrent_3"])
+                                               "concurrent_3", "shift_start", "rush_order", "staffing"])
         sp.add_argument("--speed", type=float)
         sp.add_argument("--llm-mode", choices=["mock", "llm"])
         sp.add_argument("--strict", action="store_true", help="fail instead of using fallback components")

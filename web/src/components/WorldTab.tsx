@@ -7,6 +7,10 @@ import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { Panel } from './common'
+import { GoodsCounts, GoodsQueue } from './GoodsQueue'
+import { movedText } from './goods'
+import { ProgressRing } from './ProgressRing'
+import { TaskList } from './TaskList'
 
 const STAGES = ['待排程', '生產中', '完成', '待出貨', '已出貨'] as const
 const SIZE_LABEL = { S: '小胎', M: '中胎', L: '大胎' } as const
@@ -29,6 +33,8 @@ export function WorldTab() {
       <WorldKpis w={w} />
       <div className="world">
         <OrdersPanel w={w} />
+        <TasksPanel w={w} />
+        <GoodsPanel w={w} />
         <MaterialsPanel w={w} />
         <DockPanel w={w} />
         <PeoplePanel w={w} />
@@ -85,14 +91,56 @@ function OrdersPanel({ w }: { w: WorldSnapshot }) {
         {open.map((o) => (
           <li key={o.id}>
             <div className="w-row">
-              <span><b>{o.id}</b>{o.rush && <i className="tag rush">急單</i>}<span className="muted"> {o.customer}・{SIZE_LABEL[o.size]}</span></span>
+              <span><OrderRing w={w} id={o.id} /><b>{o.id}</b>{o.rush && <i className="tag rush">急單</i>}<span className="muted"> {o.customer}・{SIZE_LABEL[o.size]}</span></span>
               <span className="muted small">{o.done}/{o.qty}・交期 {fmtMD(o.due)}</span>
             </div>
+            <OrderGoodsLine w={w} id={o.id} />
             <div className="bar"><i style={{ width: `${Math.min(100, (100 * o.done) / Math.max(1, o.qty))}%` }} /></div>
           </li>
         ))}
       </ul>
       <p className="muted small w-note">庫存成品 {w.finished_goods.total}/{w.finished_goods.capacity} 條（小 {w.finished_goods.by_size.S}・中 {w.finished_goods.by_size.M}・大 {w.finished_goods.by_size.L}）・待出貨 {w.finished_goods.waiting_ship} 條</p>
+    </Panel>
+  )
+}
+
+// issue #17: per-order ring (done / qty) and where its tyres are; moved_h = how far the last schedule change moved it
+function OrderRing({ w, id }: { w: WorldSnapshot; id: string }) {
+  const g = w.goods?.orders.find((x) => x.order_id === id)
+  if (!g) return null
+  return <span className="order-ring" data-testid="order-ring" data-order={id}><ProgressRing value={g.progress} size={20} tone={g.late ? 'alarm' : 'live'} title={`${g.done}/${g.qty}`} /> </span>
+}
+
+function OrderGoodsLine({ w, id }: { w: WorldSnapshot; id: string }) {
+  const g = w.goods?.orders.find((x) => x.order_id === id)
+  if (!g) return null
+  const mv = movedText(g.moved_h)
+  return (
+    <p className="muted small w-note">硫化中 {g.in_press}・24 h 內排入 {g.queued}{g.next_mold_in ? `・下一模 ${fmtMD(g.next_mold_in)} ${fmtHM(g.next_mold_in)}` : ''}
+      {mv && <i className={`tag moved ${g.moved_h! > 0 ? 'later' : 'earlier'}`}>{mv}</i>}{g.late && <i className="tag rush">會誤交期</i>}</p>
+  )
+}
+
+function TasksPanel({ w }: { w: WorldSnapshot }) {
+  const t = w.tasks
+  if (!t) return null
+  return (
+    <Panel title="人員任務" className="w-tasks" right={<span className="muted small">待派 {t.counts['待派'] ?? 0}・前往 {t.counts['前往中'] ?? 0}・執行 {t.counts['執行中'] ?? 0}・完成 {t.counts['完成'] ?? 0}</span>}>
+      <div data-testid="world-tasks"><TaskList tasks={t.items} limit={10} /></div>
+      <p className="muted small w-note">核准後由程式把每個步驟轉成任務（誰、去哪、做什麼），人員走過去執行</p>
+    </Panel>
+  )
+}
+
+function GoodsPanel({ w }: { w: WorldSnapshot }) {
+  const g = w.goods
+  if (!g) return null
+  return (
+    <Panel title="貨品狀態" className="w-goods">
+      <div data-testid="world-goods">
+        <GoodsCounts goods={g} />
+        <GoodsQueue goods={g} />
+      </div>
     </Panel>
   )
 }

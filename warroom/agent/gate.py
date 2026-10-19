@@ -6,7 +6,8 @@ unresolved "$S.." references, and for writes the simulation was feasible. Then a
 
   R0 read/compute (auto)                R1 notify maintenance/info (auto, 已自動)
   R2 set_cure_time, confirm_schedule,   R3 notify slow_feed/pause_feed/staff_move/machine_out, or
-     notify overtime (approval)            a schedule containing a cross-team transfer (approval)
+     notify overtime / dispatch            a schedule containing a cross-team transfer (approval)
+     (派工, issue #17) (approval)
 
 Anything not on the allow-list or not open in that state is REJECT with risk None; the state
 machine writes it to the audit log as INTERCEPTED. There are no actuator / PLC tools to allow.
@@ -79,6 +80,9 @@ NOTIFY_RISK: dict[NotifyKind, RiskLevel] = {
     NotifyKind.PAUSE_FEED: RiskLevel.R3_CRITICAL,
     NotifyKind.STAFF_MOVE: RiskLevel.R3_CRITICAL,
     NotifyKind.MACHINE_OUT: RiskLevel.R3_CRITICAL,
+    # issue #17: 派工 = an approved plan handed to the floor; code turns it into worker tasks. A plan change
+    # within the plant's own teams, so R2 (approval), never auto
+    NotifyKind.DISPATCH: RiskLevel.R2_CHANGE,
 }
 
 

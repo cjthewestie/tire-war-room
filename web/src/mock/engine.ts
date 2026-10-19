@@ -49,6 +49,10 @@ export const SCENARIOS: { name: ScenarioName; label: string; start: string; spee
   { name: 'press7_temp_drop', label: '7 號硫化機溫降（p.11）', start: '2026-10-03T02:12:00+08:00', speed: 10 },
   { name: 'concurrent_3', label: '3 件同時異常', start: '2026-10-03T02:12:00+08:00', speed: 5 },
   { name: 'bad_data', label: '壞資料（不喚醒 AI）', start: '2026-10-22T09:00:00+08:00', speed: 1 },
+  // issue #17 plant events (backend only; mock mode plays them as normal running)
+  { name: 'shift_start', label: '早班開工', start: '2026-10-05T07:50:00+08:00', speed: 10 },
+  { name: 'rush_order', label: '插單', start: '2026-10-07T09:50:00+08:00', speed: 10 },
+  { name: 'staffing', label: '人力調度', start: '2026-10-06T07:20:00+08:00', speed: 10 },
 ]
 
 interface LoadedScenario { name: ScenarioName; scripts: Script[]; press7?: ReturnType<typeof press7Script>; badData?: string }

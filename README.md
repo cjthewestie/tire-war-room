@@ -36,6 +36,16 @@
 
 程式：`warroom/agent/talk.py`（規則與條件）、`warroom/agent/discuss.py`（討論）、`StateMachine.open_command / discuss_replan`、`POST /api/command`、`POST /api/events/{id}/discuss`；排程求解器支援 `press_blackouts`。測試 `tests/test_plan_talk.py`，無頭 e2e `node web/e2e/plan-talk.mjs http://localhost:8000`。
 
+### 突發狀況與早班開工：核准後人員去執行（issue #17）
+
+展示列（也就是 3D 戰情室電腦裡的儀表板）多了三個情境，都不是機台故障，而是工廠事件：
+
+- **早班開工**（10/05 08:00）：查今日訂單、出勤（含團隊資料集的請假）、SOP-02 暖機順序、原料 → 一張「今日計畫」核准卡（派工 R2）。
+- **插單**（10/07 10:00）：急單 #R-009（依團隊資料集 SO-009 改編）加入訂單簿 → CP-SAT 重排 → 卡片列出哪些訂單完工延後幾小時、有沒有誤交期 → 核准。
+- **人力調度**（10/06 07:30）：加硫組 S13 來電請病假，硫化機組早班缺 1 人 → 求解器提出 A 加班／B 從 2 線調 1 人 → 核准。
+
+核准後，**程式**（不是模型）把每個核准步驟轉成人員任務（誰、去哪、做什麼、預計幾點完成）：工人在 3D 走過去做，任務狀態 待派 → 前往中 → 執行中 → 完成 即時更新並寫入稽核（`task`）。工廠事件的驗證等所有任務完成才結案；機台事件（p.11、p.2）的任務照樣派、照樣追蹤，但驗證仍以讀值為準。每條胎有狀態與進度圈：待補料 → 備料中 → 生產中 → 硫化中 → 完成 → 待出貨 → 已出貨；訂單的補料任務沒完成前，它的胎停在「待補料」。程式：`warroom/sim/work.py`、`StateMachine.open_plant_event`；測試 `tests/test_plant_events.py`。
+
 ### 3D 工廠（戰情室負責人視角）
 
 打開 `http://localhost:8000/factory`。你是戰情室負責人，以第一人稱站在一座迷你工廠廠房裡（產線、戰情室、員工待命區、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
@@ -114,7 +124,7 @@ Needs [uv](https://docs.astral.sh/uv/), Node.js 20+ and pnpm (`corepack enable p
 ./start.sh ollama     # Ollama mode: Nemotron 3.5 Lightning NVFP4 (run deploy/mac/dev.sh pull once, ~23 GB)
 ```
 
-Open `http://localhost:8000` (dashboard), `http://localhost:8000/phone` (supervisor phone) and `http://localhost:8000/factory` (3D factory). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
+Open `http://localhost:8000` (dashboard), `http://localhost:8000/phone` (supervisor phone) and `http://localhost:8000/factory` (3D factory). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`, and the issue #17 plant events `shift_start`, `rush_order`, `staffing`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
 
 Manual steps, if you prefer: `uv sync` · `cd web && pnpm install --frozen-lockfile && pnpm build` · `uv run python -m warroom.api serve`. Tests: `uv run pytest -q`. Headless timeline: `uv run python -m warroom.api demo --scenario press7_temp_drop --seconds 1200 --auto-approve`.
 

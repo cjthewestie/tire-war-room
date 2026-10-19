@@ -77,14 +77,12 @@ try {
   watch(f3)
   await f3.goto(`${BASE}/factory?test=1`, { waitUntil: 'domcontentloaded' })
   await f3.waitForSelector('.f3-canvas canvas', { timeout: 15000 })
-  const ready = await until(() => f3.evaluate(() => !!window.__world3d && window.__world3d.walkers().length > 0), 20000)
-  check('3D: live workers are figures', !!ready)
-  const inHall = (w) => !['break', 'toilet', 'off_site'].includes(w.zone)
-  const cmp = await f3.evaluate(() => window.__world3d.walkers())
-  const wNow = await api('/api/world')
-  const want = wNow.people.workers.filter(inHall).length
-  const shown = cmp.filter((x) => x.shown).length
-  check('3D: one figure per worker in the hall', Math.abs(shown - want) <= 3, `${shown} shown, ${want} in hall zones`)
+  // CJ 2026-10-20 「恢復人力待命 有一兩個人巡邏」: people stand by in the staff corner, two patrol; nobody else walks
+  // unless they have a task (issue #17; scenarios.mjs checks a task walker)
+  const ready = await until(() => f3.evaluate(() => !!window.__world3d && !!window.__patrol3d), 20000)
+  check('3D: live world hooked up', !!ready)
+  const idle = await f3.evaluate(() => ({ task: window.__world3d.walkers().length, patrol: window.__patrol3d() }))
+  check('3D: with no task only the patrol walks', idle.task === 0 && idle.patrol >= 1 && idle.patrol <= 2, `task walkers ${idle.task}, patrol ${idle.patrol}`)
   await f3.evaluate(() => { document.querySelector('[data-testid=f3-start]').style.visibility = 'hidden' })
   await f3.screenshot({ path: `${OUT}/world-factory-people.png` })
 
@@ -95,8 +93,8 @@ try {
   check('dock: outbound truck at 09:20', wShip.dock.trucks.some((t) => t.kind === 'outbound'), wShip.dock.trucks.map((t) => t.cargo).join(' / '))
   const parked = await until(() => f3.evaluate(() => { const t = window.__truck3d(); return t.visible && Math.abs(t.z - t.parkedZ) < 0.05 && t.cargo === 'outbound' ? t : null }), 25000)
   check('3D: truck drives in and parks with tyres', !!parked, JSON.stringify(parked))
-  const walking = await until(() => f3.evaluate(() => window.__world3d.walkers().filter((x) => x.walking).length || null), 8000, 200)
-  check('3D: workers walk after the world moved', !!walking, `${walking} walking`)
+  const still = await f3.evaluate(() => window.__world3d.walkers().length)
+  check('3D: the world moving (truck, shifts) sends nobody walking without a task', still === 0, `${still} task walkers`)
   await f3.screenshot({ path: `${OUT}/world-factory-truck.png` })
   await page.screenshot({ path: `${OUT}/world-1440-dock.png`, fullPage: true })
   check('dashboard: truck card while it loads', (await page.locator('[data-testid=dock-trucks] .truck').count()) >= 1)
@@ -130,7 +128,7 @@ try {
     return { label: (t[0]?.textContent ?? '').trim(), lines: new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size }
   }))
   check('390 px: no bottom-nav label wraps', wraps.length === 5 && wraps.every((w) => w.lines === 1), wraps.map((w) => `${w.label}:${w.lines}`).join(' '))
-  await p3.screenshot({ path: `${OUT}/world-390.png`, fullPage: true })
+  await p3.screenshot({ path: `${OUT}/world-390.png`, fullPage: true, scale: 'css' })   // the page grew (tasks + goods panels): CSS scale keeps it under the capture limit
   await p3.screenshot({ path: `${OUT}/world-390-viewport.png` })
 
   // team dataset: page 11 plays the dataset's EV-2 night, where 貼合組 S11 is on sick leave

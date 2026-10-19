@@ -110,6 +110,10 @@ class AnomalyKind(StrEnum):
     MULTI_MACHINE = "multi_machine"  # several machines on one header/line at once
     SCHEDULE_SLIP = "schedule_slip"  # page 6 box 4: plan vs actual (late de-mold / mold-in / WIP behind T)
     SUPERVISOR_COMMAND = "supervisor_command"  # issue #10: a task the supervisor typed (POST /api/command)
+    # issue #17: plant events (no sensor): the shift starts, a rush order arrives, someone calls in sick
+    SHIFT_START = "shift_start"
+    ORDER_RUSH = "order_rush"
+    STAFFING_SHORT = "staffing_short"
 
 
 class Severity(StrEnum):
@@ -277,6 +281,10 @@ class ScenarioName(StrEnum):
     OPEN_MILL_OVERHEAT = "open_mill_overheat"  # page 2
     BAD_DATA = "bad_data"                      # bad sensor must NOT wake the AI (page 10)
     CONCURRENT_3 = "concurrent_3"              # 3 anomalies at once (page 10 bench)
+    # issue #17: plant events, no machine fault
+    SHIFT_START = "shift_start"                # 早班開工 08:00: today's plan card
+    RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
+    STAFFING = "staffing"                      # 人力調度: an operator calls in sick
 
 
 class AuditKind(StrEnum):
@@ -294,6 +302,7 @@ class AuditKind(StrEnum):
     ROLLBACK = "rollback"
     NOTIFY = "notify"
     SYSTEM = "system"
+    TASK = "task"                    # issue #17: a worker task created from an approved step, or its status change
 
 
 class ScheduleStatus(StrEnum):
@@ -414,10 +423,25 @@ class FaultSpec(_M):
     params: dict[str, float] = Field(default_factory=dict)  # e.g. {"target": 122, "rate_c_per_min": 1.0}
 
 
+class PlantInput(_M):
+    """Issue #17: something that happens to the plant that is not a machine fault, scripted by a scenario.
+    It changes the plant's inputs (the order book, the roster), never a machine, and wakes the state
+    machine as a plant event."""
+    kind: Literal["shift_start", "rush_order", "absence"]
+    text: str                         # "急單 #R-009 到：客戶G 中胎 2 條，交期 10/09"
+    order: Order | None = None      # rush_order: the order that arrives
+    staff_id: str | None = None       # absence: team dataset staff id (S13)
+    team: TeamId | None = None      # absence: our team whose shift loses a person
+    shift_name: str | None = None     # absence: "早班" (factory.OPTIMISED_SHIFTS name)
+    people: int = 1
+    note: str | None = None
+
+
 class ScenarioStep(_M):
     at_offset_s: float
     fault: FaultSpec | None = None
     note: str | None = None
+    plant: PlantInput | None = None   # issue #17
 
 
 class Scenario(_M):
@@ -565,6 +589,10 @@ class QueryOrdersShiftsData(_M):
     shifts: list[Shift]
     gaps: list[str]                   # ["10/03 夜班缺 1 人"]
     next_jobs: list["ScheduleJob"]    # upcoming jobs on the queried presses
+    # issue #17: read from the sim's world when it has one (people on leave today, material stock, today's mold-ins)
+    leave: list[dict[str, Any]] | None = None
+    materials: list[dict[str, Any]] | None = None
+    today: dict[str, Any] | None = None
 
 
 class SopSearchArgs(_M):
@@ -601,6 +629,7 @@ class NotifyKind(StrEnum):
     STAFF_MOVE = "staff_move"       # R3 跨組調人
     OVERTIME = "overtime"           # R2 加班
     MACHINE_OUT = "machine_out"     # R3 機台停用
+    DISPATCH = "dispatch"           # R2 派工：今日計畫／新排程派給現場（issue #17; code turns it into worker tasks）
 
 
 class NotifyTeamsArgs(_M):
@@ -918,7 +947,7 @@ class Event(_M):
     outcome: str | None = None
     # issue #10: who opened it (the detector, or a task the supervisor typed) and what the supervisor
     # asked the agent to honour while discussing its plan
-    source: Literal["detector", "supervisor"] = "detector"
+    source: Literal["detector", "supervisor", "plant"] = "detector"   # plant = issue #17 plant event
     command: str | None = None
     constraints: list["PlanConstraint"] = Field(default_factory=list)
     discuss_replans: int = 0

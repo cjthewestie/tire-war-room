@@ -199,11 +199,31 @@ def query_orders_shifts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
         if a.order_ids:
             next_jobs = [j for j in next_jobs if j.order_id in a.order_ids]
         next_jobs.sort(key=lambda j: j.mold_in)
-    return {"orders": [o.model_dump(mode="json") for o in orders],
-            "shifts": [s.model_dump(mode="json") for s in shifts],
-            "gaps": gaps,
-            "next_jobs": [j.model_dump(mode="json") for j in next_jobs],
-            "gap_details": gap_details}
+    out = {"orders": [o.model_dump(mode="json") for o in orders],
+           "shifts": [s.model_dump(mode="json") for s in shifts],
+           "gaps": gaps,
+           "next_jobs": [j.model_dump(mode="json") for j in next_jobs],
+           "gap_details": gap_details}
+    # issue #17: the plant's people and materials, read from the sim's world when it has one (read only):
+    # who is on leave now, material stock against reorder points, and today's mold-ins
+    world = getattr(sim, "world", None)
+    if world is not None:
+        try:
+            out["leave"] = world.leave_now()
+            out["materials"] = [{k: m[k] for k in ("key", "name", "unit", "stock", "reorder_point", "on_order", "status")}
+                                for m in world.materials_status()]
+            today_jobs = 0
+            if ctx.store is not None:
+                try:
+                    today_jobs = sum(1 for j in ctx.store.current().schedule.jobs
+                                     if j.mold_in.date() == now.date() and j.mold_in >= now)
+                except Exception:  # noqa: BLE001
+                    today_jobs = 0
+            out["today"] = {"date": now.date().isoformat(), "on_duty": world.on_duty_count(), "mold_ins": today_jobs,
+                            "due_within_3d": (now.date() + timedelta(days=3)).isoformat()}
+        except Exception:  # noqa: BLE001 - the world is a view; the tool answers without it
+            pass
+    return out
 
 
 def solve_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:

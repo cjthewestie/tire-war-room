@@ -40,7 +40,7 @@ export const STEAM_HEADERS: Record<string, string[]> = {
 }
 export function machineLabel(id: string): string {
   const m = MACHINE_META[id]
-  if (!m) return id
+  if (!m) return id === 'PLANT' ? '全廠' : id   // issue #17 plant events / commands about the whole plant
   if (m.line === 'CURE') return `${m.short} 號硫化機`
   if (m.line === 'BOND') return '貼合油壓機'
   return `${m.line} 線${m.name}`

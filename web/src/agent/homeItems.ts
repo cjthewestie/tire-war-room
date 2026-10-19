@@ -36,23 +36,28 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
   for (const p of pending) { const o = pendBy.get(p.event_id); if (!o || (p.version ?? 1) > (o.version ?? 1)) pendBy.set(p.event_id, p) }
   for (const ev of events) {
     const req = pendBy.get(ev.id) ?? null
-    const who = machineLabel(ev.machine_id)
-    const task = ev.source === 'supervisor'
+    const who = ev.source === 'plant' ? '工廠事件' : machineLabel(ev.machine_id)
+    const task = ev.source === 'supervisor' || ev.source === 'plant'   // 下新任務 and plant events (開工、插單、缺人) are ③
+    const tasks = (world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
+    const tasksOpen = tasks.filter((t) => t.status !== '完成').length
     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
     if (req) {
       out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
     } else if (ev.state === 'safe_stop') {
       out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
-    } else if (ev.state === 'execute' || ev.state === 'verify') {
+    } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
+      // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
-      out.push({ ...base, rank: 4, tone: 'run', pill: `${STATE_LABEL[ev.state]} ${ok}/${total}`, title: `${task ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
-        sub: ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
+      const done = tasks.length - tasksOpen
+      out.push({ ...base, rank: 4, tone: 'run', pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
+        title: `${task ? (ev.source === 'plant' ? who : '主管指令') : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+        sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: `${task ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
         sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
     } else {
-      out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: `${task ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+      out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
     }
   }

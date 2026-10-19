@@ -57,6 +57,7 @@ from typing import Any
 
 from warroom.agent.narrate import (
     CHANNEL_LABELS,
+    order_shifts,
     decompose_text,
     expectation_text,
     fmt_num,
@@ -113,6 +114,7 @@ from warroom.contracts import (
     StaffingChange,
     StepRound,
     StepRun,
+    TeamId,
     TimelineItem,
     ToolCall,
     ToolName,
@@ -135,8 +137,11 @@ from warroom.factory import (
 
 # anomaly kinds with no sensor outcome to verify (page 6 box 4 plan vs actual): VERIFY checks that the
 # approved writes ran; the hypothesis is never CONFIRMED by it
-UNMEASURED_KINDS = frozenset({"schedule_slip", "supervisor_command"})
+UNMEASURED_KINDS = frozenset({"schedule_slip", "supervisor_command", "shift_start", "order_rush", "staffing_short"})
+PLANT_KINDS = frozenset({"shift_start", "order_rush", "staffing_short"})   # issue #17 plant events
 COMMAND_MACHINE = "PLANT"      # issue #10: a supervisor command that names no machine is about the plant
+# issue #17: a plant event's VERIFY waits (sim time) for the people to finish the tasks its approved steps became
+TASK_VERIFY_MAX_MIN = 180.0
 RISK_ORDER = [RiskLevel.R0_READ, RiskLevel.R1_NOTIFY, RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL]
 STAFFING_KINDS = (NotifyKind.OVERTIME.value, NotifyKind.STAFF_MOVE.value)
 _REF = re.compile(r"^\$(S\d+[A-Za-z]?)\.([\w.\[\]-]+)$")          # S4, or a sub-step S4b
@@ -290,6 +295,7 @@ class StateMachine:
         self._max_kept = max_events_kept
         self._events: dict[str, Event] = {}
         self._runs: dict[str, _Run] = {}         # open event id -> its run (issue #10: discussion)
+        self._plant_inputs: dict[str, Any] = {}  # issue #17: plant event id -> its PlantInput
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._ids = itertools.count(1)
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
@@ -412,6 +418,186 @@ class StateMachine:
             self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
             return
         await self._loop(run)
+
+    # ------------------------------------------------------------------ issue #17: plant events
+    def open_plant_event(self, pin: Any, at: datetime | None = None) -> Event:
+        """A plant input the scenario scripted (the shift starts, a rush order arrives, someone calls in sick)
+        opens an Event with source="plant". It is about the whole plant (machine PLANT), never a machine's open
+        event, and runs CLASSIFY -> PLAN -> SIMULATE -> GATE -> (approval) -> EXECUTE -> VERIFY (the people finish
+        the tasks) -> CLOSED like any event."""
+        kind = {"shift_start": AnomalyKind.SHIFT_START, "rush_order": AnomalyKind.ORDER_RUSH,
+                "absence": AnomalyKind.STAFFING_SHORT}[pin.kind]
+        tag = {"shift_start": "PLAN", "rush_order": "RUSH", "absence": "STAFF"}[pin.kind]
+        now = at or self._now()
+        base = f"EV-{now.astimezone(TZ):%Y%m%d-%H%M%S}-{tag}"
+        eid, n = base, 2
+        while eid in self._events:
+            eid, n = f"{base}-{n}", n + 1
+        a = Anomaly(id=f"PLT-{eid[3:]}", ts=now, machine_id=COMMAND_MACHINE, kind=kind, channel=Channel.TEMP,
+                    value=0.0, baseline=0.0, severity=Severity.WARN if pin.kind != "shift_start" else Severity.INFO,
+                    message=pin.text)
+        ev = Event(id=eid, opened_at=now, machine_id=COMMAND_MACHINE, anomaly=a, state=EventState.DETECTED,
+                   source="plant")
+        self._events[eid] = ev
+        self._plant_inputs[eid] = pin
+        self.audit.append(AuditKind.STATE_TRANSITION, "state_machine",
+                          {"from": None, "to": EventState.DETECTED.value, "reason": "plant event"}, event_id=eid)
+        self.audit.append(AuditKind.SYSTEM, "plant", {"plant_input": pin.model_dump(mode="json")}, event_id=eid)
+        self._note(ev, "事件偵測", f"[工具] {pin.text} → 喚醒指揮官", "tool", ts=now)
+        title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
+        self._set_alert(ev, AlertCard(title=title, summary=pin.text[:60]), source="detector")
+        return ev
+
+    async def run_plant(self, event_id: str) -> Event:
+        return await self._drive(self._events[event_id], self._run_plant)
+
+    async def _run_plant(self, run: _Run) -> None:
+        ev = run.ev
+        self._to(ev, EventState.CLASSIFY, "plant event: read the SOP")
+        s = await self._call(run, EventState.CLASSIFY, None, ToolName.SOP_SEARCH,
+                             {"query": self.PLANT_SOP_QUERY.get(self._plant_kind(ev), ev.anomaly.message), "k": 2})
+        # orders, shifts, leave and materials are read in PLAN (query_orders_shifts is a PLAN-state tool)
+        self._to(ev, EventState.PLAN, "read orders, roster and materials; ask commander (plant event)")
+        run.base_context = await self._classify_plant(run, s)
+        plan = await self._ask(run, "plan", {})
+        if plan is None or plan.safe_stop:
+            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            return
+        await self._loop(run)
+
+    PLANT_SOP_QUERY = {"shift_start": "密煉機開機暖機與換批 暖機順序", "rush_order": "急單 插單 排程 交期",
+                       "absence": "人力 缺人 調班 加班 支援"}
+
+    PLANT_TOOLS = frozenset({ToolName.QUERY_ORDERS_SHIFTS, ToolName.SOLVE_SCHEDULE, ToolName.CONFIRM_SCHEDULE,
+                             ToolName.NOTIFY_TEAMS})
+
+    def _plant_plan_guard(self, run: _Run, plan: CommanderPlan) -> CommanderPlan:
+        """A plant event has no machine fault: steps whose tool needs a machine (cure formula, cure time, sensors)
+        are dropped by code (audited), with anything that depended on them; a notice naming no real machine loses
+        machine_id. The model proposes; what runs is decided here."""
+        keep: list[PlanStep] = []
+        dropped: list[str] = []
+        for st in plan.steps:
+            if st.tool not in self.PLANT_TOOLS or any(d in dropped for d in st.depends_on):
+                dropped.append(st.id)
+                continue
+            if st.tool is ToolName.NOTIFY_TEAMS and st.args.get("machine_id") not in MACHINE_BY_ID and "machine_id" in st.args:
+                st = st.model_copy(update={"args": {k: v for k, v in st.args.items() if k != "machine_id"}})
+            keep.append(st)
+        kind = self._plant_kind(run.ev)
+        if kind in ("shift_start", "rush_order") and not any(
+                st.tool is ToolName.NOTIFY_TEAMS and st.args.get("kind") == NotifyKind.DISPATCH.value for st in keep):
+            # the day's plan / the inserted order reaches the floor only through 派工 (R2, approval): when the model
+            # left it out, code adds the fixed-text step so the supervisor still gets one card and people get tasks
+            pin = self._plant_inputs.get(run.ev.id)
+            teams = [TeamId.BODY.value, TeamId.CURING.value] if kind == "rush_order" else \
+                [TeamId.BODY.value, TeamId.BIGOPEN.value, TeamId.SIDE.value, TeamId.BEAD_NYLON.value, TeamId.BOND.value,
+                 TeamId.CURING.value]
+            msg = (f"急單 {pin.order.id} 插單：依新排程補料、備模" if kind == "rush_order" and pin is not None and pin.order
+                   else "今日計畫：依 SOP 暖機（密煉 → 開煉），首批膠料補到 A 線，依排程開工")
+            confirm = [st.id for st in keep if st.tool is ToolName.CONFIRM_SCHEDULE]
+            sid = f"S{len(keep) + 1}"
+            while any(st.id == sid for st in keep):
+                sid += "d"
+            keep.append(PlanStep(id=sid, tool=ToolName.NOTIFY_TEAMS, purpose="派工（需主管核准）",
+                                 depends_on=confirm[-1:] if kind == "rush_order" else [],
+                                 args={"teams": teams, "kind": NotifyKind.DISPATCH.value, "message": msg}))
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"plant_plan_guard": "dispatch step added by code (fixed text)", "step_id": sid}, event_id=run.ev.id)
+        if dropped:
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"plant_plan_guard": "steps that need a machine fault dropped", "dropped": dropped,
+                               "tools": [st.tool.value for st in plan.steps if st.id in dropped]}, event_id=run.ev.id)
+        return plan.model_copy(update={"steps": keep}) if dropped or keep != plan.steps else plan
+
+    def _bind_plant(self, run: _Run, step: PlanStep) -> PlanStep:
+        """Plant events: the schedule numbers come from code, never the model. A solve plans the normal 7-day
+        horizon with no press override (there is no machine fault); a confirm activates the version this round's
+        feasible solve produced. Changes are audited."""
+        if run.ev.source != "plant":
+            return step
+        a = step.args
+        if step.tool is ToolName.SOLVE_SCHEDULE:
+            args = {k: a[k] for k in ("allow_overtime", "allow_cross_team", "time_limit_s", "press_blackouts") if k in a}
+        elif step.tool is ToolName.CONFIRM_SCHEDULE:
+            feas = [int(r.data["schedule_version"]) for r in run.results.values() if r.ok and r.tool is ToolName.SOLVE_SCHEDULE
+                    and r.data.get("feasible") and isinstance(r.data.get("schedule_version"), int)]
+            if not feas:
+                return step
+            args = {"schedule_version": feas[-1], "reason": str(a.get("reason") or run.ev.anomaly.message)[:120]}
+        else:
+            return step
+        if args != a:
+            self.audit.append(AuditKind.SYSTEM, "state_machine", {"plant_args_from_code": step.id, "tool": step.tool.value,
+                                                                 "from": a, "to": args}, event_id=run.ev.id)
+            return step.model_copy(update={"args": args})
+        return step
+
+    def _plant_kind(self, ev: Event) -> str:
+        pin = self._plant_inputs.get(ev.id)
+        return pin.kind if pin is not None else ""
+
+    async def _classify_plant(self, run: _Run, s: ToolResult) -> dict[str, Any]:
+        """Code reads what the plan needs (orders, shifts and gaps, who is on leave, materials, the SOP) with the
+        allow-listed read tools, and writes the 已查 lines for the card from those results only."""
+        ev = run.ev
+        pin = self._plant_inputs.get(ev.id)
+        kind = pin.kind if pin is not None else ""
+        now = self._now()
+        ctx: dict[str, Any] = {"source": "plant", "factory_time": now.isoformat(),
+                               "plant_event": pin.model_dump(mode="json", exclude_none=True) if pin is not None else {}}
+        args: dict[str, Any] = {"order_ids": [pin.order.id]} if kind == "rush_order" and pin.order else {}
+        r = await self._call(run, EventState.PLAN, None, ToolName.QUERY_ORDERS_SHIFTS, args)
+        run.context_tools.append("[工具] 查訂單、班表、出勤與原料" + ("" if r.ok else "（失敗）"))
+        if r.ok:
+            d = r.data
+            ctx["orders"] = [{k: o.get(k) for k in ("id", "size", "qty", "done", "due", "priority")}
+                             for o in d.get("orders") or []][:12]
+            ctx["gaps"] = d.get("gaps") or []
+            for k in ("leave", "materials", "today"):
+                if d.get(k) is not None:
+                    ctx[k] = d[k]
+            run.done += self._plant_brief(kind, d, pin)
+        if s.ok:
+            ctx["sop"] = self._sop_brief(s.data)
+            run.context_tools.append("[工具] 查 SOP")
+            if kind == "shift_start":
+                from warroom.sim.work import WARMUP_ORDER
+                order = " → ".join(machine_label(m, short=True) for m, _ in WARMUP_ORDER)
+                hit = next((h for h in ctx["sop"] if "暖機" in str(h.get("title", "")) + str(h.get("text", ""))), None)
+                run.done.append(f"暖機順序（{hit['sop_id'] if hit and hit.get('sop_id') else 'SOP-02'}）：{order}，各 30 分鐘")
+        return ctx
+
+    @staticmethod
+    def _plant_brief(kind: str, d: dict[str, Any], pin: Any) -> list[str]:
+        """已查 lines for a plant event's card, from the query_orders_shifts result (code, not the model)."""
+        out: list[str] = []
+        today = d.get("today") or {}
+        if kind == "shift_start":
+            orders = d.get("orders") or []
+            due_soon = [o for o in orders if o.get("due") and str(o["due"]) <= str(today.get("due_within_3d") or "")]
+            out.append(f"今日訂單：{len(orders)} 筆進行中" + (f"，3 天內到期 {'、'.join(o['id'] for o in due_soon)}"
+                                                             if due_soon else "") +
+                       (f"；今日排 {today['mold_ins']} 模入模" if today.get("mold_ins") is not None else ""))
+        leave = d.get("leave")
+        if leave is not None:
+            names = "、".join(f"{x.get('name')}（{x.get('group') or x.get('team_label')}：{x.get('note') or '請假'}）"
+                             for x in leave)
+            out.append(f"出勤：在廠 {today.get('on_duty', '?')} 人；請假 {len(leave)} 人" + (f"：{names}" if names else ""))
+        mats = [m for m in d.get("materials") or [] if m.get("status") != "ok"]
+        if kind == "shift_start" or mats:
+            out.append("原料：" + ("、".join(f"{m['name']} {m['stock']:g} {m['unit']}（{ {'reorder': '已達再訂購點', 'low': '偏低', 'out': '缺料'}.get(m['status'], m['status'])}"
+                                            + (f"，在途 {m['on_order']:g}" if m.get("on_order") else "") + "）" for m in mats)
+                                  if mats else "6 項皆在再訂購點以上"))
+        if kind == "rush_order" and pin is not None and pin.order is not None:
+            o = pin.order
+            out.append(f"急單 {o.id}：{o.customer} {o.size.value} {o.qty} 條，交期 {o.due:%m/%d}（已加入訂單簿）")
+        if kind == "absence" and pin is not None:
+            out.append(f"缺勤：{pin.text}")
+        gaps = d.get("gaps") or []
+        if gaps:
+            out.append("班表缺口：" + "、".join(gaps[:3]))
+        return out
 
     async def _classify_command(self, run: _Run) -> dict[str, Any]:
         ev = run.ev
@@ -804,12 +990,14 @@ class StateMachine:
                 hyp.status = HypothesisStatus.CONFIRMED
                 self._close(run)
                 return
-            if verdict in ("contained", "inconclusive", "handed_off", "unmeasured"):
+            if verdict in ("contained", "inconclusive", "handed_off", "unmeasured", "tasks_done", "tasks_open"):
                 hyp.status = HypothesisStatus.ACTIVE          # not tested by a reading: never CONFIRMED
                 self._close(run, verified=False, why={"inconclusive": "安全核心已停機，無法驗證",
                                                       "contained": "已停用該機，未以讀值驗證",
                                                       "handed_off": "已交現場依 SOP 處置",
-                                                      "unmeasured": "無讀值可驗證，核准動作已執行"}[verdict],
+                                                      "unmeasured": "無讀值可驗證，核准動作已執行",
+                                                      "tasks_done": "核准動作已由人員執行完成",
+                                                      "tasks_open": "人員任務逾時未全部完成"}[verdict],
                             clear_alarm=verdict == "unmeasured" and ev.source != "supervisor")
                 return
             hyp.status = HypothesisStatus.REJECTED
@@ -1019,6 +1207,8 @@ class StateMachine:
                               {"error": "commander re-proposed a rejected hypothesis", "match": again,
                                "cause_code": plan.hypothesis.cause_code}, event_id=ev.id)
             plan = plan.model_copy(update={"safe_stop": True})
+        if ev.source == "plant":
+            plan = self._plant_plan_guard(run, plan)
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
         cur = ev.hypotheses[-1] if ev.hypotheses else None
         if phase == "replan" and cur is not None and cur.status is HypothesisStatus.ACTIVE \
@@ -1275,6 +1465,7 @@ class StateMachine:
                 continue
             resolved = step.model_copy(update={"args": resolve_refs(step.args, run.results)})
             resolved = self._bind_physics(run, resolved)
+            resolved = self._bind_plant(run, resolved)
             resolved = self._apply_constraints(run, resolved)
             sr.step = resolved
             kw = {"evidence": self._evidence(run)} if (self._gate_takes_evidence and
@@ -1558,8 +1749,8 @@ class StateMachine:
     def _cure_temp(self, run: _Run) -> float:
         """The temperature the press is curing at now: the detector's stable prediction (page 11:
         122±1 °C), else the anomaly reading, to 0.5 °C."""
-        a = run.ev.anomaly
-        v = a.prediction.predicted_value if a.prediction is not None else a.value
+        from warroom.agent.commander import stable_cure_temp
+        v, _ = stable_cure_temp(run.ev.anomaly)
         return round(float(v) * 2) / 2
 
     def _bind_physics(self, run: _Run, step: PlanStep) -> PlanStep:
@@ -1687,6 +1878,7 @@ class StateMachine:
                 continue
             waits = any(d in needs or d in deferred for d in write_deps)
             resolved = step.model_copy(update={"args": resolve_refs(step.args, run.results)})
+            resolved = self._bind_plant(run, resolved)
             sr.step = resolved
             kw = {}
             if step.tool is ToolName.CONFIRM_SCHEDULE and self._gate_takes_cross_team:
@@ -1838,8 +2030,9 @@ class StateMachine:
                 sh = next((s for s in shifts for c in g_opts
                            if s.name == c.get("shift_name") and s.team.value == c.get("to_team")
                            and str(s.start.date()) == str(c.get("shift_date"))), None)
-                if sh is not None and not any(sh.start <= t < sh.end for t in ops):
+                if sh is not None and run.ev.source != "plant" and not any(sh.start <= t < sh.end for t in ops):
                     continue                                 # gap not touched by this event's changes
+                # (a plant event is about the plant's own day: a sick call IS the gap, so every gap counts)
                 gaps.append(g)
                 staffing += g_opts
         return list(dict.fromkeys(gaps)), staffing
@@ -1859,7 +2052,12 @@ class StateMachine:
         if solves:
             data = solves[-1][1]
             late = data.get("late_orders") or []
-            return "不受影響" if data.get("deliveries_met") else f"延誤：{'、'.join(late) or '有'}"
+            verdict = "不受影響" if data.get("deliveries_met") else f"延誤：{'、'.join(late) or '有'}"
+            if run.ev.source == "plant":
+                shifts = order_shifts(data.get("moves"), (data.get("schedule") or {}).get("jobs"))
+                if shifts:
+                    verdict += "；" + "、".join(shifts)
+            return verdict
         if self.sim is not None and hasattr(self.sim, "semi_finished"):
             preheat = next((p[2] for p in PROCESSES if p[1] == "預熱"), None)
             if run.ev.machine_id == preheat:
@@ -1955,6 +2153,8 @@ class StateMachine:
             reason = f"假設 {plan.hypothesis.id}：{plan.hypothesis.statement}"
         if ev.source == "supervisor" and rejected:
             reason = f"主管指令：{ev.command}；" + reason
+        if ev.source == "plant" and not rejected:
+            reason = ev.anomaly.message
         # 已做 = only what has already run (page 11: 安全核心已處置；#A-311 改 9 號). What approving
         # will do (one line per gated write) and staffing an earlier round already sent are 核准內容
         # lines (_actions); there is no 「將做：…」 summary, which could name an unconfirmed solve.
@@ -2505,6 +2705,7 @@ class StateMachine:
             txt = result_text(step.tool, step.args, res.data)
             self._note(ev, "工具", ("✓ 已自動：" if auto_tag else "[工具] ") + txt, "tool")
             self._after_write(run, step)
+            self._dispatch_tasks(run, step, res, auto_tag)
 
     @staticmethod
     def _confirmed_this_round(run: _Run) -> list[int]:
@@ -2563,6 +2764,12 @@ class StateMachine:
             elif step.id in run.revocations:
                 prev = run.revocations[step.id]
                 prev["revoked"] = True
+                board = self._board()
+                if board is not None and prev.get("step_id"):
+                    gone = board.cancel(ev.id, prev["step_id"], self._now())   # issue #17: its tasks are void too
+                    if gone:
+                        self.audit.append(AuditKind.TASK, "state_machine", {"cancelled": gone, "revoked_step": prev["step_id"],
+                                                                           "by_step": step.id}, event_id=ev.id)
                 run.executed = [x for x in run.executed if x != prev["executed_label"]]
                 run.executed.append(f"撤回{prev['label']}")
             elif kind == NotifyKind.MAINTENANCE.value:
@@ -2570,11 +2777,90 @@ class StateMachine:
                 run.executed.append("已通知維修")
             elif kind in (NotifyKind.SLOW_FEED.value, NotifyKind.PAUSE_FEED.value):
                 run.executed.append("放慢生料投入" if kind == NotifyKind.SLOW_FEED.value else "暫停投料")
+            elif kind == NotifyKind.DISPATCH.value:
+                run.executed.append("已派工")
             elif ev.source == "supervisor":
                 # a typed task's notice (e.g. an info notice to maintenance): it ran, so say who was told
                 from warroom.agent.narrate import TEAM_LABELS
                 teams = "、".join(TEAM_LABELS.get(t, str(t)) for t in step.args.get("teams") or [])
                 run.executed.append(f"已通知{teams or '相關組別'}")
+
+    # ------------------------------------------------------------------ issue #17: approved steps -> worker tasks
+    def _board(self) -> Any:
+        """The plant's task board (World.tasks), when the sim has one."""
+        return getattr(getattr(self.sim, "world", None), "tasks", None) if self.sim is not None else None
+
+    def _dispatch_tasks(self, run: _Run, step: PlanStep, res: ToolResult, auto_tag: bool) -> None:
+        """CODE turns an executed write into worker tasks (who, where, what, ETA) on the plant's task board, from
+        the step's validated args and this event's own solve results. The model never writes a task. Audited."""
+        board = self._board()
+        if board is None:
+            return
+        from warroom.sim.work import TaskRequest
+        ev = run.ev
+        moves: list[dict[str, Any]] = []
+        if step.tool is ToolName.CONFIRM_SCHEDULE:
+            v = step.args.get("schedule_version")
+            for _, d in self._solve_steps(run):
+                if d.get("schedule_version") == v:
+                    moves += list(d.get("moves") or [])
+        pin = self._plant_inputs.get(ev.id)
+        order_ids = [pin.order.id] if pin is not None and getattr(pin, "order", None) is not None else []
+        req = TaskRequest(event_id=ev.id, approval_id=None if auto_tag or run.current_req is None else run.current_req.id,
+                          step_id=step.id, event_kind=ev.anomaly.kind.value, tool=step.tool.value, args=dict(step.args),
+                          result=dict(res.data or {}), moves=moves, staffing=run.step_changes.get(step.id),
+                          order_ids=order_ids)
+        try:
+            tasks = board.dispatch(req, self._now())
+        except Exception as e:  # noqa: BLE001 - task planning must never break the event
+            self.audit.append(AuditKind.SYSTEM, "state_machine", {"task_dispatch_error": f"{type(e).__name__}: {e}"[:300],
+                                                                 "step_id": step.id}, event_id=ev.id)
+            return
+        if not tasks:
+            return
+        self.audit.append(AuditKind.TASK, "state_machine",
+                          {"created": [t.model_dump(mode="json", include={"id", "kind", "title", "team", "machine_id",
+                                                                          "zone", "status", "worker_id", "eta",
+                                                                          "order_ids", "after"}) for t in tasks],
+                           "from_step": step.id, "tool": step.tool.value, "approval_id": req.approval_id,
+                           "generated_by": "code"}, event_id=ev.id)
+        if ev.source == "plant":
+            self._note(ev, "系統", f"派工：{step.id} → {len(tasks)} 項人員任務（"
+                       + "、".join(f"{t.kind}［{t.where.split('（')[0]}］" for t in tasks[:5])
+                       + ("…" if len(tasks) > 5 else "") + "）", "human")
+
+    async def _verify_tasks(self, run: _Run, h: Hypothesis) -> tuple[str, float | None]:
+        """A plant event has no reading to test: VERIFY waits (sim time) until the people finished every task its
+        approved steps became, or TASK_VERIFY_MAX_MIN passed, and reports how many are done."""
+        ev = run.ev
+        board = self._board()
+        tasks = board.for_event(ev.id) if board is not None else []
+        if not tasks:
+            self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "tasks": 0, "unmeasured": True},
+                              event_id=ev.id)
+            self._note(ev, "驗證（程式）", ("核准動作已執行完成" if run.executed else "沒有需要人員執行的動作")
+                       + f"；{h.id} 無讀值可驗證", "info")
+            return "unmeasured", None
+        self._note(ev, "驗證（程式）", f"等待人員完成 {len(tasks)} 項任務（待派 → 前往中 → 執行中 → 完成）", "info")
+        deadline = self._now() + timedelta(minutes=TASK_VERIFY_MAX_MIN)
+        while True:
+            tasks = board.for_event(ev.id)
+            done = [t for t in tasks if t.status == "完成"]
+            if len(done) == len(tasks) or self._now() >= deadline:
+                break
+            await self._sleep(self.verify_poll_s)
+        ok = len(done) == len(tasks)
+        last = max((t.done_at for t in done if t.done_at), default=None)
+        self.audit.append(AuditKind.TASK, "verifier",
+                          {"hypothesis": h.id, "tasks": len(tasks), "done": len(done), "ok": ok,
+                           "open": [t.id for t in tasks if t.status != "完成"],
+                           "last_done_at": last.isoformat() if last else None}, event_id=ev.id)
+        if ok:
+            self._note(ev, "驗證（程式）", f"人員任務 {len(done)}/{len(tasks)} 完成"
+                       + (f"（最後一項 {last:%H:%M}）" if last else ""), "dynamic")
+            return "tasks_done", None
+        self._note(ev, "驗證（程式）", f"人員任務逾時：{len(done)}/{len(tasks)} 完成，其餘交主管追蹤", "dynamic")
+        return "tasks_open", None
 
     # ------------------------------------------------------------------ VERIFY (code, no LLM)
     VERIFY_SMOOTH_S = 30.0     # verify compares a 30-second mean, so one noisy sample cannot flip the verdict
@@ -2622,6 +2908,8 @@ class StateMachine:
         assert plan is not None
         h = ev.hypotheses[-1]
         exp = h.expectation
+        if exp is None and ev.source == "plant":
+            return await self._verify_tasks(run, h)
         if exp is None and ev.anomaly.kind.value in UNMEASURED_KINDS:
             self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
                                                              "unmeasured": True}, event_id=ev.id)
@@ -2729,6 +3017,8 @@ class StateMachine:
         outcome = "；".join(dict.fromkeys(run.executed)) or "無需動作"
         h = ev.hypotheses[-1]
         head = f"{h.id} {h.statement}" + ("" if verified else f"（未驗證：{why}）")
+        if ev.source == "plant":
+            head = run.plan.goal if run.plan is not None else ev.anomaly.message
         if ev.source == "supervisor":
             head = f"主管指令「{ev.command}」"
             if not run.executed:
