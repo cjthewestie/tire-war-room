@@ -7,6 +7,7 @@ sensor_meta.csv (equipment "A03 大開煉機" -> its leading id "A03").
 from __future__ import annotations
 
 from warroom.contracts import TeamId
+from warroom.factory import MACHINE_IDS
 
 # dataset equipment id -> warroom machine id (all 28; tire_step.csv lists exactly these)
 MACHINE_ID: dict[str, str] = {
@@ -44,5 +45,14 @@ WORK_GROUP_MACHINES: dict[str, tuple[str, ...]] = {
 
 
 def machine_id(dataset_equipment: str) -> str | None:
-    """'A03 大開煉機' or 'A03' -> 'A-BIGOPEN'; None for non-machines ('輸送帶', '人工', '靜置')."""
-    return MACHINE_ID.get(dataset_equipment.split()[0]) if dataset_equipment else None
+    """'A03 大開煉機', 'A03' or a sensor id 'V07.T' -> our id ('A-BIGOPEN', 'CURE-07'); None for
+    non-machines ('輸送帶', '人工', '靜置')."""
+    if not dataset_equipment or not dataset_equipment.strip():
+        return None
+    return MACHINE_ID.get(dataset_equipment.split()[0].split(".", 1)[0].upper())
+
+
+# Known difference, kept on purpose: the dataset makes V08–V11 the medium/large presses and V01–V07
+# small-only (its EV-2 tire S-027 on V07 is small); our factory.py fixes CURE-07..10 as M/L (page 11).
+# The ids still map 1:1 by number, so V07 (EV-2) is CURE-07 (page 11). Take tire sizes from factory.py.
+UNMAPPED: frozenset[str] = frozenset(MACHINE_IDS) - frozenset(MACHINE_ID.values())   # tests: must be empty

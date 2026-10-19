@@ -1,0 +1,17 @@
+﻿sensor_id,equipment,name,unit
+A03.T,A03 大開煉機,膠溫,°C
+A03.FLOW,A03 大開煉機,冷卻水流量,L/min
+A03.AMP,A03 大開煉機,馬達電流,A
+A03.RPM,A03 大開煉機,滾筒轉速,rpm
+A04.T,A04 小開煉機,膠溫,°C
+A04.FLOW,A04 小開煉機,冷卻水流量,L/min
+A06.T,A06 冷卻機,出口溫度,°C
+V06.T,V06 硫化機,模溫,°C
+V06.P,V06 硫化機,蒸汽壓力,bar(abs)
+V06.F,V06 硫化機,夾套蒸汽流量,kg/h
+V07.T,V07 硫化機,模溫,°C
+V07.P,V07 硫化機,蒸汽壓力,bar(abs)
+V07.F,V07 硫化機,夾套蒸汽流量,kg/h
+V08.T,V08 硫化機,模溫,°C
+V08.P,V08 硫化機,蒸汽壓力,bar(abs)
+V08.F,V08 硫化機,夾套蒸汽流量,kg/h
