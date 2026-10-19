@@ -1,0 +1,352 @@
+// Visual approval card (issue #8, part B): the plan as a flow diagram, the schedule before/after,
+// the staffing options side by side, the tools that ran and the conclusion — then approve / modify / reject.
+import { useMemo, useState } from 'react'
+import type { ApprovalRequest, DecisionKind, Event } from '../contracts'
+import { machineLabel } from '../factory'
+import { fmtHM, fmtMD, ms } from '../format'
+import { RISK_PLAIN, hypName, plain } from '../plain'
+import { TOOL_LABEL, NOTIFY_LABEL } from '../stepText'
+import { useWarRoom } from '../useWarRoom'
+import { useWidth } from '../components/common'
+import {
+  NODE_LABEL, cureChange, deliveryFacts, optionViews, planNodes, proposedVersion, scheduleDiff, toolUses,
+  type PlanNode, type ScheduleDiff, type ToolUse,
+} from './approvalView'
+import { ToolIcon } from './ToolIcon'
+import { expectationText, type ToolItem } from './transcript'
+import { useTranscript, useVersions } from './useTranscript'
+import './agent.css'
+
+const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
+
+/** The visual card for one pending request, with its event's transcript (tool counts) looked up here. */
+export function PendingApproval({ req, onAgent }: { req: ApprovalRequest; onAgent?: () => void }) {
+  const { state } = useWarRoom()
+  const ev = state.snapshot?.events.find((e) => e.id === req.event_id) ?? null
+  const { items } = useTranscript(ev)
+  const tools = useMemo(() => items.filter((i): i is ToolItem => i.k === 'tool'), [items])
+  return <ApprovalVisual req={req} ev={ev} tools={tools} onAgent={onAgent} />
+}
+
+export function ApprovalVisual({ req, ev, tools, onAgent }: { req: ApprovalRequest; ev: Event | null; tools: ToolItem[]; onAgent?: () => void }) {
+  const { transport, state } = useWarRoom()
+  const versions = useVersions()
+  const now = ms(state.clock?.factory_time ?? state.snapshot?.header.factory_time)
+  const lanDown = state.snapshot?.header.network === 'lan_down'
+  const nodes = useMemo(() => planNodes(ev), [ev])
+  const cure = useMemo(() => cureChange(ev), [ev])
+  const diff = useMemo(() => scheduleDiff(versions, proposedVersion(ev, req), cure, now), [versions, ev, req, cure, now])
+  const opts = useMemo(() => optionViews(req, ev), [req, ev])
+  const uses = useMemo(() => toolUses(ev, tools), [ev, tools])
+  const facts = deliveryFacts(ev)
+
+  const base = (req.options.find((o) => o.recommended) ?? req.options[0])?.id ?? null
+  const [pick, setPick] = useState<string | null>(null)
+  const chosen = pick ?? base
+  const chosenOpt = req.options.find((o) => o.id === chosen)
+  const changesOption = chosen != null && chosen !== base
+  const [mode, setMode] = useState<DecisionKind | null>(null)
+  const [reason, setReason] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const [done, setDone] = useState<string | null>(null)
+
+  // same rules as the phone card: a 修改 that changes no option executes nothing and goes back as a reject with the note
+  const send = async (decision: DecisionKind) => {
+    if (!transport) return
+    if (decision === 'reject' && !reason.trim()) { setMode('reject'); setErr('駁回需要填寫理由'); return }
+    if (decision === 'modify' && !reason.trim()) { setMode('modify'); setErr('修改需要填寫修改內容'); return }
+    if (decision === 'approve' && req.options.length > 0 && !chosen) { setErr('請先選擇方案'); return }
+    const note = reason.trim()
+    let d: { decision: DecisionKind; option_id: string | null; reason: string }
+    if (decision === 'modify' && changesOption) d = { decision: 'modify', option_id: chosen, reason: `修改：改選「${chosenOpt?.label ?? chosen}」；${note}` }
+    else if (decision === 'modify') d = { decision: 'reject', option_id: null, reason: `退回修改：${note}（未改選方案，原方案不執行，請依修改內容重排）` }
+    else if (decision === 'reject') d = { decision, option_id: null, reason: note }
+    else d = { decision, option_id: chosen, reason: note || (changesOption ? `否決「${req.options.find((o) => o.id === base)?.label}」，改選「${chosenOpt?.label}」` : chosenOpt ? `核准「${chosenOpt.label}」` : '戰情室核准') }
+    setBusy(true); setErr(null)
+    try {
+      await transport.decide({ request_id: req.id, ...d, modified_args: null, decided_by: '主管', via: lanDown ? 'touchscreen' : 'dashboard' })
+      setDone(d.decision === 'approve' ? `已核准${d.option_id ? ` ${d.option_id}` : ''}` : d.decision === 'modify' ? `已修改（改選 ${d.option_id}）` : '已退回指揮官')
+    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+
+  const hyp = ev?.plan?.hypothesis ?? null
+  const afterSteps = nodes.filter((n) => n.status === 'after')
+  const activeV = diff?.before.version ?? versions.find((v) => v.status === 'active')?.version ?? null
+  const expires = req.expires_at ? `${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前` : null
+
+  return (
+    <section className="apv" data-testid="approval-visual" aria-label={`核准：${plain(req.title)}`}>
+      <header className="apv-h">
+        <div className="apv-tags">
+          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
+          <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
+          {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
+          {expires && <span className="apv-exp">{expires}決定</span>}
+          {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
+        </div>
+        <h3 className="apv-title">{plain(req.title)}</h3>
+        <p className="apv-reason">{plain(req.reason)}</p>
+      </header>
+
+      <div className="apv-grid">
+        <div className="apv-col">
+          <Block n="1" title="處理計畫" hint={nodes.length ? `${nodes.length} 步・箭頭＝相依` : undefined}>
+            {nodes.length ? <PlanFlow nodes={nodes} /> : <p className="muted small">尚無計畫步驟資料</p>}
+          </Block>
+          <Block n="2" title="排程前後對照" hint={diff ? `第 ${diff.before.version} 版 → 第 ${diff.after.version} 版` : undefined}>
+            {diff ? <ScheduleCompare diff={diff} now={now} /> : <p className="muted small">{versions.length ? '這一輪沒有可對照的排程版本' : '讀取排程版本中…'}</p>}
+            {!diff && cure && <p className="apv-chips"><span className="chg cure">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</span></p>}
+          </Block>
+        </div>
+
+        <div className="apv-col">
+          {opts.length > 0 && (
+            <Block n="3" title="人力方案" hint="點選一個方案">
+              <div className="apv-opts" role="radiogroup" aria-label="人力方案">
+                {opts.map((o) => {
+                  const on = chosen === o.opt.id
+                  return (
+                    <button key={o.opt.id} role="radio" aria-checked={on} className={`opt ${on ? 'on' : ''}`} disabled={busy || !!done}
+                      onClick={() => setPick(o.opt.id)} data-testid={`option-${o.opt.id}`}>
+                      <span className="opt-h"><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
+                        {o.opt.recommended && <span className="opt-rec">系統建議</span>}</span>
+                      <dl className="opt-dl">
+                        {o.who && <><dt>人員</dt><dd>{o.who}</dd></>}
+                        {o.shift && <><dt>班別</dt><dd>{o.shift}</dd></>}
+                        {o.people != null && <><dt>人數</dt><dd>{o.people} 人</dd></>}
+                        {o.teams.length > 0 && <><dt>通知</dt><dd>{o.kind && NOTIFY_LABEL[o.kind] ? `${NOTIFY_LABEL[o.kind]} → ` : ''}{o.teams.join('、')}</dd></>}
+                        {!o.who && o.message && <><dt>內容</dt><dd>{plain(o.message)}</dd></>}
+                        <dt>交期</dt><dd>{deliveryLine(req.delivery_impact, facts)}</dd>
+                      </dl>
+                      <span className="opt-pick" aria-hidden>{on ? '● 已選' : '○ 選這個'}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </Block>
+          )}
+          <Block n={opts.length ? '4' : '3'} title="調用的工具" hint={uses.length ? `${uses.reduce((s, u) => s + u.calls, 0)} 次` : undefined}>
+            {uses.length ? <ToolChips uses={uses} /> : <p className="muted small">尚無工具紀錄</p>}
+          </Block>
+          <Block n={opts.length ? '5' : '4'} title="結論" className="apv-concl">
+            <dl className="concl">
+              <dt>為什麼</dt>
+              <dd>
+                {hyp ? <><b>{hypName(hyp.id)}</b>　{plain(hyp.statement)}</> : plain(req.reason)}
+                {hyp && expectationText(hyp) && <span className="concl-sub">預期：{expectationText(hyp)}（程式會用讀值驗證）</span>}
+                {ev?.plan?.rationale && <span className="concl-sub">{plain(ev.plan.rationale)}</span>}
+              </dd>
+              <dt>交期影響</dt>
+              <dd>{deliveryLine(req.delivery_impact, facts)}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</dd>
+              <dt className="ok">核准後</dt>
+              <dd>
+                <ul className="concl-list">
+                  {(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a, i) => <li key={i}>{plain(a)}</li>)}
+                  {chosenOpt && <li>人力：{chosenOpt.id} {chosenOpt.label}</li>}
+                  {afterSteps.map((n) => <li key={n.id}>接著自動（R1）：{TOOL_LABEL[n.tool]}・{plain(n.purpose)}</li>)}
+                </ul>
+              </dd>
+              <dt className="no">駁回後</dt>
+              <dd>原方案全部不執行，退回 AI 指揮官重新規劃{activeV != null ? `；排程維持第 ${activeV} 版` : ''}。</dd>
+            </dl>
+          </Block>
+        </div>
+      </div>
+
+      <footer className="apv-act">
+        {done ? <p className="apv-done" role="status">{done}・決定已寫入稽核日誌，系統接著往下執行</p> : <>
+          {mode && (
+            <textarea className="apv-reason-in" rows={2} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容（必填，寫入稽核日誌）'} aria-label={mode === 'reject' ? '駁回理由' : '修改內容'} />
+          )}
+          {mode === 'modify' && (
+            <p className="apv-hint">{changesOption
+              ? `送出後執行：${chosen} ${chosenOpt?.label ?? ''}（取代系統建議）＋其餘核准內容。`
+              : '未改選方案：原方案全部不執行，修改內容退回指揮官重新規劃（記為退回）。要換方案，請先點另一個方案。'}</p>
+          )}
+          {err && <p className="err">{err}</p>}
+          <div className="apv-btns">
+            <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send('approve')} data-testid="visual-approve">
+              {busy ? '送出中…' : `核准${chosen ? ` ${chosen}` : ''}`}
+            </button>
+            <button className="btn-sec" disabled={busy} onClick={() => (mode === 'modify' ? void send('modify') : setMode('modify'))}>{mode === 'modify' ? (changesOption ? `送出修改（改選 ${chosen}）` : '退回重排') : '修改'}</button>
+            <button className="btn-sec danger" disabled={busy} onClick={() => (mode === 'reject' ? void send('reject') : setMode('reject'))}>{mode === 'reject' ? '確認駁回' : '駁回'}</button>
+          </div>
+        </>}
+      </footer>
+    </section>
+  )
+}
+
+function round1(n: number): number { return Math.round(n * 10) / 10 }
+
+function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {
+  const bits = [plain(impact)]
+  if (facts.met === true && !/滿足|不受影響/.test(impact)) bits.push('求解器：交期全部滿足')
+  if (facts.late.length) bits.push(`延誤 ${facts.late.join('、')}`)
+  return bits.filter(Boolean).join('；') || '—'
+}
+
+function Block({ n, title, hint, children, className = '' }: { n: string; title: string; hint?: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`apv-b ${className}`}>
+      <h4 className="apv-bh"><span className="apv-n">{n}</span>{title}{hint && <small>{hint}</small>}</h4>
+      {children}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------- flow diagram (inline SVG)
+export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
+  const [ref, w] = useWidth<HTMLDivElement>()
+  const levels = Math.max(...nodes.map((n) => n.level)) + 1
+  const byLevel = Array.from({ length: levels }, (_, l) => nodes.filter((n) => n.level === l))
+  const widest = Math.max(...byLevel.map((l) => l.length))
+  const horiz = w >= 560
+  const GAP = horiz ? 30 : 14, VGAP = horiz ? 12 : 26
+  let NW: number, NH = 58
+  const pos = new Map<string, { x: number; y: number }>()
+  let W: number, Hh: number
+  if (horiz) {
+    NW = Math.min(170, (w - GAP * (levels - 1)) / levels)
+    W = levels * NW + (levels - 1) * GAP
+    Hh = widest * NH + (widest - 1) * VGAP
+    byLevel.forEach((col, l) => {
+      const colH = col.length * NH + (col.length - 1) * VGAP
+      col.forEach((n, i) => pos.set(n.id, { x: l * (NW + GAP), y: (Hh - colH) / 2 + i * (NH + VGAP) }))
+    })
+  } else {
+    NW = Math.min(170, (w - GAP * (widest - 1)) / widest)
+    NH = 54
+    W = Math.max(200, w)
+    Hh = levels * NH + (levels - 1) * VGAP
+    byLevel.forEach((row, l) => {
+      const rowW = row.length * NW + (row.length - 1) * GAP
+      row.forEach((n, i) => pos.set(n.id, { x: (W - rowW) / 2 + i * (NW + GAP), y: l * (NH + VGAP) }))
+    })
+  }
+  return (
+    <div ref={ref} className="flow" data-testid="plan-flow">
+      <svg width="100%" viewBox={`-2 -2 ${W + 4} ${Hh + 4}`} role="img" aria-label={`處理計畫：${nodes.map((n) => `${n.id} ${TOOL_LABEL[n.tool]} ${NODE_LABEL[n.status]}`).join('，')}`}>
+        <defs>
+          <marker id="flow-arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0L8 4L0 8z" className="flow-ah" />
+          </marker>
+        </defs>
+        {nodes.flatMap((n) => n.deps.map((d) => {
+          const a = pos.get(d), b = pos.get(n.id)
+          if (!a || !b) return null
+          const path = horiz
+            ? `M${a.x + NW},${a.y + NH / 2} C${a.x + NW + GAP / 2},${a.y + NH / 2} ${b.x - GAP / 2},${b.y + NH / 2} ${b.x - 1},${b.y + NH / 2}`
+            : `M${a.x + NW / 2},${a.y + NH} C${a.x + NW / 2},${a.y + NH + VGAP / 2} ${b.x + NW / 2},${b.y - VGAP / 2} ${b.x + NW / 2},${b.y - 1}`
+          return <path key={`${d}-${n.id}`} d={path} className="flow-edge" markerEnd="url(#flow-arrow)" />
+        }))}
+        {nodes.map((n) => {
+          const p = pos.get(n.id)!
+          const risk = n.risk && (n.status === 'wait' || n.status === 'after' || n.status === 'auto') ? ` ${n.risk}` : ''
+          return (
+            <g key={n.id} transform={`translate(${p.x},${p.y})`} className={`fnode fs-${n.status}`}>
+              <title>{`${n.id} ${TOOL_LABEL[n.tool]}：${plain(n.purpose)}（${NODE_LABEL[n.status]}${risk}）`}</title>
+              <rect width={NW} height={NH} rx={9} />
+              <text x={10} y={21} className="fn-t"><tspan className="fn-id">{n.id}</tspan> {TOOL_LABEL[n.tool]}</text>
+              <text x={10} y={NH - 13} className="fn-s">{statusGlyph(n.status)} {NODE_LABEL[n.status]}{risk}</text>
+            </g>
+          )
+        })}
+      </svg>
+    </div>
+  )
+}
+function statusGlyph(s: PlanNode['status']): string {
+  return s === 'done' || s === 'auto' ? '✓' : s === 'wait' ? '◆' : s === 'running' ? '…' : s === 'failed' || s === 'rejected' ? '✕' : '○'
+}
+
+// ---------------------------------------------------------------- schedule before / after (inline SVG Gantt)
+function ScheduleCompare({ diff, now }: { diff: ScheduleDiff; now: number }) {
+  const [ref, w] = useWidth<HTMLDivElement>()
+  const LABEL = w < 480 ? 54 : 70, LANE = 17, PAD = 5, TOP = 20
+  const W = Math.max(300, w)
+  const x = (t: number) => LABEL + ((t - diff.t0) / (diff.t1 - diff.t0)) * (W - LABEL - 4)
+  const clampX = (t: number) => Math.max(LABEL, Math.min(W - 4, x(t)))
+  const rowH = LANE * 2 + PAD + 10
+  const Hh = TOP + diff.presses.length * rowH + 12
+  const changedNew = new Map(diff.changes.map((c) => [c.job.id, c]))
+  const changedOld = new Map(diff.changes.filter((c) => c.before).map((c) => [c.before!.id, c]))
+  const inWin = (j: { mold_in: string; demold: string }) => ms(j.demold) > diff.t0 && ms(j.mold_in) < diff.t1
+  const days: number[] = []
+  const DAY = 86_400_000
+  for (let t = Math.ceil((diff.t0 + 8 * 3_600_000) / DAY) * DAY - 8 * 3_600_000; t < diff.t1; t += DAY) days.push(t)
+  const retimed = diff.changes.filter((c) => c.kind === 'retimed').length
+  return (
+    <div ref={ref} className="cmp" data-testid="schedule-compare">
+      <svg width="100%" viewBox={`0 0 ${W} ${Hh}`} role="img" aria-label="排程前後對照">
+        {days.map((t) => (
+          <g key={t}>
+            <line x1={x(t)} x2={x(t)} y1={TOP - 4} y2={Hh} className="cmp-grid" />
+            <text x={x(t) + 3} y={12} className="cmp-tick">{fmtMD(t)}</text>
+          </g>
+        ))}
+        {diff.presses.map((p, i) => {
+          const y0 = TOP + i * rowH
+          const oldJobs = diff.before.schedule.jobs.filter((j) => j.press_id === p && inWin(j))
+          const newJobs = diff.after.schedule.jobs.filter((j) => j.press_id === p && inWin(j))
+          return (
+            <g key={p}>
+              <text x={0} y={y0 + LANE + 4} className="cmp-press">{shortPress(p)} 號機</text>
+              <text x={LABEL - 6} y={y0 + LANE - 5} textAnchor="end" className="cmp-lane">原</text>
+              <text x={LABEL - 6} y={y0 + 2 * LANE + PAD - 5} textAnchor="end" className="cmp-lane">新</text>
+              {oldJobs.map((j) => {
+                const c = changedOld.get(j.id)
+                const cls = c?.kind === 'moved' ? 'out' : c?.kind === 'cure' ? 'cure-old' : ''
+                return <Bar key={`o${j.id}`} x0={clampX(ms(j.mold_in))} x1={clampX(ms(j.demold))} y={y0} h={LANE - 2} cls={`old ${cls}`}
+                  label={j.order_id} title={`原：${j.order_id}・${machineLabel(j.press_id)}・${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} 入模・${round1(j.cure_h)} h`} />
+              })}
+              {newJobs.map((j) => {
+                const c = changedNew.get(j.id)
+                const cls = c?.kind === 'moved' ? 'moved' : c?.kind === 'cure' ? 'cure' : c?.kind === 'retimed' ? 'retimed' : ''
+                const label = c?.kind === 'moved' && c.before ? `${j.order_id} ←${shortPress(c.before.press_id)}`
+                  : c?.kind === 'cure' && c.before ? `${round1(c.before.cure_h)}→${round1(j.cure_h)} h` : j.order_id
+                return <Bar key={`n${j.id}`} x0={clampX(ms(j.mold_in))} x1={clampX(ms(j.demold))} y={y0 + LANE + PAD} h={LANE - 2} cls={`new ${cls}`}
+                  label={label} title={`新：${j.order_id}・${machineLabel(j.press_id)}・${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} 入模・${round1(j.cure_h)} h${c?.before ? `（原 ${machineLabel(c.before.press_id)} ${fmtMD(c.before.mold_in)} ${fmtHM(c.before.mold_in)}・${round1(c.before.cure_h)} h）` : ''}`} />
+              })}
+            </g>
+          )
+        })}
+        {isFinite(now) && now > diff.t0 && now < diff.t1 && (
+          <g><line x1={x(now)} x2={x(now)} y1={TOP - 4} y2={Hh - 12} className="cmp-now" /><text x={x(now)} y={Hh - 1} textAnchor="middle" className="cmp-now-t">現在</text></g>
+        )}
+      </svg>
+      <p className="apv-chips" data-testid="schedule-changes">
+        {diff.moved.map((m) => <span key={`${m.order}${m.from}${m.to}`} className="chg moved">{m.order} {shortPress(m.from)} → {shortPress(m.to)} 號機{m.n > 1 ? ` ×${m.n}` : ''}</span>)}
+        {diff.cure && <span className="chg cure">{machineLabel(diff.cure.press)}硫化 {round1(diff.cure.from)} h → {round1(diff.cure.to)} h</span>}
+        {retimed > 0 && <span className="chg">另 {retimed} 模微調時間</span>}
+      </p>
+    </div>
+  )
+}
+function shortPress(id: string): string { return id.startsWith('CURE-') ? String(Number(id.slice(5))) : id }
+function Bar({ x0, x1, y, h, cls, label, title }: { x0: number; x1: number; y: number; h: number; cls: string; label: string; title: string }) {
+  const w = Math.max(2, x1 - x0)
+  return (
+    <g className={`cbar ${cls}`}>
+      <title>{title}</title>
+      <rect x={x0} y={y} width={w} height={h} rx={3} />
+      {w > label.length * 6.4 + 8 && <text x={x0 + 4} y={y + h - 4}>{label}</text>}
+    </g>
+  )
+}
+
+// ---------------------------------------------------------------- tool chips
+export function ToolChips({ uses }: { uses: ToolUse[] }) {
+  return (
+    <ul className="tchips" data-testid="tool-chips">
+      {uses.map((u) => (
+        <li key={u.tool} className={`tchip ${u.failed ? 'has-fail' : ''}`} data-tool={u.tool}>
+          <span className="tchip-h"><ToolIcon name={u.tool} /><b>{TOOL_LABEL[u.tool] ?? u.tool}</b><span className="tchip-n">×{u.calls}</span>{u.failed > 0 && <span className="tchip-f">失敗 {u.failed}</span>}</span>
+          {u.line && <span className="tchip-l">{plain(u.line)}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
