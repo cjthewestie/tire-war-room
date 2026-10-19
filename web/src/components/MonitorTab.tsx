@@ -1,10 +1,12 @@
 import { useState } from 'react'
-import type { ApprovalRequest, BadDataMark, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
-import { LINES, LINE_SHORT, machineLabel } from '../factory'
+import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, PendingAction, SemiFinishedProgress } from '../contracts'
+import { LINES, LINE_SHORT, ML_PRESSES, machineLabel } from '../factory'
 import { fmtHM, fmtNum } from '../format'
-import { primaryEvent } from '../store'
+import { RISK_PLAIN, closedTitle, hypLabel, hypName, plain } from '../plain'
+import { isAbnormal, primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, TimelineTable } from './common'
+import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, StageChain, TimelineTable } from './common'
+import { TemperatureTrend } from './Trend'
 
 export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
   const { state } = useWarRoom()
@@ -12,14 +14,51 @@ export function MonitorTab({ onMachine }: { onMachine: (id: string) => void }) {
   if (!s) return <div className="loading">等待工廠資料…</div>
   const lanDown = s.header.network === 'lan_down'
   return (
-    <div className="monitor">
-      <div className="col-left">
-        <OrdersPanel orders={s.orders} />
-        <SemiPanel semi={s.semi_finished} />
+    <div className="monitor-wrap">
+      <KpiStrip s={s} pending={state.pending} />
+      <div className="monitor">
+        <FocusPanelView focus={s.focus} pending={state.pending} lanDown={lanDown} />
+        <div className="col-left">
+          <OrdersPanel orders={s.orders} />
+          <SemiPanel semi={s.semi_finished} />
+        </div>
+        <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
       </div>
-      <FocusPanelView focus={s.focus} pending={state.pending} lanDown={lanDown} />
-      <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} />
     </div>
+  )
+}
+
+/** Four numbers a judge reads first: machines running, what needs attention, what waits for the supervisor, where the AI is. */
+function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalRequest[] }) {
+  const h = s.header
+  const total = h.normal_count + h.abnormal_count
+  const bad = s.machines.filter((m) => isAbnormal(m.status))
+  const ev = primaryEvent(s.events)
+  const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
+  const round = pending.reduce((r, a) => Math.max(r, a.round), 0)
+  return (
+    <section className="kpis" aria-label="全廠重點">
+      <div className="kpi">
+        <span className="kpi-l">機台運轉</span>
+        <span className="kpi-v" data-testid="kpi-normal">{h.normal_count}<small> / {total} 台</small></span>
+        <span className="kpi-s">事件偵測常駐監看，不經 AI</span>
+      </div>
+      <div className={`kpi ${h.abnormal_count > 0 ? 'is-alarm' : ''}`}>
+        <span className="kpi-l">需要注意</span>
+        <span className="kpi-v">{h.abnormal_count}<small> 台</small></span>
+        <span className="kpi-s">{bad.length ? bad.map((m) => machineLabel(m.machine_id)).join('、') : '全廠正常'}</span>
+      </div>
+      <div className={`kpi ${pending.length ? 'is-warn' : ''}`}>
+        <span className="kpi-l">等主管核准</span>
+        <span className="kpi-v">{pending.length}<small> 件</small></span>
+        <span className="kpi-s">{pending.length ? `第 ${round} 輪・已推到主管手機` : '沒有待核准事項'}</span>
+      </div>
+      <div className={`kpi ${open ? 'is-live' : ''}`}>
+        <span className="kpi-l">AI 指揮官</span>
+        <span className="kpi-v kpi-word">{open ? STATE_LABEL[ev.state] : '待命'}</span>
+        <span className="kpi-s">{open ? `${plain(ev.machine_id)}${ev.replans ? `・重新規劃 ${ev.replans} 次` : '・處理中'}` : ev ? `上一事件：${machineLabel(ev.machine_id)}已結案` : '有異常才喚醒'}</span>
+      </div>
+    </section>
   )
 }
 
@@ -32,7 +71,7 @@ function OrdersPanel({ orders }: { orders: OrderProgress[] }) {
             <span className="order-l">{o.label}<b>{o.done}</b><small> / {o.total}</small></span>
             <span className={o.note ? 'order-h moved' : 'muted'}>剩餘約 {fmtNum(o.remaining_h, 0)} 小時</span>
           </div>
-          {o.note && <p className="order-note small">{o.note}</p>}
+          {o.note && <p className="order-note small">{plain(o.note)}</p>}
           <div className="bar" role="progressbar" aria-valuenow={o.done} aria-valuemax={o.total} aria-label={`${o.label}進度`}>
             <i style={{ width: `${(100 * o.done) / Math.max(1, o.total)}%` }} />
           </div>
@@ -54,7 +93,7 @@ function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
         ))}
       </ul>
       {semi.planned_mold_in_at && <p className="muted small">預計 {fmtHM(semi.planned_mold_in_at)} 入硫化機</p>}
-      {semi.note && <p className={`small semi-note semi-st ${semi.note_state ?? ''}`}>{semi.note}</p>}
+      {semi.note && <p className={`small semi-note semi-st ${semi.note_state ?? ''}`}>{plain(semi.note)}</p>}
     </Panel>
   )
 }
@@ -66,14 +105,14 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
   if (!focus) {
     const ev = primaryEvent(state.snapshot?.events)
     return (
-      <Panel num="③" title="中央說明面板" className="focus calm">
+      <Panel num="③" title="目前事件" className="focus calm">
         <div className="calm-body">
           <p className="calm-title">全廠正常</p>
-          <p className="muted">事件偵測常駐監看 28 台機台（非 LLM、全天候常駐）。異常 1 分鐘內喚醒指揮官。</p>
+          <p className="muted">事件偵測常駐監看 28 台機台（不經 AI、全天候）。發現異常 1 分鐘內喚醒 AI 指揮官。</p>
           {(state.snapshot?.header.bad_data_total ?? 0) > 0 && (
             <p className="note dq-note" data-testid="bad-data-note">驗證層攔下 {state.snapshot?.header.bad_data_total} 筆壞資料（近 30 分）：{(state.snapshot?.header.bad_data ?? []).map((b) => `${machineLabel(b.machine_id)} ${b.count} 筆・${QUALITY_LABEL[b.last_quality] ?? b.last_quality}`).join('；')}。壞資料不進預測、不喚醒 AI。</p>
           )}
-          {ev && <p className="muted small">上一事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${ev.outcome}` : ''}</p>}
+          {ev && <p className="muted small">上一事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>}
         </div>
       </Panel>
     )
@@ -91,50 +130,53 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
   const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
   const view = focusView(focus, ev, [...pending, ...state.resolved])
   return (
-    <Panel num="③" title="中央說明面板" className={`focus ${closed ? 'closed' : 'hot'}`} right={<span className={`state-pill st-${focus.state}`}>{STATE_LABEL[focus.state]}</span>}>
-      <h3 className="focus-title">{view.title}</h3>
-      <p className="focus-detail">{view.detail}</p>
-      {view.causes.length > 0 && (
-        <ul className="focus-causes">
-          {view.causes.map((c) => <li key={c.text} className={`fc-${c.kind}`}>{c.text}</li>)}
-        </ul>
-      )}
-      <div className="tiles">
-        {focus.tiles.map((t) => (
-          <div className={`tile ${t.status}`} key={t.label}>
-            <span className="tile-l">{t.label}</span>
-            <span className="tile-v">{tileValue(t.label, t.value, focus.machine_id)}</span>
+    <Panel num="③" title="目前事件" className={`focus ${closed ? 'closed' : 'hot'}`} right={<span className={`state-pill st-${focus.state}`}>{STATE_LABEL[focus.state]}</span>}>
+      {ev && <StageChain ev={ev} />}
+      <h3 className="focus-title">{closedTitle(plain(view.title), closed)}</h3>
+      <p className="focus-detail">{plain(view.detail)}</p>
+      <div className={`focus-grid ${ev && ev.hypotheses.length > 0 ? 'has-judge' : ''}`}>
+        <div className="focus-main">
+          <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} />
+          <div className="tiles">
+            {focus.tiles.map((t) => (
+              <div className={`tile ${t.status}`} key={t.label}>
+                <span className="tile-l">{t.label}</span>
+                <span className="tile-v">{tileValue(t.label, t.value, focus.machine_id)}</span>
+              </div>
+            ))}
           </div>
-        ))}
+        </div>
+        {ev && ev.hypotheses.length > 0 && <JudgmentTrail ev={ev} />}
       </div>
-      <h4 className="sub">建議調整</h4>
+      <h4 className="sub">處置與核准</h4>
       <ul className="actions">
-        {focus.auto_done.map((a) => <li key={a} className="done"><span className="ck">✓</span>已自動：{a}</li>)}
+        {focus.auto_done.map((a) => <li key={a} className="done"><span className="ck">✓</span><span><em className="act-k">已自動<span className="sr">：</span></em>{plain(a)}</span></li>)}
         {(focus.approved ?? []).map((a, i) => (
           <li key={`${a.approval_id}-${i}`} className="done approved">
-            <span className="ck">✓</span>已核准：{a.label}<small className="muted">（{whoLabel(a.decided_by)}）</small>
+            <span className="ck">✓</span><span><em className="act-k">已核准<span className="sr">：</span></em>{plain(a.label)}<small className="muted">（{whoLabel(a.decided_by)}）</small></span>
           </li>
         ))}
         {(focus.revoked ?? []).map((r) => (
-          <li key={`rv-${r}`} className="revoked"><span className="ck" aria-hidden>↺</span>已撤回：{r}</li>
+          <li key={`rv-${r}`} className="revoked"><span className="ck" aria-hidden>↺</span><span><em className="act-k">已撤回<span className="sr">：</span></em>{plain(r)}</span></li>
         ))}
+        {focus.pending.length > 1 && <li className="pick-one">以下方案擇一核准</li>}
         {focus.pending.map((p) => {
           const r = req(p.approval_id)
           const s = sent[p.approval_id]
           return (
             <li key={`${p.approval_id}-${p.option_id}`} className="todo">
-              <span className="box" aria-hidden>☐</span>
-              <span className="todo-l">待核准：{p.label}{r && <small className="risk">{r.risk}{r.round > 1 ? `・第${r.round}輪` : ''}</small>}</span>
+              <span className="box" aria-hidden />
+              <span className="todo-l"><em className="act-k">待核准<span className="sr">：</span></em>{plain(p.label)}{r && <small className={`risk r-${r.risk}`}>{RISK_PLAIN[r.risk]}{r.round > 1 ? `・第 ${r.round} 輪` : ''}</small>}</span>
               <button className="btn-approve" disabled={!!s} onClick={() => approve(p)}>{s === p.option_id ? '送出中…' : '核准'}</button>
             </li>
           )
         })}
       </ul>
       {err && <p className="err">核准失敗：{err}</p>}
-      <p className="impact">排程影響：{focus.schedule_impact}</p>
+      <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
       {focus.timeline.length > 0 && (
         <details className="focus-tl">
-          <summary>事件時間軸（{focus.timeline.length}）</summary>
+          <summary>事件時間軸（{focus.timeline.length} 筆）</summary>
           <TimelineTable items={focus.timeline.slice(-6)} compact />
         </details>
       )}
@@ -142,23 +184,69 @@ function FocusPanelView({ focus, pending, lanDown }: { focus: FocusPanel | null;
   )
 }
 
-function MachinesPanel({ machines, bad, onMachine }: { machines: MachineTile[]; bad: BadDataMark[]; onMachine: (id: string) => void }) {
-  const badBy = new Map(bad.map((b) => [b.machine_id, b]))
+/** Page 7 "dynamic adjustment": each hypothesis the commander made, what it expected, and what code verified. */
+function JudgmentTrail({ ev }: { ev: Event }) {
   return (
-    <Panel num="④" title="機台狀態（依產線）" className="machines">
+    <section className="judge" aria-label="AI 指揮官的判斷">
+      <h4 className="sub">AI 指揮官的判斷</h4>
+      <ol className="judge-list">
+        {ev.hypotheses.map((h, i) => {
+          const label = hypLabel(h.status, ev)
+          const e = h.expectation
+          const evidence = [...h.evidence].reverse().find((x) => /°C/.test(x))
+          return (
+            <li key={h.id} className={`jg jg-${h.status} ${label === '驗證中' ? 'live' : ''}`}>
+              {i > 0 && ev.hypotheses[i - 1].status === 'rejected' && <span className="jg-turn">沒達到預期，改判</span>}
+              <div className="jg-head">
+                <b>{hypName(h.id)}</b>
+                <span className="jg-st">{label}</span>
+              </div>
+              <p className="jg-text">{plain(h.statement)}</p>
+              {!e && h.status !== 'rejected' && <p className="jg-exp">沒有可量測的預期值，依 SOP 處置並交維修確認</p>}
+              {e && <p className="jg-exp">預期：{e.within_min} 分鐘內{e.op === '>=' ? `回到 ${e.value}°C 以上` : e.op === '<=' ? `降到 ${e.value}°C 以下` : `維持在 ${e.value}–${e.value_hi}°C`}</p>}
+              {h.status === 'rejected' && evidence && <p className="jg-ev">程式驗證：{plain(evidence)}</p>}
+            </li>
+          )
+        })}
+      </ol>
+    </section>
+  )
+}
+
+function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: MachineTile[]; bad: BadDataMark[]; onMachine: (id: string) => void; focusId?: string }) {
+  const badBy = new Map(bad.map((b) => [b.machine_id, b]))
+  const dqText = (id: string) => {
+    const b = badBy.get(id)
+    return b ? `・壞資料 ${b.count} 筆（${QUALITY_LABEL[b.last_quality] ?? b.last_quality}，未喚醒 AI）` : ''
+  }
+  const presses = machines.filter((m) => m.line === 'CURE')
+  return (
+    <Panel num="④" title="機台狀態" className="machines">
+      <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・7–10 號可做中大胎</small></p>
+      <div className="presses">
+        {presses.map((m) => (
+          <button key={m.machine_id} className={`mdot press st-${m.status}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
+            onClick={() => onMachine(m.machine_id)} data-machine={m.machine_id}
+            title={`${machineLabel(m.machine_id)}・${STATUS_LABEL[m.status]}${m.temp_c != null ? `・${m.temp_c}°C` : ''}${dqText(m.machine_id)}`}
+            aria-label={`${machineLabel(m.machine_id)} ${STATUS_LABEL[m.status]}${m.temp_c != null ? ` ${m.temp_c}°C` : ''}${dqText(m.machine_id)}`}>
+            <span className="press-n">{m.short_name}<small>號</small></span>
+            <span className="press-t">{m.temp_c != null ? `${Math.round(m.temp_c * 10) / 10}°` : '—'}</span>
+            <span className="press-s">{STATUS_LABEL[m.status]}{ML_PRESSES.includes(m.machine_id) && <span className="press-ml" title="可做中、大胎">中大</span>}</span>
+          </button>
+        ))}
+      </div>
       <div className="mlines">
-        {LINES.map((ln) => (
+        {LINES.filter((ln) => ln !== 'CURE').map((ln) => (
           <div className="mline" key={ln}>
-            <span className={`mline-k ln-${ln}`}>{LINE_SHORT[ln]}</span>
+            <span className={`mline-k ln-${ln}`}>{LINE_SHORT[ln]}{ln.length === 1 ? ' 線' : ''}</span>
             <div className="mline-items">
               {machines.filter((m) => m.line === ln).map((m) => {
-                const b = badBy.get(m.machine_id)
-                const dq = b ? `・壞資料 ${b.count} 筆（${QUALITY_LABEL[b.last_quality] ?? b.last_quality}，未喚醒 AI）` : ''
+                const dq = dqText(m.machine_id)
                 return (
-                  <button key={m.machine_id} className={`mdot st-${m.status}${b ? ' dq' : ''}`} onClick={() => onMachine(m.machine_id)}
+                  <button key={m.machine_id} className={`mdot st-${m.status}${dq ? ' dq' : ''}`} onClick={() => onMachine(m.machine_id)}
                     title={`${machineLabel(m.machine_id)}・${STATUS_LABEL[m.status]}${m.temp_c != null ? `・${m.temp_c}°C` : ''}${dq}`}
                     aria-label={`${machineLabel(m.machine_id)} ${STATUS_LABEL[m.status]}${dq}`} data-machine={m.machine_id}>
-                    <i className="dot" />{m.short_name}{b && <span className="dq-tag" aria-hidden>資料</span>}
+                    <i className="dot" />{m.short_name}{dq && <span className="dq-tag" aria-hidden>資料</span>}
                   </button>
                 )
               })}
@@ -166,18 +254,17 @@ function MachinesPanel({ machines, bad, onMachine }: { machines: MachineTile[]; 
           </div>
         ))}
       </div>
-      <p className="muted small foot">點選機台：看溫度、壓力、時間、水流{bad.length > 0 && <>・<span className="dq-tag">資料</span> = 驗證層攔下壞資料</>}</p>
+      <p className="muted small foot">點機台看溫度、壓力、時間、水流{bad.length > 0 && <>・<span className="dq-tag">資料</span> = 驗證層攔下壞資料</>}</p>
     </Panel>
   )
 }
 
-type Cause = { kind: 'hyp' | 'ok' | 'no'; text: string }
-/** Rebuild ③'s title, detail and cause from the live event, so the panel never contradicts the tiles or the phone:
- *  the wake-time reading is labelled as such, the live value comes from the temperature tile, and a cause stays
- *  "假設 H1" until code verifies it. After a replan the round-2 approval title (e.g. 7 號機停用，重排中) leads. */
-function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[]): { title: string; detail: string; causes: Cause[] } {
+/** Rebuild ③'s title and detail from the live event, so the panel never contradicts the tiles or the phone:
+ *  the wake-time reading is labelled as such and the live value comes from the temperature tile.
+ *  After a replan the round-2 approval title (e.g. 7 號機停用，重排中) leads. */
+function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[]): { title: string; detail: string } {
   // Only the server-built panel freezes the wake-time anomaly message; a live-built detail (mock) is used as-is.
-  if (!ev || !ev.anomaly.message || !focus.detail.startsWith(ev.anomaly.message)) return { title: focus.title, detail: focus.detail, causes: [] }
+  if (!ev || !ev.anomaly.message || !focus.detail.startsWith(ev.anomaly.message)) return { title: focus.title, detail: focus.detail }
   const base = focus.detail.split('；原因：')[0]
   const temp = focus.tiles.find((t) => t.label === '溫度')
   const detail = `喚醒時（${fmtHM(ev.anomaly.ts)}）：${base}${temp && temp.value !== '—' ? `。現在：${temp.value}` : ''}`
@@ -186,16 +273,7 @@ function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[])
   const title = rejected.length > 0 && latestRound && latestRound.round > 1
     ? `${machineLabel(ev.machine_id)}：${latestRound.title}`
     : focus.title
-  const causes: Cause[] = ev.hypotheses.map((h) => (
-    h.status === 'confirmed' ? { kind: 'ok' as const, text: `原因（已驗證）${h.id}：${h.statement}` }
-      : h.status === 'rejected' ? { kind: 'no' as const, text: `${h.id} 不成立：${h.statement}${h.evidence.length ? `（${h.evidence[h.evidence.length - 1]}）` : ''}` }
-        : { kind: 'hyp' as const, text: `假設 ${h.id}（${ev.state === 'closed' || ev.state === 'safe_stop' ? '未驗證，已依 SOP 處置' : '驗證中'}）：${h.statement}` }
-  ))
-  if (!causes.length) {
-    const c = focus.detail.split('；原因：')[1]
-    if (c) causes.push({ kind: 'hyp', text: `假設：${c}（尚未驗證）` })
-  }
-  return { title, detail, causes }
+  return { title, detail }
 }
 
 /** "supervisor" is the API default for a phone decision; show the role in Chinese. */

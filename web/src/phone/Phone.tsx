@@ -2,6 +2,8 @@
 import { useState } from 'react'
 import type { ApprovalRequest, AskAnswer, DecisionKind } from '../contracts'
 import { STATE_LABEL } from '../components/common'
+import { TemperatureTrend } from '../components/Trend'
+import { RISK_PLAIN, plain } from '../plain'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
@@ -37,10 +39,10 @@ export function Phone() {
           <div className="ph-card idle">
             <h2>目前沒有待核准事項</h2>
             {ev ? (
-              <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${ev.outcome}` : ''}</p>
+              <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
             {state.resolved.slice(0, 3).map((r) => (
-              <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{r.title}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
+              <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
             ))}
           </div>
         ) : pending.map((a) => <ApprovalCard key={a.id} a={a} disabled={lanDown || !transport} />)}
@@ -101,7 +103,8 @@ function AskBox({ disabled }: { disabled: boolean }) {
 const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時' }
 
 function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }) {
-  const { transport } = useWarRoom()
+  const { transport, state } = useWarRoom()
+  const ev = state.snapshot?.events.find((e) => e.id === a.event_id) ?? null
   const [opt, setOpt] = useState<string | null>(null)
   const [mode, setMode] = useState<DecisionKind | null>(null)
   const [reason, setReason] = useState('')
@@ -135,22 +138,27 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   return (
-    <div className="ph-card">
+    <div className="ph-card ph-approval">
+      <div className="ph-col-a">
       <div className="ph-top">
-        <span className="ph-risk">{a.risk}</span>
+        <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>
         <span className="ph-round">{ROUND[a.round] ?? `第${a.round}輪`}核准</span>
       </div>
-      <h2 className="ph-title">{a.title}</h2>
+      <h2 className="ph-title">{plain(a.title)}</h2>
+      {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       <dl className="ph-info">
-        <dt>原因</dt><dd>{a.reason}</dd>
-        <dt>已做</dt><dd>{a.done.length ? a.done.join('；') : '—'}</dd>
-        <dt>缺口</dt><dd>{a.gaps.length ? a.gaps.join('；') : '無'}</dd>
-        <dt>交期</dt><dd>{a.delivery_impact}</dd>
+        <dt>原因</dt><dd>{plain(a.reason)}</dd>
+        <dt>已做</dt><dd>{a.done.length ? a.done.map(plain).join('；') : '—'}</dd>
+        <dt>缺口</dt><dd>{a.gaps.length ? a.gaps.map(plain).join('；') : '無'}</dd>
+        <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
         {a.actions?.length ? (<>
-          <dt>核准內容</dt>
-          <dd>{a.actions.map((x, i) => <div key={i}>{x}</div>)}</dd>
+          <dt>要核准</dt>
+          <dd><ul className="ph-acts-list">{a.actions.map((x, i) => <li key={i}>{plain(x)}</li>)}</ul></dd>
         </>) : null}
       </dl>
+      </div>
+      <div className="ph-col-b">
+      <p className="ph-q">選一個人力方案</p>
       <div className="ph-opts" role="radiogroup" aria-label="方案">
         {a.options.map((o) => (
           <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}
@@ -169,11 +177,13 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
       )}
       {err && <p className="err">{err}</p>}
       <div className="ph-acts">
+        {!chosen && !mode && <p className="ph-hint">請先選方案，再按核准</p>}
         <button className="ph-approve" disabled={disabled || busy || !chosen} onClick={() => send('approve')}>{busy ? '送出中…' : `核准${chosen ? ` ${chosen}` : ''}`}</button>
         <button className="ph-sec" disabled={disabled || busy} onClick={() => (mode === 'modify' ? send('modify') : setMode('modify'))}>{mode === 'modify' ? (changesOption ? `送出修改（改選 ${chosen}）` : '退回重排') : '修改'}</button>
         <button className="ph-sec danger" disabled={disabled || busy} onClick={() => (mode === 'reject' ? send('reject') : setMode('reject'))}>{mode === 'reject' ? '確認駁回' : '駁回'}</button>
       </div>
-      <p className="ph-foot">決定與理由會寫入稽核日誌，回到狀態機繼續執行。</p>
+      <p className="ph-foot">決定與理由會寫入稽核日誌，系統接著往下執行。</p>
+      </div>
     </div>
   )
 }
