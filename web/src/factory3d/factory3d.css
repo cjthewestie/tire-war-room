@@ -1,9 +1,9 @@
 /* 3D factory (/factory): full-screen canvas + soft cream HUD in the Minimotive look.
-   The machine drawer is the dashboard's own component and keeps the dashboard's dark theme. */
+   State colours and the toast accent come from the war-room tokens (index.css, DESIGN.md); in-game screens are the real pages in iframes. */
 html, body, #root { height: 100%; overflow: hidden; }
 .f3-root {
   --c-paper: rgba(255, 250, 240, .92); --c-paper-solid: #fffaf0; --c-ink: #3d342b; --c-ink-dim: #7a6e60;
-  --c-line: #e4d8c3; --c-green: #4f8a1c; --c-amber: #b26a00; --c-red: #c8392e; --c-shadow: 0 6px 22px rgba(90, 70, 40, .16);
+  --c-line: #e4d8c3; --c-green: var(--ok-text); --c-amber: var(--wait-text); --c-red: var(--bad-text); --c-shadow: 0 6px 22px rgba(90, 70, 40, .16);
   position: fixed; inset: 0; background: #e9dfcf; user-select: none;
 }
 .f3-canvas { position: absolute !important; inset: 0; z-index: 0; outline: none; }  /* own stacking context: 3D labels stay under the HUD */
@@ -30,17 +30,17 @@ html, body, #root { height: 100%; overflow: hidden; }
 
 .f3-keys { position: absolute; z-index: 10; left: 14px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--c-ink-dim); background: var(--c-paper); border-radius: 16px; padding: 7px 12px; max-width: calc(100vw - 28px); pointer-events: none; box-shadow: var(--c-shadow); }
 
-.f3-toast { position: absolute; top: 14px; right: 14px; display: grid; gap: 2px; min-width: 280px; max-width: min(460px, calc(100vw - 28px)); background: var(--c-paper-solid); color: var(--c-ink); border: 3px solid #ffc94d; border-radius: 18px; padding: 10px 15px; box-shadow: 0 10px 30px rgba(90, 70, 40, .25); cursor: pointer; animation: f3-drop .35s cubic-bezier(.2, .9, .3, 1.3); z-index: 15; }
+.f3-toast { position: absolute; top: 14px; right: 14px; display: grid; gap: 2px; min-width: 280px; max-width: min(460px, calc(100vw - 28px)); background: var(--c-paper-solid); color: var(--c-ink); border: 3px solid var(--orange); border-radius: 18px; padding: 10px 15px; box-shadow: 0 10px 30px rgba(90, 70, 40, .25); cursor: pointer; animation: f3-drop .35s cubic-bezier(.16, 1, .3, 1); z-index: 15; }
 .f3-toast b { color: var(--c-amber); } .f3-toast span { font-size: 13px; } .f3-toast i { font-size: 12px; color: var(--c-ink-dim); font-style: normal; }
 @keyframes f3-drop { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
 /* reading tag for the machine the lead is at: anchored above its status lamp, bottom edge clear of it */
-.f3-tag { transform: translate(-50%, calc(-100% - 4px)); display: grid; justify-items: center; gap: 0; padding: 4px 11px 5px; border-radius: 14px; background: var(--c-paper-solid); border-top: 4px solid #3fcf5a; color: var(--c-ink); white-space: nowrap; font-size: 14px; line-height: 1.3; box-shadow: var(--c-shadow); }
+.f3-tag { transform: translate(-50%, calc(-100% - 4px)); display: grid; justify-items: center; gap: 0; padding: 4px 11px 5px; border-radius: 14px; background: var(--c-paper-solid); --lamp: #3fcf5a; background-image: linear-gradient(var(--lamp), var(--lamp)); background-size: 100% 4px; background-repeat: no-repeat; padding-top: 8px; color: var(--c-ink); white-space: nowrap; font-size: 14px; line-height: 1.3; box-shadow: var(--c-shadow); }
 .f3-tag span { font-weight: 800; font-size: 16px; }
 .f3-tag i { font-style: normal; font-size: 12px; color: var(--c-ink-dim); }
-.f3-tag.amber { border-top-color: #f5a623; } .f3-tag.amber span { color: var(--c-amber); }
-.f3-tag.red { border-top-color: #ff3b30; background: #ffe9e4; } .f3-tag.red span { color: var(--c-red); }
-.f3-tag.grey { border-top-color: #8a8f96; }
+.f3-tag.amber { --lamp: #f5a623; } .f3-tag.amber span { color: var(--c-amber); }
+.f3-tag.red { --lamp: #ff3b30; background-color: #ffe9e4; } .f3-tag.red span { color: var(--c-red); }
+.f3-tag.grey { --lamp: #8a8f96; }
 
 /* line signpost board (DOM, so the tilt-shift blur leaves it sharp; in first person it scales with distance) */
 .f3-sign { padding: 2px 10px; border: 3px solid; border-radius: 12px; background: var(--c-paper-solid); color: var(--c-ink); font-weight: 800; font-size: 13px; white-space: nowrap; box-shadow: 0 3px 10px rgba(90, 70, 40, .14); }

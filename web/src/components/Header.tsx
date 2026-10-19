@@ -15,7 +15,7 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   return (
     <header className="topbar">
       <div className="brand">
-        <span className="logo" aria-hidden>◆</span>
+        <svg className="logo" viewBox="0 0 24 24" aria-hidden><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 10h20M7 14h4M14 14h3" /></svg>
         <h1>實心胎智慧製造戰情室</h1>
       </div>
       <nav className="tabs" role="tablist">

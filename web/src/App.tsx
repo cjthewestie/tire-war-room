@@ -33,7 +33,7 @@ function Dashboard() {
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const pendingN = state.pending.length
   return (
-    <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
+    <div className={`app tab-${tab} ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
       <Header tab={tab} onTab={go} />
       <div className="demo-sheet" role="region" aria-label="展示控制">
         <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>

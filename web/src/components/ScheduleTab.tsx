@@ -7,6 +7,7 @@ import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { heldAt } from './MachineDrawer'
+import { ShiftLoad } from './ShiftLoad'
 import { MarkedText, Panel, RISK_LABEL, STATE_LABEL, TimelineTable, useWidth } from './common'
 
 const H = 3_600_000
@@ -342,6 +343,7 @@ function LaborPanel({ shifts, current, now, version }: { shifts: Shift[]; curren
           <span><i className="lg run" />機台運轉</span><span><i className="lg on" />有人上班</span><span><i className="lg none" />無人</span><span><i className="lg demold" />出模</span>
           <span className="muted">{fmtMD(d0)}（{fmtWeekday(d0)}）{mode === 'cur' ? '・現況：多數組只上早班（p.4）' : '・優化：硫化機組 6–15／14–23 錯班（p.6）'}</span>
         </div>
+        <ShiftLoad shifts={list} d0={d0} d1={d1} />
       </div>
     </Panel>
   )
