@@ -1,8 +1,9 @@
-// Headless check of the 3D factory (/factory) against a running FastAPI server (./start.sh, mock mode).
+// Headless check of the 3D factory island (/factory) against a running FastAPI server (./start.sh, mock mode).
 //   PORT=8010 ./start.sh &   then   node web/e2e/factory3d.mjs http://localhost:8010
-// Checks: canvas renders, no console errors, keyboard walking, F at the desk starts the p.11 scenario,
-// press 7 turns red, a new approval raises the HUD toast, P raises the real /phone page and it is usable
-// (approve + 問戰情室). Screenshots -> web/e2e/screenshots/factory-*.png
+// Checks: canvas renders, no console errors, third-person walking (WASD relative to the camera, Shift runs),
+// Q/E and the wheel move the orbit camera, collision with the desk and the island edge, F at the desk starts
+// the p.11 scenario, press 7 turns red, a new approval raises the HUD toast, P raises the real /phone page and
+// it is usable (approve + 問戰情室). Screenshots -> web/e2e/screenshots/factory-*.png
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -51,26 +52,58 @@ try {
   check('HUD connected to live backend', !!live, await page.locator('.f3-hud-top').innerText())
 
   await page.click('[data-testid=f3-start]')
-  await sleep(1500)
+  await sleep(3500)   // camera eases in from the island overview to behind the lead
   await page.screenshot({ path: `${OUT}/factory-start.png` })
+  const pos = () => page.evaluate(() => ({ ...window.__factory3d.player }))
+  const camNow = () => page.evaluate(() => ({ ...window.__factory3d.cam }))
+  const hold = async (keys, ms) => { for (const k of keys) await page.keyboard.down(k); await sleep(ms); for (const k of [...keys].reverse()) await page.keyboard.up(k) }
 
-  // keyboard: Q/E turn, S walks back (no pointer lock needed)
-  const p0 = await page.evaluate(() => ({ ...window.__factory3d.player }))
-  await page.keyboard.down('KeyQ'); await sleep(400); await page.keyboard.up('KeyQ')
-  await page.keyboard.down('KeyE'); await sleep(400); await page.keyboard.up('KeyE')
-  await page.keyboard.down('KeyS'); await sleep(700); await page.keyboard.up('KeyS')   // back away from the desk
-  const p1 = await page.evaluate(() => ({ ...window.__factory3d.player }))
-  check('WASD walking moves the player (S)', Math.hypot(p1.x - p0.x, p1.z - p0.z) > 0.5, `(${p0.x.toFixed(2)},${p0.z.toFixed(2)}) -> (${p1.x.toFixed(2)},${p1.z.toFixed(2)})`)
-  // collision: walk into the desk from behind should stop short of it
-  await page.evaluate(() => window.__factory3d.teleport(27, 0, Math.PI / 2))
-  await page.keyboard.down('KeyW'); await sleep(1200); await page.keyboard.up('KeyW')
-  const pc = await page.evaluate(() => ({ ...window.__factory3d.player }))
-  check('collision: desk blocks the player', pc.x > 24.8, `x=${pc.x.toFixed(2)} (desk edge 24.8)`)
+  // Q/E orbit the camera around the figure; S walks toward the camera (away from the desk)
+  const c0 = await camNow()
+  await hold(['KeyQ'], 500)
+  const c1 = await camNow()
+  check('Q rotates the camera around the figure', Math.abs(c1.yaw - c0.yaw) > 0.05, `yaw ${c0.yaw.toFixed(2)} -> ${c1.yaw.toFixed(2)}`)
+  await hold(['KeyE'], 500)
+  const p0 = await pos()
+  await hold(['KeyS'], 1500)
+  const p1 = await pos()
+  check('WASD walking moves the figure (S)', Math.hypot(p1.x - p0.x, p1.z - p0.z) > 0.3, `(${p0.x.toFixed(2)},${p0.z.toFixed(2)}) -> (${p1.x.toFixed(2)},${p1.z.toFixed(2)})`)
+  check('the figure turns to face where it walks', Math.abs(Math.atan2(Math.sin(p1.yaw - p0.yaw), Math.cos(p1.yaw - p0.yaw))) > 1, `yaw ${p0.yaw.toFixed(2)} -> ${p1.yaw.toFixed(2)}`)
+  // wheel zooms within limits
+  await page.mouse.move(720, 450)
+  await page.mouse.wheel(0, 600)
+  await sleep(300)
+  const c2 = await camNow()
+  await page.mouse.wheel(0, -600)
+  check('mouse wheel zooms the camera', c2.dist > c1.dist + 1 && c2.dist <= 24, `dist ${c1.dist.toFixed(1)} -> ${c2.dist.toFixed(1)}`)
+  // Shift runs: same hold, roughly twice the distance
+  await page.evaluate(() => window.__factory3d.teleport(0.5, 1.4, -Math.PI / 2))
+  await hold(['KeyW'], 1000)
+  const w1 = await pos()
+  await page.evaluate(() => window.__factory3d.teleport(0.5, 1.4, -Math.PI / 2))
+  await hold(['ShiftLeft', 'KeyW'], 1000)
+  const r1 = await pos()
+  check('Shift runs faster than walking', r1.x - 0.5 > (w1.x - 0.5) * 1.3, `walk ${(w1.x - 0.5).toFixed(2)} vs run ${(r1.x - 0.5).toFixed(2)}`)
+  // collision: walk into the desk from behind it should stop short of it
+  await page.evaluate(() => window.__factory3d.teleport(7.65, 0, Math.PI / 2))
+  await hold(['KeyW'], 1500)
+  const pc = await pos()
+  check('collision: desk blocks the figure', pc.x > 7.38, `x=${pc.x.toFixed(2)} (desk edge 7.175 + radius 0.22)`)
+  // the island edge: walking south into the sea stops on the grass
+  await page.evaluate(() => window.__factory3d.teleport(0, 5.6, Math.PI))
+  await hold(['ShiftLeft', 'KeyW'], 2500)
+  const pe = await pos()
+  const onIsle = await page.evaluate(([x, z]) => window.__factory3d.onIsland(x, z, 0.2), [pe.x, pe.z])
+  check('collision: the island edge keeps the figure out of the sea', pe.z > 5.8 && onIsle, `z=${pe.z.toFixed(2)} onIsland=${onIsle}`)
+  // zoomed-out view of the whole island
+  await page.evaluate(() => { const f = window.__factory3d; f.teleport(0.5, 1.4, -0.6); f.cam.dist = 22 })
+  await sleep(2500)
+  await page.screenshot({ path: `${OUT}/factory-island.png` })
+  await page.evaluate(() => { window.__factory3d.cam.dist = 14 })
 
   // desk: F opens the demo controls; start the p.11 scenario with the same API as DemoStrip
-  await page.evaluate(() => window.__factory3d.teleport(22.5, 0, Math.PI / 2))   // turn around: the hall
+  await page.evaluate(() => window.__factory3d.teleport(6.2, 0, -Math.PI / 2))   // in front of the desk, facing the big screen
   await sleep(1200)
-  await page.screenshot({ path: `${OUT}/factory-hall.png` })
   check('desk prompt', (await page.locator('[data-testid=f3-prompt]').innerText()).includes('戰情室控制台'))
   await page.keyboard.press('KeyF')
   await page.waitForSelector('.f3-desk', { timeout: 3000 })
@@ -137,6 +170,21 @@ try {
   // fps sample (headless SwiftShader: CPU rendering, far below a real GPU; reported, not asserted)
   const fps = await page.evaluate(() => new Promise((r) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else r(n / 2) }; requestAnimationFrame(f) }))
   console.log(`INFO  fps headless SwiftShader: ${fps}`)
+
+  // phone screen (390 px wide) — the HUD must still fit. Close the big page first: two SwiftShader pages starve each other.
+  await page.close()
+  const m = await browser.newContext({ viewport: { width: 390, height: 844 }, locale: 'zh-TW', timezoneId: 'Asia/Taipei', hasTouch: true })
+  const mp = await m.newPage()
+  mp.on('pageerror', (e) => errors.push(`pageerror(390): ${e.message}`))
+  await mp.goto(`${BASE}/factory?test=1`, { waitUntil: 'domcontentloaded' })   // the 10× sim keeps the network busy
+  await mp.waitForSelector('canvas', { timeout: 15000 })
+  await sleep(1500)
+  await mp.click('[data-testid=f3-start]')
+  await sleep(3500)
+  await mp.screenshot({ path: `${OUT}/factory-390.png` })
+  const over = await mp.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
+  check('390 px: no horizontal overflow', !over)
+  await m.close()
 } finally {
   const real = errors.filter((e) => !/favicon/.test(e))
   check('no console errors', real.length === 0, real.slice(0, 5).join(' | '))
