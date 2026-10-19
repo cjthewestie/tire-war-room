@@ -1,7 +1,6 @@
 // Low-poly building blocks, ported from CJ's Minimotive world (minimotive/src/world/kit.ts + islands/common.ts):
-// flat-shaded cached materials, box/cyl/ball helpers, the chibi figure rig with walk/rest poses, island pieces
-// (wobbly grass-over-sand-over-dirt base, pine, round tree, flowers), a gear and a short conveyor, plus a helper
-// that merges a static group into one mesh per material.
+// flat-shaded cached materials, box/cyl/ball helpers, the chibi figure rig with walk/rest poses, a gear and a short
+// conveyor, plus a helper that merges a static group into one mesh per material.
 import * as THREE from 'three'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js'
 
@@ -142,55 +141,6 @@ export function restPose(f: Figure): void {
   f.head.rotation.set(0, 0, 0)
 }
 
-// ---- island pieces (Minimotive islands/common.ts, made rectangular-ish for a factory floor) ----
-
-/** Wobble factor of the island outline at angle a (shared by the mesh and the walkable-edge test). */
-export function wobble(a: number, seed: number) {
-  return 1 + 0.045 * Math.sin(3 * a + seed) + 0.03 * Math.sin(5 * a + seed * 2.3) + 0.018 * Math.sin(9 * a + seed * 0.7)
-}
-/** Radius of a squircle (|x/A|^4 + |z/B|^4 = 1) at angle a. */
-export function squircle(a: number, A: number, B: number) {
-  const c = Math.abs(Math.cos(a)) / A, s = Math.abs(Math.sin(a)) / B
-  return Math.pow(c ** 4 + s ** 4, -0.25)
-}
-
-/** An organic island: grass top over a sand beach and a dirt underside, outline = squircle × wobble. */
-export function islandBase(A: number, B: number, ground: string, seed: number): THREE.Group {
-  const g = new THREE.Group()
-  // A unit cylinder whose top ring sits `top` outside the outline and bottom ring `bottom` outside it.
-  const ring = (h: number, top: number, bottom: number) => {
-    const geo = new THREE.CylinderGeometry(1, 1, h, 72, 1)
-    const p = geo.attributes.position as THREE.BufferAttribute
-    for (let i = 0; i < p.count; i++) {
-      const x = p.getX(i), z = p.getZ(i)
-      const r = Math.hypot(x, z)
-      if (r < 1e-6) continue
-      const a = Math.atan2(z, x)
-      const R = squircle(a, A, B) * wobble(a, seed) + (p.getY(i) > 0 ? top : bottom)
-      p.setXYZ(i, (x / r) * R, p.getY(i), (z / r) * R)
-    }
-    geo.computeVertexNormals()
-    return geo
-  }
-  g.add(mesh(ring(0.5, 0.55, 0.9), mat('#e3cf9f'), 0, -0.45, 0))      // sand beach
-  g.add(mesh(ring(0.5, 0, 0.15), mat(ground), 0, -0.25, 0))            // grass top (surface at y=0)
-  g.add(mesh(ring(1.6, 0.85, -2.2), mat('#8a6a4a'), 0, -1.45, 0))      // dirt underside
-  return g
-}
-
-export const pine = (g: THREE.Group, x: number, z: number, s = 1, c = '#4f7a43') => {
-  g.add(cyl(0.05 * s, 0.07 * s, 0.4 * s, '#6e4526', x, 0.2 * s, z, 5))
-  g.add(mesh(new THREE.ConeGeometry(0.32 * s, 0.6 * s, 7), mat(c), x, 0.6 * s, z))
-  g.add(mesh(new THREE.ConeGeometry(0.24 * s, 0.5 * s, 7), mat(c), x, 0.9 * s, z))
-}
-export const roundTree = (g: THREE.Group, x: number, z: number, s = 1, c = '#6f9a4f') => {
-  g.add(cyl(0.05 * s, 0.07 * s, 0.5 * s, '#6e4526', x, 0.25 * s, z, 5))
-  g.add(ball(0.35 * s, c, x, 0.75 * s, z, 1))
-}
-export const flower = (g: THREE.Group, x: number, z: number, c: string) => {
-  g.add(cyl(0.006, 0.006, 0.1, '#4f7a43', x, 0.05, z, 3), ball(0.045, c, x, 0.11, z, 0))
-}
-
 /** A gear standing upright (spin it with rotation.y of the returned group's child). */
 export function gear(r: number, teeth: number, color: string, hub = '#55575a') {
   const outer = new THREE.Group()
@@ -254,7 +204,7 @@ export function mergeStatic(src: THREE.Object3D, opts: { castShadow?: boolean; r
   return out
 }
 
-/** Small deterministic random, so the island looks the same on every load. */
+/** Small deterministic random, so the scene looks the same on every load. */
 export function mulberry(seed: number) {
   let a = seed >>> 0
   return () => {

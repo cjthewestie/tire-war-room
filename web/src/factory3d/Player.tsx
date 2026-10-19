@@ -1,13 +1,13 @@
 // Third-person controller: a tiny chibi war-room lead (hard hat, safety vest, phone in hand) followed by an orbit
 // camera at a diorama angle. WASD moves relative to the camera, Shift runs, Q/E or mouse drag rotate the camera,
-// the wheel zooms. Collision against machine footprints, the hut and the island edge (layout.collide).
+// the wheel zooms. Collision against machine footprints, furniture, inner walls and the outer walls (layout.collide).
 import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
-import { collide, nearest, type Near } from './layout'
-import { CAM_LIMITS, cam, player } from './pose'
+import { OVERVIEW_CENTER, collide, nearest, type Near } from './layout'
+import { CAM_LIMITS, OVERVIEW_DIST, cam, player } from './pose'
 
 const WALK = 2.2
 const RUN = 4.4
@@ -39,6 +39,12 @@ function buildLead() {
   f.handR.add(phone)
   f.root.scale.setScalar(FIG_SCALE)
   f.root.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true })
+  // a soft white marker ring at the feet, so the lead is easy to find in the overview
+  const ring = new THREE.Mesh(new THREE.RingGeometry(0.2, 0.27, 24), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0.75, depthWrite: false, toneMapped: false }))
+  ring.rotation.x = -Math.PI / 2
+  ring.position.y = 0.02
+  ring.renderOrder = 3
+  f.root.add(ring)
   return { f, phone, screenMat }
 }
 
@@ -55,11 +61,11 @@ export function Player({ enabled, started, onNear, prompt, pending, buzzUntil, p
   const lead = useMemo(() => buildLead(), [])
   const root = useRef<THREE.Group>(null)
   // smoothed camera state (the targets live in `cam`)
-  const view = useRef({ yaw: cam.yaw, pitch: cam.pitch, dist: 26, tx: player.x, tz: player.z })
+  const view = useRef({ yaw: cam.yaw, pitch: cam.pitch, dist: OVERVIEW_DIST, tx: OVERVIEW_CENTER.x, tz: OVERVIEW_CENTER.z })
   const walkT = useRef(0)
   const armX = useRef(-0.6)
 
-  // Before the start screen is dismissed the camera floats out over the whole island and slowly circles it.
+  // Before the start screen is dismissed the camera floats out over the whole building and slowly circles it.
   useEffect(() => {
     if (started) { cam.yaw = view.current.yaw + wrap(player.yaw - view.current.yaw) }
   }, [started])
@@ -157,36 +163,41 @@ export function Player({ enabled, started, onNear, prompt, pending, buzzUntil, p
       f.body.position.y = 0.36 + Math.sin(t * 2) * 0.006   // idle breathing
     }
     const buzzing = performance.now() < buzzUntil
-    // phone arm: held low while walking, raised to the face when the phone is up
-    const armTarget = phoneUp ? -1.45 : moved ? -0.55 + Math.sin(walkT.current * 10) * 0.08 : -0.6
+    // phone arm: held low while walking; with the phone up the arm swings up so the phone sits in front of the face,
+    // screen turned toward the eyes, and the head tips down a little to read it
+    const armTarget = phoneUp ? -2.3 : moved ? -0.55 + Math.sin(walkT.current * 10) * 0.08 : -0.6
     armX.current += (armTarget - armX.current) * Math.min(1, dt * 14)
     f.armR.rotation.x = armX.current
-    f.armR.rotation.z = phoneUp ? -0.25 : 0.08
-    f.head.rotation.x = phoneUp ? 0.28 : 0
-    phone.rotation.x = phoneUp ? 0.2 : 0.9
+    f.armR.rotation.z = phoneUp ? -0.5 : 0.08
+    f.head.rotation.x = phoneUp ? 0.12 : 0
+    phone.rotation.x = phoneUp ? 1.05 : 0.9
+    if (phoneUp) { f.armL.rotation.x = -1.2; f.armL.rotation.z = 0.35 }   // other hand comes up to steady it
     phone.position.x = buzzing ? Math.sin(t * 70) * 0.012 : 0
     screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? '#f5a623' : '#3fcf5a')
     screenMat.emissiveIntensity = pending > 0 ? 0.9 + Math.sin(t * 5) * 0.4 : 0.6
 
     // orbit camera: ease toward the targets (snap after a teleport)
     const vw = view.current
-    const targetDist = started ? cam.dist : 26
+    const targetDist = !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist   // close in on the raised phone
+    // with the phone up, swing a little to the side so the raised phone shows
+    const yawT = cam.yaw + (phoneUp ? 0.85 : 0)
+    const pitchT = cam.pitch
+    const tx = started ? player.x : OVERVIEW_CENTER.x, tz = started ? player.z : OVERVIEW_CENTER.z
     if (cam.snap) {
-      vw.yaw = cam.yaw; vw.pitch = cam.pitch; vw.dist = targetDist; vw.tx = player.x; vw.tz = player.z
+      vw.yaw = yawT; vw.pitch = pitchT; vw.dist = targetDist; vw.tx = tx; vw.tz = tz
       cam.snap = false
     } else {
       const e = 1 - Math.exp(-dt * 6)
-      vw.yaw += wrap(cam.yaw - vw.yaw) * e
-      vw.pitch += (cam.pitch - vw.pitch) * e
+      vw.yaw += wrap(yawT - vw.yaw) * e
+      vw.pitch += (pitchT - vw.pitch) * (1 - Math.exp(-dt * 3))
       vw.dist += (targetDist - vw.dist) * (1 - Math.exp(-dt * (started ? 4 : 1)))
-      vw.tx += (player.x - vw.tx) * (1 - Math.exp(-dt * 10))
-      vw.tz += (player.z - vw.tz) * (1 - Math.exp(-dt * 10))
+      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
+      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
     }
     const ty = 0.55
     const hr = Math.cos(vw.pitch) * vw.dist
     camera.position.set(vw.tx + Math.sin(vw.yaw) * hr, ty + Math.sin(vw.pitch) * vw.dist, vw.tz + Math.cos(vw.yaw) * hr)
     camera.lookAt(vw.tx, ty, vw.tz)
-
     const n = nearest(player.x, player.z)
     const key = n ? (n.kind === 'desk' ? 'desk' : n.id) : ''
     if (key !== lastNear.current) { lastNear.current = key; onNear(n) }
@@ -196,7 +207,7 @@ export function Player({ enabled, started, onNear, prompt, pending, buzzUntil, p
     <group ref={root}>
       <primitive object={lead.f.root} />
       {prompt && (
-        <Html position={[0, 1.25, 0]} center zIndexRange={[8, 6]} style={{ pointerEvents: 'none' }}>
+        <Html position={[0, 0, 0]} zIndexRange={[8, 6]} style={{ pointerEvents: 'none' }}>
           <div className="f3-prompt" data-testid="f3-prompt"><kbd>F</kbd> {prompt}</div>
         </Html>
       )}

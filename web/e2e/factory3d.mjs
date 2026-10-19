@@ -1,8 +1,10 @@
-// Headless check of the 3D factory island (/factory) against a running FastAPI server (./start.sh, mock mode).
+// Headless check of the 3D factory (/factory, a dollhouse-cutaway factory building) against a running FastAPI
+// server (./start.sh, mock mode).
 //   PORT=8010 ./start.sh &   then   node web/e2e/factory3d.mjs http://localhost:8010
-// Checks: canvas renders, no console errors, third-person walking (WASD relative to the camera, Shift runs),
-// Q/E and the wheel move the orbit camera, collision with the desk and the island edge, F at the desk starts
-// the p.11 scenario, press 7 turns red, a new approval raises the HUD toast, P raises the real /phone page and
+// Checks: canvas renders, no console errors, the whole building fits the start overview, third-person walking (WASD
+// relative to the camera, Shift runs), Q/E and the wheel move the orbit camera, collision with the desk, the inner
+// glass walls and the outer walls, doorways stay open (war room, the doors out to the loading dock), line and room
+// signs show, F at the desk starts the p.11 scenario, press 7 turns red, a new approval raises the HUD toast, P raises the real /phone page and
 // it is usable (approve + 問戰情室). Screenshots -> web/e2e/screenshots/factory-*.png
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
@@ -51,11 +53,34 @@ try {
   const live = await until(() => page.locator('.f3-conn.ok').count(), 10000)
   check('HUD connected to live backend', !!live, await page.locator('.f3-hud-top').innerText())
 
+  // before start: the camera circles the whole building; all four corners and the dock are on screen
+  await sleep(2500)
+  const corners = () => page.evaluate(() => {
+    const f = window.__factory3d, B = { x0: -8.0, x1: 11.6, z0: -6.0, z1: 6.2 }
+    const pts = [[B.x0, B.z0], [B.x1, B.z0], [B.x0, B.z1], [B.x1, B.z1], [7.1, 8.0]].map(([x, z]) => f.screenOf(x, 0, z))
+    return { dist: f.cam.dist, ok: pts.every((s) => s && s.x > 0 && s.x < innerWidth && s.y > 0 && s.y < innerHeight), pts: pts.map((s) => `${s.x.toFixed(0)},${s.y.toFixed(0)}`).join(' ') }
+  })
+  const pre = await corners()
+  check('start overview shows the whole building', pre.ok, `corners+dock ${pre.pts}`)
+  await page.evaluate(() => { document.querySelector('[data-testid=f3-start]').style.visibility = 'hidden' })
+  await page.screenshot({ path: `${OUT}/factory-overview.png` })
+  await page.evaluate(() => { document.querySelector('[data-testid=f3-start]').style.visibility = '' })
+  const rooms = await page.evaluate(() => [...document.querySelectorAll('[data-testid^=room-]')].map((e) => e.textContent))
+  check('room signs: 戰情室, 員工待命區, 休息區, 廁所', ['戰情室', '員工待命區', '休息區', '廁所'].every((r) => rooms.includes(r)), rooms.join(' · '))
+  const signs = await page.evaluate(() => [...document.querySelectorAll('[data-testid^=sign-]')].map((e) => e.textContent))
+  check('all six line signs show (DOM, unblurred)', signs.length === 6, signs.join(' · '))
+
   await page.click('[data-testid=f3-start]')
-  await sleep(3500)   // camera eases in from the island overview to behind the lead
+  await sleep(3500)   // camera eases in from the building overview to behind the lead
   await page.screenshot({ path: `${OUT}/factory-start.png` })
   const pos = () => page.evaluate(() => ({ ...window.__factory3d.player }))
   const camNow = () => page.evaluate(() => ({ ...window.__factory3d.cam }))
+  // the start view looks across the works: most machines are on screen, not behind the camera
+  const onScreen = await page.evaluate(() => {
+    const f = window.__factory3d
+    return Object.values(f.placed).filter((p) => { const s = f.screenOf(p.x, p.h / 2, p.z); return s && s.x > 0 && s.x < innerWidth && s.y > 0 && s.y < innerHeight }).length
+  })
+  check('start view faces the machine rows', onScreen >= 14, `${onScreen}/28 machines on screen`)
   const hold = async (keys, ms) => { for (const k of keys) await page.keyboard.down(k); await sleep(ms); for (const k of [...keys].reverse()) await page.keyboard.up(k) }
 
   // Q/E orbit the camera around the figure; S walks toward the camera (away from the desk)
@@ -75,7 +100,15 @@ try {
   await sleep(300)
   const c2 = await camNow()
   await page.mouse.wheel(0, -600)
-  check('mouse wheel zooms the camera', c2.dist > c1.dist + 1 && c2.dist <= 24, `dist ${c1.dist.toFixed(1)} -> ${c2.dist.toFixed(1)}`)
+  check('mouse wheel zooms the camera', c2.dist > c1.dist + 1 && c2.dist <= 36, `dist ${c1.dist.toFixed(1)} -> ${c2.dist.toFixed(1)}`)
+  // wheel all the way out from the middle of the building: the whole building fits on screen
+  await page.evaluate(() => window.__factory3d.teleport(1.8, 0.8))
+  for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 800)
+  await sleep(2500)
+  const fit = await corners()
+  check('wheel max shows the whole building', fit.ok, `dist ${fit.dist.toFixed(1)} · corners+dock ${fit.pts}`)
+  await page.screenshot({ path: `${OUT}/factory-wheel-max.png` })
+  await page.evaluate(() => { window.__factory3d.cam.dist = 20 })
   // Shift runs: same hold, roughly twice the distance
   await page.evaluate(() => window.__factory3d.teleport(0.5, 1.4, -Math.PI / 2))
   await hold(['KeyW'], 1000)
@@ -84,25 +117,35 @@ try {
   await hold(['ShiftLeft', 'KeyW'], 1000)
   const r1 = await pos()
   check('Shift runs faster than walking', r1.x - 0.5 > (w1.x - 0.5) * 1.3, `walk ${(w1.x - 0.5).toFixed(2)} vs run ${(r1.x - 0.5).toFixed(2)}`)
-  // collision: walk into the desk from behind it should stop short of it
-  await page.evaluate(() => window.__factory3d.teleport(7.65, 0, Math.PI / 2))
+  // collision: walk into the desk from behind it (between the desk and the big screen) should stop short of it
+  await page.evaluate(() => window.__factory3d.teleport(9.1, 0, Math.PI / 2))
   await hold(['KeyW'], 1500)
   const pc = await pos()
-  check('collision: desk blocks the figure', pc.x > 7.38, `x=${pc.x.toFixed(2)} (desk edge 7.175 + radius 0.22)`)
-  // the island edge: walking south into the sea stops on the grass
+  check('collision: desk blocks the figure', pc.x > 8.76, `x=${pc.x.toFixed(2)} (desk edge 8.575 + radius 0.22)`)
+  // the war room's glass wall blocks; its doorway (toward the C/D aisle) lets the lead through
+  await page.evaluate(() => window.__factory3d.teleport(6.8, -1.5, 0))
+  await hold(['KeyW'], 1500)
+  const pg = await pos()
+  check('collision: war-room glass wall blocks', pg.z > -2.13 && pg.z < -1.6, `z=${pg.z.toFixed(2)} (glass at -2.4 + 0.08 + 0.22)`)
+  await page.evaluate(() => window.__factory3d.teleport(4.0, 0, -Math.PI / 2))
+  await hold(['ShiftLeft', 'KeyW'], 1500)
+  const pd = await pos()
+  check('war-room doorway is open', pd.x > 5.2, `x=${pd.x.toFixed(2)}`)
+  // the outer wall: running south off the production floor stops at the wall
   await page.evaluate(() => window.__factory3d.teleport(0, 5.6, Math.PI))
   await hold(['ShiftLeft', 'KeyW'], 2500)
   const pe = await pos()
-  const onIsle = await page.evaluate(([x, z]) => window.__factory3d.onIsland(x, z, 0.2), [pe.x, pe.z])
-  check('collision: the island edge keeps the figure out of the sea', pe.z > 5.8 && onIsle, `z=${pe.z.toFixed(2)} onIsland=${onIsle}`)
-  // zoomed-out view of the whole island
-  await page.evaluate(() => { const f = window.__factory3d; f.teleport(0.5, 1.4, -0.6); f.cam.dist = 22 })
-  await sleep(2500)
-  await page.screenshot({ path: `${OUT}/factory-island.png` })
-  await page.evaluate(() => { window.__factory3d.cam.dist = 14 })
+  const inWalls = await page.evaluate(([x, z]) => window.__factory3d.walkable(x, z, 0.2), [pe.x, pe.z])
+  check('collision: the outer wall keeps the figure inside', pe.z > 5.7 && pe.z < 5.91 && inWalls, `z=${pe.z.toFixed(2)} walkable=${inWalls}`)
+  // the big doors are open: out onto the loading dock, which ends at its edge
+  await page.evaluate(() => window.__factory3d.teleport(7.1, 5.0, Math.PI))
+  await hold(['ShiftLeft', 'KeyW'], 3000)
+  const pk = await pos()
+  check('doors open onto the loading dock (and the dock edge holds)', pk.z > 6.4 && pk.z <= 7.79, `z=${pk.z.toFixed(2)}`)
+  await page.evaluate(() => { window.__factory3d.cam.dist = 20; window.__factory3d.cam.pitch = 0.85 })
 
   // desk: F opens the demo controls; start the p.11 scenario with the same API as DemoStrip
-  await page.evaluate(() => window.__factory3d.teleport(6.2, 0, -Math.PI / 2))   // in front of the desk, facing the big screen
+  await page.evaluate(() => window.__factory3d.teleport(7.7, 0, -Math.PI / 2))   // in front of the desk, facing the big screen
   await sleep(1200)
   check('desk prompt', (await page.locator('[data-testid=f3-prompt]').innerText()).includes('戰情室控制台'))
   await page.keyboard.press('KeyF')
@@ -122,6 +165,21 @@ try {
   const tag = page.locator('[data-testid=tag-CURE-07]')
   const tagCls = (await tag.count()) ? await tag.getAttribute('class') : ''
   check('press 7 label shows red/amber + temperature', /red|amber/.test(tagCls ?? ''), `${tagCls} · ${(await tag.count()) ? (await tag.innerText()).replace(/\n/g, ' ') : ''}`)
+  // the press 7 lamp is not covered by its tag, by the prompt bubble or by the figure
+  const lampCheck = await page.evaluate(() => {
+    const f = window.__factory3d, p = f.placed['CURE-07']
+    const lamp = f.screenOf(p.x, p.h + 0.54, p.z - p.d * 0.15)
+    const head = f.screenOf(f.player.x, 0.95, f.player.z)
+    const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom] }
+    return { lamp, head, tag: r('[data-testid=tag-CURE-07]'), prompt: r('[data-testid=f3-prompt]') }
+  })
+  const inside = (pt, b) => !!b && pt.x >= b[0] && pt.x <= b[2] && pt.y >= b[1] && pt.y <= b[3]
+  const hits = (a, b) => !!a && !!b && a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+  check('press 7 lamp clear of its tag and the prompt', !!lampCheck.tag && lampCheck.tag[3] < lampCheck.lamp.y - 4 && !inside(lampCheck.lamp, lampCheck.prompt),
+    `lamp ${lampCheck.lamp.x.toFixed(0)},${lampCheck.lamp.y.toFixed(0)} tag ${lampCheck.tag?.map((v) => v.toFixed(0))} prompt ${lampCheck.prompt?.map((v) => v.toFixed(0))}`)
+  check('press 7 lamp clear of the figure', Math.hypot(lampCheck.lamp.x - lampCheck.head.x, lampCheck.lamp.y - lampCheck.head.y) > 40,
+    `lamp-head ${Math.hypot(lampCheck.lamp.x - lampCheck.head.x, lampCheck.lamp.y - lampCheck.head.y).toFixed(0)} px`)
+  check('prompt bubble does not cover the tag', !hits(lampCheck.tag, lampCheck.prompt))
   check('HUD shows the active event', (await page.locator('[data-testid=f3-event]').innerText()).includes('7 號硫化機'), await page.locator('[data-testid=f3-event]').innerText())
   await page.screenshot({ path: `${OUT}/factory-press7.png` })
 
@@ -184,6 +242,17 @@ try {
   await mp.screenshot({ path: `${OUT}/factory-390.png` })
   const over = await mp.evaluate(() => document.documentElement.scrollWidth > window.innerWidth)
   check('390 px: no horizontal overflow', !over)
+  // the approval toast must not sit on the HUD chips
+  await mp.evaluate(() => window.__factory3d.toast())
+  await sleep(600)
+  const clash = await mp.evaluate(() => {
+    const r = (sel) => { const e = document.querySelector(sel); if (!e) return null; const b = e.getBoundingClientRect(); return [b.left, b.top, b.right, b.bottom] }
+    const t = r('[data-testid=f3-toast]')
+    const hit = (a, b) => !!a && !!b && a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3]
+    return { t, bad: ['.f3-hud-top', '[data-testid=f3-event]', '[data-testid=f3-pending]'].filter((s) => hit(t, r(s))) }
+  })
+  check('390 px: toast clear of the HUD', !!clash.t && clash.bad.length === 0, `toast ${clash.t?.map((v) => v.toFixed(0))} overlaps ${clash.bad.join(', ') || 'nothing'}`)
+  await mp.screenshot({ path: `${OUT}/factory-390-toast.png` })
   await m.close()
 } finally {
   const real = errors.filter((e) => !/favicon/.test(e))

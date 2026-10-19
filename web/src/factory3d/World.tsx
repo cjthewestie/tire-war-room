@@ -1,5 +1,7 @@
-// The miniature factory island (Minimotive look): a squircle island in a pale sea, toy machines grouped by line
-// with live status lamps, a war-room hut with the live big screen, trees and flowers on the rim, a few workers.
+// The miniature factory building (Minimotive look), seen as a dollhouse cutaway: a tiled floor with painted
+// walkways, outer walls with windows that drop to a low stub on the camera's side, toy machines grouped by line
+// with live status lamps, and the rooms: 戰情室 (glass walls, desk, live big screen), 員工待命區, 休息區 (half court),
+// 廁所, plus a loading dock outside the doors.
 // Static meshes are merged per material (kit.mergeStatic); only lamps, gears, rollers, belts and people animate.
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
@@ -11,14 +13,11 @@ import { LINES, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import type { WarRoomState } from '../store'
 import { primaryEvent } from '../store'
+import { ball, belt, box, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, walkCycle } from './kit'
 import {
-  ball, belt, box, cyl, flower, gear, islandBase, makeFigure, mat, mergeStatic, mesh, mulberry, pine, rbox, roundTree, walkCycle,
-} from './kit'
-import {
-  DESK, ISLAND, LIGHT_HEX, LINE_HEX, PLACED, ROW_X0, ROW_Z, SCREEN, WALKER_LOOPS, WAR_ROOM, distToMachine, islandRadius, statusLight,
-  type Light, type Placed,
+  BENCH, BUILDING, COURT, DESK, DOCK, DOCK_PROPS, DOOR, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PLACED, ROOMS, ROOM_X, ROW_X0, ROW_Z,
+  SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
 } from './layout'
-import { player } from './pose'
 
 const CREAM = '#f3ead8', STEEL = '#a9b2ba', DARK = '#5d636b', YELLOW = '#f2c14e', ROLL = '#6b7078', WOOD = '#c89a6a'
 const FONT = '"Noto Sans TC", "PingFang TC", "Heiti TC", sans-serif'
@@ -148,37 +147,46 @@ function glowTexture() {
 }
 const GLOW = typeof document !== 'undefined' ? glowTexture() : null
 
-/** Status lamp on a short post above the machine, a soft glow sprite behind it, the event ring and the near tag. */
-function MachineStatus({ p, tile, hot }: { p: Placed; tile: MachineTile | undefined; hot: boolean }) {
+/** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
+ *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
+function MachineStatus({ p, tile, hot, focus }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean }) {
   const light: Light = statusLight(tile?.status)
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
+  const lampMesh = useRef<THREE.Mesh>(null)
   const glowRef = useRef<THREE.Sprite>(null)
   const ringRef = useRef<THREE.Mesh>(null)
-  const [near, setNear] = useState(false)
-  const lampY = p.h + 0.32
+  const shellRef = useRef<THREE.MeshBasicMaterial>(null)
+  const [lampY, lz] = lampPos(p)
+  const alarm = light === 'red' || light === 'amber'
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
     const blink = light === 'red' ? 0.5 + 0.5 * Math.sin(t * 9) : light === 'amber' ? 0.5 + 0.5 * Math.sin(t * 4.5) : 1
     if (lampRef.current) lampRef.current.emissiveIntensity = light === 'grey' ? 0.15 : 0.5 + blink * 1.3
+    if (lampMesh.current) lampMesh.current.scale.setScalar(alarm ? 1.5 + blink * 0.25 : 1)
     if (glowRef.current) {
-      const s = light === 'grey' ? 0 : light === 'green' ? 0.55 : 0.6 + blink * 0.5
+      const s = light === 'grey' ? 0 : light === 'green' ? 0.55 : 0.9 + blink * 0.7
       glowRef.current.scale.set(s, s, 1)
-      ;(glowRef.current.material as THREE.SpriteMaterial).opacity = light === 'green' ? 0.45 : 0.35 + blink * 0.5
+      ;(glowRef.current.material as THREE.SpriteMaterial).opacity = light === 'green' ? 0.45 : 0.45 + blink * 0.5
     }
+    if (shellRef.current) shellRef.current.opacity = 0.12 + blink * (light === 'red' ? 0.22 : 0.14)
     if (ringRef.current) {
       const u = (t * 0.8) % 1
       const s = 1 + u * 0.6
       ringRef.current.scale.set(s, s, 1)
       ;(ringRef.current.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - u)
     }
-    const n = distToMachine(p, player.x, player.z) < 1.2
-    if (n !== near) setNear(n)
   })
   const temp = tile?.temp_c
-  const lx = 0, lz = p.line === 'CURE' ? -p.d * 0.15 : 0
+  const lx = 0
   return (
     <group position={[p.x, 0, p.z]} name={p.id}>
-      <mesh position={[lx, lampY, lz]} castShadow>
+      {alarm && (
+        <mesh position={[0, p.h / 2 + 0.02, 0]} renderOrder={1}>
+          <boxGeometry args={[p.w + 0.1, p.h + 0.12, p.d + 0.1]} />
+          <meshBasicMaterial ref={shellRef} color={LIGHT_HEX[light]} transparent opacity={0.25} depthWrite={false} toneMapped={false} />
+        </mesh>
+      )}
+      <mesh ref={lampMesh} position={[lx, lampY, lz]} castShadow>
         <icosahedronGeometry args={[0.09, 1]} />
         <meshStandardMaterial ref={lampRef} color={LIGHT_HEX[light]} emissive={LIGHT_HEX[light]} flatShading roughness={0.4} />
       </mesh>
@@ -193,8 +201,8 @@ function MachineStatus({ p, tile, hot }: { p: Placed; tile: MachineTile | undefi
           <meshBasicMaterial color={LIGHT_HEX.red} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
-      {near && (
-        <Html position={[0, lampY + 0.22, lz]} center zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
+      {focus && (
+        <Html position={[0, lampY + 0.2, lz]} zIndexRange={[5, 0]} style={{ pointerEvents: 'none' }}>
           <div className={`f3-tag ${light}`} data-testid={`tag-${p.id}`}>
             <b>{tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
@@ -220,8 +228,8 @@ function Machines() {
       moving.add(toy.moving)
       anims.push(...toy.anim)
       // lamp post (static part of the lamp)
-      const lz = p.line === 'CURE' ? -p.d * 0.15 : 0
-      all.add(cyl(0.025, 0.025, 0.3, DARK, p.x, p.h + 0.12, p.z + lz, 5))
+      const [ly, lz] = lampPos(p)
+      all.add(cyl(0.025, 0.025, LAMP_POST, DARK, p.x, ly - 0.04 - LAMP_POST / 2, p.z + lz, 5))
     }
     return { statics: mergeStatic(all), moving, anims }
   }, [])
@@ -257,28 +265,24 @@ function roundRect(g: CanvasRenderingContext2D, x: number, y: number, w: number,
   g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath()
 }
 
-/** A little signpost with the line's Chinese name; the board always turns to the camera. */
+/** A little signpost with the line's Chinese name. The board is a DOM chip (like the machine tags), so the
+ *  tilt-shift blur never softens it and it stays readable from the far overview. */
 function LineSign({ line, x, z }: { line: Line; x: number; z: number }) {
-  const tex = useTextTexture(512, 160, (g) => {
-    roundRect(g, 6, 6, 500, 148, 40); g.fillStyle = '#fffaf0'; g.fill()
-    g.lineWidth = 10; g.strokeStyle = LINE_HEX[line]; g.stroke()
-    g.fillStyle = '#3d342b'; g.font = `bold 66px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'
-    g.fillText(LINE_LABELS[line], 256, 84)
-  }, line)
   const post = useMemo(() => {
     const g = new THREE.Group()
     g.add(cyl(0.03, 0.035, 0.95, WOOD, 0, 0.475, 0, 6), cyl(0.09, 0.1, 0.05, LINE_HEX[line], 0, 0.025, 0, 8))
+    g.add(rbox(0.5, 0.2, 0.05, '#fffaf0', 0, 0.8, 0, 0.04))
     return g
   }, [line])
-  // turn the board about its post toward the camera (yaw only, so it never tips over)
-  const board = useRef<THREE.Group>(null)
-  useFrame(({ camera }) => { if (board.current) board.current.rotation.y = Math.atan2(camera.position.x - x, camera.position.z - z) })
+  // mount the DOM board one frame late: the very first drei <Html> mounted with the canvas can lose its root
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
   return (
     <group position={[x, 0, z]}>
       <primitive object={post} />
-      <group ref={board} position={[0, 1.15, 0]}>
-        <mesh><planeGeometry args={[1.5, 0.47]} /><meshBasicMaterial map={tex} transparent toneMapped={false} /></mesh>
-      </group>
+      {ready && <Html position={[0, 1.0, 0]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+        <div className="f3-sign" style={{ borderColor: LINE_HEX[line] }} data-testid={`sign-${line}`}>{LINE_LABELS[line]}</div>
+      </Html>}
     </group>
   )
 }
@@ -320,80 +324,119 @@ function ScreenTexture({ state, connected, mode }: { state: WarRoomState; connec
   return <meshBasicMaterial map={tex} toneMapped={false} />
 }
 
-/** The war-room hut: wooden deck, cream back wall with the live big screen, low side walls, striped awning. */
-function WarRoomHut({ state, connected, mode }: { state: WarRoomState; connected: boolean; mode: string }) {
-  const { x0, x1, z0, z1 } = WAR_ROOM
-  const w = x1 - x0, d = z1 - z0, cx = (x0 + x1) / 2
-  const sign = useTextTexture(512, 192, (g) => {
-    roundRect(g, 8, 8, 496, 176, 60); g.fillStyle = '#fffaf0'; g.fill()
-    g.lineWidth = 12; g.strokeStyle = '#8fd16a'; g.stroke()
-    g.fillStyle = '#3d342b'; g.font = `bold 100px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('戰情室', 256, 102)
-  }, 'sign')
-  const { statics, beacon } = useMemo(() => {
-    const g = new THREE.Group()
-    g.add(rbox(w + 0.2, 0.08, d + 0.2, '#d9b88a', cx, 0, 0, 0.12))                         // deck
-    for (let i = 0; i < 7; i++) g.add(box(0.02, 0.005, d + 0.1, '#c7a274', x0 + 0.3 + i * (w / 7), 0.082, 0))
-    g.add(rbox(0.22, 2.1, d + 0.2, CREAM, x1, 0, 0, 0.08))                                   // back wall
-    g.add(rbox(0.26, 0.12, d + 0.3, '#8fd16a', x1, 2.08, 0, 0.05))                           // green trim
-    for (const z of [z0, z1]) {
-      g.add(rbox(w - 0.5, 0.62, 0.12, CREAM, cx + 0.25, 0, z, 0.05))                        // low side walls
-      g.add(rbox(w - 0.45, 0.06, 0.18, '#8fd16a', cx + 0.25, 0.62, z, 0.03))
-      g.add(cyl(0.06, 0.06, 2.1, WOOD, x0 + 0.5, 1.05, z, 8))                                // corner posts
-    }
-    // short striped canopy over the big screen (the rest of the hut stays open so the camera sees in)
-    for (let i = 0; i < 6; i++) {
-      const s = box(0.62, 0.05, d / 6 + 0.01, i % 2 ? '#fffaf0' : '#e07a74', x1 - 0.32, 2.12, z0 + d / 12 + (i * d) / 6)
-      s.rotation.z = 0.3
-      g.add(s)
-    }
-    g.add(box(0.06, 0.06, d + 0.1, WOOD, x0 + 0.5, 2.12, 0))                                 // front beam
-    for (const z of [z0, z1]) g.add(box(w - 0.5, 0.06, 0.06, WOOD, cx + 0.25, 2.12, z))
-    // desk + three little monitors facing the lead
-    g.add(rbox(DESK.w, DESK.h, DESK.d, WOOD, DESK.x, 0, DESK.z, 0.06))
-    g.add(rbox(DESK.w + 0.06, 0.04, DESK.d + 0.06, '#efe6d2', DESK.x, DESK.h, DESK.z, 0.04))
-    for (const z of [-0.5, 0, 0.5]) {
-      g.add(box(0.03, 0.12, 0.03, DARK, DESK.x + 0.1, DESK.h + 0.1, z))
-      const mon = rbox(0.06, 0.24, 0.38, '#3b4450', DESK.x + 0.1, DESK.h + 0.14, z, 0.03)
-      g.add(mon)
-    }
-    g.add(box(0.12, 0.02, 0.4, '#3b4450', DESK.x - 0.08, DESK.h + 0.05, 0))                   // keyboard
-    // screen frame on the back wall
-    g.add(rbox(0.06, SCREEN.h + 0.16, SCREEN.w + 0.16, '#3b4450', SCREEN.x - 0.12, SCREEN.y - SCREEN.h / 2 - 0.08, SCREEN.z, 0.05))
-    // potted plant and a satellite dish on the roof line
-    g.add(cyl(0.12, 0.09, 0.2, '#d98a5f', x0 + 0.85, 0.18, z1 - 0.3, 8))
-    g.add(ball(0.2, '#6f9a4f', x0 + 0.85, 0.42, z1 - 0.3, 1))
-    g.add(cyl(0.02, 0.02, 0.4, STEEL, x1, 2.35, z0 + 0.4, 5))
-    const dish = mesh(new THREE.SphereGeometry(0.2, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2.5), mat('#efe6d2', { side: THREE.DoubleSide }), x1 - 0.05, 2.6, z0 + 0.4)
-    dish.rotation.z = Math.PI / 2 + 0.5
-    g.add(dish)
-    g.add(cyl(0.015, 0.015, 0.5, STEEL, x1, 2.4, z1 - 0.3, 4))
-    const beacon = ball(0.05, '#ff6b5e', x1, 2.68, z1 - 0.3, 0)
-    beacon.material = new THREE.MeshStandardMaterial({ color: '#ff6b5e', emissive: '#ff6b5e', emissiveIntensity: 1 })
-    return { statics: mergeStatic(g), beacon }
-  }, [w, d, cx, x0, x1, z0, z1])
-  useFrame(({ clock }) => { (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = Math.sin(clock.elapsedTime * 3) > 0 ? 1.6 : 0.2 })
-  return (
-    <group>
-      <primitive object={statics} />
-      <primitive object={beacon} />
-      <group position={[SCREEN.x - 0.16, SCREEN.y, SCREEN.z]} rotation={[0, -Math.PI / 2, 0]}>
-        <mesh><planeGeometry args={[SCREEN.w, SCREEN.h]} /><ScreenTexture state={state} connected={connected} mode={mode} /></mesh>
-      </group>
-      {/* hut sign standing on the back wall, readable from both sides */}
-      <group position={[x1 + 0.05, 2.62, 0]}>
-        <mesh rotation={[0, -Math.PI / 2, 0]}><planeGeometry args={[1.3, 0.49]} /><meshBasicMaterial map={sign} transparent toneMapped={false} /></mesh>
-        <mesh rotation={[0, Math.PI / 2, 0]}><planeGeometry args={[1.3, 0.49]} /><meshBasicMaterial map={sign} transparent toneMapped={false} /></mesh>
-      </group>
-    </group>
-  )
+/** Floor tile texture: soft cream squares with a faint grout line (one tile per unit, repeated). */
+function tileTexture(base: string, line: string) {
+  const c = document.createElement('canvas'); c.width = c.height = 64
+  const g = c.getContext('2d')!
+  g.fillStyle = base; g.fillRect(0, 0, 64, 64)
+  g.strokeStyle = line; g.lineWidth = 2; g.strokeRect(1, 1, 62, 62)
+  const t = new THREE.CanvasTexture(c)
+  t.colorSpace = THREE.SRGBColorSpace
+  t.wrapS = t.wrapT = THREE.RepeatWrapping
+  t.anisotropy = 4
+  return t
 }
 
-/** Island base, sea-side trees and flowers, soft line pads under each row, crates, lamp posts. All static. */
-function Scenery() {
+const WALL = '#f6efe2', TRIM = '#d9cbb3', ROOF = '#d98f73', GLASS = '#cfe6ee'
+const glassMat = () => mat(GLASS, { transparent: true, opacity: 0.38, depthWrite: false, roughness: 0.15 })
+const flat = (o: THREE.Mesh) => { o.castShadow = false; return o }
+
+/** One outer-wall side, as a tall wall (sill, window band, pilasters, lintel, roof lip) and a low stub; the tall
+ *  version hides whenever the camera is outside that side, so the building reads as a dollhouse cutaway. */
+function wallSide(segs: Box[], axis: 'x' | 'z', outward: number) {
+  const tall = new THREE.Group(), stub = new THREE.Group()
+  const along = (b: Box) => axis === 'x' ? [b.x0, b.x1] : [b.z0, b.z1]
+  const at = (b: Box) => axis === 'x' ? (b.z0 + b.z1) / 2 : (b.x0 + b.x1) / 2
+  const put = (g: THREE.Group, a0: number, a1: number, c: number, y: number, h: number, t: number, color: string, round = 0.03, m?: THREE.Material) => {
+    const len = a1 - a0, mid = (a0 + a1) / 2
+    const o = axis === 'x' ? rbox(len, h, t, color, mid, y, c, round) : rbox(t, h, len, color, c, y, mid, round)
+    if (m) { o.material = m; o.castShadow = false }
+    g.add(o)
+  }
+  for (const b of segs) {
+    const [a0, a1] = along(b), c = at(b)
+    // tall: sill, window glass, lintel, pilasters every ~2.2, roof lip leaning out
+    put(tall, a0, a1, c, 0, 0.55, WALL_T, WALL)
+    put(tall, a0, a1, c, 0.55, 0.8, 0.04, GLASS, 0.01, glassMat())
+    put(tall, a0, a1, c, 1.35, 0.4, WALL_T, WALL)
+    put(tall, a0, a1, c + outward * 0.12, 1.75, 0.1, 0.42, ROOF, 0.04)
+    const n = Math.max(1, Math.round((a1 - a0) / 2.2))
+    for (let i = 0; i <= n; i++) {
+      const u = a0 + ((a1 - a0) * i) / n
+      put(tall, u - 0.11, u + 0.11, c, 0, 1.75, WALL_T + 0.08, TRIM, 0.04)
+    }
+    // stub: a low wall with a coloured cap, so the floor plan still reads from the open side
+    put(stub, a0, a1, c, 0, 0.3, WALL_T, WALL)
+    put(stub, a0, a1, c, 0.3, 0.05, WALL_T + 0.04, ROOF, 0.02)
+  }
+  return { tall: mergeStatic(tall), stub: mergeStatic(stub) }
+}
+
+function OuterWalls() {
+  const { x0, x1, z0, z1 } = BUILDING
+  const sides = useMemo(() => {
+    const north = wallSide(OUTER_WALLS.north, 'x', -1)
+    const south = wallSide(OUTER_WALLS.south, 'x', 1)
+    const west = wallSide(OUTER_WALLS.west, 'z', -1)
+    const east = wallSide(OUTER_WALLS.east, 'z', 1)
+    // the big doorway: lintel with a rolled-up yellow shutter over the gap (part of the tall south wall)
+    const lintel = new THREE.Group()
+    lintel.add(rbox(DOOR.x1 - DOOR.x0 + 0.3, 0.4, WALL_T + 0.04, TRIM, (DOOR.x0 + DOOR.x1) / 2, 1.35, z1, 0.03))
+    const roll = cyl(0.13, 0.13, DOOR.x1 - DOOR.x0, YELLOW, (DOOR.x0 + DOOR.x1) / 2, 1.22, z1 - 0.12, 10); roll.rotation.z = Math.PI / 2
+    lintel.add(roll)
+    south.tall.add(mergeStatic(lintel))
+    return [
+      { ...north, out: (c: THREE.Vector3) => c.z < z0 }, { ...south, out: (c: THREE.Vector3) => c.z > z1 },
+      { ...west, out: (c: THREE.Vector3) => c.x < x0 }, { ...east, out: (c: THREE.Vector3) => c.x > x1 },
+    ]
+  }, [x0, x1, z0, z1])
+  useFrame(({ camera }) => {
+    for (const s of sides) { const o = s.out(camera.position); s.tall.visible = !o; s.stub.visible = o }
+  })
+  return <>{sides.map((s, i) => <group key={i}><primitive object={s.tall} /><primitive object={s.stub} /></group>)}</>
+}
+
+/** Inner walls: solid low walls with a trim cap, or glass walls (low sill, glass, thin frame and mullions). The wall
+ *  behind the big screen is tall so the screen hangs on it. */
+function innerWalls() {
+  const g = new THREE.Group()
+  for (const { box: b, kind } of INNER_WALLS) {
+    const w = b.x1 - b.x0, d = b.z1 - b.z0, cx = (b.x0 + b.x1) / 2, cz = (b.z0 + b.z1) / 2
+    const alongX = w > d
+    if (kind === 'solid') {
+      const screenWall = !alongX && Math.abs(cx - ROOMS.staff.x0) < 0.01 && b.z0 < SCREEN.z && b.z1 > SCREEN.z
+      const h = screenWall ? 2.0 : 0.85
+      g.add(rbox(w, h, d, WALL, cx, 0, cz, 0.03), rbox(w + 0.04, 0.05, d + 0.04, '#a9c9a0', cx, h, cz, 0.02))
+    } else {
+      g.add(rbox(w, 0.22, d, '#e8e2d6', cx, 0, cz, 0.03))
+      g.add(flat(mesh(new THREE.BoxGeometry(alongX ? w : 0.03, 0.9, alongX ? 0.03 : d), glassMat(), cx, 0.67, cz)))
+      g.add(box(alongX ? w : 0.06, 0.05, alongX ? 0.06 : d, '#9fb4bf', cx, 1.14, cz))
+      const len = alongX ? w : d, n = Math.max(1, Math.round(len / 1.1))
+      for (let i = 0; i <= n; i++) {
+        const u = (alongX ? b.x0 : b.z0) + (len * i) / n
+        g.add(box(0.05, 0.95, 0.05, '#9fb4bf', alongX ? u : cx, 0.69, alongX ? cz : u))
+      }
+    }
+  }
+  return g
+}
+
+/** Floor, painted walkways, row pads, inner walls and the furniture of every room. All static. */
+function Building() {
+  const tiles = useMemo(() => {
+    const { x0, x1, z0, z1 } = BUILDING
+    const w = x1 - x0, d = z1 - z0
+    const t = tileTexture('#f4efe5', '#e7dece'); t.repeat.set(w, d)
+    return { t, w, d, cx: (x0 + x1) / 2, cz: (z0 + z1) / 2 }
+  }, [])
   const statics = useMemo(() => {
     const g = new THREE.Group()
-    g.add(islandBase(ISLAND.A, ISLAND.B, ISLAND.ground, ISLAND.seed))
-    const rand = mulberry(7)
+    const { x0, x1, z0, z1 } = BUILDING
+    const paint = (w: number, d: number, color: string, x: number, z: number, y = 0.004) => g.add(flat(box(w, 0.006, d, color, x, y, z)))
+    // plinth under the floor, and the loading dock slab outside the doors
+    g.add(rbox(x1 - x0 + 0.5, 0.32, z1 - z0 + 0.5, '#d6c8b0', (x0 + x1) / 2, -0.32, (z0 + z1) / 2, 0.1))
+    g.add(rbox(DOCK.x1 - DOCK.x0, 0.3, DOCK.z1 - DOCK.z0 + 0.2, '#d9d2c4', (DOCK.x0 + DOCK.x1) / 2, -0.3, (DOCK.z0 + DOCK.z1) / 2 + 0.1, 0.05))
+    for (let i = 0; i < 9; i++) paint(0.22, 0.14, i % 2 ? '#3d342b' : YELLOW, DOCK.x0 + 0.2 + i * ((DOCK.x1 - DOCK.x0 - 0.4) / 8), DOCK.z1 - 0.1, 0.002)
     // pastel floor pads under every row (D and BOND share one)
     const rows: Line[] = ['A', 'B', 'C', 'D', 'CURE']
     for (const line of rows) {
@@ -401,62 +444,170 @@ function Scenery() {
       const xa = Math.min(...ms.map((p) => p.x - p.w / 2)) - 0.3
       const xb = Math.max(...ms.map((p) => p.x + p.w / 2)) + 0.3
       const dd = Math.max(...ms.map((p) => p.d)) + 0.5
-      const pad = rbox(xb - xa, 0.03, dd, soften(LINE_HEX[line], 0.6), (xa + xb) / 2, 0.0, ROW_Z[line], 0.2)
-      pad.castShadow = false
-      g.add(pad)
+      g.add(flat(rbox(xb - xa, 0.02, dd, soften(LINE_HEX[line], 0.6), (xa + xb) / 2, 0.0, ROW_Z[line], 0.2)))
     }
-    // a sandy path from the yard to the hut
-    const path = rbox(1.3, 0.025, 1.2, '#e8d8b0', 4.3, 0, 0, 0.3); path.castShadow = false; g.add(path)
-    // trees and flowers around the rim, kept out of the works and the hut
-    const busy = (x: number, z: number) =>
-      (x > ROW_X0 - 1.1 && x < 4.6 && z > -5.6 && z < 5.3) || (x > WAR_ROOM.x0 - 0.6 && x < WAR_ROOM.x1 + 0.7 && z > WAR_ROOM.z0 - 0.7 && z < WAR_ROOM.z1 + 0.7)
-    const greens = ['#4f7a43', '#5d8a4c', '#6f9a4f', '#7aa35a']
-    for (let i = 0; i < 46; i++) {
-      const a = (i / 46) * Math.PI * 2 + rand() * 0.08
-      const r = islandRadius(a) - 0.55 - rand() * 0.9
-      const x = Math.cos(a) * r, z = Math.sin(a) * r
-      if (busy(x, z)) continue
-      const s = 0.65 + rand() * 0.45
-      if (rand() < 0.55) pine(g, x, z, s, greens[i % 2]); else roundTree(g, x, z, s, greens[2 + (i % 2)])
+    // painted walkways: a green path from the war-room door across the yard, a path from the yard to the doors,
+    // dashed yellow aisle lines between the rows, and a yellow safety border round the production floor
+    paint(5.2, 0.9, '#cfe3c0', 2.2, 0)
+    paint(2.4, 3.6, '#cfe3c0', 7.1, 4.4)
+    for (const z of [-3.5, -1.3, 0.95, 3.25]) for (let x = -7.2; x < 3.6; x += 0.7) paint(0.4, 0.06, YELLOW, x, z)
+    const fx0 = x0 + 0.45, fx1 = ROOM_X - 0.3, fz0 = z0 + 0.35, fz1 = z1 - 0.35
+    paint(fx1 - fx0, 0.07, YELLOW, (fx0 + fx1) / 2, fz0); paint(fx1 - fx0, 0.07, YELLOW, (fx0 + fx1) / 2, fz1)
+    paint(0.07, fz1 - fz0, YELLOW, fx0, (fz0 + fz1) / 2)
+    for (let i = 0; i < 8; i++) paint(0.2, 0.3, i % 2 ? '#3d342b' : YELLOW, DOOR.x0 + 0.2 + i * 0.37, z1 - 0.25)   // hazard band at the doors
+    // room floors
+    const roomFloor = (r: { x0: number; x1: number; z0: number; z1: number }, c: string) => paint(r.x1 - r.x0 - 0.1, r.z1 - r.z0 - 0.1, c, (r.x0 + r.x1) / 2, (r.z0 + r.z1) / 2, 0.003)
+    roomFloor(ROOMS.warRoom, '#e1e9ee'); roomFloor(ROOMS.staff, '#efe3cc'); roomFloor(ROOMS.restroom, '#d9ebf0'); roomFloor(ROOMS.breakArea, '#e6eedb')
+    g.add(innerWalls())
+
+    // --- 休息區: half basketball court, hoop on the north wall, bench, vending machine, plant
+    const C = COURT, ccx = (C.x0 + C.x1) / 2
+    paint(C.x1 - C.x0, C.z1 - C.z0, '#ecb98f', ccx, (C.z0 + C.z1) / 2, 0.005)
+    const line = (w: number, d: number, x: number, z: number) => paint(w, d, '#fffaf0', x, z, 0.007)
+    line(C.x1 - C.x0, 0.05, ccx, C.z1); line(0.05, C.z1 - C.z0, C.x0, (C.z0 + C.z1) / 2); line(0.05, C.z1 - C.z0, C.x1, (C.z0 + C.z1) / 2)
+    line(1.2, 0.05, C.hoopX, C.z0 + 1.6); line(0.05, 1.6, C.hoopX - 0.6, C.z0 + 0.8); line(0.05, 1.6, C.hoopX + 0.6, C.z0 + 0.8)
+    const arc = flat(mesh(new THREE.RingGeometry(1.75, 1.8, 32, 1, Math.PI, Math.PI), mat('#fffaf0'), C.hoopX, 0.008, C.z0 + 0.15)); arc.rotation.x = -Math.PI / 2; g.add(arc)
+    g.add(cyl(0.05, 0.06, 1.7, '#6b7078', C.hoopX, 0.85, z0 + 0.3, 8), rbox(0.3, 0.08, 0.5, '#6b7078', C.hoopX, 0, z0 + 0.35, 0.03))
+    g.add(box(0.05, 0.05, 0.4, '#6b7078', C.hoopX, 1.62, z0 + 0.5))
+    g.add(rbox(0.8, 0.5, 0.05, '#fffaf0', C.hoopX, 1.4, z0 + 0.7, 0.03), box(0.3, 0.2, 0.06, '#e07a74', C.hoopX, 1.52, z0 + 0.7))
+    const rim = mesh(new THREE.TorusGeometry(0.14, 0.018, 6, 16), mat('#e8743b'), C.hoopX, 1.45, z0 + 0.88); rim.rotation.x = Math.PI / 2; g.add(rim)
+    g.add(ball(0.12, '#e8743b', C.hoopX - 0.9, 0.12, C.z0 + 2.0, 1))
+    g.add(rbox(BENCH.w, 0.06, BENCH.d, WOOD, BENCH.x, 0.24, BENCH.z, 0.03))
+    for (const dz of [-0.55, 0.55]) g.add(box(BENCH.w - 0.06, 0.24, 0.06, '#8a6a4a', BENCH.x, 0.12, BENCH.z + dz))
+    g.add(rbox(0.5, 1.1, 0.4, '#e07a74', 5.3, 0, z0 + 0.35, 0.05), rbox(0.36, 0.5, 0.02, '#cfe6ee', 5.3, 0.45, z0 + 0.56, 0.01))   // vending machine
+    g.add(cyl(0.14, 0.1, 0.24, '#d98a5f', 11.25, 0.12, z0 + 0.35, 8), ball(0.24, '#6f9a4f', 11.25, 0.42, z0 + 0.35, 1))
+
+    // --- 戰情室: desk with three little monitors facing the lead, the big screen's frame, a plant
+    g.add(rbox(DESK.w, DESK.h, DESK.d, WOOD, DESK.x, 0, DESK.z, 0.06))
+    g.add(rbox(DESK.w + 0.06, 0.04, DESK.d + 0.06, '#efe6d2', DESK.x, DESK.h, DESK.z, 0.04))
+    for (const z of [-0.5, 0, 0.5]) {
+      g.add(box(0.03, 0.12, 0.03, DARK, DESK.x + 0.1, DESK.h + 0.1, z))
+      g.add(rbox(0.06, 0.24, 0.38, '#3b4450', DESK.x + 0.1, DESK.h + 0.14, z, 0.03))
     }
-    const petals = ['#e2b34a', '#d9534f', '#f6f1e8', '#b98ad0', '#e88fb0']
-    for (let i = 0; i < 150; i++) {
-      const a = rand() * Math.PI * 2
-      const r = islandRadius(a) - 0.4 - rand() * 2.2
-      const x = Math.cos(a) * r, z = Math.sin(a) * r
-      if (busy(x, z)) continue
-      flower(g, x, z, petals[i % petals.length])
+    g.add(box(0.12, 0.02, 0.4, '#3b4450', DESK.x - 0.08, DESK.h + 0.05, 0))
+    g.add(rbox(0.06, SCREEN.h + 0.16, SCREEN.w + 0.16, '#3b4450', SCREEN.x, SCREEN.y - SCREEN.h / 2 - 0.08, SCREEN.z, 0.05))
+    g.add(cyl(0.12, 0.09, 0.2, '#d98a5f', ROOM_X + 0.45, 0.1, ROOMS.warRoom.z1 - 0.45, 8), ball(0.2, '#6f9a4f', ROOM_X + 0.45, 0.36, ROOMS.warRoom.z1 - 0.45, 1))
+    g.add(rbox(0.9, 0.04, 0.5, '#b8c9d6', 6.6, 0.002, -1.5, 0.1))   // rug
+
+    // --- 員工待命區: lockers on the east wall, a water cooler
+    LOCKERS.forEach((z, i) => g.add(rbox(0.32, 1.0, 0.36, ['#6fa8dc', '#8fbf5a', '#e8c15a', '#a993d6'][i], x1 - 0.3, 0, z, 0.03)))
+    g.add(cyl(0.12, 0.12, 0.7, '#fffaf0', 9.95, 0.35, -2.1, 10), cyl(0.1, 0.08, 0.26, '#9fd0e6', 9.95, 0.83, -2.1, 10))
+
+    // --- 廁所: two stalls on the east side, a sink on the north wall, the door leaf ajar
+    const R = ROOMS.restroom
+    for (const z of [R.z0, (R.z0 + R.z1) / 2, R.z1]) g.add(box(0.9, 0.85, 0.05, '#a9c9d6', 11.15, 0.43, z))
+    for (const z of [(R.z0 * 3 + R.z1) / 4, (R.z0 + R.z1 * 3) / 4]) {
+      g.add(rbox(0.3, 0.26, 0.24, '#ffffff', 11.4, 0, z, 0.08), box(0.05, 0.85, 0.5, '#cfe6ee', 10.72, 0.43, z - 0.08))
     }
-    // little rocks on the beach
-    for (let i = 0; i < 14; i++) {
-      const a = rand() * Math.PI * 2, r = islandRadius(a) + 0.25
-      const rock = ball(0.1 + rand() * 0.12, '#b9b2a4', Math.cos(a) * r, -0.18, Math.sin(a) * r, 0)
-      g.add(rock)
+    g.add(rbox(0.5, 0.5, 0.3, '#ffffff', 10.1, 0, R.z0 + 0.25, 0.06), box(0.4, 0.3, 0.02, '#cfe6ee', 10.1, 0.95, R.z0 + 0.1))
+    const leaf = box(0.04, 0.95, 0.75, '#8fbfd6', R.x0 - 0.3, 0.48, 4.62); leaf.rotation.y = 0.9; g.add(leaf)
+
+    // --- loading area inside the doors (pallets of crates), the dock outside (crate stack, forklift), a little truck
+    const pallet = (x: number, z: number, n: number) => {
+      g.add(box(0.7, 0.08, 0.7, '#c89a6a', x, 0.04, z))
+      for (let i = 0; i < n; i++) g.add(box(0.3, 0.26, 0.3, i % 3 === 2 ? '#efe6d2' : '#c9a06a', x - 0.16 + (i % 2) * 0.32, 0.21 + Math.floor(i / 4) * 0.26, z - 0.16 + (Math.floor(i / 2) % 2) * 0.32))
     }
-    // crate stack and barrels in the yard, a lamp post by the path
-    for (let i = 0; i < 5; i++) g.add(box(0.26, 0.26, 0.26, i % 3 === 2 ? '#efe6d2' : '#c9a06a', 1.3 + (i % 3) * 0.28, 0.13 + Math.floor(i / 3) * 0.26, -1.1))
-    for (let i = 0; i < 3; i++) g.add(cyl(0.1, 0.1, 0.28, i === 1 ? '#e07a74' : '#6fa8dc', 2.4 + i * 0.23, 0.14, -1.25, 10))
-    g.add(cyl(0.025, 0.03, 1.1, '#5b4636', 4.3, 0.55, -0.85, 6), ball(0.07, '#fff3cf', 4.3, 1.12, -0.85, 0))
-    // a picnic bench by the trees, for cuteness
-    g.add(box(0.7, 0.05, 0.22, WOOD, 2.6, 0.24, -6.3), box(0.05, 0.24, 0.2, WOOD, 2.3, 0.12, -6.3), box(0.05, 0.24, 0.2, WOOD, 2.9, 0.12, -6.3))
+    pallet(5.4, 3.0, 4); pallet(9.0, 2.9, 6)
+    const cr = DOCK_PROPS.crates
+    for (let i = 0; i < 5; i++) g.add(box(0.32, 0.3, 0.32, i % 3 === 2 ? '#efe6d2' : '#c9a06a', cr.x0 + 0.18 + (i % 2) * 0.34, 0.15 + Math.floor(i / 2) * 0.3, cr.z0 + 0.22 + (Math.floor(i / 2) % 2) * 0.4))
+    const fk = DOCK_PROPS.forklift, fx = (fk.x0 + fk.x1) / 2, fz = (fk.z0 + fk.z1) / 2
+    g.add(rbox(0.5, 0.35, 0.6, YELLOW, fx, 0.08, fz + 0.1, 0.06), rbox(0.36, 0.06, 0.4, '#3d342b', fx, 0.62, fz + 0.15, 0.03))
+    for (const dx of [-0.2, 0.2]) g.add(box(0.04, 0.6, 0.04, '#3d342b', fx + dx, 0.3, fz + 0.32), box(0.04, 0.6, 0.04, '#3d342b', fx + dx, 0.62, fz - 0.05))
+    for (const dx of [-0.13, 0.13]) g.add(box(0.06, 0.03, 0.42, '#6b7078', fx + dx, 0.06, fz - 0.33))
+    for (const [dx, dz] of [[-0.26, 0.3], [0.26, 0.3], [-0.26, -0.1], [0.26, -0.1]]) { const wh = cyl(0.09, 0.09, 0.06, '#3d342b', fx + dx, 0.09, fz + dz, 10); wh.rotation.z = Math.PI / 2; g.add(wh) }
+    const tx = 7.1, tz = DOCK.z1 + 1.15
+    g.add(rbox(1.5, 0.95, 1.4, '#fffaf0', tx, -0.05, tz - 0.05, 0.08), rbox(1.3, 0.62, 0.7, '#6fa8dc', tx, 0.05, tz + 0.95, 0.12))
+    g.add(rbox(1.0, 0.24, 0.05, '#cfe6ee', tx, 0.4, tz + 1.3, 0.03))
+    for (const [dx, dz] of [[-0.66, -0.4], [0.66, -0.4], [-0.66, 0.95], [0.66, 0.95]]) { const wh = cyl(0.17, 0.17, 0.12, '#3d342b', tx + dx, -0.12, tz + dz, 12); wh.rotation.z = Math.PI / 2; g.add(wh) }
     return mergeStatic(g)
   }, [])
-  return <primitive object={statics} />
+  return (
+    <group>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[tiles.cx, 0.001, tiles.cz]} receiveShadow>
+        <planeGeometry args={[tiles.w, tiles.d]} />
+        <meshStandardMaterial map={tiles.t} roughness={0.9} />
+      </mesh>
+      <primitive object={statics} />
+    </group>
+  )
 }
 
-/** Floating boats and the chimney steam: the small motion that makes a diorama feel alive. */
-function Ambient() {
-  const { group, boats, puffs } = useMemo(() => {
+const LOCKERS = [-1.9, -1.5, -1.1, -0.7]
+
+/** The live big screen on the war-room wall, and the 戰情室 board on top of that wall. */
+function WarRoomScreen({ state, connected, mode }: { state: WarRoomState; connected: boolean; mode: string }) {
+  const sign = useTextTexture(512, 192, (g) => {
+    roundRect(g, 8, 8, 496, 176, 60); g.fillStyle = '#fffaf0'; g.fill()
+    g.lineWidth = 12; g.strokeStyle = '#8fd16a'; g.stroke()
+    g.fillStyle = '#3d342b'; g.font = `bold 100px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('戰情室', 256, 102)
+  }, 'sign')
+  const beacon = useMemo(() => {
+    const b = ball(0.05, '#ff6b5e', ROOMS.staff.x0, 2.12, -1.0, 0)
+    b.material = new THREE.MeshStandardMaterial({ color: '#ff6b5e', emissive: '#ff6b5e', emissiveIntensity: 1 })
+    return b
+  }, [])
+  useFrame(({ clock }) => { (beacon.material as THREE.MeshStandardMaterial).emissiveIntensity = Math.sin(clock.elapsedTime * 3) > 0 ? 1.6 : 0.2 })
+  return (
+    <group>
+      <primitive object={beacon} />
+      <group position={[SCREEN.x - 0.04, SCREEN.y, SCREEN.z]} rotation={[0, -Math.PI / 2, 0]}>
+        <mesh><planeGeometry args={[SCREEN.w, SCREEN.h]} /><ScreenTexture state={state} connected={connected} mode={mode} /></mesh>
+      </group>
+      <group position={[ROOMS.staff.x0, 2.3, 0.2]}>
+        <mesh rotation={[0, -Math.PI / 2, 0]}><planeGeometry args={[1.1, 0.41]} /><meshBasicMaterial map={sign} transparent toneMapped={false} /></mesh>
+        <mesh rotation={[0, Math.PI / 2, 0]}><planeGeometry args={[1.1, 0.41]} /><meshBasicMaterial map={sign} transparent toneMapped={false} /></mesh>
+      </group>
+    </group>
+  )
+}
+
+/** Room name plate: a DOM chip (sharp under the tilt-shift blur), mounted a frame late like the line signs. */
+function RoomSign({ id, label, x, z, y = 1.3 }: { id: string; label: string; x: number; z: number; y?: number }) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  return ready ? (
+    <Html position={[x, y, z]} center zIndexRange={[4, 0]} style={{ pointerEvents: 'none' }}>
+      <div className="f3-sign f3-room" data-testid={`room-${id}`}>{label}</div>
+    </Html>
+  ) : null
+}
+
+/** The four staff in the 員工待命區: standing idle, breathing, now and then glancing round. */
+function StaffCorner() {
+  const { group, figs } = useMemo(() => {
     const group = new THREE.Group()
-    const boats = [0, 1].map((i) => {
-      const b = new THREE.Group()
-      b.add(box(0.9, 0.25, 0.35, ['#e07a74', '#6fa8dc'][i], 0, -0.75, 0))
-      const sail = mesh(new THREE.ConeGeometry(0.35, 0.9, 3), mat('#f6f1e8'), 0, -0.15, 0)
-      sail.scale.z = 0.15
-      b.add(sail, cyl(0.02, 0.02, 1, '#6e4526', 0, -0.2, 0, 4))
-      group.add(b)
-      return b
+    const looks = [
+      { shirt: '#6fa8dc', pants: '#4a5a6a', hat: YELLOW, vest: '#ff8a3d' },
+      { shirt: '#8fbf5a', pants: '#5b4a3a', hair: '#7a4a24', vest: '#ff8a3d' },
+      { shirt: '#a993d6', pants: '#4a4a5a', hat: '#f6f1e8' },
+      { shirt: '#e8c15a', pants: '#3f4a5a', hair: '#2a1e14', vest: '#ff8a3d' },
+    ]
+    const figs = STAFF_SPOTS.map(([x, z, yaw], i) => {
+      const f = makeFigure(looks[i])
+      f.root.scale.setScalar(0.85)
+      f.root.position.set(x, 0, z)
+      f.root.rotation.y = yaw + Math.PI
+      restPose(f)
+      if (i === 1) { f.armR.rotation.x = -1.0; f.handR.add(cyl(0.035, 0.03, 0.08, '#fffaf0', 0, -0.02, 0.03, 8)) }   // a cup of tea
+      group.add(f.root)
+      return f
     })
+    return { group, figs }
+  }, [])
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime
+    figs.forEach((f, i) => {
+      f.body.position.y = 0.36 + Math.sin(t * 2 + i) * 0.007
+      f.head.rotation.y = Math.sin(t * 0.4 + i * 1.7) > 0.7 ? 0.5 * Math.sin(t * 0.8 + i) : 0
+    })
+  })
+  return <primitive object={group} />
+}
+
+/** Chimney steam over a few curing presses: the small motion that makes a diorama feel alive. */
+function Ambient() {
+  const { group, puffs } = useMemo(() => {
+    const group = new THREE.Group()
     const chimneys = PLACED.filter((p) => p.kind === 'press' && ['CURE-02', 'CURE-06', 'CURE-10'].includes(p.id))
       .map((p) => new THREE.Vector3(p.x + p.w * 0.32, p.h * 1.15 + 0.08, p.z - p.d * 0.36))
     const puffs = Array.from({ length: 12 }, (_, i) => {
@@ -464,15 +615,10 @@ function Ambient() {
       group.add(m)
       return { m, from: chimneys[i % chimneys.length], ph: (i / 12) * 3 }
     })
-    return { group, boats, puffs }
+    return { group, puffs }
   }, [])
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
-    boats.forEach((b, i) => {
-      const a = t * 0.05 + i * Math.PI
-      b.position.set(Math.cos(a) * 15, Math.sin(t * 1.3 + i) * 0.04, Math.sin(a) * 11.5)
-      b.rotation.y = -a
-    })
     for (const p of puffs) {
       const u = ((t + p.ph) % 3) / 3
       p.m.position.set(p.from.x + u * 0.25, p.from.y + u * 0.9, p.from.z - u * 0.1)
@@ -500,7 +646,7 @@ function Walkers() {
       group.add(f.root)
       const segs = pts.map((p, k) => { const q = pts[(k + 1) % pts.length]; return Math.hypot(q[0] - p[0], q[1] - p[1]) })
       const total = segs.reduce((a, b) => a + b, 0)
-      let s = (i / 3) * total
+      let s = (i / WALKER_LOOPS.length) * total
       const speed = 0.55 + i * 0.08
       return (t: number, dt: number) => {
         s = (s + dt * speed) % total
@@ -522,7 +668,8 @@ function Walkers() {
 function Lights() {
   const sun = useMemo(() => {
     const s = new THREE.DirectionalLight('#ffe9c9', 2.4)
-    s.position.set(9, 16, 7)
+    s.position.set(1.8 + 7, 16, 0.6 + 8)
+    s.target.position.set(1.8, 0, 0.6)
     s.castShadow = true
     s.shadow.mapSize.set(2048, 2048)
     Object.assign(s.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 1, far: 45 })
@@ -535,6 +682,7 @@ function Lights() {
     <>
       <hemisphereLight args={['#fff6e6', '#8a7458', 1.3]} />
       <primitive object={sun} />
+      <primitive object={sun.target} />
     </>
   )
 }
@@ -546,21 +694,29 @@ function signSpot(line: Line): [number, number] {
   return [ROW_X0 - 0.5, ROW_Z[line]]
 }
 
-export function World({ state, connected, mode }: { state: WarRoomState; connected: boolean; mode: string }) {
+export function World({ state, connected, mode, focusId }: { state: WarRoomState; connected: boolean; mode: string; focusId: string | null }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
+  const R = ROOMS
   return (
     <group>
       <Lights />
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.9, 0]} receiveShadow>
-        <circleGeometry args={[160, 64]} />
-        <meshStandardMaterial color="#a9c9c6" roughness={0.35} />
+      {/* soft cream ground round the building (no sea: the building sits on the backdrop) */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.3, 0]} receiveShadow>
+        <circleGeometry args={[160, 48]} />
+        <meshStandardMaterial color="#e6dac6" roughness={0.95} />
       </mesh>
-      <Scenery />
+      <Building />
+      <OuterWalls />
       <Machines />
-      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} />)}
+      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={focusId === p.id} />)}
       {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} /> })}
-      <WarRoomHut state={state} connected={connected} mode={mode} />
+      <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
+      <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
+      <RoomSign id="break" label={R.breakArea.label} x={6.3} z={(R.breakArea.z0 + R.breakArea.z1) / 2} />
+      <RoomSign id="restroom" label={R.restroom.label} x={R.restroom.x0} z={4.8} y={1.2} />
+      <WarRoomScreen state={state} connected={connected} mode={mode} />
+      <StaffCorner />
       <Ambient />
       <Walkers />
     </group>

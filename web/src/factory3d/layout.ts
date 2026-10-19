@@ -1,9 +1,8 @@
-// Floor plan of the miniature factory island. Pure data: positions, footprints, colliders, colours.
-// Units are "figure heights" (the chibi lead is ~1 unit tall), so the whole works is a ~21 × 15 diorama.
+// Floor plan of the miniature factory building. Pure data: positions, footprints, colliders, colours.
+// Units are "figure heights" (the chibi lead is ~1 unit tall), so the whole building is a ~20 × 12 dollhouse.
 // Machines come from ../factory (mirrored from warroom/factory.py), so the 28 ids stay in sync.
 import type { Line, MachineStatus } from '../contracts'
 import { MACHINES, type MachineMeta } from '../factory'
-import { squircle, wobble } from './kit'
 
 export type MachineKind =
   | 'mixer' | 'mill' | 'bigmill' | 'calender' | 'cooler' | 'winder'
@@ -48,42 +47,105 @@ function place(): Placed[] {
 export const PLACED: Placed[] = place()
 export const PLACED_BY_ID: Record<string, Placed> = Object.fromEntries(PLACED.map((p) => [p.id, p]))
 
-/** The island: squircle half-extents (grass edge before wobble) and the wobble seed. */
-export const ISLAND = { A: 10.6, B: 7.7, seed: 2.3, ground: '#9dbb6e' }
-/** The walkable grass stops this far inside the grass edge. */
-const EDGE_MARGIN = 0.45
+/** The factory building (dollhouse cutaway): outer-wall lines. The production floor is the west part; the east strip
+ *  (x > ROOM_X) holds the break area (north), the war room + staff corner (middle) and the restroom (south). */
+export const BUILDING = { x0: -8.0, x1: 11.6, z0: -6.0, z1: 6.2 }
+/** Partition between the production floor and the east rooms. */
+export const ROOM_X = 4.8
+/** Wall thickness (outer and inner). */
+export const WALL_T = 0.16
 
-/** Grass-edge radius of the island at angle a. */
-export function islandRadius(a: number) {
-  return squircle(a, ISLAND.A, ISLAND.B) * wobble(a, ISLAND.seed)
+/** Rooms (floor rectangles, inside the walls). Decorative for now; the next game phase can use them. */
+export const ROOMS = {
+  breakArea: { x0: ROOM_X, x1: 11.6, z0: -6.0, z1: -2.4, label: '休息區' },
+  warRoom: { x0: ROOM_X, x1: 9.6, z0: -2.4, z1: 2.4, label: '戰情室' },
+  staff: { x0: 9.6, x1: 11.6, z0: -2.4, z1: 2.4, label: '員工待命區' },
+  restroom: { x0: 9.6, x1: 11.6, z0: 3.6, z1: 6.2, label: '廁所' },
+} as const
+export const WAR_ROOM = ROOMS.warRoom
+/** Big roll-up doors in the south wall, with the loading dock outside. */
+export const DOOR = { x0: 5.6, x1: 8.6 }
+export const DOCK = { x0: 5.2, x1: 9.0, z0: 6.2, z1: 8.0 }
+/** Half basketball court painted in the break area, hoop on the north wall. */
+export const COURT = { x0: 7.4, x1: 11.4, z0: -5.85, z1: -2.75, hoopX: 9.4 }
+export const BENCH = { x: 5.7, z: -4.4, w: 0.36, d: 1.4 }
+/** Staff corner: where the four idle workers stand. */
+/** [x, z, yaw]: yaw as for the lead (π = facing +z), so they look out over the corridor and the doors. */
+export const STAFF_SPOTS: [number, number, number][] = [[10.1, -1.3, Math.PI + 0.5], [10.85, -0.6, Math.PI - 0.3], [10.15, 0.4, Math.PI + 0.2], [10.85, 1.2, Math.PI - 0.4]]
+
+export const DESK = { x: 8.35, z: 0, w: 0.45, d: 1.5, h: 0.42 }
+export const SCREEN = { x: 9.5, z: 0, w: 2.4, h: 1.35, y: 1.2 }
+
+/** Where the overview camera circles before start: the middle of the building (and dock). */
+export const OVERVIEW_CENTER = { x: 1.8, z: 0.8 }
+
+/** Player start: inside the war-room door, facing west across the machine rows (yaw π/2 = facing −x). */
+export const START = { x: 5.5, z: 0, yaw: Math.PI / 2 }
+
+/** Status lamp: on a post above the machine (presses: over the back panel), well above the figure's head. */
+export const LAMP_POST = 0.5
+export function lampPos(p: { h: number; d: number; line: string }): [number, number] {
+  return [p.h + LAMP_POST + 0.04, p.line === 'CURE' ? -p.d * 0.15 : 0]
 }
-
-/** War-room hut on the east end: open toward the factory (west), big screen on the back (east) wall. */
-export const WAR_ROOM = { x0: 4.9, x1: 8.1, z0: -1.7, z1: 1.7 }
-export const DESK = { x: 6.95, z: 0, w: 0.45, d: 1.5, h: 0.42 }
-export const SCREEN = { x: 7.98, z: 0, w: 2.4, h: 1.35, y: 1.2 }
-
-/** Player start: in front of the desk, facing the big screen (yaw −π/2 = facing +x). */
-export const START = { x: 6.2, z: 0, yaw: -Math.PI / 2 }
 
 export interface Box { x0: number; x1: number; z0: number; z1: number }
 const PAD = 0.04
+const H = WALL_T / 2
+/** A wall along x (at z) or along z (at x) from a to b, with doorway gaps [g0, g1] left open. */
+function wall(axis: 'x' | 'z', at: number, a: number, b: number, gaps: [number, number][] = []): Box[] {
+  const out: Box[] = []
+  let s = a
+  for (const [g0, g1] of [...gaps].sort((m, n) => m[0] - n[0])) { if (g0 > s) out.push(seg(axis, at, s, g0)); s = Math.max(s, g1) }
+  if (b > s) out.push(seg(axis, at, s, b))
+  return out
+}
+const seg = (axis: 'x' | 'z', at: number, a: number, b: number): Box =>
+  axis === 'x' ? { x0: a, x1: b, z0: at - H, z1: at + H } : { x0: at - H, x1: at + H, z0: a, z1: b }
+
+const { x0: BX0, x1: BX1, z0: BZ0, z1: BZ1 } = BUILDING
+const R = ROOMS
+/** Wall segments (also what World draws for the inner walls). Doorways are the gaps. */
+export const OUTER_WALLS = {
+  north: wall('x', BZ0, BX0, BX1), south: wall('x', BZ1, BX0, BX1, [[DOOR.x0, DOOR.x1]]),
+  west: wall('z', BX0, BZ0, BZ1), east: wall('z', BX1, BZ0, BZ1),
+}
+export const INNER_WALLS: { box: Box; kind: 'solid' | 'glass' }[] = [
+  // break area: partition to the production floor with a doorway; glass wall to the war room with a doorway
+  ...wall('z', ROOM_X, BZ0, R.breakArea.z1, [[-3.7, -2.7]]).map((box) => ({ box, kind: 'solid' as const })),
+  ...wall('x', R.warRoom.z0, ROOM_X, BX1, [[5.3, 6.3]]).map((box) => ({ box, kind: 'glass' as const })),
+  // war room: glass on the factory side (doorway at the C/D aisle) and on the south; the screen wall to the staff corner
+  ...wall('z', ROOM_X, R.warRoom.z0, R.warRoom.z1, [[-0.6, 0.6]]).map((box) => ({ box, kind: 'glass' as const })),
+  ...wall('x', R.warRoom.z1, ROOM_X, R.staff.x0, [[5.3, 6.3]]).map((box) => ({ box, kind: 'glass' as const })),
+  ...wall('z', R.staff.x0, R.warRoom.z0, R.warRoom.z1, [[1.6, 2.4]]).map((box) => ({ box, kind: 'solid' as const })),
+  // restroom: walls on the north and west, door on the west side
+  ...wall('x', R.restroom.z0, R.restroom.x0, BX1).map((box) => ({ box, kind: 'solid' as const })),
+  ...wall('z', R.restroom.x0, R.restroom.z0, BZ1, [[4.4, 5.2]]).map((box) => ({ box, kind: 'solid' as const })),
+]
+
+const pad = (b: Box, p = PAD): Box => ({ x0: b.x0 - p, x1: b.x1 + p, z0: b.z0 - p, z1: b.z1 + p })
+const around = (x: number, z: number, w: number, d: number): Box => ({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 })
+/** Dock props (crates, forklift) the lead bumps into. */
+export const DOCK_PROPS = { crates: around(8.35, 7.2, 0.7, 0.9), forklift: around(6.0, 7.35, 0.6, 0.95) }
 export const COLLIDERS: Box[] = [
-  ...PLACED.map((p) => ({ x0: p.x - p.w / 2 - PAD, x1: p.x + p.w / 2 + PAD, z0: p.z - p.d / 2 - PAD, z1: p.z + p.d / 2 + PAD })),
-  { x0: DESK.x - DESK.w / 2, x1: DESK.x + DESK.w / 2, z0: DESK.z - DESK.d / 2, z1: DESK.z + DESK.d / 2 },
-  { x0: WAR_ROOM.x1 - 0.12, x1: WAR_ROOM.x1 + 0.12, z0: WAR_ROOM.z0 - 0.1, z1: WAR_ROOM.z1 + 0.1 },   // back wall
-  { x0: WAR_ROOM.x0 + 0.5, x1: WAR_ROOM.x1, z0: WAR_ROOM.z0 - 0.06, z1: WAR_ROOM.z0 + 0.06 },           // side walls
-  { x0: WAR_ROOM.x0 + 0.5, x1: WAR_ROOM.x1, z0: WAR_ROOM.z1 - 0.06, z1: WAR_ROOM.z1 + 0.06 },
+  ...PLACED.map((p) => pad({ x0: p.x - p.w / 2, x1: p.x + p.w / 2, z0: p.z - p.d / 2, z1: p.z + p.d / 2 })),
+  around(DESK.x, DESK.z, DESK.w, DESK.d),
+  around(SCREEN.x - 0.05, SCREEN.z, 0.2, SCREEN.w + 0.2),
+  around(BENCH.x, BENCH.z, BENCH.w, BENCH.d),
+  around(COURT.hoopX, BZ0 + 0.35, 0.3, 0.5),
+  DOCK_PROPS.crates, DOCK_PROPS.forklift,
+  ...Object.values(OUTER_WALLS).flat(), ...INNER_WALLS.map((w) => w.box),
 ]
 
 export const PLAYER_R = 0.22
 
-/** Is (x, z) on the walkable grass? */
-export function onIsland(x: number, z: number, r = PLAYER_R) {
-  return Math.hypot(x, z) <= islandRadius(Math.atan2(z, x)) - EDGE_MARGIN - r
+/** Is (x, z) a place the lead can stand: inside the building, or out on the loading dock? */
+export function walkable(x: number, z: number, r = PLAYER_R) {
+  const inside = x >= BX0 + H + r && x <= BX1 - H - r && z >= BZ0 + H + r && z <= BZ1 - H - r
+  const dock = x >= DOCK.x0 + r && x <= DOCK.x1 - r && z >= BZ1 - H && z <= DOCK.z1 - r
+  return inside || dock
 }
 
-/** Push a circle (x, z, r) out of every box and keep it on the island (no walking into the sea). */
+/** Push a circle (x, z, r) out of every box (machines, furniture, walls) and keep it in the building or on the dock. */
 export function collide(x: number, z: number, r = PLAYER_R): [number, number] {
   let px = x
   let pz = z
@@ -109,10 +171,13 @@ export function collide(x: number, z: number, r = PLAYER_R): [number, number] {
       pz = opts[0][2]
     }
   }
-  const a = Math.atan2(pz, px)
-  const lim = islandRadius(a) - EDGE_MARGIN - r
-  const rr = Math.hypot(px, pz)
-  if (rr > lim) { px *= lim / rr; pz *= lim / rr }
+  // hard bounds: the building's inner face, or the dock outside the doors
+  if (pz > BZ1 - H - r && px > DOCK.x0 + r && px < DOCK.x1 - r) {
+    pz = Math.min(pz, DOCK.z1 - r)
+  } else {
+    px = Math.min(BX1 - H - r, Math.max(BX0 + H + r, px))
+    pz = Math.min(BZ1 - H - r, Math.max(BZ0 + H + r, pz))
+  }
   return [px, pz]
 }
 
@@ -132,7 +197,7 @@ export function statusLight(s: MachineStatus | undefined): Light {
 }
 export const LIGHT_HEX: Record<Light, string> = { green: '#3fcf5a', amber: '#f5a623', red: '#ff3b30', grey: '#8a8f96' }
 
-/** Line colours: the dashboard's line hues, softened to pastels for the island. */
+/** Line colours: the dashboard's line hues, softened to pastels for the toy factory. */
 export const LINE_HEX: Record<Line, string> = {
   A: '#8fbf5a', B: '#6fa8dc', C: '#a993d6', D: '#f29a6b', BOND: '#e8c15a', CURE: '#e07a74',
 }
@@ -152,9 +217,8 @@ export function nearest(x: number, z: number): Near {
   return best ? { kind: 'machine', id: best.id } : null
 }
 
-/** Background workers' walking loops (aisles and the open yard; they ignore the player). */
+/** Background workers' walking loops on the production floor (they ignore the player). */
 export const WALKER_LOOPS: [number, number][][] = [
   [[-6.8, -3.5], [3.6, -3.5], [3.6, -1.3], [-6.8, -1.3]],
-  [[0.2, 0.9], [4.2, 0.9], [4.2, 3.0], [0.2, 3.0]],
   [[-6.8, 3.25], [3.8, 3.25], [3.8, 5.6], [-6.8, 5.6]],
 ]

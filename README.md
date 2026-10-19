@@ -28,7 +28,7 @@
 
 ### 3D 工廠（戰情室負責人視角）
 
-打開 `http://localhost:8000/factory`。你是戰情室負責人，從戰情室桌前出發（面對大螢幕，轉身就是產線）。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
+打開 `http://localhost:8000/factory`。你是戰情室負責人，畫面是一座迷你工廠廠房（娃娃屋式切面：產線、戰情室、員工待命區、休息區、廁所、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
 
 - 點一下畫面開始（鎖定滑鼠）。`W A S D` 走、`Shift` 跑、滑鼠或 `Q`/`E`（方向鍵）轉向、`Esc` 放開滑鼠。
 - 走到機台前按 `F`：開即時讀數（和戰情室的機台抽屜相同）。在戰情室桌前按 `F`：展示控制台，一鍵啟動 p.11「7 號硫化機溫降」、重來、調速度、拔網路測試（和上方展示列同一組 API）。
@@ -128,7 +128,7 @@ The phone page has a 問戰情室 box. It is not a second agent: the same Nemotr
 
 ### 3D factory (the war-room lead's view)
 
-Open `http://localhost:8000/factory`. You are the war-room lead, starting at the war-room desk (facing the big screen; turn around for the lines). Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
+Open `http://localhost:8000/factory`. You are the war-room lead in a miniature factory building seen as a dollhouse cutaway (production lines, war room, staff corner, break area, restroom, loading dock), starting at the war-room door facing the lines. Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
 
 - Click to start (pointer lock). `W A S D` walk, `Shift` run, mouse or `Q`/`E` (arrow keys) to turn, `Esc` releases the mouse.
 - `F` at a machine opens its live readings (the dashboard's machine drawer). `F` at the war-room desk opens the demo controls: start the p.11 press-7 temperature drop, reset, speed, network tiers (the same API as the dashboard's demo strip).

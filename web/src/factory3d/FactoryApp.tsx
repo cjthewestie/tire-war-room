@@ -1,6 +1,6 @@
-// 3D factory island (served at /factory). The player is a tiny war-room lead on a Minimotive-style miniature
-// island: walk the rows, press F at a machine for its live readings, F at the hut desk for the demo controls,
-// P to raise the real /phone page.
+// 3D factory (served at /factory). The player is a tiny war-room lead in a Minimotive-style miniature factory
+// building, seen as a dollhouse cutaway: walk the rows, press F at a machine for its live readings, F at the
+// war-room desk for the demo controls, P to raise the real /phone page.
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -14,7 +14,7 @@ import { fmtHM, fmtMD } from '../format'
 import { alertText, diffPending, type PushState } from '../phone/alert'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { PLACED_BY_ID, onIsland, type Near } from './layout'
+import { PLACED_BY_ID, ROOMS, collide, walkable, type Near } from './layout'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
 import { cam, player, teleport } from './pose'
@@ -47,13 +47,15 @@ function ring() {
   } catch { /* ignore */ }
 }
 
-/** In front of a machine, in the aisle, facing it (camera swings behind the figure). */
+/** In front of a machine, in the aisle, facing it. The camera sits behind and a little to the side, so neither the
+ *  figure nor the reading tag hides the machine's status lamp. */
 function standAt(id: string) {
   const p = PLACED_BY_ID[id]
   if (!p) return
   const side = p.line === 'CURE' ? -1 : 1   // presses: stand on the aisle north of the row
   const z = p.z + side * (p.d / 2 + 0.45)
-  teleport(p.x, z, side > 0 ? 0 : Math.PI)
+  const yaw = side > 0 ? 0 : Math.PI
+  teleport(p.x, z, yaw, yaw + 0.6)
 }
 
 export function FactoryApp() {
@@ -67,6 +69,7 @@ export function FactoryApp() {
   const [busy, setBusy] = useState(false)
   const [buzz, setBuzz] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const cameraRef = useRef<THREE.Camera | null>(null)
   const nearRef = useRef<Near>(null)
   useEffect(() => { nearRef.current = near }, [near])
   const push = useRef<PushState>({ seen: new Set(), held: [] })
@@ -138,7 +141,17 @@ export function FactoryApp() {
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
-    w.__factory3d = { teleport, standAt, player, cam, onIsland, raisePhone }
+    // screenOf: where a world point lands on screen (CSS px), for layout asserts; toast: show the approval toast
+    const screenOf = (x: number, y: number, z: number) => {
+      const c = cameraRef.current, el = canvasRef.current
+      if (!c || !el) return null
+      const v = new THREE.Vector3(x, y, z).project(c)
+      const r = el.getBoundingClientRect()
+      return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }
+    }
+    const toastNow = (title = '測試通知', body = '7 號硫化機：待核准 1 件') => setToast({ title, body, at: Date.now() })
+    w.__factory3d = { teleport, standAt, player, cam, walkable, collide, raisePhone, screenOf, toast: toastNow, placed: PLACED_BY_ID, rooms: ROOMS,
+      cameraPos: () => cameraRef.current?.position.toArray() }
     return () => { delete w.__factory3d }
   }, [raisePhone])
 
@@ -156,8 +169,9 @@ export function FactoryApp() {
         dpr={[1, 1.5]}
         shadows="percentage"
         gl={{ antialias: true, powerPreference: 'high-performance' }}
-        onCreated={({ gl }) => {
+        onCreated={({ gl, camera }) => {
           canvasRef.current = gl.domElement
+          cameraRef.current = camera
           gl.domElement.tabIndex = 0
           gl.toneMapping = THREE.ACESFilmicToneMapping
           gl.toneMappingExposure = 1.05
@@ -165,8 +179,8 @@ export function FactoryApp() {
         onClick={() => { if (!overlay && !started) start() }}
       >
         <color attach="background" args={['#e9dfcf']} />
-        <fog attach="fog" args={['#e9dfcf', 32, 80]} />
-        <World state={state} connected={connected} mode={transport?.mode ?? 'live'} />
+        <fog attach="fog" args={['#e9dfcf', 46, 110]} />
+        <World state={state} connected={connected} mode={transport?.mode ?? 'live'} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
         <Player
           enabled={started && !overlay} started={started} onNear={setNear} phoneUp={phoneUp}
           pending={pending.length} buzzUntil={buzzUntil}
@@ -200,8 +214,8 @@ export function FactoryApp() {
       {!started && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
-            <h1>工廠小島・戰情室</h1>
-            <p>你是戰情室負責人。從小屋裡的戰情室桌前出發，走遍小島上的產線，看 28 台機台的即時狀態。</p>
+            <h1>迷你工廠・戰情室</h1>
+            <p>你是戰情室負責人。從戰情室門口出發，走遍廠房裡的產線，看 28 台機台的即時狀態。</p>
             <ul>
               <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，<kbd>Q</kbd>/<kbd>E</kbd> 或拖曳滑鼠轉鏡頭，滾輪拉遠拉近</li>
               <li>走到機台旁按 <kbd>F</kbd> 看即時讀數；在戰情室桌前按 <kbd>F</kbd> 開展示控制</li>
