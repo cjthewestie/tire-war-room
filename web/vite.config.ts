@@ -34,6 +34,10 @@ export default defineConfig({
     },
   },
   build: {
+    // /factory bundles three.js + r3f + drei into one ~950 kB chunk (~255 kB gzip). It is loaded only by
+    // that page and served from the local box, so the default 500 kB warning is raised rather than split
+    // (a manual vendor split grew the total to 1.14 MB under Rolldown).
+    chunkSizeWarningLimit: 1000,
     rollupOptions: {
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
