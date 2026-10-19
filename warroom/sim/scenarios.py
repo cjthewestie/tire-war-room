@@ -15,7 +15,19 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
-from warroom.contracts import FaultKind, FaultSpec, Scenario, ScenarioName, ScenarioStep
+from datetime import date
+
+from warroom.contracts import (
+    FaultKind,
+    FaultSpec,
+    Order,
+    PlantInput,
+    Scenario,
+    ScenarioName,
+    ScenarioStep,
+    TeamId,
+    TireSize,
+)
 from warroom.factory import TZ
 
 # Page 11 runs on 10/03 (the phone card's gap is "10/03 夜班缺 1 人"); page 2 shows 10/22 14:26.
@@ -25,7 +37,32 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
     ScenarioName.OPEN_MILL_OVERHEAT: datetime(2026, 10, 22, 14, 18, 0, tzinfo=TZ),
     ScenarioName.BAD_DATA: datetime(2026, 10, 3, 9, 0, 0, tzinfo=TZ),
     ScenarioName.CONCURRENT_3: datetime(2026, 10, 3, 10, 0, 0, tzinfo=TZ),
+    # issue #17 plant events: three working days after the page-11 Saturday (Mon / Tue / Wed)
+    ScenarioName.SHIFT_START: datetime(2026, 10, 5, 7, 50, 0, tzinfo=TZ),
+    ScenarioName.STAFFING: datetime(2026, 10, 6, 7, 20, 0, tzinfo=TZ),
+    ScenarioName.RUSH_ORDER: datetime(2026, 10, 7, 9, 50, 0, tzinfo=TZ),
 }
+PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER})
+
+# issue #17 timing: each plant event lands 10 min after the scenario start, so the dashboard shows the
+# plant running normally first.
+SHIFT_START_OFFSET_S = 600.0         # 08:00 早班開工
+STAFFING_OFFSET_S = 600.0            # 07:30 the call comes in, 30 min into the curing 早班 (06:00–15:00)
+RUSH_OFFSET_S = 600.0                # 10:00 the rush order arrives
+# The rush order follows the team dataset's one tight-due order (orders.csv SO-009: 客戶G 中胎, 「唯一需週六加班
+# 的訂單（交期緊）」), moved onto the sim clock: 2 tyres due 2 days after it arrives (assumed first lot).
+RUSH_ORDER_ID = "#R-009"
+RUSH_QTY = 2
+RUSH_DUE_DAYS = 2
+# The sick call: team dataset staff S13 (加硫組, 早) -> our curing team's 早班 loses one person.
+SICK_STAFF_ID = "S13"
+
+
+def _rush_order(start: datetime) -> Order:
+    due: date = start.date() + timedelta(days=RUSH_DUE_DAYS)
+    return Order(id=RUSH_ORDER_ID, size=TireSize.M, qty=RUSH_QTY, done=0, due=due, customer="客戶G",
+                 mold_id="MD-R009", priority=3)
+
 
 # Page 11 timing. The steam drop starts at 02:13:15; the detector confirms it ~45 s later
 # (02:14:00) with "穩定在 122±1"; the leak starts 02:22:55 at 1/3 °C/min so CURE-07 crosses
@@ -107,6 +144,31 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
                              fault=_f("F-C3-3", "CURE-10", FaultKind.STEAM_PRESSURE_DROP, target_c=122.0)),
             ],
             expected=["3 件獨立 Anomaly，各自在 60 秒內：CURE-03、B-OPEN、CURE-10"])
+    if name is ScenarioName.SHIFT_START:
+        return Scenario(
+            name=name, title="早班開工 08:00：今日訂單、出勤、暖機、原料 → 今日計畫", start_at=start,
+            steps=[ScenarioStep(at_offset_s=SHIFT_START_OFFSET_S, note="08:00 早班開工",
+                                plant=PlantInput(kind="shift_start", text="08:00 早班開工：排今日計畫"))],
+            expected=["08:00 開工事件：查今日訂單、出勤（含請假）、SOP 暖機順序、原料", "一張「今日計畫」核准卡",
+                      "核准後：暖機、補料、宣達任務由人員執行，全部完成才結案"])
+    if name is ScenarioName.STAFFING:
+        return Scenario(
+            name=name, title="人力調度：加硫組 S13 來電請病假，硫化機組早班缺 1 人", start_at=start,
+            steps=[ScenarioStep(at_offset_s=STAFFING_OFFSET_S, note="07:30 S13 來電請病假",
+                                plant=PlantInput(kind="absence", text=f"{SICK_STAFF_ID}（加硫組）來電請病假，硫化機組早班缺 1 人",
+                                                 staff_id=SICK_STAFF_ID, team=TeamId.CURING, shift_name="早班",
+                                                 note="來電請病假"))],
+            expected=["07:30 人力事件：硫化機組早班缺 1 人", "求解器提出 A 加班 / B 從 2 線調 1 人", "核准後被指派的人走到硫化區報到"])
+    if name is ScenarioName.RUSH_ORDER:
+        order = _rush_order(start)
+        return Scenario(
+            name=name, title=f"插單：急單 {RUSH_ORDER_ID} 中胎 {RUSH_QTY} 條，交期 {order.due:%m/%d}", start_at=start,
+            steps=[ScenarioStep(at_offset_s=RUSH_OFFSET_S, note=f"10:00 急單 {RUSH_ORDER_ID} 到單",
+                                plant=PlantInput(kind="rush_order", order=order,
+                                                 text=f"急單 {RUSH_ORDER_ID} 到：{order.customer} 中胎 {RUSH_QTY} 條，"
+                                                      f"交期 {order.due:%m/%d}"))],
+            expected=["10:00 訂單事件：CP-SAT 重排", "卡片列出哪些訂單延後幾小時、有沒有誤交期",
+                      "核准後補料、換模準備任務由人員執行；佇列重排"])
     raise ValueError(f"unknown scenario {name}")
 
 

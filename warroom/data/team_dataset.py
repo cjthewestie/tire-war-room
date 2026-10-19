@@ -26,6 +26,12 @@ EV1_DATE = date(2026, 10, 22)       # dataset EV-1: A03 膠溫 112 °C (page 2)
 SCENARIO_ANCHOR: dict[ScenarioName, date] = {
     ScenarioName.PRESS7_TEMP_DROP: EV2_DATE,
     ScenarioName.OPEN_MILL_OVERHEAT: EV1_DATE,
+    # issue #17 plant scenarios play working days of the roster (Sat/Sun are rest days there): the shift start on
+    # the EV-2 Tuesday (S11 貼合組 is on sick leave that night), the sick call on a Monday, the rush order on a
+    # Wednesday
+    ScenarioName.SHIFT_START: date(2026, 10, 27),
+    ScenarioName.STAFFING: date(2026, 10, 26),
+    ScenarioName.RUSH_ORDER: date(2026, 10, 21),
 }
 
 

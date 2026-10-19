@@ -652,7 +652,10 @@ class Runtime:
                 # accelerated demo: the simulated plant's clock waits for the LLM / solver (wall time
                 # is not owed). No sim second passes, so no reading goes unchecked: every reading the
                 # sim produces still goes through tick() -> safety_pass() first.
-                self._publish_periodic()
+                try:
+                    self._publish_periodic()
+                except Exception:  # noqa: BLE001 - a read model must never stop the plant loop
+                    log.exception("publish failed")
                 continue
             owed += wall * self.speed
             n = min(int(owed), self.max_steps_per_iter)
@@ -739,6 +742,7 @@ class Runtime:
             self.clock.advance(dt_s)
         self.ticks += 1
         self.safety_pass(readings)              # RED path first: nothing below can delay it
+        self._plant_inputs()                    # issue #17: a scripted shift start / rush order / sick call
         readings = self.ingest.transport(readings)
         self.ingest.record(readings)
         self._track_baseline(readings)
@@ -832,6 +836,36 @@ class Runtime:
             return
         self.audit.append(AuditKind.ANOMALY, "detector", an.model_dump(mode="json"))
         self._spawn(an)
+
+    def _plant_inputs(self) -> None:
+        """Issue #17: each plant input the sim fired (shift start, rush order, sick call) opens a plant event that
+        runs as a tracked task (cancelled on a scenario load like any event)."""
+        drain = getattr(self.sim, "drain_plant_inputs", None)
+        sm = self.state_machine
+        if not callable(drain) or not callable(getattr(sm, "open_plant_event", None)):
+            return
+        self._watch_tasks()
+        for at, pin in drain():
+            ev = sm.open_plant_event(pin, at)
+            task = asyncio.create_task(sm.run_plant(ev.id), name=f"plant-{ev.id}")
+            self._tasks[ev.id] = task
+            task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
+
+    def _watch_tasks(self) -> None:
+        """Audit every worker-task status change of the current world's task board (once per World)."""
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        if board is None or getattr(board, "_audited", False):
+            return
+        board._audited = True
+
+        def on_task(what: str, t: Any, now: datetime) -> None:
+            if what == "created":
+                return                          # the state machine audits creation with its source step
+            self.audit.append(AuditKind.TASK, "world",
+                              {"task_id": t.id, "status": t.status, "change": what, "kind": t.kind, "title": t.title,
+                               "worker_id": t.worker_id, "worker": t.worker_name, "where": t.where,
+                               "at": now.isoformat()}, t.event_id)
+        board.add_listener(on_task)
 
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
         """Issue #10: open a supervisor-command event now and run it as a tracked task (cancelled on a
@@ -1168,6 +1202,15 @@ class Runtime:
         ev = ev or self.focus_event()
         if ev is None:
             return None
+        if ev.machine_id not in F.MACHINE_BY_ID:
+            # a plant event (issue #17) or a supervisor command about the whole plant: no machine, no tiles
+            auto_done, pending = self._actions_for(ev)
+            kind = {"shift_start": "早班開工", "order_rush": "插單", "staffing_short": "人力缺口",
+                    "supervisor_command": "主管指令"}.get(ev.anomaly.kind.value, "工廠事件")
+            return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=f"{kind}：{ev.goal or ev.anomaly.message}"[:60],
+                              detail=ev.anomaly.message, tiles=[], auto_done=auto_done, pending=pending,
+                              schedule_impact=self.schedule_impact(ev), state=ev.state, timeline=ev.timeline,
+                              approved=self._approved_for(ev), revoked=self._revoked_for(ev))
         d = F.MACHINE_BY_ID[ev.machine_id]
         m = self.sim.machine(ev.machine_id)
         where = self._where(ev.machine_id)
@@ -1468,7 +1511,7 @@ class Runtime:
         solve_runs = [sr for sr in ev.steps if sr.step.tool is ToolName.SOLVE_SCHEDULE]
         plans_solve = bool(solve_runs) or bool(ev.plan and any(
             st.tool is ToolName.SOLVE_SCHEDULE for st in ev.plan.steps))
-        is_press = F.MACHINE_BY_ID[ev.machine_id].line.value == "CURE"
+        is_press = ev.machine_id in F.MACHINE_BY_ID and F.MACHINE_BY_ID[ev.machine_id].line.value == "CURE"
         if plans_solve or (is_press and ev.plan is None):
             if ev.state in TERMINAL_STATES or (solve_runs and all(
                     sr.state in ("failed", "skipped", "rejected") for sr in solve_runs)):
