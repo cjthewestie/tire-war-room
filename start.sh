@@ -9,7 +9,14 @@ cd "$(dirname "$0")"
 command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
 command -v pnpm >/dev/null || { echo "Node.js 20+ and pnpm are required (corepack enable pnpm)" >&2; exit 1; }
 uv sync --quiet
-if [[ ! -f web/dist/index.html ]]; then
+# Rebuild web/dist when any page is missing or anything the build reads is newer than the last build
+# (a dist left over from another branch would otherwise be served as-is).
+stale_web() {
+  local f
+  for f in index.html phone.html factory.html; do [[ -f "web/dist/$f" ]] || return 0; done
+  [[ -n "$(find web/src web/index.html web/phone.html web/factory.html web/vite.config.ts web/package.json -newer web/dist/index.html -print -quit 2>/dev/null)" ]]
+}
+if stale_web; then
   (cd web && { [[ -d node_modules ]] || pnpm install --frozen-lockfile; } && pnpm build)
 fi
 case "${1:-mock}" in
