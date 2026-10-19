@@ -41,7 +41,7 @@ page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.
 try {
   // reset the sim so the run starts clean
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'reset' } })
-  await page.goto(`${BASE}/factory`, { waitUntil: 'networkidle' })
+  await page.goto(`${BASE}/factory?test=1`, { waitUntil: 'networkidle' })
   const canvas = await page.waitForSelector('canvas', { timeout: 15000 })
   const box = await canvas.boundingBox()
   check('canvas renders full screen', !!box && box.width >= 1400 && box.height >= 850, JSON.stringify(box))

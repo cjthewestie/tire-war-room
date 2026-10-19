@@ -149,8 +149,10 @@ export function FactoryApp() {
     return () => window.removeEventListener('keydown', k)
   }, [started, phoneUp, panel, start, raisePhone, closePanel])
 
-  // Test / demo hook (headless e2e moves the player without a mouse).
+  // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
+  // so a normal viewer's bundle does not expose teleport.
   useEffect(() => {
+    if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
     w.__factory3d = { teleport, standAt, player, raisePhone }
     return () => { delete w.__factory3d }
