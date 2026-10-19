@@ -1,6 +1,6 @@
 // Checks the web review fixes against a live backend:
 //   uv run python -m warroom.api serve --port 8771   then   node web/e2e/fixcheck.mjs http://localhost:8771
-// Phone 修改 keeps the chosen action, network-tier buttons work live, step plan has no JSON dumps, ⑨ shows p.6.
+// Phone: picking the other option then 核准 executes that option (no 修改/駁回 buttons since #16), network-tier buttons work live, step plan has no JSON dumps, ⑨ shows p.6.
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
@@ -43,46 +43,42 @@ await ph.setViewportSize({ width: 390, height: 844 })
 ph.on('pageerror', (e) => errors.push(e.message))
 await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
 
-// approve round 1 normally, then use 修改 on the round with options A/B
+// approve round 1 normally; on the round with options A/B pick A (not the system's B) and 核准
+// (the phone card has only 核准 and 討論 — CJ, 2026-10-20: 「agent 計劃就只有核准跟討論」)
 let modified = null
 for (let round = 0; round < 3 && !modified; round++) {
   let ok = false
-  for (let i = 0; i < 240 && !ok; i++) { await ph.waitForTimeout(1000); ok = (await ph.locator('.ph-opt').count()) > 0 }
+  for (let i = 0; i < 240 && !ok; i++) { await ph.waitForTimeout(1000); ok = (await ph.locator('.ph-approval .ph-approve:enabled').count()) > 0 }
   if (!ok) break
-  const title = await ph.locator('.ph-title').first().innerText()
-  const opts = await ph.locator('.ph-opt').count()
+  const title = await ph.locator('.ph-approval .ph-title').first().innerText()
+  const opts = await ph.locator('.ph-approval .ph-opt').count()
+  check(`phone card has no 修改/駁回 buttons (round ${round + 1})`, (await ph.locator('.ph-approval button', { hasText: /修改|駁回/ }).count()) === 0)
   if (opts >= 2) {
     await ph.screenshot({ path: `${OUT}/fix-phone-r2-390.png`, fullPage: true })
     await d.screenshot({ path: `${OUT}/fix-dash-r2-1440.png`, fullPage: true })
-    await ph.locator('.ph-opt').first().click()
-    await ph.locator('.ph-sec', { hasText: '修改' }).click()
-    await ph.fill('.ph-reason', '加班改 2 人')
-    await ph.locator('.ph-sec', { hasText: '送出修改' }).click()
+    await ph.locator('.ph-approval .ph-opt').first().click()
+    await ph.click('.ph-approval .ph-approve')
     modified = title
   } else {
-    await ph.locator('.ph-opt').first().click()
-    await ph.click('.ph-approve')
+    await ph.click('.ph-approval .ph-approve')
     await ph.waitForTimeout(3000)
   }
 }
-check('reached a round with A/B options and sent 修改', !!modified, modified ?? '')
+check('reached a round with A/B options and approved option A', !!modified, modified ?? '')
 // wait for the event to close, approving any later round (no options) from the phone
 let ev = null
 for (let i = 0; i < 300; i++) {
   await d.waitForTimeout(1000)
-  if (await ph.locator('.ph-card .ph-opt').count()) {
-    await ph.locator('.ph-opt').first().click()
-    if (await ph.locator('.ph-approve:enabled').count()) { await ph.locator('.ph-approve:enabled').first().click(); await ph.waitForTimeout(1500) }
-  }
+  if (await ph.locator('.ph-approval .ph-approve:enabled').count()) { await ph.locator('.ph-approval .ph-approve:enabled').first().click(); await ph.waitForTimeout(1500) }
   const evs = await d.evaluate(() => fetch('/api/events').then((r) => r.json()))
   ev = evs.find((e) => e.machine_id === 'CURE-07')
   if (ev && ['closed', 'safe_stop'].includes(ev.state)) break
 }
 const rejected = (ev?.steps ?? []).filter((s) => s.state === 'rejected')
-check('no step rejected after 修改', rejected.length === 0, rejected.map((s) => `${s.step.tool}:${s.gate?.reasons?.join(';')}`).join(' | '))
+check('no step rejected after choosing A', rejected.length === 0, rejected.map((s) => `${s.step.tool}:${s.gate?.reasons?.join(';')}`).join(' | '))
 const tl = (ev?.timeline ?? []).map((x) => x.text).join('\n')
 check('overtime notify executed (round-1 steps are replaced on replan, so read the timeline)', /\[工具\] 加班 →/.test(tl), tl.split('\n').find((x) => x.includes('加班 →')) ?? '')
-check('timeline records the modify note', tl.includes('加班改 2 人'), tl.split('\n').find((x) => x.includes('加班改 2 人')) ?? '')
+check('timeline records the changed choice', tl.includes('改選'), tl.split('\n').find((x) => x.includes('改選')) ?? '')
 check('no gate interception in timeline', !tl.includes('Extra inputs'))
 check('event closed', ev?.state === 'closed', `${ev?.state} ${ev?.outcome ?? ''}`)
 await ph.screenshot({ path: `${OUT}/fix-phone-after-390.png`, fullPage: true })
@@ -103,7 +99,7 @@ check('drawer de-mold has date', /預計出模 \d\d\/\d\d \d\d:\d\d/.test(dr))
 await d.screenshot({ path: `${OUT}/fix-drawer-cure07-1440.png` })
 await d.keyboard.press('Escape')
 
-await d.click('text=排程與人力')
+await d.click('text=人力排程')
 await d.waitForTimeout(2500)
 const plan = await d.locator('.plan-panel').innerText()
 check('step plan has no JSON / key=value dumps', !/[{}]|=\S/.test(plan), plan.match(/.*[{}=].*/)?.[0] ?? '')
