@@ -1,0 +1,5 @@
+Team official synthetic dataset (CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」).
+Copied unchanged from 實心胎_合成資料.zip (data/*.csv): staff, roster, mold_change, history_incident,
+history_daily, events. Read by warroom/data/team_dataset.py; machine and group ids are mapped in
+warroom/data/team_ids.py. Dataset dates (10/20–2027-01-26, EV-1 10/22, EV-2 10/28) are shifted to the
+sim clock per scenario; the files are never edited.

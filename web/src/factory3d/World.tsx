@@ -12,6 +12,7 @@ import { STATUS_LABEL } from '../components/common'
 import { LINES } from '../factory'
 import type { WarRoomState } from '../store'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
+import { DockTruck, WorldPeople } from './People'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
   ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
@@ -458,10 +459,7 @@ function Building() {
     for (const dx of [-0.2, 0.2]) g.add(box(0.04, 0.6, 0.04, '#3d342b', fx + dx, 0.3, fz + 0.32), box(0.04, 0.6, 0.04, '#3d342b', fx + dx, 0.62, fz - 0.05))
     for (const dx of [-0.13, 0.13]) g.add(box(0.06, 0.03, 0.42, '#6b7078', fx + dx, 0.06, fz - 0.33))
     for (const [dx, dz] of [[-0.26, 0.3], [0.26, 0.3], [-0.26, -0.1], [0.26, -0.1]]) { const wh = cyl(0.09, 0.09, 0.06, '#3d342b', fx + dx, 0.09, fz + dz, 10); wh.rotation.z = Math.PI / 2; g.add(wh) }
-    const tx = 7.1, tz = DOCK.z1 + 1.15
-    g.add(rbox(1.5, 0.95, 1.4, '#fffaf0', tx, -0.05, tz - 0.05, 0.08), rbox(1.3, 0.62, 0.7, '#6fa8dc', tx, 0.05, tz + 0.95, 0.12))
-    g.add(rbox(1.0, 0.24, 0.05, '#cfe6ee', tx, 0.4, tz + 1.3, 0.03))
-    for (const [dx, dz] of [[-0.66, -0.4], [0.66, -0.4], [-0.66, 0.95], [0.66, 0.95]]) { const wh = cyl(0.17, 0.17, 0.12, '#3d342b', tx + dx, -0.12, tz + dz, 12); wh.rotation.z = Math.PI / 2; g.add(wh) }
+    // the truck itself is People.tsx DockTruck: it comes and goes with the live world's deliveries and shipments
     return mergeStatic(g)
   }, [])
   return (
@@ -720,9 +718,10 @@ export function World({ state, focusId, active, fp }: { state: WarRoomState; foc
       </>}
       <BigScreen active={active} />
       <WarRoomScreen />
-      <StaffCorner />
+      {/* live world (issue #11): workers go where the sim says, the truck comes and goes; without it, the idle diorama */}
+      {state.world ? <WorldPeople world={state.world} /> : <><StaffCorner /><Walkers /></>}
+      <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <Ambient />
-      <Walkers />
     </group>
   )
 }

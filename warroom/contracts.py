@@ -1031,6 +1031,7 @@ class WsType(StrEnum):
     SCHEDULE = "schedule"               # data: ScheduleVersion
     AUDIT = "audit"                     # data: AuditEntry
     CLOCK = "clock"                     # data: {"factory_time": iso, "speed": float, "paused": bool}
+    WORLD = "world"                     # data: {"full": bool, "rev": int, "factory_time": iso, <changed WorldSnapshot sections>}
 
 
 class WsMessage(_M):
@@ -1076,6 +1077,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
     ("POST", "/api/sim/control", "SimControl", "{ok: bool}"),
     ("POST", "/api/ask", "AskRequest", "AskAnswer"),               # 問戰情室: read-only Q&A
+    ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream

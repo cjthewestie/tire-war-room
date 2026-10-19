@@ -8,6 +8,7 @@ sub-steps, so accelerated time (e.g. 60 sim-s per step) keeps the same dynamics.
 """
 from __future__ import annotations
 
+import logging
 import math
 import random
 from collections import deque
@@ -55,7 +56,9 @@ from warroom.factory import (
 )
 from warroom.sim import physics as P
 from warroom.sim.scenarios import get_scenario
+from warroom.sim.world import World
 
+log = logging.getLogger("warroom.sim")
 HISTORY_S = 2 * 3600            # raw history kept per machine
 MAX_SUBSTEPS = 3600
 SIZE_LABEL = {TireSize.S: "小胎", TireSize.M: "中胎", TireSize.L: "大胎"}
@@ -148,6 +151,9 @@ class Factory:
         self._gap_date: date = t0.date()
         if self.backfill_min > 0:
             self._backfill(t0, self.backfill_min)
+        # the rest of the plant (orders over time, materials, dock, people, energy, quality, maintenance):
+        # reads this Factory, never writes it, own RNG stream -> machine physics and _rng are unchanged
+        self.world = World(self, t0, self.seed)
         return sc
 
     def _init_orders(self, t0: datetime) -> None:
@@ -390,6 +396,10 @@ class Factory:
             r = self._to_reading(mid, row)
             m.last = r
             out.append(r)
+        try:
+            self.world.advance(now)
+        except Exception:  # noqa: BLE001 - the world view must never break the plant loop or the red path
+            log.exception("world advance failed")
         return out
 
     @staticmethod

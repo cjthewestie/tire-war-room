@@ -500,10 +500,10 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .tabs { display: none; }
   .stages { flex-wrap: wrap; overflow: visible; }
 
-  .bottomnav { display: grid; grid-template-columns: repeat(4, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
+  .bottomnav { display: grid; grid-template-columns: repeat(5, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
     height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 0 max(env(safe-area-inset-left), 8px) env(safe-area-inset-bottom) max(env(safe-area-inset-right), 8px);
     background: rgba(14, 16, 20, .94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
-  .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 12px; }
+  .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 12px; white-space: nowrap; min-width: 0; }
   .bottomnav button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .bottomnav button:last-child svg { fill: currentColor; stroke: none; }
   .bottomnav button.on { color: var(--accent); }
@@ -587,3 +587,66 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .prior-round > summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); }
 .prior-round .steps { margin-top: 6px; }
 .round-now { margin: 8px 0 2px; }
+
+/* ---------- 工廠全貌 (issue #11) ---------- */
+.world-wrap { margin-top: var(--gap); }
+.world { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--gap); align-items: start; }
+.world .w-orders { grid-row: span 2; }
+.w-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; min-width: 0; }
+.w-row > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.w-note { margin: 10px 0 0; }
+.w-list, .mat-list, .zones, .w-log, .w-mini { list-style: none; margin: 0; padding: 0; }
+.w-list li { padding: 8px 0; border-bottom: 1px solid var(--border); }
+.w-list li:last-child { border-bottom: 0; }
+.w-list .w-row { margin-bottom: 5px; font-size: 14.5px; }
+.tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: 999px; font-size: 11.5px; font-style: normal; line-height: 18px; background: var(--panel-3); color: var(--ink-dim); vertical-align: 1px; }
+.tag.rush { background: var(--alarm-soft); color: #ffb3ab; }
+.tag.warn { background: var(--warn-soft); color: var(--warn); margin: 0; }
+.pipe { list-style: none; margin: 0 0 12px; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.pipe li { position: relative; display: flex; flex-direction: column; align-items: center; padding: 8px 2px; border-radius: 8px; background: var(--panel-2); color: var(--ink-faint); font-size: 12.5px; white-space: nowrap; }
+.pipe li b { font-size: 22px; line-height: 1.2; color: var(--ink-dim); }
+.pipe li.has b { color: var(--ink); }
+.pipe li:nth-child(2).has b { color: var(--accent); }
+.pipe li:nth-child(4).has b { color: var(--info); }
+.mat { padding: 6px 0 8px; font-size: 14.5px; }
+.mat-bar { position: relative; height: 8px; margin-top: 5px; background: var(--panel-3); border-radius: 4px; }
+.mat-bar i { display: block; height: 100%; border-radius: 4px; background: var(--accent); transition: width .6s; }
+.mat-bar em { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--ink); opacity: .7; border-radius: 1px; }
+.mat.reorder .mat-bar i { background: var(--warn); }
+.mat.low .mat-bar i, .mat.out .mat-bar i { background: var(--alarm); }
+.mat.low b, .mat.out b { color: var(--alarm); }
+.trucks { display: grid; gap: 8px; margin-bottom: 10px; }
+.truck { display: flex; flex-direction: column; gap: 1px; padding: 8px 12px; border-radius: 10px; background: var(--panel-2); border-left: 3px solid var(--info); font-size: 14px; }
+.truck.outbound { border-left-color: var(--accent); }
+.w-log li, .w-mini li { padding: 5px 0; font-size: 13.5px; line-height: 1.45; border-bottom: 1px solid var(--border); }
+.w-log li:last-child, .w-mini li:last-child { border-bottom: 0; }
+.w-mini { margin-bottom: 8px; }
+.w-mini .warn, .w-log .warn { color: var(--warn); }
+.w-mini li.warn { color: var(--ink); }
+.w-mini li.warn b { color: var(--warn); }
+.w-quality .sub { margin-top: 12px; }
+.dir { display: inline-block; width: 18px; text-align: center; border-radius: 4px; font-size: 11.5px; background: var(--panel-3); }
+.dir.inbound { color: var(--info); }
+.dir.outbound { color: var(--accent); }
+.res { font-weight: 700; font-size: 12.5px; }
+.res.ok { color: var(--accent); }
+.res.bad { color: var(--alarm); }
+.res.warn { color: var(--warn); }
+.zones li { display: grid; grid-template-columns: minmax(84px, 112px) minmax(0, 1fr) 34px; align-items: center; gap: 8px; padding: 4px 0; font-size: 13.5px; }
+.zones li b { text-align: right; }
+.zbar { height: 6px; background: var(--panel-3); border-radius: 3px; overflow: hidden; }
+.zbar i { display: block; height: 100%; background: var(--info); border-radius: 3px; transition: width .6s; }
+.w-energy .zbar i { background: var(--warn); }
+.states { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.st { font-size: 12.5px; padding: 2px 9px; border-radius: 999px; background: var(--panel-2); color: var(--ink-dim); }
+.st-在機台 { color: var(--accent); }
+.st-搬運 { color: var(--info); }
+.st-請假 { color: var(--warn); }
+.big { font-size: 26px; }
+.w-energy .bar { margin: 6px 0 10px; }
+.spark { width: 100%; height: 40px; display: block; margin-bottom: 8px; }
+.spark polyline { fill: none; stroke: var(--warn); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.w-maint .sub { margin-top: 10px; }
+@media (max-width: 1279px) { .world { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 899px) { .world { grid-template-columns: minmax(0, 1fr); } .world .w-orders { grid-row: auto; } }
+@media (max-width: 599px) { .pipe li { font-size: 11px; } .pipe li b { font-size: 18px; } }
