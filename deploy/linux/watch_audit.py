@@ -89,7 +89,7 @@ def describe(r):
         src = "規則（mock）" if p.get("mode") == "mock" else f"模型 {p.get('model')}"
         fb = "，⚠ 退回規則" if p.get("fell_back_to_mock") else ""
         return (f"{p.get('phase')}：{src} 寫計畫，假設 {p.get('hypothesis')}（{p.get('cause_code')}），"
-                f"步驟 {','.join(p.get('steps') or [])}，{round(p.get('total_ms') or 0, 1)} ms{fb}")
+                f"步驟 {','.join(x if isinstance(x, str) else str(x.get('tool')) for x in (p.get('steps') or []))}，{round(p.get('total_ms') or 0, 1)} ms{fb}")
     if k == "tool_call":
         return f"呼叫 {r.get('actor', '').split(':')[-1]}（狀態 {STATE.get(p.get('state'), p.get('state'))}）{short(p.get('args'), 70)}"
     if k == "tool_result":
