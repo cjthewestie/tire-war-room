@@ -1,5 +1,6 @@
 // 核准區：等待列表 (right-top of the home screen). Ranked ①–⑤ (homeItems.ts); ⑤ AI 已自行處理 is collapsed.
 // Selecting an item drives the 計劃 area below it and the conversation on the left.
+import { ProgressRing } from '../components/ProgressRing'
 import { RANK_LABEL, type HomeItem, type Rank } from './homeItems'
 
 export function ApprovalList({ items, selected, onPick, next }: {
@@ -39,7 +40,10 @@ export function ApprovalList({ items, selected, onPick, next }: {
 function Row({ i, on, onPick }: { i: HomeItem; on: boolean; onPick: (key: string) => void }) {
   return (
     <button type="button" className={`hl-item tone-${i.tone} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
-      <span className="hl-top"><span className={`hl-pill tone-${i.tone}`}>{i.pill}</span><span className="hl-t">{i.title}</span></span>
+      <span className="hl-top">
+        <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${i.tone}`}>{i.pill}</span></span>
+        <span className="hl-t">{i.title}</span>
+      </span>
       <span className="hl-s">{i.sub}</span>
     </button>
   )

@@ -332,10 +332,7 @@
 .home-status-row { display: flex; gap: 8px; align-items: stretch; margin: 0 0 12px; }
 .home-status-row .agent-strip { margin: 0; flex: 1; min-width: 0; }
 .as-item b { color: var(--ink); font-weight: 700; }
-.theme-tog { flex: none; width: 40px; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; color: var(--ink-dim); padding: 0; }
-.theme-tog:hover { color: var(--ink); border-color: var(--ink-faint); }
-.theme-tog svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.home { --home-h: max(560px, calc(100vh - 206px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
+.home { --home-h: max(560px, calc(100vh - 236px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
 .home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
 .home > .plan-area { grid-area: plan; height: var(--home-h); }
 .home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
@@ -420,3 +417,4 @@
   .impact-t td { white-space: normal; }
   .hl-s { display: block; }
 }
+.hl-pill-row { display: flex; align-items: center; gap: 6px; }

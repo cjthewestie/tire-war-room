@@ -25,6 +25,7 @@ export interface HomeItem {
   orderId: string | null
   req: ApprovalRequest | null
   ts: number
+  progress?: number         // ④: share of the event's worker tasks done (0–1)
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -50,7 +51,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
       const done = tasks.length - tasksOpen
-      out.push({ ...base, rank: 4, tone: 'run', pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
+      out.push({ ...base, rank: 4, tone: 'run', progress: tasks.length ? done / tasks.length : ok / Math.max(1, total), pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
         title: `${task ? (ev.source === 'plant' ? who : '主管指令') : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
@@ -78,7 +79,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
   for (const w of schedule?.schedule.warnings ?? []) {
     const [head, list] = w.includes('：') ? [w.slice(0, w.indexOf('：')), w.slice(w.indexOf('：') + 1)] : ['', w]
     for (const seg of list.split('、')) {
-      const id = /#[A-Z]-\d+/.exec(seg)?.[0]
+      const id = /#\p{Lu}-\d+/u.exec(seg)?.[0]
       if (!id || seen.has(id)) continue
       seen.add(id)
       out.push({ key: `order:${id}`, rank: 2, tone: 'risk', pill: '交期預警', eventId: null, orderId: id, req: null, ts: now,

@@ -34,13 +34,18 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
       {!rows.length && <p className="muted">目前沒有預警。機台、原料、採購、保養與交期都在範圍內。</p>}
       {rows.length > 0 && (
         <ul className="early-list">
-          {rows.map((r, i) => (
+          {rows.slice(0, 3).map((r, i) => (
             <li key={i} className={`tone-${r.tone}`}>
               {r.machine && onMachine ? <button type="button" className="early-k" onClick={() => onMachine(r.machine!)}>{r.k}</button> : <b className="early-k">{r.k}</b>}
-              <span>{r.what}</span><span className="early-when">{r.when}</span>
+              <span className="early-what" title={r.what}>{r.what}</span><span className="early-when">{r.when}</span>
             </li>
           ))}
         </ul>
+      )}
+      {rows.length > 3 && (
+        <details className="early-more"><summary>還有 {rows.length - 3} 項預警</summary>
+          <ul className="early-list">{rows.slice(3).map((r, i) => <li key={i} className={`tone-${r.tone}`}><b className="early-k">{r.k}</b><span>{r.what}</span><span className="early-when">{r.when}</span></li>)}</ul>
+        </details>
       )}
     </section>
   )

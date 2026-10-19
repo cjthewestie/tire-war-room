@@ -20,6 +20,8 @@ export function Phone() {
   const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))
   const [pick, setPick] = useState<string | null>(null)
   const top = pending.find((p) => p.id === pick) ?? pending[0]
+  // kept here, not in the card: the card is replaced by its new version once the agent has replanned
+  const [sent, setSent] = useState<string | null>(null)
   const net = state.snapshot?.header.network ?? 'online'
   const lanDown = net === 'lan_down'
   const ev = primaryEvent(state.snapshot?.events)
@@ -40,6 +42,7 @@ export function Phone() {
         ) : (
           <div className="ph-armed muted">核准提醒已開啟{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</div>
         )}
+        {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
         {pending.length === 0 ? (
@@ -53,7 +56,7 @@ export function Phone() {
             ))}
           </div>
         ) : <>
-          <ApprovalCard key={top.id} a={top} disabled={lanDown || !transport} />
+          <ApprovalCard key={top.id} a={top} disabled={lanDown || !transport} onSent={setSent} />
           {pending.length > 1 && (
             <div className="ph-more" data-testid="phone-more">
               <b>還有 {pending.length - 1} 件待核准</b>
@@ -117,7 +120,7 @@ function AskBox({ disabled }: { disabled: boolean }) {
 
 const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時', superseded: '已改版（討論後由新版取代）' }
 
-function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }) {
+function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: boolean; onSent: (text: string) => void }) {
   const { transport, state } = useWarRoom()
   const ev = state.snapshot?.events.find((e) => e.id === a.event_id) ?? null
   const [opt, setOpt] = useState<string | null>(null)
@@ -125,7 +128,6 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const [sent, setSent] = useState<string | null>(null)
   const base = (a.options.find((o) => o.recommended) ?? a.options[0])?.id ?? null
   const chosen = opt ?? base
   // 核准 executes the chosen option (the system's unless the supervisor picked another one)
@@ -141,7 +143,7 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
   const discuss = async () => {
     if (!transport?.discuss || !text.trim()) return
     setBusy(true); setErr(null)
-    try { await transport.discuss(a.event_id, text.trim()); setSent(text.trim()); setText(''); setTalk(false) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
+    try { const t = text.trim(); onSent(t); setText(''); setTalk(false); await transport.discuss(a.event_id, t) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
   }
   return (
     <div className="ph-card ph-approval">
@@ -152,6 +154,7 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
         {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
       </div>
       <h2 className="ph-title">{plain(a.title)}</h2>
+      <p className="ph-problem">{plain(a.reason)}</p>
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">
           <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
@@ -168,7 +171,6 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
       </dl>
       <details className="ph-why">
         <summary>為什麼</summary>
-        <p>{plain(a.reason)}</p>
         {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
         {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       </details>
@@ -189,7 +191,6 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
         <textarea className="ph-reason" rows={2} maxLength={300} autoFocus value={text} onChange={(e) => setText(e.target.value)}
           placeholder="例如：不要加班／9 號機今晚要保養／這個不行，改用 B" aria-label="跟 AI 討論這個計劃" data-testid="phone-discuss-input" />
       )}
-      {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排後會送新版核准卡</p>}
       {err && <p className="err">{err}</p>}
       <div className="ph-acts">
         <button className="ph-approve" disabled={disabled || busy || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>{busy ? '送出中…' : `核准${chosen && a.options.length > 1 ? `（${chosen}）` : ''}`}</button>

@@ -140,7 +140,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           </ul>
         </dd>
         <dt className="no">不同意時</dt>
-        <dd>按「討論」在對話台說條件或原因（例如「不要加班」「改用 B」），AI 會重新規劃並發新版核准卡；未核准前什麼都不執行{activeV != null ? `，排程維持第 ${activeV} 版` : ''}。</dd>
+        <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
       </dl>
     </Block>
   )

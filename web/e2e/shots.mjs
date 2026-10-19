@@ -73,7 +73,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   check('p11 focus', t.includes('7 號硫化機') && t.includes('判斷一不成立'))
   check('p11 pending A/B', t.includes('A 夜班加班') && t.includes('B 從 2 線調 1 人'))
   await p.screenshot({ path: `${OUT}/dashboard-p11-1440.png`, fullPage: true })
-  await p.click('text=排程與人力')
+  await p.click('text=人力排程')
   await p.waitForSelector('.gantt svg')
   await p.waitForTimeout(400)
   const s = await text(p)
