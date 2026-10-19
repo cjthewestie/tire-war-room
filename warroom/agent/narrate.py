@@ -44,7 +44,7 @@ def machine_label(machine_id: str, short: bool = False) -> str:
         return f"{n} 號" if short else f"{n} 號機"
     m = MACHINE_BY_ID.get(machine_id)
     if m is None:
-        return machine_id
+        return "全廠" if machine_id == "PLANT" else machine_id     # issue #10: a command that names no machine
     return f"{LINE_PREFIX[m.line]}{m.name}"
 
 

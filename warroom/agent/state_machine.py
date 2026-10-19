@@ -71,6 +71,7 @@ from warroom.agent.narrate import (
 from warroom.contracts import (
     ALLOWED_TRANSITIONS,
     MAX_CONSECUTIVE_FAILURES,
+    MAX_DISCUSS_REPLANS,
     MAX_TOOL_RETRIES,
     TERMINAL_STATES,
     TOOLS_BY_STATE,
@@ -82,6 +83,7 @@ from warroom.contracts import (
     ApprovalOption,
     ApprovalRequest,
     ApprovalStatus,
+    AnomalyKind,
     AuditKind,
     AuditLog,
     Bus,
@@ -102,9 +104,11 @@ from warroom.contracts import (
     Line,
     MachineStatus,
     NotifyKind,
+    PlanConstraint,
     PlanStep,
     RiskLevel,
     SafetyAction,
+    Severity,
     ScheduleStatus,
     StaffingChange,
     StepRound,
@@ -131,7 +135,8 @@ from warroom.factory import (
 
 # anomaly kinds with no sensor outcome to verify (page 6 box 4 plan vs actual): VERIFY checks that the
 # approved writes ran; the hypothesis is never CONFIRMED by it
-UNMEASURED_KINDS = frozenset({"schedule_slip"})
+UNMEASURED_KINDS = frozenset({"schedule_slip", "supervisor_command"})
+COMMAND_MACHINE = "PLANT"      # issue #10: a supervisor command that names no machine is about the plant
 RISK_ORDER = [RiskLevel.R0_READ, RiskLevel.R1_NOTIFY, RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL]
 STAFFING_KINDS = (NotifyKind.OVERTIME.value, NotifyKind.STAFF_MOVE.value)
 _REF = re.compile(r"^\$(S\d+[A-Za-z]?)\.([\w.\[\]-]+)$")          # S4, or a sub-step S4b
@@ -244,6 +249,11 @@ class _Run:
     current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
     approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
     stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
+    # issue #10: plan discussion
+    waiting_req: ApprovalRequest | None = None               # the card the event is waiting on now
+    supersede: dict[str, Any] | None = None                  # {"old": card, "text", "by"} set by a discussion
+    discuss_future: Any = None                               # asyncio.Future: the next card (or None) for discuss()
+    card_snaps: dict[str, dict[str, Any]] = field(default_factory=dict)  # card id -> what it proposed (diff v1 -> v2)
 
 
 class StateMachine:
@@ -279,6 +289,7 @@ class StateMachine:
         self.pace = pace                         # sim-time latency model (see MODEL_* above)
         self._max_kept = max_events_kept
         self._events: dict[str, Event] = {}
+        self._runs: dict[str, _Run] = {}         # open event id -> its run (issue #10: discussion)
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._ids = itertools.count(1)
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
@@ -319,9 +330,13 @@ class StateMachine:
             self._note(existing, "事件偵測", f"追加異常：{anomaly.message}", "info", ts=anomaly.ts)
             return existing
         ev = self._open_event(anomaly)
+        return await self._drive(ev, self._run)
+
+    async def _drive(self, ev: Event, body: Callable[[_Run], Awaitable[None]]) -> Event:
         run = _Run(ev=ev, prev_schedule_version=self._active_version())
+        self._runs[ev.id] = run
         try:
-            await self._run(run)
+            await body(run)
         except asyncio.CancelledError:
             if ev.state not in TERMINAL_STATES:
                 self._safe_stop(run, "事件處理被取消")
@@ -332,10 +347,149 @@ class StateMachine:
             if ev.state not in TERMINAL_STATES:
                 self._safe_stop(run, f"內部錯誤：{type(e).__name__}")
         finally:
+            self._settle_discussion(run, None)
+            self._runs.pop(ev.id, None)
             if self._open.get(ev.machine_id) == ev.id:
                 del self._open[ev.machine_id]
             self._trim()
         return ev
+
+    # ------------------------------------------------------------------ issue #10: supervisor commands
+    def open_command(self, text: str, actor: str = "supervisor") -> Event:
+        """A task the supervisor typed opens an Event (source=supervisor). It is not a machine
+        anomaly: it never raises an alarm, is not the 'open event' of any machine (detector anomalies
+        never attach to it) and runs PLAN -> SIMULATE -> GATE -> (approval) -> EXECUTE like any event."""
+        from warroom.agent.talk import command_machine
+        mid = command_machine(text) or COMMAND_MACHINE
+        now = self._now()
+        base = f"EV-{now.astimezone(TZ):%Y%m%d-%H%M%S}-CMD"
+        eid, n = base, 2
+        while eid in self._events:
+            eid, n = f"{base}-{n}", n + 1
+        a = Anomaly(id=f"CMD-{eid[3:]}", ts=now, machine_id=mid, kind=AnomalyKind.SUPERVISOR_COMMAND,
+                    channel=Channel.TEMP, value=0.0, baseline=0.0, severity=Severity.INFO,
+                    message=f"主管指令：{text}")
+        ev = Event(id=eid, opened_at=now, machine_id=mid, anomaly=a, state=EventState.DETECTED,
+                   source="supervisor", command=text)
+        from warroom.agent.talk import command_kind, rule_constraints
+        if command_kind(text) == "schedule":       # 「9 號機明天保養，重排」: the same constraints a discussion makes
+            ev.constraints = rule_constraints(text, now)[0]
+        self._events[eid] = ev
+        self.audit.append(AuditKind.SYSTEM, actor, {"command": text, "source": "supervisor", "machine_id": mid},
+                          event_id=eid)
+        self.audit.append(AuditKind.STATE_TRANSITION, "state_machine",
+                          {"from": None, "to": EventState.DETECTED.value, "reason": "supervisor command"}, event_id=eid)
+        self._note(ev, "主管", f"[人工] 主管指令：{text}", "human", ts=now)
+        self._set_alert(ev, AlertCard(title="主管指令", summary=text[:60]), source="detector")
+        return ev
+
+    async def run_command(self, event_id: str) -> Event:
+        ev = self._events[event_id]
+        return await self._drive(ev, self._run_command)
+
+    async def handle_command(self, text: str, actor: str = "supervisor") -> Event:
+        return await self.run_command(self.open_command(text, actor).id)
+
+    async def _run_command(self, run: _Run) -> None:
+        from warroom.agent.talk import physical_request
+        ev = run.ev
+        text = ev.command or ""
+        self._to(ev, EventState.CLASSIFY, "supervisor command: read context")
+        refusal = physical_request(text)
+        if refusal:
+            # nothing on the allow-list can do it: say so, never invent an action (page 5: no actuator)
+            self.audit.append(AuditKind.SYSTEM, "state_machine", {"command_refused": refusal, "command": text},
+                              event_id=ev.id)
+            ev.outcome = f"無法執行：{refusal}"
+            self._note(ev, "指揮官", f"無法執行這個指令：{refusal}", "decision")
+            self._to(ev, EventState.CLOSED, "command cannot be carried out by any tool")
+            ev.closed_at = self._now()
+            return
+        run.base_context = await self._classify_command(run)
+        self._to(ev, EventState.PLAN, "ask commander (supervisor command)")
+        plan = await self._ask(run, "plan", {})
+        if plan is None or plan.safe_stop:
+            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            return
+        await self._loop(run)
+
+    async def _classify_command(self, run: _Run) -> dict[str, Any]:
+        ev = run.ev
+        mid = ev.machine_id
+        ctx: dict[str, Any] = {"source": "supervisor", "command": ev.command,
+                               "factory_time": self._now().isoformat()}
+        if mid in MACHINE_BY_ID:
+            st = self._machine_state(mid)
+            mdef = MACHINE_BY_ID[mid]
+            ctx["machine"] = {"id": mid, "label": machine_label(mid), "line": mdef.line.value,
+                              "status": st.status.value if st else None,
+                              "steam_header": mdef.steam_header}
+            r = await self._call(run, EventState.CLASSIFY, None, ToolName.READ_SENSORS,
+                                 {"machine_ids": [mid], "minutes": 30.0})
+            run.context_tools.append("[工具] 讀 30 分鐘讀值" + ("" if r.ok else "（失敗）"))
+            if r.ok:
+                ctx["sensors"] = r.data.get("summary", {})
+        s = await self._call(run, EventState.CLASSIFY, None, ToolName.SOP_SEARCH, {"query": ev.command or "", "k": 2})
+        if s.ok:
+            ctx["sop"] = self._sop_brief(s.data)
+            run.context_tools.append("[工具] 查 SOP")
+        if ev.constraints:
+            ctx["constraints"] = [c.label for c in ev.constraints]
+        return ctx
+
+    # ------------------------------------------------------------------ issue #10: plan discussion
+    def waiting_card(self, event_id: str) -> ApprovalRequest | None:
+        run = self._runs.get(event_id)
+        if run is None or run.ev.state is not EventState.AWAIT_APPROVAL or run.waiting_req is None:
+            return None
+        try:
+            req = self.approvals.get(run.waiting_req.id)
+        except Exception:  # noqa: BLE001
+            return None
+        return req if req.status is ApprovalStatus.PENDING else None
+
+    async def discuss_replan(self, event_id: str, constraints: list[PlanConstraint], text: str,
+                             actor: str = "supervisor", timeout_s: float = 300.0) -> ApprovalRequest | None:
+        """The supervisor changed the conditions of a waiting plan. The constraints are added to the
+        event (code enforces them on every solve from now on), the waiting card is superseded
+        (audited) and the event re-plans: REPLAN -> SIMULATE -> GATE. Returns the new card (v2...),
+        or None when the new plan needs no approval or the event stopped. Raises ValueError when
+        the event is not waiting at the gate or the discussion cap is reached."""
+        run = self._runs.get(event_id)
+        old = self.waiting_card(event_id)
+        if run is None or old is None:
+            raise ValueError("event is not waiting for approval")
+        ev = run.ev
+        if ev.discuss_replans >= MAX_DISCUSS_REPLANS:
+            raise ValueError(f"discussion replan cap {MAX_DISCUSS_REPLANS} reached")
+        now = self._now()
+        added = [c.model_copy(update={"at": c.at or now}) for c in constraints]
+        # a newer window for the same press replaces the older one (「延後到明天」)
+        for c in added:
+            if c.kind == "machine_unavailable":
+                ev.constraints = [x for x in ev.constraints
+                                  if not (x.kind == "machine_unavailable" and x.machine_id == c.machine_id)]
+            elif c.kind == "prefer_option":
+                ev.constraints = [x for x in ev.constraints if x.kind != "prefer_option"]
+        ev.constraints = [*ev.constraints, *added]
+        self.audit.append(AuditKind.SYSTEM, actor,
+                          {"constraints_added": [c.model_dump(mode="json") for c in added], "text": text,
+                           "approval_id": old.id, "constraints_in_force": [c.label for c in ev.constraints]},
+                          event_id=ev.id)
+        fut = asyncio.get_running_loop().create_future()
+        run.discuss_future = fut
+        run.supersede = {"old": old, "text": text, "by": actor, "added": added}
+        self.approvals.supersede(old.id, by=actor, reason=f"主管討論：{text}")
+        try:
+            return await asyncio.wait_for(asyncio.shield(fut), timeout_s)
+        except TimeoutError:
+            return None
+
+    def _settle_discussion(self, run: _Run, req: ApprovalRequest | None) -> None:
+        fut = run.discuss_future
+        if fut is not None and not fut.done():
+            fut.set_result(req)
+        run.discuss_future = None
 
     # ------------------------------------------------------------------ helpers: time, bus, audit
     def _now(self) -> datetime:
@@ -497,7 +651,10 @@ class StateMachine:
         if plan is None or plan.safe_stop:
             self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
             return
+        await self._loop(run)
 
+    async def _loop(self, run: _Run) -> None:
+        ev = run.ev
         while True:
             run.round_problems = []
             # ---------------- SIMULATE
@@ -526,13 +683,44 @@ class StateMachine:
 
             reused = self._reuse_stale_approval(run, needs, options) if needs else None
             run.stale_approval = None
+            if not needs and run.supersede is not None:
+                # the discussed plan needs no approval (e.g. nothing left to change): no new card
+                run.supersede = None
+                self._settle_discussion(run, None)
             if needs:
                 if reused is not None:
                     res = reused
                 else:
                     self._to(ev, EventState.AWAIT_APPROVAL, f"{req_risk.value} approval")
                     req = self._request_approval(run, needs, options, req_risk)
+                    run.waiting_req = req
+                    self._settle_discussion(run, req)
                     res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
+                    run.waiting_req = None
+                if res.status is ApprovalStatus.SUPERSEDED:
+                    # issue #10: the supervisor discussed this plan; its card is retired (audited by the
+                    # broker) and the plan is redone with the new conditions. A discussion is a decision,
+                    # not a failure: it never counts toward the safe stop.
+                    for sr in ev.steps:
+                        if sr.state == "awaiting_approval":
+                            sr.state = "skipped"
+                    for sr in deferred:
+                        sr.state = "skipped"
+                    sup = run.supersede or {}
+                    ev.discuss_replans += 1
+                    chips = "、".join(c.label for c in sup.get("added") or []) or "新條件"
+                    self._note(ev, "主管", f"[人工] 主管：「{sup.get('text', '')}」→ 條件：{chips}；"
+                               f"第 {res.round} 輪 v{res.version} 作廢，依新條件重新規劃", "human")
+                    ctx = {"supervisor_discussion": {
+                        "text": sup.get("text"), "constraints": [c.label for c in ev.constraints],
+                        "constraint_detail": [c.model_dump(mode="json", exclude={"text", "at"}) for c in ev.constraints],
+                        "superseded_card": {"id": res.id, "version": res.version, "actions": res.actions,
+                                            "options": [o.label for o in res.options]},
+                        "note": "constraints are enforced by code on every solve_schedule; keep the hypothesis "
+                                "and re-solve"}}
+                    if not await self._replan(run, ctx, "主管討論 → 依新條件重排", discussion=True):
+                        return
+                    continue
                 if res.status is ApprovalStatus.EXPIRED or res.decision is None:
                     self._note(ev, "系統", "主管逾時未回覆 → 不變更，維持原排程", "dynamic")
                     self._safe_stop(run, "核准逾時")
@@ -618,7 +806,7 @@ class StateMachine:
                                                       "contained": "已停用該機，未以讀值驗證",
                                                       "handed_off": "已交現場依 SOP 處置",
                                                       "unmeasured": "無讀值可驗證，核准動作已執行"}[verdict],
-                            clear_alarm=verdict == "unmeasured")
+                            clear_alarm=verdict == "unmeasured" and ev.source != "supervisor")
                 return
             hyp.status = HypothesisStatus.REJECTED
             run.newly_rejected = hyp.id
@@ -1010,25 +1198,30 @@ class StateMachine:
         exp = expectation_text(plan.hypothesis.expectation)
         self._note(ev, "指揮官", f"拆步驟：{decompose_text(plan.steps)}" + (f"；預期：{exp}" if exp else ""), "info")
 
-    async def _replan(self, run: _Run, extra: dict[str, Any], why: str) -> bool:
+    async def _replan(self, run: _Run, extra: dict[str, Any], why: str, discussion: bool = False) -> bool:
         """REPLAN: gather fresh context (neighbours on the same header/line, SOP), ask the commander
-        for a new hypothesis. False when the event was safe-stopped."""
+        for a new hypothesis. False when the event was safe-stopped. A discussion replan (issue #10)
+        is bounded by MAX_DISCUSS_REPLANS instead of max_replans and keeps the plan's shape: when the
+        model drops the schedule solve, the previous steps run again so the constraint is enforced."""
         ev = run.ev
-        if ev.replans >= self.max_replans:
+        if not discussion and ev.replans >= self.max_replans:
             self._safe_stop(run, f"已重新規劃 {ev.replans} 次仍未解決")
             return False
         self._to(ev, EventState.REPLAN, why)
-        ev.replans += 1
+        if not discussion:
+            ev.replans += 1
         run.replan_why = why
+        prior = run.plan
         a = ev.anomaly
         run.replan_tools = []
         cur = ev.hypotheses[-1] if ev.hypotheses else None
         if cur is not None and cur.status is HypothesisStatus.ACTIVE:
             extra = {**extra, "current_hypothesis": {"id": cur.id, "cause_code": cur.cause_code,
                                                      "statement": cur.statement}}
-        neigh = self._neighbours(a.machine_id)
+        neigh = self._neighbours(a.machine_id) if a.machine_id in MACHINE_BY_ID else []
         r = await self._call(run, EventState.REPLAN, None, ToolName.READ_SENSORS,
-                             {"machine_ids": neigh, "minutes": 30.0})
+                             {"machine_ids": neigh, "minutes": 30.0}) if neigh else \
+            ToolResult(call_id="none", tool=ToolName.READ_SENSORS, ok=False, error="no machine")
         others = [m for m in neigh if m != a.machine_id]
         same = "同管線" if MACHINE_BY_ID.get(a.machine_id) and MACHINE_BY_ID[a.machine_id].line is Line.CURE else "同產線"
         if r.ok:
@@ -1047,6 +1240,17 @@ class StateMachine:
         if plan is None or plan.safe_stop:
             self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
             return False
+        if discussion and prior is not None and any(st.tool is ToolName.SOLVE_SCHEDULE for st in prior.steps) \
+                and not any(st.tool is ToolName.SOLVE_SCHEDULE for st in plan.steps):
+            # the supervisor's condition is a schedule condition: a plan with no solve could not honour
+            # it. Keep the model's hypothesis, run the previous steps again (constraints applied by code)
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"discussion_replan_guard": "model plan had no solve_schedule; previous steps reused",
+                               "model_steps": [st.id + ":" + st.tool.value for st in plan.steps]}, event_id=ev.id)
+            plan = plan.model_copy(update={"steps": prior.steps})
+            run.plan = ev.plan = plan
+            ev.steps = [StepRun(step=st, state="pending") for st in plan.steps]
+            self._narrate_steps(run)
         return True
 
     # ------------------------------------------------------------------ SIMULATE
@@ -1067,6 +1271,7 @@ class StateMachine:
                 continue
             resolved = step.model_copy(update={"args": resolve_refs(step.args, run.results)})
             resolved = self._bind_physics(run, resolved)
+            resolved = self._apply_constraints(run, resolved)
             sr.step = resolved
             kw = {"evidence": self._evidence(run)} if (self._gate_takes_evidence and
                                                        step.tool is ToolName.SOLVE_SCHEDULE) else {}
@@ -1096,6 +1301,18 @@ class StateMachine:
                     self._note(ev, "求解器", "求解逾時 → 切換備援求解器（heuristic）", "dynamic")
                 if not res.data.get("feasible", False):
                     run.feasible = False
+                elif ev.constraints:
+                    viol = self._constraint_violations(run, res.data)
+                    self.audit.append(AuditKind.GATE if viol else AuditKind.SYSTEM, "state_machine",
+                                      {"constraint_check": step.id, "schedule_version": res.data.get("schedule_version"),
+                                       "constraints": [c.label for c in ev.constraints], "ok": not viol,
+                                       "violations": viol[:10]}, event_id=ev.id)
+                    if viol:
+                        run.feasible = False
+                        self._note(ev, "系統", f"求解結果未遵守主管條件（{'；'.join(viol[:3])}）→ 不採用", "dynamic")
+                    else:
+                        self._note(ev, "系統", f"程式檢查：排程 v{res.data.get('schedule_version')} 遵守主管條件"
+                                   f"（{'、'.join(c.label for c in ev.constraints)}）", "info")
             else:
                 today = self._now().date()
                 line_bits.append(f"[工具] {step.id}：{result_text(step.tool, resolved.args, res.data, today)}")
@@ -1383,6 +1600,55 @@ class StateMachine:
                 return step.model_copy(update={"args": {**step.args, "cure_overrides_h": over}})
         return step
 
+    def _apply_constraints(self, run: _Run, step: PlanStep) -> PlanStep:
+        """Issue #10: the supervisor's conditions go into every solve by CODE, whatever the plan said:
+        a press unavailable in a window -> press_blackouts, no overtime -> allow_overtime=False, no
+        cross-team move -> allow_cross_team=False. Audited."""
+        ev = run.ev
+        if step.tool is not ToolName.SOLVE_SCHEDULE or not ev.constraints:
+            return step
+        args = dict(step.args)
+        blk: dict[str, list[list[str]]] = {p: [list(map(str, w)) for w in ws]
+                                           for p, ws in (args.get("press_blackouts") or {}).items()}
+        for c in ev.constraints:
+            if c.kind == "machine_unavailable" and c.machine_id in CURE_PRESS_IDS and c.start and c.end:
+                w = [c.start.isoformat(), c.end.isoformat()]
+                if w not in blk.setdefault(c.machine_id, []):
+                    blk[c.machine_id].append(w)
+            elif c.kind == "no_overtime":
+                args["allow_overtime"] = False
+            elif c.kind == "no_transfer":
+                args["allow_cross_team"] = False
+        if blk:
+            args["press_blackouts"] = blk
+        if args != step.args:
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"constraints_applied": step.id, "constraints": [c.label for c in ev.constraints],
+                               "from": {k: step.args.get(k) for k in ("press_blackouts", "allow_overtime", "allow_cross_team")},
+                               "to": {k: args.get(k) for k in ("press_blackouts", "allow_overtime", "allow_cross_team")}},
+                              event_id=ev.id)
+        return step.model_copy(update={"args": args})
+
+    def _constraint_violations(self, run: _Run, data: dict[str, Any]) -> list[str]:
+        """Check the solver's RESULT honours every constraint (never trust the plan, nor the solver)."""
+        out: list[str] = []
+        sched = data.get("schedule") or {}
+        jobs = sched.get("jobs") or []
+        changes = list(sched.get("staffing_changes") or []) + list(data.get("staffing_options") or [])
+        for c in run.ev.constraints:
+            if c.kind == "machine_unavailable" and c.start and c.end and c.machine_id in CURE_PRESS_IDS:
+                for j in jobs:
+                    if j.get("press_id") != c.machine_id or j.get("frozen"):
+                        continue
+                    mi, de = datetime.fromisoformat(str(j["mold_in"])), datetime.fromisoformat(str(j["demold"]))
+                    if mi < c.end and c.start < de:
+                        out.append(f"{j.get('order_id')} {j.get('id')} 排在 {c.label} 時段")
+            elif c.kind == "no_overtime" and any(x.get("kind") == "overtime" for x in changes):
+                out.append("排程仍含加班")
+            elif c.kind == "no_transfer" and any(x.get("kind") == "transfer" for x in changes):
+                out.append("排程仍含跨組調人")
+        return out
+
     def _check(self, run: _Run, step: PlanStep, provisional: list[PlanStep] | None = None,
                **kw: Any) -> GateDecision:
         ok, why = self._sim_ok(run, step)
@@ -1514,6 +1780,13 @@ class StateMachine:
             opts.append(ApprovalOption(id="A", label=label, tool=first.tool, args=first.args, recommended=True))
         if opts and not any(o.recommended for o in opts):
             opts[0] = opts[0].model_copy(update={"recommended": True})
+        pref = [c for c in run.ev.constraints if c.kind == "prefer_option"]
+        if pref and len(opts) > 1:
+            want = pref[-1].option
+            kind = {"overtime": NotifyKind.OVERTIME.value, "transfer": NotifyKind.STAFF_MOVE.value}.get(str(want))
+            hit = next((o for o in opts if o.id == want or (kind and o.args.get("kind") == kind)), None)
+            if hit is not None:      # the supervisor's preference becomes the recommended option (code, not model)
+                opts = [o.model_copy(update={"recommended": o.id == hit.id}) for o in opts]
         return opts
 
     # ---- approval-card content: only what THIS event's own results say ----
@@ -1659,14 +1932,25 @@ class StateMachine:
                           risk: RiskLevel) -> ApprovalRequest:
         ev, plan = run.ev, run.plan
         assert plan is not None
-        run.approvals_made += 1
-        rnd = run.approvals_made
+        sup, run.supersede = run.supersede, None
+        old: ApprovalRequest | None = sup["old"] if sup else None
+        if old is not None:          # issue #10: a new version of the same round replaces the discussed card
+            rnd, version = old.round, old.version + 1
+            rid = f"AP-{ev.id}-{rnd}v{version}"
+        else:
+            run.approvals_made += 1
+            rnd, version = run.approvals_made, 1
+            rid = f"AP-{ev.id}-{rnd}"
         rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
-        if rejected:
+        if ev.source == "supervisor" and not rejected:
+            reason = f"主管指令：{ev.command}"
+        elif rejected:
             last = rejected[-1]
             reason = f"{last.id} 不成立：" + (last.evidence[-1] if last.evidence else "驗證未達預期")
         else:
             reason = f"假設 {plan.hypothesis.id}：{plan.hypothesis.statement}"
+        if ev.source == "supervisor" and rejected:
+            reason = f"主管指令：{ev.command}；" + reason
         # 已做 = only what has already run (page 11: 安全核心已處置；#A-311 改 9 號). What approving
         # will do (one line per gated write) and staffing an earlier round already sent are 核准內容
         # lines (_actions); there is no 「將做：…」 summary, which could name an unconfirmed solve.
@@ -1676,15 +1960,115 @@ class StateMachine:
         gaps, _ = self._event_staffing(run)
         delivery = self._delivery_text(run)
         now = self._now()
+        snap = self._card_snap(run, needs, options, delivery)
+        changes = self._card_changes(run.card_snaps.get(old.id) if old else None, snap) if old else []
         req = ApprovalRequest(
-            id=f"AP-{ev.id}-{rnd}", event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,
+            id=rid, event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,
             risk=risk, title=plan.alert_card.title, reason=reason, done=done, gaps=list(dict.fromkeys(gaps)),
             delivery_impact=delivery, options=options, actions=self._actions(run, needs, options),
-            expires_at=self._approval_expires_at(now))
+            expires_at=self._approval_expires_at(now), version=version, supersedes=old.id if old else None,
+            changes=changes, constraints=[c.label for c in ev.constraints])
+        run.card_snaps[rid] = snap
         req = self.approvals.request(req)
         ev.approvals.append(req.id)
+        if old is not None:
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"card_version": version, "approval_id": rid, "supersedes": old.id, "changes": changes,
+                               "constraints": req.constraints}, event_id=ev.id)
+            self._note(ev, "系統", f"新核准卡 v{version} 取代 v{old.version}："
+                       + ("；".join(changes) if changes else "內容與上一版相同"), "human")
+        self._post_summary(run, req)
         self._publish(WsType.EVENT, ev)
         return req
+
+    # ---- issue #10: what a card proposes, what changed since the card it replaced, and the plain summary
+    def _card_snap(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption], delivery: str) -> dict[str, Any]:
+        moves: dict[str, dict[str, Any]] = {}
+        for sr in needs:
+            if sr.step.tool is not ToolName.CONFIRM_SCHEDULE:
+                continue
+            v = sr.step.args.get("schedule_version")
+            for _, d in self._solve_steps(run):
+                if d.get("schedule_version") == v:
+                    for m in d.get("moves") or []:
+                        moves[str(m.get("job_id"))] = dict(m)
+        return {"moves": moves, "options": [o.label for o in options],
+                "recommended": next((o.label for o in options if o.recommended), None),
+                "delivery": delivery, "cure": sorted(f"{machine_label(str(sr.step.args.get('press_id')))} "
+                                                     f"{fmt_num(sr.step.args.get('total_cure_h'))} h"
+                                                     for sr in needs if sr.step.tool is ToolName.SET_CURE_TIME)}
+
+    @staticmethod
+    def _card_changes(old: dict[str, Any] | None, new: dict[str, Any]) -> list[str]:
+        """Code-built diff between two card versions: tires that now go to another press, staffing
+        options added / removed, the recommended option, the delivery verdict."""
+        if old is None:
+            return []
+        out: list[str] = []
+        per_order: dict[str, int] = {}
+        for jid in list(dict.fromkeys([*old["moves"], *new["moves"]])):
+            o, n = old["moves"].get(jid), new["moves"].get(jid)
+            ref = o or n
+            before = (o or {}).get("to_press") or (n or {}).get("from_press")
+            after = (n or {}).get("to_press") or (o or {}).get("from_press")
+            if before == after or not before or not after:
+                continue
+            order = str(ref.get("order_id"))
+            per_order[order] = per_order.get(order, 0) + 1
+            if per_order[order] > 1:
+                continue
+            when = "（維持原排程）" if n is None else ""
+            if n is not None and n.get("to_mold_in"):
+                try:
+                    when = f"（{datetime.fromisoformat(str(n['to_mold_in'])):%m/%d %H:%M} 入模）"
+                except ValueError:
+                    when = ""
+            out.append(f"{order}：{machine_label(str(before), short=True)} → {machine_label(str(after), short=True)}{when}")
+        for order, k in per_order.items():
+            if k > 1:
+                out.append(f"{order} 共 {k} 模改機台")
+        gone = [x for x in old["options"] if x not in new["options"]]
+        added = [x for x in new["options"] if x not in old["options"]]
+        if gone:
+            out.append("人力方案移除：" + "、".join(gone))
+        if added:
+            out.append("人力方案新增：" + "、".join(added))
+        if old.get("recommended") != new.get("recommended") and new.get("recommended") and not added:
+            out.append(f"建議方案：{old.get('recommended') or '—'} → {new['recommended']}")
+        if old.get("delivery") != new.get("delivery"):
+            out.append(f"交期：{old.get('delivery')} → {new.get('delivery')}")
+        if old.get("cure") != new.get("cure"):
+            out.append("硫化時間：" + ("、".join(new.get("cure") or []) or "不設定"))
+        return out
+
+    def _post_summary(self, run: _Run, req: ApprovalRequest) -> None:
+        """「我建議…因為…你可以說…」: built by code from the card (every number is a tool result)."""
+        ev = run.ev
+        acts = [re.sub(r"^S\d+[a-z]? ", "", a) for a in req.actions if not a.startswith("人力：依所選")]
+        rec = next((o for o in req.options if o.recommended), None)
+        if rec is not None and len(req.options) > 1:
+            acts.append(f"人力選 {rec.id} {rec.label}")
+        say: list[str] = []
+        presses: list[str] = []
+        for _, d in self._solve_steps(run):
+            for m in d.get("moves") or []:
+                p = str(m.get("to_press") or "")
+                if p and p != m.get("from_press") and p not in presses and p != ev.machine_id:
+                    presses.append(p)
+        if presses:
+            say.append(f"「{machine_label(presses[0], short=True)}機今晚要保養」")
+        kinds = {o.args.get("kind") for o in req.options}
+        if NotifyKind.OVERTIME.value in kinds:
+            say.append("「不要加班」")
+        if NotifyKind.STAFF_MOVE.value in kinds:
+            say.append("「不要跨組調人」")
+        why = req.reason + (f"；交期{req.delivery_impact}" if req.delivery_impact and self._solve_steps(run) else "")
+        text = (f"{'（v' + str(req.version) + '）' if req.version > 1 else ''}我建議：{'；'.join(acts) or req.title}。"
+                f"因為：{why}。" + (f"你可以說：{'、'.join(say)}，或直接核准／駁回。" if say
+                                   else "有問題可以直接問我，或核准／駁回。"))
+        self.audit.append(AuditKind.SYSTEM, "agent", {"plan_summary": text, "approval_id": req.id,
+                                                      "version": req.version}, event_id=ev.id)
+        self._note(ev, "指揮官", text, "decision")
 
     def _safety_acted(self, machine_id: str) -> bool:
         st = self._machine_state(machine_id)
@@ -2232,8 +2616,12 @@ class StateMachine:
         if exp is None and ev.anomaly.kind.value in UNMEASURED_KINDS:
             self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
                                                              "unmeasured": True}, event_id=ev.id)
-            self._note(ev, "驗證（程式）", ("核准動作已執行完成" if run.executed else "排程無需變更")
-                       + f"；{h.id} 無讀值可驗證", "info")
+            if ev.source == "supervisor":
+                self._note(ev, "驗證（程式）", ("主管指令已執行：" + "；".join(dict.fromkeys(run.executed))) if run.executed
+                           else "主管指令沒有產生任何動作", "info")
+            else:
+                self._note(ev, "驗證（程式）", ("核准動作已執行完成" if run.executed else "排程無需變更")
+                           + f"；{h.id} 無讀值可驗證", "info")
             return "unmeasured", None
         if exp is None and run.sop_handoff:
             self.audit.append(AuditKind.SYSTEM, "verifier", {"hypothesis": h.id, "expectation": None,
@@ -2332,6 +2720,10 @@ class StateMachine:
         outcome = "；".join(dict.fromkeys(run.executed)) or "無需動作"
         h = ev.hypotheses[-1]
         head = f"{h.id} {h.statement}" + ("" if verified else f"（未驗證：{why}）")
+        if ev.source == "supervisor":
+            head = f"主管指令「{ev.command}」"
+            if not run.executed:
+                outcome = "沒有可執行的動作" + (f"（{run.plan.rationale}）" if run.plan and run.plan.rationale else "")
         ev.outcome = f"{head}：{outcome}"
         self._to(ev, EventState.CLOSED, ev.outcome)
         ev.closed_at = self._now()

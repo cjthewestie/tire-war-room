@@ -54,6 +54,10 @@ from warroom.contracts import (
     Anomaly,
     AskAnswer,
     AskRequest,
+    CommandReply,
+    CommandRequest,
+    DiscussReply,
+    DiscussRequest,
     ApprovalDecision,
     ApprovalRequest,
     ApprovalStatus,
@@ -719,11 +723,61 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕提問")
         if r.c.tools is None:
             raise HTTPException(status_code=503, detail="tools unavailable (degraded mode)")
+        return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
+                                       now=r.clock.now(), actor=session.actor)
+
+    # ------------------------------------------------------------------ issue #10: 下新任務 / 討論這個計劃
+    def _ask_agent(r: Runtime):
         if "ask" not in holder:
             from warroom.agent.ask import AskAgent
             holder["ask"] = AskAgent(r.settings)
-        return await holder["ask"].ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
-                                       now=r.clock.now(), actor=session.actor)
+        return holder["ask"]
+
+    def _talk(r: Runtime):
+        if "talk" not in holder:
+            from warroom.agent.discuss import PlanTalk
+            holder["talk"] = PlanTalk(r.settings)
+        return holder["talk"]
+
+    def _sm_ready(r: Runtime):
+        sm = r.state_machine
+        if r.c.tools is None or not callable(getattr(sm, "open_command", None)):
+            raise HTTPException(status_code=503, detail="agent unavailable (degraded mode)")
+        return sm
+
+    @app.post("/api/command", response_model=CommandReply)
+    async def command(body: CommandRequest, session: Session = Depends(supervisor)) -> CommandReply:
+        """The supervisor gives the agent a new task in plain Chinese. It opens an Event (source =
+        supervisor) that runs PLAN -> SIMULATE -> GATE -> (approval) -> EXECUTE with the same tools,
+        gate and audit as any event. Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕下指令")
+        _sm_ready(r)
+        ev = r.start_command(body.text.strip(), session.actor)
+        from warroom.agent.talk import physical_request
+        refusal = physical_request(body.text)
+        return CommandReply(event_id=ev.id, accepted=refusal is None,
+                            reply=refusal or f"收到，已開任務事件 {ev.id}，AI 指揮官規劃中；需要核准的動作會送出核准卡。")
+
+    @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
+    async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
+        """The supervisor talks with the agent about this event's waiting plan: a question is answered
+        from read tools (plan unchanged); a change becomes a code-enforced constraint, the card is
+        superseded and a new version is issued. Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕討論計劃")
+        sm = _sm_ready(r)
+        try:
+            sm.get(event_id)
+        except KeyError:
+            raise _404(event_id) from None
+        out = await _talk(r).discuss(sm=sm, event_id=event_id, text=body.text.strip(), actor=session.actor,
+                                     ask_agent=_ask_agent(r), tools=r.c.tools, audit=r.audit,
+                                     context=r.ask_context(), now=r.clock.now())
+        _safe(r.sync_warning_light, False)
+        return out
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")
