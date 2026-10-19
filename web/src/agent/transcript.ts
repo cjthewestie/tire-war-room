@@ -21,6 +21,9 @@ export interface ToolItem extends Base {
   k: 'tool'; tool: ToolName; stepId: string | null; args: Record<string, unknown>; attempt: number; callId: string
   status: 'running' | 'ok' | 'failed'; error: string | null; data: Record<string, unknown> | null; durationMs: number | null
   phase: string | null
+  /** true while only the audit's brief copy is known (long fields cut to "<n chars>"); the full result
+   *  arrives with the next event snapshot */
+  partial: boolean
 }
 export interface GateItem extends Base {
   k: 'gate'; stepId: string | null; tool: string | null; risk: RiskLevel | null; verdict: string | null
@@ -90,7 +93,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         const tool = e.actor.replace(/^tool:/, '') as ToolName
         const it: ToolItem = {
           ...base, k: 'tool', tool, stepId: str(p.step_id), args: obj(p.args), attempt: numOr(p.attempt) ?? 1,
-          callId: String(p.call_id ?? e.seq), status: 'running', error: null, data: null, durationMs: null, phase: str(p.state),
+          callId: String(p.call_id ?? e.seq), status: 'running', error: null, data: null, durationMs: null, phase: str(p.state), partial: false,
         }
         calls.set(it.callId, it)
         out.push(it)
@@ -103,7 +106,9 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         it.status = p.ok ? 'ok' : 'failed'
         it.error = str(p.error)
         it.durationMs = numOr(p.duration_ms)
-        it.data = full && full.ok === !!p.ok ? full.data : obj(p.data)
+        const useFull = !!full && full.ok === !!p.ok
+        it.data = useFull ? full.data : obj(p.data)
+        it.partial = !useFull && isBrief(it.data)
         break
       }
       case 'gate': {
@@ -153,6 +158,11 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
   return out
 }
 
+/** The audit keeps a brief copy of big results: a cut field reads "<1234 chars>", a schedule only its size. */
+function isBrief(d: D): boolean {
+  return Object.values(d).some((v) => (typeof v === 'string' && /^<\d+ chars>$/.test(v)) || (v && typeof v === 'object' && typeof (v as D).jobs === 'number'))
+}
+
 const VERDICT: Record<string, string> = { confirmed: '成立', rejected: '不成立', inconclusive: '無法驗證（安全核心已停機）' }
 const STEP_STATE: Record<string, string> = { failed: '失敗', rejected: '被攔截', skipped: '未執行' }
 const hypWord = hypName
@@ -197,7 +207,7 @@ export function fromEvent(ev: Event): Item[] {
       if (sr.state === 'pending' || sr.state === 'awaiting_approval' || sr.state === 'skipped' || sr.state === 'rejected') continue
       push({ k: 'tool', tool: sr.step.tool, stepId: sr.step.id, args: sr.step.args, attempt: sr.result?.attempt ?? 1, callId: sr.result?.call_id ?? sr.step.id,
         status: sr.state === 'running' ? 'running' : sr.result?.ok ? 'ok' : 'failed', error: sr.result?.error ?? null, data: sr.result?.data ?? null,
-        durationMs: sr.result?.duration_ms ?? null, phase: null } as Omit<ToolItem, 'seq' | 'key' | 'ts'>)
+        durationMs: sr.result?.duration_ms ?? null, phase: null, partial: false } as Omit<ToolItem, 'seq' | 'key' | 'ts'>)
     }
   }
   return out

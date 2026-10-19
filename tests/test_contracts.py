@@ -102,6 +102,9 @@ def test_ts_contracts_in_sync():
         assert path in ts, f"{method} {path} missing from contracts.ts"
     for mid in F.MACHINE_IDS:
         assert f'"{mid}"' in ts, mid
+    m = re.search(r"export const WRITE_TOOLS[^=]*=\s*\[([^\]]*)\]", ts)
+    assert m, "WRITE_TOOLS missing from contracts.ts"
+    assert set(re.findall(r'"(\w+)"', m.group(1))) == {t.value for t in C.WRITE_TOOLS}
 
 
 def test_bus_and_clock():

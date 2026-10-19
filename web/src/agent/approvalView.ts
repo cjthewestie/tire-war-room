@@ -1,15 +1,16 @@
 // Visual approval card (issue #8): everything the card draws, derived from data the server already
 // sends: the approval request, the event's steps and results, the schedule versions and the audit log.
 // Nothing is hard-coded; a missing field leaves its part of the card out.
-import type {
-  ApprovalOption, ApprovalRequest, Event, RiskLevel, ScheduleJob, ScheduleVersion, StaffingChange, StepRun, ToolName,
+import {
+  WRITE_TOOLS,
+  type ApprovalOption, type ApprovalRequest, type Event, type RiskLevel, type ScheduleJob, type ScheduleVersion,
+  type StaffingChange, type StepRun, type ToolName,
 } from '../contracts'
 import { TEAM_LABELS } from '../factory'
 import { ms } from '../format'
 import { isRevoke, resultText } from '../stepText'
-import type { ToolItem } from './transcript'
+import type { Item, ToolItem } from './transcript'
 
-const WRITE_TOOLS: ToolName[] = ['confirm_schedule', 'set_cure_time', 'notify_teams']
 type D = Record<string, unknown>
 const arr = (v: unknown): D[] => (Array.isArray(v) ? (v as unknown[]).filter((x): x is D => !!x && typeof x === 'object') : [])
 const num = (v: unknown): number | null => {
@@ -21,8 +22,10 @@ const num = (v: unknown): number | null => {
 export type NodeStatus = 'done' | 'auto' | 'wait' | 'after' | 'pending' | 'running' | 'failed' | 'skipped' | 'rejected'
 export interface PlanNode { id: string; tool: ToolName; purpose: string; deps: string[]; status: NodeStatus; risk: RiskLevel | null; level: number }
 
-/** The current round's plan S1…Sn (approval-option and withdrawal steps are results of a decision, not plan steps). */
-export function planNodes(ev: Event | null): PlanNode[] {
+/** The current round's plan S1…Sn (approval-option and withdrawal steps are results of a decision, not plan steps).
+ *  `live` = this round's tool rows from the audit log: they arrive before the next snapshot, so a step the
+ *  audit already shows as running / finished is drawn that way instead of waiting for the event refresh. */
+export function planNodes(ev: Event | null, live: ToolItem[] = []): PlanNode[] {
   if (!ev) return []
   const steps = ev.steps.filter((s) => !s.step.id.startsWith('AP-') && !isRevoke(s.step.id))
   const ids = new Set(steps.map((s) => s.step.id))
@@ -37,10 +40,27 @@ export function planNodes(ev: Event | null): PlanNode[] {
     level.set(id, l)
     return l
   }
-  return steps.map((sr) => ({
-    id: sr.step.id, tool: sr.step.tool, purpose: sr.step.purpose, deps: sr.step.depends_on.filter((d) => ids.has(d)),
-    status: nodeStatus(sr), risk: sr.gate?.risk ?? null, level: lv(sr.step.id),
-  }))
+  const latest = new Map<string, ToolItem>()
+  for (const t of live) if (t.stepId && t.tool) latest.set(t.stepId, t)
+  return steps.map((sr) => {
+    let status = nodeStatus(sr)
+    const t = latest.get(sr.step.id)
+    if (t && t.tool === sr.step.tool && (status === 'pending' || status === 'after' || status === 'running')) {
+      status = t.status === 'running' ? 'running' : t.status === 'failed' ? 'failed'
+        : WRITE_TOOLS.includes(sr.step.tool) && sr.gate?.risk === 'R1' ? 'auto' : 'done'
+    }
+    return {
+      id: sr.step.id, tool: sr.step.tool, purpose: sr.step.purpose, deps: sr.step.depends_on.filter((d) => ids.has(d)),
+      status, risk: sr.gate?.risk ?? null, level: lv(sr.step.id),
+    }
+  })
+}
+
+/** Tool rows of the latest plan round (after the last 思考 block that carried steps). */
+export function currentRoundTools(items: Item[]): ToolItem[] {
+  let start = -1
+  items.forEach((it, i) => { if (it.k === 'think' && it.stepIds.length) start = i })
+  return items.slice(start + 1).filter((i): i is ToolItem => i.k === 'tool')
 }
 
 function nodeStatus(sr: StepRun): NodeStatus {

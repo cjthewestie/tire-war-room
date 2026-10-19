@@ -7,11 +7,11 @@ import { machineLabel } from '../factory'
 import { fmtHMS } from '../format'
 import { RISK_PLAIN, hypName, plain } from '../plain'
 import { primaryEvent } from '../store'
-import { TOOL_LABEL, resultText } from '../stepText'
+import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { useWarRoom } from '../useWarRoom'
 import { STATE_LABEL } from '../components/common'
 import { ApprovalVisual, PlanFlow, ToolChips } from './ApprovalVisual'
-import { planNodes, toolUses } from './approvalView'
+import { currentRoundTools, planNodes, toolUses } from './approvalView'
 import { ToolIcon } from './ToolIcon'
 import {
   expectationText, inFilter, thinkContext, withAsks,
@@ -20,6 +20,7 @@ import {
 import { useTranscript } from './useTranscript'
 import './agent.css'
 
+const MAX_ROWS = 500
 const FILTERS: { id: Filter; label: string }[] = [{ id: 'all', label: '全部' }, { id: 'tool', label: '工具' }, { id: 'think', label: '思考' }, { id: 'gate', label: '把關' }]
 const ASK_EXAMPLES = ['7 號機現在怎樣？', '今晚夜班缺誰？', '9 號機下一模是哪張訂單？']
 const PHASE: Record<string, string> = { plan: '規劃', replan: '重新規劃' }
@@ -27,10 +28,12 @@ const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需�
 const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
 
-export function AgentTab({ asks, setAsks }: { asks: AskItem[]; setAsks: React.Dispatch<React.SetStateAction<AskItem[]>> }) {
+export function AgentTab({ asks, setAsks, picked, setPicked }: {
+  asks: AskItem[]; setAsks: React.Dispatch<React.SetStateAction<AskItem[]>>
+  picked: string | null; setPicked: (id: string) => void
+}) {
   const { state } = useWarRoom()
   const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
-  const [picked, setPicked] = useState<string | null>(null)
   const ev = events.find((e) => e.id === picked) ?? primaryEvent(events)
   const { items } = useTranscript(ev)
   const pending = ev ? state.pending.filter((p) => p.event_id === ev.id) : []
@@ -39,16 +42,16 @@ export function AgentTab({ asks, setAsks }: { asks: AskItem[]; setAsks: React.Di
     <div className="agent">
       <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} />
       <aside className="agent-side" aria-label="計畫與核准">
-        {pending.map((p) => <ApprovalVisual key={p.id} req={p} ev={ev} tools={tools} />)}
-        {!pending.length && ev && <EventSummary ev={ev} tools={tools} />}
+        {pending.map((p) => <ApprovalVisual key={p.id} req={p} ev={ev} items={items} layout="side" />)}
+        {!pending.length && ev && <EventSummary ev={ev} items={items} tools={tools} />}
         {!ev && <div className="panel agent-empty"><p className="calm-title">全廠正常</p><p className="muted">有異常時，AI 指揮官的計畫、調用的工具和待核准事項會出現在這裡。你仍可在左邊提問（只查不改）。</p></div>}
       </aside>
     </div>
   )
 }
 
-function EventSummary({ ev, tools }: { ev: Event; tools: ToolItem[] }) {
-  const nodes = planNodes(ev)
+function EventSummary({ ev, items, tools }: { ev: Event; items: Item[]; tools: ToolItem[] }) {
+  const nodes = planNodes(ev, currentRoundTools(items))
   const uses = toolUses(ev, tools)
   const closed = ev.state === 'closed' || ev.state === 'safe_stop'
   return (
@@ -72,7 +75,10 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
   const { state } = useWarRoom()
   const [filter, setFilter] = useState<Filter>('all')
   const all = useMemo(() => withAsks(items, asks), [items, asks])
-  const shown = all.filter((i) => inFilter(i, filter))
+  const [cap, setCap] = useState(MAX_ROWS)
+  const matching = all.filter((i) => inFilter(i, filter))
+  const hidden = Math.max(0, matching.length - cap)
+  const shown = hidden ? matching.slice(hidden) : matching
   const scroller = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
   const onScroll = () => {
@@ -113,11 +119,12 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
           ))}
         </div>
       </header>
-      <div className="con-body" ref={scroller} onScroll={onScroll} data-testid="transcript" aria-live="polite">
+      <div className="con-body" ref={scroller} onScroll={onScroll} data-testid="transcript">
+        {hidden > 0 && <button className="con-more" onClick={() => setCap((c) => c + MAX_ROWS)}>顯示較早的 {Math.min(hidden, MAX_ROWS)} 筆（共 {hidden} 筆未顯示）</button>}
         {!shown.length && <p className="muted con-empty">{ev ? (filter === 'all' ? '讀取稽核紀錄中…' : '這個篩選沒有紀錄') : '目前沒有事件。下方可直接提問。'}</p>}
         {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} />)}
         {open && (filter === 'all') && (
-          <div className={`con-live ${waiting ? 'wait' : ''}`} role="status">
+          <div className={`con-live ${waiting ? 'wait' : ''}`} role="status" aria-live="polite">
             {waiting ? <><i className="pulse" />等待主管核准…（{state.pending.filter((p) => p.event_id === ev.id).map((p) => RISK_PLAIN[p.risk]).join('、') || '核准卡在右側'}）</>
               : <><i className="spin" />AI 指揮官{STATE_LABEL[ev.state]}中{running ? '・工具執行中' : ''}…</>}
           </div>
@@ -139,7 +146,7 @@ function Row({ it, ev, nth }: { it: Item; ev: Event | null; nth: number }) {
     case 'blocked':
       return (
         <div className="r-line r-blocked" data-kind="blocked"><ToolIcon name="blocked" />
-          <span><b>已攔下</b>{it.tool ? ` ${TOOL_LABEL[it.tool as keyof typeof TOOL_LABEL] ?? it.tool}` : ''}{it.stepId ? `（${it.stepId}）` : ''}：{it.reason}</span><time>{fmtHMS(it.ts)}</time></div>
+          <span><b>已攔下</b>{it.tool ? ` ${TOOL_LABEL[it.tool as keyof typeof TOOL_LABEL] ?? it.tool}` : ''}{it.stepId ? `（${stepLabel(it.stepId)}）` : ''}：{it.reason}</span><time>{fmtHMS(it.ts)}</time></div>
       )
     case 'approval': return <ApprovalRow it={it} />
     case 'safety':
@@ -160,7 +167,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
     <article className="r-think" data-kind="think" data-testid="think-block">
       <header><ToolIcon name="think" /><b>{who} {PHASE[it.phase] ?? it.phase}</b>
         {it.totalMs != null && <small>{Math.round(it.totalMs)} ms</small>}{it.tokens != null && <small>{it.tokens} tokens</small>}<time>{fmtHMS(it.ts)}</time></header>
-      <p className="r-think-note">推理模式關閉：以下是模型回傳的計畫與假設，不是隱藏的思考過程。</p>
+      <p className="r-think-note">{thinkNote(it)}</p>
       {it.error && <p className="r-warn">{it.source === 'mock_fallback' ? '模型輸出未通過檢查，改用規則備援計畫：' : '呼叫失敗：'}{it.error}</p>}
       {it.hypothesisId && (
         <div className="r-hyp">
@@ -184,6 +191,14 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
   )
 }
 
+/** Say where the plan came from: the model (reasoning off), the rule fallback, or the rule-mode commander. */
+function thinkNote(it: ThinkItem): string {
+  if (it.mode === 'llm' && it.source === 'mock_fallback') return '模型輸出未採用：以下計畫由規則備援產生，不是模型的思考過程。'
+  if (it.mode === 'llm') return '推理模式關閉：以下是模型回傳的計畫與假設，不是隱藏的思考過程。'
+  if (it.mode === 'mock') return '規則模式：沒有呼叫模型，以下計畫與假設由規則式指揮官產生。'
+  return '以下是這一輪的計畫與假設（依事件紀錄重建），不是隱藏的思考過程。'
+}
+
 function ToolRow({ it }: { it: ToolItem }) {
   let line = ''
   if (it.status === 'ok' && it.data) { try { line = resultText(it.tool, it.args, it.data) } catch { line = '' } }
@@ -194,9 +209,9 @@ function ToolRow({ it }: { it: ToolItem }) {
       <summary>
         <ToolIcon name={it.tool} />
         <b>{TOOL_LABEL[it.tool] ?? it.tool}</b>
-        <span className="r-step">{it.stepId && !ask ? it.stepId : ask ? '提問' : '情境'}</span>
+        <span className="r-step">{it.stepId && !ask ? stepLabel(it.stepId) : ask ? '提問' : '情境'}</span>
         {it.attempt > 1 && <span className="r-retry">重試 #{it.attempt}</span>}
-        <span className="r-res">{it.status === 'running' ? <><i className="spin" />執行中…</> : plain(line) || '完成'}</span>
+        <span className="r-res">{it.status === 'running' ? <><i className="spin" />執行中…</> : <>{plain(line) || '完成'}{it.partial && <em className="r-partial">（完整結果同步中…）</em>}</>}</span>
         {it.durationMs != null && <small className="r-ms">{fmtMs(it.durationMs)}</small>}
         <time>{fmtHMS(it.ts)}</time>
       </summary>
@@ -214,7 +229,7 @@ function GateRow({ it }: { it: GateItem }) {
   const v = it.verdict ?? (it.dropped ? 'reject' : '')
   return (
     <div className={`r-line r-gate gv-${v}`} data-kind="gate"><ToolIcon name="gate" />
-      <span><b>動作把關</b>　{it.stepId}{it.tool ? ` ${TOOL_LABEL[it.tool as keyof typeof TOOL_LABEL] ?? it.tool}` : ''}
+      <span><b>動作把關</b>　{it.stepId ? stepLabel(it.stepId) : ''}{it.tool ? ` ${TOOL_LABEL[it.tool as keyof typeof TOOL_LABEL] ?? it.tool}` : ''}
         {it.risk && <span className={`risk r-${it.risk}`}>{it.risk}</span>}
         <span className="r-verdict">{VERDICT[v] ?? v}</span>
         {it.reasons.filter((r) => !/approval required$/.test(r)).length > 0 && <small>（{it.reasons.filter((r) => !/approval required$/.test(r)).join('；')}）</small>}

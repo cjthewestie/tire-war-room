@@ -8,14 +8,14 @@ import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, StageChain, TimelineTa
 import { TemperatureTrend } from './Trend'
 import { PendingApproval } from '../agent/ApprovalVisual'
 
-export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => void; onAgent?: () => void }) {
+export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void }) {
   const { state } = useWarRoom()
   const s = state.snapshot
   if (!s) return <div className="loading">等待工廠資料…</div>
   return (
     <div className="monitor-wrap">
       <KpiStrip s={s} pending={state.pending} />
-      {state.pending.map((a) => <PendingApproval key={a.id} req={a} onAgent={onAgent} />)}
+      <PendingCards pending={state.pending} focusEvent={s.focus?.event_id ?? primaryEvent(s.events)?.id ?? null} onAgent={onAgent} />
       <div className="monitor">
         <FocusPanelView focus={s.focus} pending={state.pending} />
         <div className="col-left">
@@ -25,6 +25,38 @@ export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => 
         <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
       </div>
     </div>
+  )
+}
+
+/** One full visual card (the focus event's, else the oldest) above the monitor; any other pending
+ *  approval is a one-line row that opens the Agent tab on its event, so the plant view stays near the top. */
+function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalRequest[]; focusEvent: string | null; onAgent?: (eventId?: string) => void }) {
+  const { state } = useWarRoom()
+  if (!pending.length) return null
+  const main = pending.find((a) => a.event_id === focusEvent) ?? pending[0]
+  const rest = pending.filter((a) => a !== main)
+  const machineOf = (a: ApprovalRequest) => state.snapshot?.events.find((e) => e.id === a.event_id)?.machine_id
+  return (
+    <>
+      <PendingApproval key={main.id} req={main} onAgent={onAgent ? () => onAgent(main.event_id) : undefined} />
+      {rest.length > 0 && (
+        <ul className="apv-more" aria-label="其他待核准" data-testid="pending-more">
+          {rest.map((a) => {
+            const m = machineOf(a)
+            return (
+              <li key={a.id}>
+                <a href="#agent" onClick={(e) => { if (onAgent) { e.preventDefault(); onAgent(a.event_id) } }}>
+                  <span className={`risk r-${a.risk}`}>{a.risk}</span>
+                  {m && <b>{machineLabel(m)}</b>}
+                  <span>{plain(a.title)}</span>
+                  <span className="go">看計畫並核准 →</span>
+                </a>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </>
   )
 }
 
