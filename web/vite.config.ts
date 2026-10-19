@@ -2,10 +2,11 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { defineConfig, type Plugin } from 'vite'
 
-// /phone -> phone.html in dev and preview (FastAPI does the same in production).
+// /phone -> phone.html and /factory -> factory.html in dev and preview (FastAPI does the same in production).
 const phoneRoute = (): Plugin => {
   const rewrite = (req: { url?: string }, _res: unknown, next: () => void) => {
-    if (req.url && /^\/phone\/?(\?.*)?$/.test(req.url)) req.url = req.url.replace(/^\/phone\/?/, '/phone.html')
+    const m = req.url?.match(/^\/(phone|factory)\/?(\?.*)?$/)
+    if (m) req.url = `/${m[1]}.html${m[2] ?? ''}`
     next()
   }
   return {
@@ -21,7 +22,8 @@ const phoneRoute = (): Plugin => {
 // client reaching Vite (WARROOM_DEV_HOST=0.0.0.0 to test the phone page on a real phone) is then
 // a remote caller and needs the supervisor PIN, exactly as it would hitting FastAPI directly.
 const devHost = process.env.WARROOM_DEV_HOST || 'localhost'
-// Build: dist/index.html (war-room dashboard) + dist/phone.html (supervisor phone), served by FastAPI.
+// Build: dist/index.html (war-room dashboard) + dist/phone.html (supervisor phone) + dist/factory.html
+// (3D factory walk-through), served by FastAPI.
 export default defineConfig({
   plugins: [react(), phoneRoute()],
   server: {
@@ -36,6 +38,7 @@ export default defineConfig({
       input: {
         main: resolve(import.meta.dirname, 'index.html'),
         phone: resolve(import.meta.dirname, 'phone.html'),
+        factory: resolve(import.meta.dirname, 'factory.html'),
       },
     },
   },
