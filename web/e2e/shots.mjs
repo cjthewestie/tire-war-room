@@ -32,7 +32,8 @@ async function page(w, h, url) {
   await p.goto(BASE + url, { waitUntil: 'networkidle' })
   return p
 }
-const text = (p) => p.locator('body').innerText()
+// plain.ts puts word joiners (U+2060) inside 判斷一 so it never breaks across lines
+const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/g, '')
 
 // 1. page 2 — open-mill overheat at 14:26, desktop 1440
 {
@@ -69,14 +70,14 @@ const text = (p) => p.locator('body').innerText()
   const p = await page(1440, 900, '/?mock=1&scenario=press7_temp_drop&at=02:31:15&speed=1')
   await p.waitForSelector('.focus-title')
   const t = await text(p)
-  check('p11 focus', t.includes('7 號硫化機') && t.includes('H1 不成立'))
+  check('p11 focus', t.includes('7 號硫化機') && t.includes('判斷一不成立'))
   check('p11 pending A/B', t.includes('A 夜班加班') && t.includes('B 從 2 線調 1 人'))
   await p.screenshot({ path: `${OUT}/dashboard-p11-1440.png`, fullPage: true })
   await p.click('text=排程與人力')
   await p.waitForSelector('.gantt svg')
   await p.waitForTimeout(400)
   const s = await text(p)
-  check('schedule versions', s.includes('v1') && s.includes('v2') && s.includes('v3'))
+  check('schedule versions', s.includes('第 1 版') && s.includes('第 2 版') && s.includes('第 3 版'))
   check('schedule steps', s.includes('solve_schedule') && s.includes('sop_search') && s.includes('換假設'))
   check('timeline rows', ['02:14:00', '02:14:01', '02:14:11', '02:16:40', '02:31:00', '02:31:04'].every((x) => s.includes(x)))
   check('timeline numbers', s.includes('36.5 h') && s.includes('+8.5 h') && s.includes('119.5°C') && s.includes('#A-311'))
@@ -87,7 +88,7 @@ const text = (p) => p.locator('body').innerText()
   // rollback
   await p.click('text=回復上一版')
   await p.waitForTimeout(500)
-  check('rollback', (await text(p)).includes('已回復到 v'))
+  check('rollback', (await text(p)).includes('已回復到第'))
   await p.context().close()
 }
 

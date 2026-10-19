@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CapacityReport, Event, EventState, ScheduleVersion, Shift, StepRun } from '../contracts'
+import type { CapacityReport, Event, EventState, ScheduleJob, ScheduleVersion, Shift, StepRun } from '../contracts'
 import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
 import { TOOL_LABEL, isRevoke, resultText, staffingChoice, stepLabel } from '../stepText'
+import { RISK_SHORT, hypLabel, hypName, plain } from '../plain'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -50,11 +51,11 @@ export function ScheduleTab() {
       if (transport.rollbackPreview) {
         // gate first: never re-activate a version that loads a press now out of service
         const pv = await transport.rollbackPreview()
-        if (!pv.feasible) { setMsg(`無法回復到 v${pv.to_version}：${pv.reasons.join('；')}`); return }
+        if (!pv.feasible) { setMsg(`無法回復到第 ${pv.to_version} 版：${pv.reasons.join('；')}`); return }
         const moved = pv.moved.slice(0, 5).map((m) => `・${m.order_id} ${machineLabel(m.from_press)} → ${machineLabel(m.to_press)}`)
         const text = [
-          `回復排程 v${pv.from_version} → v${pv.to_version}（${RISK_LABEL[pv.risk]}）`,
-          `v${pv.to_version}：${pv.target_reason}`,
+          `回復排程 第 ${pv.from_version} 版 → 第 ${pv.to_version} 版（${RISK_LABEL[pv.risk]}）`,
+          `第 ${pv.to_version} 版：${plain(pv.target_reason)}`,
           `異動 ${pv.moved_count} 筆入模${pv.added || pv.removed ? `，新增 ${pv.added}／移除 ${pv.removed}` : ''}`,
           ...moved,
           ...(pv.staffing_changes.length ? [`人力：${pv.staffing_changes.join('、')}`] : []),
@@ -64,7 +65,7 @@ export function ScheduleTab() {
         to = pv.to_version
       } else if (!window.confirm('回復上一版排程？')) { setMsg('已取消回復'); return }
       const v = await transport.rollback(to, true)
-      setMsg(v ? `已回復到 v${v.version}` : '沒有可回復的上一版')
+      setMsg(v ? `已回復到第 ${v.version} 版` : '沒有可回復的上一版')
       loadVersions()
     } catch (e) { setMsg(`回復失敗：${e}`) }
   }
@@ -74,7 +75,7 @@ export function ScheduleTab() {
       <Panel title="硫化機排程（以出模時刻為中心）" num="⑤" className="gantt-panel"
         right={<VersionBar versions={versions} active={active} onRollback={rollback} />}>
         {msg && <p className="note">{msg}</p>}
-        {active ? <Gantt version={active} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} /> : <p className="muted">等待排程…</p>}
+        {active ? <Gantt version={active} prev={versions.find((v) => v.version === active.parent_version)} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} /> : <p className="muted">等待排程…</p>}
         {active && (active.schedule.staffing_changes.length > 0 || active.schedule.warnings.length > 0) && (
           <div className="sched-notes">
             {active.schedule.staffing_changes.map((c, i) => <span key={i} className={`pill ${c.kind}`}>{c.kind === 'overtime' ? '加班' : '跨組調人'}：{c.label}</span>)}
@@ -99,7 +100,7 @@ function VersionBar({ versions, active, onRollback }: { versions: ScheduleVersio
     <div className="versions">
       {versions.map((v) => (
         <span key={v.version} className={`ver st-${v.status}`} title={`${v.reason}（${fmtMD(v.created_at)} ${fmtHM(v.created_at)}）`}>
-          v{v.version}<small>{VSTATUS[v.status]}</small>
+          第 {v.version} 版<small>{VSTATUS[v.status]}</small>
         </span>
       ))}
       <button className="btn-ghost" onClick={onRollback} disabled={!active || active.parent_version == null} title="一鍵回復上一版排程">↶ 回復上一版</button>
@@ -108,11 +109,11 @@ function VersionBar({ versions, active, onRollback }: { versions: ScheduleVersio
 }
 const VSTATUS: Record<ScheduleVersion['status'], string> = { draft: '草稿', proposed: '待核准', active: '生效', superseded: '已取代', rolled_back: '已回復' }
 
-function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string; outAt?: Record<string, number> }) {
+function Gantt({ version, prev, shifts, now, focusPress, outAt = {} }: { version: ScheduleVersion; prev?: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string; outAt?: Record<string, number> }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const t0 = Math.floor((now - 6 * H) / H) * H
   const t1 = t0 + 90 * H
-  const LABEL = 64, ROW = 24, TOP = 22
+  const LABEL = 76, ROW = 24, TOP = 22
   const W = Math.max(320, width)
   const x = (t: number) => LABEL + ((t - t0) / (t1 - t0)) * (W - LABEL - 6)
   const presses: string[] = CURE_PRESS_IDS
@@ -120,8 +121,27 @@ function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: Sche
   // staffed windows for de-mold / mold-in: curing team + body night shift
   const staffed = shifts.filter((s) => s.team === 'curing' || (s.team === 'body' && s.name.includes('夜')))
   const ticks: number[] = []
-  for (let t = factoryMidnight(t0); t <= t1; t += 6 * H) if (t >= t0) ticks.push(t)
+  const tickStep = W < 700 ? 24 : W < 1000 ? 12 : 6   // hours between labels, so labels never overlap
+  for (let t = factoryMidnight(t0); t <= t1; t += tickStep * H) if (t >= t0) ticks.push(t)
   const jobs = version.schedule.jobs.filter((j) => ms(j.demold) > t0 && ms(j.mold_in) < t1)
+  // jobs this version moved to another press, compared with the version it replaced
+  // (paired per order by mold-in order, since a moved job may get a new id)
+  const movedMap = useMemo(() => {
+    const byOrder = (list: ScheduleJob[]) => {
+      const m = new Map<string, ScheduleJob[]>()
+      for (const j of [...list].sort((a, b) => ms(a.mold_in) - ms(b.mold_in))) m.set(j.order_id, [...(m.get(j.order_id) ?? []), j])
+      return m
+    }
+    const out = new Map<string, string>()
+    if (!prev) return out
+    const before = byOrder(prev.schedule.jobs)
+    for (const [order, list] of byOrder(version.schedule.jobs)) {
+      const old = before.get(order) ?? []
+      list.forEach((j, k) => { if (old[k] && old[k].press_id !== j.press_id) out.set(j.id, old[k].press_id) })
+    }
+    return out
+  }, [version, prev])
+  const movedFrom = (j: ScheduleJob) => movedMap.get(j.id) ?? null
   return (
     <div ref={ref} className="gantt">
       <svg width={W} height={Hh} role="img" aria-label="硫化機甘特圖">
@@ -132,12 +152,12 @@ function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: Sche
         {ticks.map((t) => (
           <g key={t}>
             <line x1={x(t)} x2={x(t)} y1={TOP - 6} y2={Hh} className={`g-tick ${Math.abs(t - factoryMidnight(t)) < 1000 ? 'day' : ''}`} />
-            <text x={x(t) + 3} y={12} className="g-tick-t">{Math.abs(t - factoryMidnight(t)) < 1000 ? `${fmtMD(t)}（${fmtWeekday(t)}）` : fmtHM(t)}</text>
+            <text x={x(t) > W - 46 ? x(t) - 3 : x(t) + 3} y={12} textAnchor={x(t) > W - 46 ? 'end' : 'start'} className="g-tick-t">{Math.abs(t - factoryMidnight(t)) < 1000 ? (W < 700 ? fmtMD(t) : `${fmtMD(t)}（${fmtWeekday(t)}）`) : fmtHM(t)}</text>
           </g>
         ))}
         {presses.map((p, i) => (
           <g key={p}>
-            <text x={4} y={TOP + i * ROW + 15} className={`g-press ${p === focusPress ? 'focus' : ''}`}>{Number(p.slice(5))} 號{ML_PRESSES.includes(p) ? ' M/L' : ''}</text>
+            <text x={4} y={TOP + i * ROW + 15} className={`g-press ${p === focusPress ? 'focus' : ''}`}>{Number(p.slice(5))} 號{ML_PRESSES.includes(p) && <tspan className="g-ml" dx={4}>中大</tspan>}</text>
             <line x1={LABEL} x2={W} y1={TOP + (i + 1) * ROW - 0.5} y2={TOP + (i + 1) * ROW - 0.5} className="g-row" />
           </g>
         ))}
@@ -145,7 +165,7 @@ function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: Sche
           const i = presses.indexOf(j.press_id)
           if (i < 0) return null
           const stop = outAt[j.press_id]
-          // out of service: a job not yet in the mold is not drawn; the in-mold one ends at the stop (扣模待 QC)
+          // out of service: a job not yet in the mold is not drawn; the in-mold one ends at the stop (扣模待品管)
           if (stop != null && ms(j.mold_in) >= stop) return null
           const held = stop != null && ms(j.demold) > stop
           const end = held ? stop : ms(j.demold)
@@ -153,19 +173,20 @@ function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: Sche
           const a = Math.max(ms(j.mold_in), t0), b = Math.min(end, t1)
           const y = TOP + i * ROW + 3
           const hot = j.order_id === '#A-311'
+          const from = movedFrom(j)
           const tip = held
-            ? `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → ${fmtMD(stop)} ${fmtHM(stop)} 停用\n扣模待 QC，無出模時間`
+            ? `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → ${fmtMD(stop)} ${fmtHM(stop)} 停用\n扣模待品管，無出模時間`
             : `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → 出模 ${fmtMD(j.demold)} ${fmtHM(j.demold)}（${j.cure_h} h）\n貼合 ${fmtHM(j.bond_start)}・A 線投料 ${fmtHM(j.a_feed_start)}`
           return (
             <g key={j.id}>
-              <rect x={x(a)} y={y} width={Math.max(1, x(b) - x(a))} height={ROW - 7} rx={3} className={`g-job sz-${j.size} ${hot ? 'hot' : ''} ${j.frozen ? 'frozen' : ''} ${held ? 'held' : ''}`}>
-                <title>{tip}</title>
+              <rect x={x(a)} y={y} width={Math.max(1, x(b) - x(a))} height={ROW - 7} rx={3} className={`g-job sz-${j.size} ${hot ? 'hot' : ''} ${j.frozen ? 'frozen' : ''} ${held ? 'held' : ''} ${from ? 'moved' : ''}`}>
+                <title>{from ? `${tip}\n本版從 ${machineLabel(from)} 移來` : tip}</title>
               </rect>
-              {x(b) - x(a) > 54 && <text x={x(a) + 4} y={y + 12} className="g-job-t">{j.order_id}</text>}
+              {x(b) - x(a) > 54 && <text x={x(a) + 4} y={y + 12} className="g-job-t">{j.order_id}{from && x(b) - x(a) > 120 ? `・自 ${Number(from.slice(5))} 號` : ''}</text>}
               {held && stop <= t1 && (
                 <g className="g-held">
                   <line x1={x(stop)} x2={x(stop)} y1={y - 2} y2={y + ROW - 5} />
-                  <text x={x(stop) + 4} y={y + 12}>■ 停用・扣模待 QC</text>
+                  <text x={x(stop) + 4} y={y + 12}>■ 停用・扣模待品管</text>
                   <title>{tip}</title>
                 </g>
               )}
@@ -181,9 +202,10 @@ function Gantt({ version, shifts, now, focusPress, outAt = {} }: { version: Sche
         )}
       </svg>
       <div className="legend">
-        <span><i className="lg sz-S" />小胎 24 h</span><span><i className="lg sz-M" />中胎 28 h</span><span><i className="lg sz-L" />大胎 34 h</span>
+        <span><i className="lg sz-S" />#S 小胎 24 h</span><span><i className="lg sz-M" />#M 中胎 28 h</span><span><i className="lg sz-L" />#L 大胎 34 h</span>
         <span><i className="lg demold" />出模</span><span><i className="lg staffed" />有人時段（硫化機組 6–15・14–23／胎體夜班 20–05）</span>
-        <span className="muted">版本 v{version.version}・{version.reason}</span>
+        {prev && <span><i className="lg moved" />本版移動（虛線框，對照第 {prev.version} 版）</span>}
+        <span className="muted">第 {version.version} 版・{plain(version.reason)}</span>
       </div>
     </div>
   )
@@ -210,7 +232,7 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
                 {STATE_LABEL[s]}{i < CHAIN.length - 1 && <i>→</i>}
               </span>
             ))}
-            {(ev.replans > 0 || cur === 'replan') && <span className={`ch replan ${cur === 'replan' ? 'cur' : 'seen'}`}>↺ 換假設 ×{Math.max(1, ev.replans)}</span>}
+            {(ev.replans > 0 || cur === 'replan') && <span className={`ch replan ${cur === 'replan' ? 'cur' : 'seen'}`}>↺ 重新規劃 ×{Math.max(1, ev.replans)}</span>}
             {cur === 'safe_stop' && <span className="ch stop cur">■ 安全停止</span>}
           </div>
           {ev.goal && <p className="goal"><span className="k">目標</span>{ev.goal}</p>}
@@ -218,7 +240,7 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
             <ul className="hyps">
               {ev.hypotheses.map((h) => (
                 <li key={h.id} className={`hyp h-${h.status}`}>
-                  <b>{h.id}</b> {h.statement}
+                  <b>{hypName(h.id)}</b> {plain(h.statement)}
                   {h.expectation && <small>預期：{h.expectation.within_min} 分內 {h.expectation.op} {h.expectation.value}°C</small>}
                   <em>{hypLabel(h.status, ev)}</em>
                 </li>
@@ -247,17 +269,6 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
 const STEP_LABEL: Record<StepRun['state'], string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '駁回' }
 const ROUND_NUM: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '四', 5: '五' }
 
-/** A hypothesis never tested by a reading stays 驗證中 only while the event is open. On close it is
- *  handed to maintenance when the event took a machine out or called maintenance (page 11 H2). */
-function hypLabel(status: string, ev: Event): string {
-  if (status === 'rejected') return '不成立'
-  if (status === 'confirmed') return '成立'
-  if (ev.state !== 'closed' && ev.state !== 'safe_stop') return '驗證中'
-  const all = [...(ev.prior_rounds ?? []).flatMap((r) => r.steps), ...ev.steps]
-  const handed = all.some((s) => s.state === 'ok' && s.step.tool === 'notify_teams' && ['machine_out', 'maintenance'].includes(String(s.step.args.kind)))
-  return handed ? '未驗證・交維修' : '未驗證'
-}
-
 function StepRow({ s, staffing }: { s: StepRun; staffing?: string }) {
   const summary = s.result?.ok ? resultText(s.step.tool, s.step.args, s.result.data, { staffing }) : s.result?.error ? `錯誤：${s.result.error.slice(0, 60)}` : ''
   const label = stepLabel(s.step.id)
@@ -266,7 +277,7 @@ function StepRow({ s, staffing }: { s: StepRun; staffing?: string }) {
       <span className="step-id" title={s.step.id}>{label}</span>
       <div className="step-b">
         <div className="step-t"><code title={s.step.tool}>{TOOL_LABEL[s.step.tool] ?? s.step.tool}</code>{s.step.depends_on.length > 0 && <small className="muted">依賴 {s.step.depends_on.map(stepLabel).join('、')}</small>}
-          {s.gate?.risk && !isRevoke(s.step.id) && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{s.gate.risk}</small>}
+          {s.gate?.risk && !isRevoke(s.step.id) && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{RISK_SHORT[s.gate.risk]}</small>}
           {isRevoke(s.step.id) && <small className="muted" title="主管後一輪改選，先前已執行的人力調動依此撤回並通知；不是另一項核准">因主管改選而撤回</small>}</div>
         <div className="step-p">{s.step.purpose}</div>
         {summary && <div className="step-r"><MarkedText text={summary} /></div>}
