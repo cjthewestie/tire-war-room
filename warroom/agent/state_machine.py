@@ -2570,6 +2570,11 @@ class StateMachine:
                 run.executed.append("已通知維修")
             elif kind in (NotifyKind.SLOW_FEED.value, NotifyKind.PAUSE_FEED.value):
                 run.executed.append("放慢生料投入" if kind == NotifyKind.SLOW_FEED.value else "暫停投料")
+            elif ev.source == "supervisor":
+                # a typed task's notice (e.g. an info notice to maintenance): it ran, so say who was told
+                from warroom.agent.narrate import TEAM_LABELS
+                teams = "、".join(TEAM_LABELS.get(t, str(t)) for t in step.args.get("teams") or [])
+                run.executed.append(f"已通知{teams or '相關組別'}")
 
     # ------------------------------------------------------------------ VERIFY (code, no LLM)
     VERIFY_SMOOTH_S = 30.0     # verify compares a 30-second mean, so one noisy sample cannot flip the verdict

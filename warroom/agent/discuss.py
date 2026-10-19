@@ -42,7 +42,8 @@ change 時把條件轉成 constraints，只能用這四種：
 - no_overtime：不要加班。
 - no_transfer：不要跨組調人。
 - prefer_option：選某個方案，option = A|B|overtime|transfer。
-不能轉成這四種的改動，不要編造，constraints 留空陣列。只輸出一個 JSON 物件。"""
+不能轉成這四種的改動，不要編造，constraints 留空陣列。只輸出一個 JSON 物件。
+例：「9 號機今晚要保養」→ change，machine_unavailable CURE-09 tonight；「不要跨組調人」→ change，no_transfer；「為什麼用 9 號機？」→ question；「哈摟」「謝謝」→ chitchat；「asdf」→ other。"""
 
 
 def classify_schema() -> dict[str, Any]:
@@ -118,6 +119,17 @@ class PlanTalk:
                     elif why:
                         res["dropped"].append({"constraint": raw, "why": why})
                 intent = got["intent"]
+                rules_say = rule_intent(text)
+                if intent != "change" and rules_say == "change" and rule_constraints(text, now)[0]:
+                    # code decides: words the rules read as an explicit, enforceable change (「9 號機今晚要
+                    # 保養」) are never dropped because the model misread them as small talk or a question
+                    res["fell_back"] = True
+                    res["error"] = f"model said {intent!r} for an explicit change: rules used"
+                    intent = "change-by-rules"
+                elif intent == "chitchat" and rules_say != "chitchat" and rules_say != "unclear":
+                    res["fell_back"] = True
+                    res["error"] = f"model said chitchat for a factory message: rules used ({rules_say})"
+                    intent = "change-by-rules"
                 if intent == "change" and cons:
                     return {**res, "intent": "change", "constraints": cons, "why": None, "by": "model"}
                 if intent == "question":
@@ -130,7 +142,8 @@ class PlanTalk:
                             "why": None, "by": "model"}
                 # a change the model could not encode (or encoded wrongly): the rules get one try
                 res["fell_back"] = True
-                res["error"] = "model change had no valid constraint" + (f": {res['dropped']}" if res["dropped"] else "")
+                res["error"] = res["error"] or ("model change had no valid constraint"
+                                                + (f": {res['dropped']}" if res["dropped"] else ""))
             except Exception as e:  # noqa: BLE001 - model down / invalid JSON: rules
                 if not self.settings.llm_fallback_to_mock:
                     raise

@@ -500,3 +500,13 @@ async def test_discuss_gibberish_is_unclear_in_both_modes():
     assert got["intent"] == "unclear" and got["by"] == "model"
     got = await _llm_talk("broken").classify("asdkjh qwe", None, NOW)
     assert got["intent"] == "unclear" and got["fell_back"]
+
+
+async def test_model_misreading_an_explicit_change_is_overruled_by_code():
+    """Seen live with Nemotron: 「9 號機今晚要保養」 classified as chitchat. Code decides: the rules read an
+    explicit, enforceable change, so the change goes through (marked as a fallback)."""
+    for wrong in ("chitchat", "question", "other"):
+        got = await _llm_talk(json.dumps({"intent": wrong, "constraints": []})).classify("9 號機今晚要保養", None, NOW)
+        assert got["intent"] == "change" and got["fell_back"] and got["by"] == "rules", wrong
+        assert [c.machine_id for c in got["constraints"]] == ["CURE-09"]
+        assert wrong in got["error"]
