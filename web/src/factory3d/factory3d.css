@@ -1,0 +1,102 @@
+/* 3D factory (/factory): full-screen canvas + soft cream HUD in the Minimotive look.
+   The machine drawer is the dashboard's own component and keeps the dashboard's dark theme. */
+html, body, #root { height: 100%; overflow: hidden; }
+.f3-root {
+  --c-paper: rgba(255, 250, 240, .92); --c-paper-solid: #fffaf0; --c-ink: #3d342b; --c-ink-dim: #7a6e60;
+  --c-line: #e4d8c3; --c-green: #4f8a1c; --c-amber: #b26a00; --c-red: #c8392e; --c-shadow: 0 6px 22px rgba(90, 70, 40, .16);
+  position: fixed; inset: 0; background: #e9dfcf; user-select: none;
+}
+.f3-canvas { position: absolute !important; inset: 0; z-index: 0; outline: none; }  /* own stacking context: 3D labels stay under the HUD */
+.f3-canvas canvas { outline: none; touch-action: none; }
+.f3-root kbd { display: inline-block; min-width: 1.6em; padding: 0 6px; border: 1px solid #d8c9b0; border-bottom-width: 3px; border-radius: 7px; background: #fffdf7; color: var(--c-ink); font: 700 12px/1.6 ui-monospace, monospace; text-align: center; }
+
+.f3-hud { position: absolute; z-index: 10; top: 14px; left: 14px; display: grid; gap: 6px; max-width: min(560px, calc(100vw - 28px)); pointer-events: none; justify-items: start; }
+.f3-hud > div { background: var(--c-paper); color: var(--c-ink); border: 0; border-radius: 16px; padding: 7px 14px; box-shadow: var(--c-shadow); }
+.f3-hud-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.f3-hud-top b { color: var(--c-ink); }
+.f3-hud-top .muted { color: var(--c-ink-dim); }
+.f3-conn { padding: 0 9px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.f3-conn.ok { color: var(--c-green); background: #e6f2d8; } .f3-conn.bad { color: var(--c-amber); background: #fbecd0; }
+.f3-ev { font-size: 14px; }
+.f3-ev.open { color: #fff !important; background: #e0665c !important; font-weight: 700; }
+.f3-pend.has { color: #5a3a00 !important; background: #ffd77a !important; font-weight: 700; }
+
+/* proximity bubble just under the figure's feet (drei <Html> anchored at the feet), so it never covers the machine
+   in front of the lead or its reading tag */
+.f3-prompt { position: relative; transform: translate(-50%, 14px); background: var(--c-paper-solid); color: var(--c-ink); border-radius: 999px; padding: 5px 13px 5px 6px; font-size: 14px; font-weight: 700; white-space: nowrap; box-shadow: var(--c-shadow); animation: f3-pop .2s ease-out; }
+.f3-prompt::after { content: ''; position: absolute; left: 50%; top: -6px; width: 12px; height: 12px; background: var(--c-paper-solid); transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+.f3-prompt kbd { background: #8fd16a; border-color: #6aa84a; color: #1f3a0e; margin-right: 4px; }
+@keyframes f3-pop { from { scale: .7; opacity: 0; } to { scale: 1; opacity: 1; } }
+
+.f3-keys { position: absolute; z-index: 10; left: 14px; bottom: 12px; display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; color: var(--c-ink-dim); background: var(--c-paper); border-radius: 16px; padding: 7px 12px; max-width: calc(100vw - 28px); pointer-events: none; box-shadow: var(--c-shadow); }
+
+.f3-toast { position: absolute; top: 14px; right: 14px; display: grid; gap: 2px; min-width: 280px; max-width: min(460px, calc(100vw - 28px)); background: var(--c-paper-solid); color: var(--c-ink); border: 3px solid #ffc94d; border-radius: 18px; padding: 10px 15px; box-shadow: 0 10px 30px rgba(90, 70, 40, .25); cursor: pointer; animation: f3-drop .35s cubic-bezier(.2, .9, .3, 1.3); z-index: 15; }
+.f3-toast b { color: var(--c-amber); } .f3-toast span { font-size: 13px; } .f3-toast i { font-size: 12px; color: var(--c-ink-dim); font-style: normal; }
+@keyframes f3-drop { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* reading tag for the machine the lead is at: anchored above its status lamp, bottom edge clear of it */
+.f3-tag { transform: translate(-50%, calc(-100% - 4px)); display: grid; justify-items: center; gap: 0; padding: 4px 11px 5px; border-radius: 14px; background: var(--c-paper-solid); border-top: 4px solid #3fcf5a; color: var(--c-ink); white-space: nowrap; font-size: 14px; line-height: 1.3; box-shadow: var(--c-shadow); }
+.f3-tag span { font-weight: 800; font-size: 16px; }
+.f3-tag i { font-style: normal; font-size: 12px; color: var(--c-ink-dim); }
+.f3-tag.amber { border-top-color: #f5a623; } .f3-tag.amber span { color: var(--c-amber); }
+.f3-tag.red { border-top-color: #ff3b30; background: #ffe9e4; } .f3-tag.red span { color: var(--c-red); }
+.f3-tag.grey { border-top-color: #8a8f96; }
+
+/* line signpost board (DOM, so the tilt-shift blur leaves it sharp; in first person it scales with distance) */
+.f3-sign { padding: 2px 10px; border: 3px solid; border-radius: 12px; background: var(--c-paper-solid); color: var(--c-ink); font-weight: 800; font-size: 13px; white-space: nowrap; box-shadow: 0 3px 10px rgba(90, 70, 40, .14); }
+/* room name plates: same chip, a warm frame */
+.f3-room { border-color: #c9b89a; background: #fff6e4; font-size: 12.5px; }
+
+.f3-start { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(233, 223, 207, .35); z-index: 12; cursor: pointer; padding: 16px; }
+.f3-start > div { max-width: 520px; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 24px; padding: 22px 26px; box-shadow: 0 20px 60px rgba(90, 70, 40, .25); }
+.f3-start h1 { margin: 0 0 6px; font-size: 24px; }
+.f3-start p { color: var(--c-ink); }
+.f3-start ul { padding-left: 18px; color: var(--c-ink-dim); line-height: 1.9; }
+.f3-go { width: 100%; padding: 11px; border: 0; border-radius: 999px; background: #8fd16a; color: #1f3a0e; font-weight: 800; font-size: 16px; box-shadow: 0 4px 0 #6aa84a; }
+
+/* the big wall screen: the real dashboard page, laid out at 1600 × 900 and scaled onto the screen in 3D */
+.f3-bigscreen { background: #0b0c0e; overflow: hidden; }
+.f3-bigscreen iframe { width: 100%; height: 100%; border: 0; display: block; pointer-events: none; background: var(--bg, #101317); }
+
+/* sitting at the war-room computer: the real dashboard full-size, framed as the desk monitor */
+.f3-monitor-wrap { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-rows: 1fr auto; justify-items: center; padding: 14px 14px 0; background: radial-gradient(ellipse at center, rgba(40, 34, 28, .55), rgba(40, 34, 28, .82)); animation: f3-sit .3s ease-out; }
+@keyframes f3-sit { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: none; } }
+.f3-monitor { width: min(1560px, 100%); min-height: 0; display: flex; flex-direction: column; background: #2a2e35; border-radius: 20px; padding: 12px 12px 0; box-shadow: 0 0 0 3px #3b4450, 0 30px 80px rgba(0, 0, 0, .45); }
+.f3-monitor-screen { flex: 1; min-height: 0; border-radius: 8px; overflow: hidden; background: #0b0c0e; }
+.f3-monitor-screen iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg, #101317); }
+.f3-monitor-chin { display: flex; align-items: center; gap: 10px; padding: 7px 6px 9px; color: #b8c2cc; font-size: 13px; }
+.f3-monitor-chin b { color: #e9e2d4; font-weight: 700; letter-spacing: .04em; }
+.f3-monitor-led { width: 8px; height: 8px; border-radius: 50%; background: #3fcf5a; box-shadow: 0 0 8px #3fcf5a; }
+.f3-monitor-up { margin-left: auto; border: 0; border-radius: 999px; padding: 5px 14px; background: #8fd16a; color: #1f3a0e; font-weight: 800; box-shadow: 0 3px 0 #6aa84a; cursor: pointer; }
+.f3-monitor-stand { width: 160px; height: 16px; margin-top: 0; background: linear-gradient(#3b4450, #2a2e35); border-radius: 0 0 16px 16px; }
+
+/* first person: aim dot, what F does here, the mouse-look hint */
+.f3-cross { position: absolute; z-index: 9; left: 50%; top: 50%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: rgba(255, 250, 240, .9); box-shadow: 0 0 0 2px rgba(61, 52, 43, .35); pointer-events: none; }
+.f3-aim { position: absolute; z-index: 11; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); background: var(--c-paper-solid); color: var(--c-ink); border-radius: 999px; padding: 6px 15px 6px 7px; font-size: 15px; font-weight: 700; white-space: nowrap; box-shadow: var(--c-shadow); pointer-events: none; animation: f3-pop .2s ease-out; }
+.f3-aim kbd { background: #8fd16a; border-color: #6aa84a; color: #1f3a0e; margin-right: 4px; }
+.f3-look-hint { position: absolute; z-index: 10; left: 50%; bottom: 58px; transform: translateX(-50%); background: var(--c-paper); color: var(--c-ink-dim); border-radius: 999px; padding: 5px 14px; font-size: 13px; pointer-events: none; box-shadow: var(--c-shadow); white-space: nowrap; }
+.f3-look-hint kbd { margin: 0 1px; }
+.f3-where { padding: 0 9px; border-radius: 999px; background: #e9f2fa; color: #2f5f8a; font-size: 13px; font-weight: 700; }
+/* door plates: a chip with the door's colour and a little door icon */
+.f3-door-sign { display: inline-flex; gap: 4px; align-items: center; font-size: 14px; background: #fffaf0; border-width: 3px; }
+.f3-door-sign i { font-style: normal; }
+/* going through a door: a short fade to cream */
+.f3-fade { position: absolute; inset: 0; z-index: 25; background: #f6efe2; opacity: 0; pointer-events: none; transition: opacity .3s ease; }
+.f3-fade.on { opacity: 1; }
+
+/* phone in hand: slides up from the bottom right, slight tilt */
+.f3-phone { position: absolute; right: max(4vw, 16px); bottom: 0; width: 390px; max-width: calc(100vw - 32px); height: min(780px, 92vh); transform: translateY(105%) rotate(6deg); transform-origin: bottom right; transition: transform .35s cubic-bezier(.2, .9, .3, 1.1); z-index: 30; pointer-events: none; }
+.f3-phone.up { transform: translateY(3%) rotate(-2deg); pointer-events: auto; }
+.f3-phone.buzz.up .f3-phone-body, .f3-phone.buzz:not(.up) { animation: f3-buzz .09s linear 12; }
+@keyframes f3-buzz { 0% { translate: 0 0; } 25% { translate: 3px -1px; } 50% { translate: -3px 1px; } 75% { translate: 2px 1px; } 100% { translate: 0 0; } }
+.f3-phone-body { position: relative; height: 100%; display: flex; flex-direction: column; background: #0b0c0e; border: 10px solid #2a2e35; border-radius: 46px 46px 0 0; border-bottom: 0; box-shadow: 0 0 0 3px #f2c14e, 0 30px 80px rgba(60, 40, 20, .45); overflow: hidden; }
+.f3-phone-notch { position: absolute; top: 6px; left: 50%; transform: translateX(-50%); width: 92px; height: 22px; border-radius: 12px; background: #000; z-index: 2; pointer-events: none; }
+.f3-phone iframe { flex: 1; width: 100%; border: 0; background: var(--bg); border-radius: 34px 34px 0 0; }
+.f3-phone-down { border: 0; border-top: 1px solid var(--border); background: #15181c; color: var(--ink-dim); padding: 9px; font-size: 13px; }
+.f3-thumb { position: absolute; left: -28px; bottom: 18%; width: 46px; height: 120px; border-radius: 24px; background: linear-gradient(90deg, #d9a47c, #e8b98f); transform: rotate(-18deg); box-shadow: 0 6px 18px rgba(60, 40, 20, .3); pointer-events: none; }
+@media (max-width: 600px) {
+  .f3-thumb { display: none; } .f3-keys { display: none; }
+  /* narrow screens: the HUD stack fills the top-left, so the toast drops to the bottom, full width */
+  .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
+}
+@keyframes f3-rise { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }

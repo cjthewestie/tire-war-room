@@ -7,7 +7,7 @@ Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` sectio
 - Work on an issue: open one with `gh issue create` (template 前端體驗改進 for UX work) before changing code, unless the request names an existing issue.
 - Branch `座位/issue號-簡述` (teammates: `d/<n>-<slug>`); never commit or push to `main`.
 - Teammates change the front end only: `web/`. Anything in `warroom/`, `deploy/`, `bench/` or `warroom/contracts.py` → open an issue for CJ instead of editing. CJ, 2026-10-18: 「我希望他們改的是前端客戶體驗」.
-- Before a PR: `cd web && npm run build && npm run lint`, then `uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py`; all green. Attach before/after screenshots at 1440 and 390 width (headless browser).
+- Before a PR: `cd web && pnpm build && pnpm lint`, then `uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py`; all green. Attach before/after screenshots at 1440 and 390 width (headless browser).
 - PR body: what changed, `Closes #<n>`, the test output, the screenshots.
 
 ## Never

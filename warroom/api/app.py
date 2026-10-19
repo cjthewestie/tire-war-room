@@ -1,5 +1,5 @@
 """FastAPI app: REST per contracts.REST_ENDPOINTS (+ a few demo-control extras), one WebSocket
-/ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone).
+/ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone, 3D factory at /factory).
 
 Everything is local: no CDN, no outbound calls except the optional LLM health probe.
 
@@ -346,7 +346,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                demo_controls: bool | None = None, local_hosts: frozenset[str] | None = None,
                pin_guard: PinGuard | None = None, kiosk_token: str | None = None,
                container: bool | None = None, weak_push_delay_s: float | None = None) -> FastAPI:
-    """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at / and /phone."""
+    """Routes per contracts.REST_ENDPOINTS, WebSocket /ws, serves web/dist at /, /phone and /factory."""
     holder: dict[str, Any] = {}
     access = AccessConfig.from_env(supervisor_pin, demo_controls, local_hosts, kiosk_token, container)
     guard = pin_guard or PinGuard()
@@ -884,7 +884,7 @@ def _safe(fn, default):
 
 _MISSING = """<!doctype html><meta charset="utf-8"><title>戰情室</title>
 <body style="background:#0b0f0c;color:#e6e6e6;font-family:sans-serif;padding:2rem">
-<h1>實心胎智慧製造戰情室</h1><p>web/dist not built. Run <code>cd web && npm install && npm run build</code>.
+<h1>實心胎智慧製造戰情室</h1><p>web/dist not built. Run <code>cd web && pnpm install && pnpm build</code>.
 API is live: <a style="color:#76b900" href="/api/snapshot">/api/snapshot</a> · <a style="color:#76b900" href="/docs">/docs</a></p>"""
 
 
@@ -907,6 +907,11 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     @app.get("/phone.html", include_in_schema=False)
     async def phone():
         return page("phone.html")
+
+    @app.get("/factory", include_in_schema=False)
+    @app.get("/factory.html", include_in_schema=False)
+    async def factory():
+        return page("factory.html")
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon():
