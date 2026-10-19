@@ -56,6 +56,12 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 
 `POST /api/ask` → `AskAgent.ask`: PLAN (model returns `AskPlan`, ≤ `ASK_MAX_STEPS` steps; mock = keyword rules) → RUN (code runs only `ASK_TOOLS` via the same `Registry.acall`; anything else → `INTERCEPTED`) → ANSWER (model writes from the step summaries only; failure → template). Audit: `SYSTEM ask` → `LLM_CALL plan` → `TOOL_CALL`/`TOOL_RESULT` (state `ASK`) → `LLM_CALL answer` → `SYSTEM answered`, all with `event_id = ASK-nnnn`. No state machine, no gate: nothing in `ASK_TOOLS` writes, so there is nothing to gate.
 
+## Supervisor commands and plan discussion (issue #10)
+
+`POST /api/command {text}` → `StateMachine.open_command` opens an Event with `source="supervisor"`, `command=text` (anomaly kind `supervisor_command`, no alarm, never a machine's open event) and runs CLASSIFY (light) → PLAN → SIMULATE → GATE → [AWAIT_APPROVAL] → EXECUTE → VERIFY (unmeasured) → CLOSED. A command that would move or set a machine (`talk.physical_request`) closes at CLASSIFY with the reason and no tool call.
+
+`POST /api/events/{id}/discuss {text}` → `PlanTalk.discuss`: CLASSIFY (model with a JSON schema; rules for mock mode, model failure, or when the rules read an explicit change the model missed) into chitchat / question / change / unclear / unsupported. A change becomes `PlanConstraint`s validated by code (the press must be named in the text; the window is computed from the words). `StateMachine.discuss_replan` adds them to `Event.constraints`, supersedes the waiting card (`ApprovalStatus.SUPERSEDED`, audited, cannot be decided) and the event goes AWAIT_APPROVAL → REPLAN → SIMULATE → GATE. Code applies the constraints to every `solve_schedule` (`press_blackouts`, `allow_overtime`, `allow_cross_team`), checks the result honours them (`constraint_check`), and the new card carries `version`, `supersedes`, `changes`, `constraints`. Discussion replans do not count toward `max_replans` or failures; `MAX_DISCUSS_REPLANS = 3`. At every gate the agent posts a code-built summary (`plan_summary`).
+
 ## Key numbers
 
 | What | Value | Page |

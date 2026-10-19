@@ -183,13 +183,14 @@ def reschedule(store, scheduler: Scheduler, now: datetime, orders: list[Order], 
                unavailable_presses: list[str] | None = None, cure_overrides_h: dict[str, float] | None = None,
                event_id: str | None = None, reason: str | None = None, time_limit_s: float = 10.0,
                allow_overtime: bool = True, allow_cross_team: bool = True, horizon_days: int = 7,
-               propose: bool = True) -> tuple[SolveResult, ScheduleVersion | None]:
+               propose: bool = True, press_blackouts: dict | None = None) -> tuple[SolveResult, ScheduleVersion | None]:
     """Solve against the store's ACTIVE schedule and, if feasible, store it as PROPOSED (activation
     happens only after approval: store.activate). Returns (result, proposed version or None)."""
     req = SolveRequest(now=now, orders=orders, shifts=shifts, previous=store.current().schedule,
                        unavailable_presses=list(unavailable_presses or []),
                        cure_overrides_h=dict(cure_overrides_h or {}), horizon_days=horizon_days,
-                       time_limit_s=time_limit_s, allow_overtime=allow_overtime, allow_cross_team=allow_cross_team)
+                       time_limit_s=time_limit_s, allow_overtime=allow_overtime, allow_cross_team=allow_cross_team,
+                       press_blackouts=dict(press_blackouts or {}))
     res = scheduler.solve(req)
     ver = None
     if propose and res.feasible and res.schedule is not None:

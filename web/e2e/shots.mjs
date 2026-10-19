@@ -124,7 +124,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: 'zh-TW', timezoneId: 'Asia/Taipei' })
   const d = await ctx.newPage()
   d.on('pageerror', (e) => errors.push(`sync dash: ${e.message}`))
-  await d.goto(BASE + '/?mock=1', { waitUntil: 'networkidle' })
+  await d.goto(BASE + '/?mock=1#monitor', { waitUntil: 'networkidle' })
   await d.waitForSelector('.focus-title')
   const ph = await ctx.newPage()
   await ph.goto(BASE + '/phone?mock=1', { waitUntil: 'networkidle' })

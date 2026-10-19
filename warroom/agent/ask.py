@@ -60,6 +60,7 @@ PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一�
 只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
 規則：
 1. 最多 {ASK_MAX_STEPS} 步，只能用下列唯讀工具；你沒有任何寫入、排程或通知的權限。
+0. 不是工廠的問題（打招呼、道謝、閒聊、看不懂的字）時，steps 留空陣列，不要查任何機台。
 2. 機台用代號（例如 CURE-07）。問題沒指名機台時，查「目前異常機台」。
 3. 問到人力、班表、交期、下一模 → query_orders_shifts；問到怎麼處理 → sop_search。
 工具：
@@ -74,6 +75,29 @@ def ask_plan_schema() -> dict[str, Any]:
     s = AskPlan.model_json_schema()
     s["required"] = ["steps"]
     return s
+
+
+# ------------------------------------------------------------------ small talk / unclear (no tool call)
+_HELLO_RX = re.compile(r"^(哈[摟囉嘍喽啰]|hello|hi|hey|嗨|你好|您好|妳好|大家好|早安|午安|晚安|早|安安|在嗎|在不在|有人嗎|哈哈+|嘿)[\s!！~～。.?？啊呀喔哦耶囉嗎]*$", re.I)
+_THANKS_RX = re.compile(r"^(謝謝|感謝|多謝|謝啦|3q|thx|thanks|thank you|辛苦了|好的|好喔|好|ok|okay|收到|了解|瞭解|知道了|讚|沒事|沒問題)[\s!！~～。.啦喔哦了你您]*$", re.I)
+HELP_EXAMPLES = "「7 號機現在怎樣？」「今晚夜班缺誰？」「大開煉機過熱怎麼處理？」"
+HELLO_REPLY = "你好，我是戰情室助理。可以問我機台狀況、訂單、班表，或討論待核准的計劃。"
+THANKS_REPLY = "不客氣，有需要再叫我。可以問我機台狀況、訂單、班表，或討論待核准的計劃。"
+UNCLEAR_REPLY = f"我不確定要查什麼，所以沒有查任何資料。你可以這樣問：{HELP_EXAMPLES}"
+COLD_REPLY = (f"AI 模型還在載入（冷啟動，約半分鐘），這次來不及判讀你的問題，我沒有亂猜去查。請稍等再問一次，或換個明確的問法：{HELP_EXAMPLES}")
+
+
+def smalltalk_reply(text: str) -> str | None:
+    """A greeting or thanks gets a short reply and no tool call; anything else returns None."""
+    t = text.strip()
+    if _HELLO_RX.match(t):
+        return HELLO_REPLY
+    if _THANKS_RX.match(t):
+        return THANKS_REPLY
+    return None
+
+
+_STATUS_RX = re.compile(r"狀況|狀態|怎樣|怎麼樣|如何|溫度|異常|問題|情況|哪台|機台|現在|目前|讀值|壓力|水流|蒸汽|預測|趨勢|好嗎|正常")
 
 
 # ------------------------------------------------------------------ mock planner (no model)
@@ -116,8 +140,10 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
     named = machines_in(q)
     orders = re.search(r"訂單|交期|班|人力|缺|排程|下一模|延誤|遲交", q)
     sop = re.search(r"SOP|sop|怎麼處理|處置|怎麼辦|步驟|程序", q)
-    # no machine named: the abnormal ones, but only for a status question (not staffing or SOP)
-    mids = named or ([] if orders or sop else list(context.get("abnormal", []))[:3])
+    # no machine named: the abnormal ones, but only for a status question (not staffing or SOP). Text
+    # that is not a factory question names nothing: no machine is guessed (the plan stays empty)
+    status = bool(_STATUS_RX.search(q))
+    mids = named or ([] if orders or sop or not status else list(context.get("abnormal", []))[:3])
     presses = [m for m in mids if m.startswith("CURE-")]
     steps: list[AskStep] = []
     if mids:
@@ -129,9 +155,10 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
         steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args=args))
     if sop:
         steps.append(AskStep(tool=ToolName.SOP_SEARCH.value, args={"query": q, "k": 2}))
-    if not steps:
+    if not steps and status:
         steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args={}))
-    return AskPlan(steps=steps[:ASK_MAX_STEPS], rationale="規則模式：依問題關鍵字選工具")
+    return AskPlan(steps=steps[:ASK_MAX_STEPS],
+                   rationale="規則模式：依問題關鍵字選工具" if steps else "規則模式：看不出要查什麼，不猜機台")
 
 
 # ------------------------------------------------------------------ result -> one line
@@ -254,6 +281,13 @@ class AskAgent:
         ask_id = f"ASK-{next(self._ids):04d}"
         audit.append(AuditKind.SYSTEM, actor, {"msg": "ask", "question": question}, event_id=ask_id)
         fell_back = False
+        chat = smalltalk_reply(question)
+        if chat is not None:      # a greeting / thanks: answered by code, no model call, no tool call
+            audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": chat, "intent": "chitchat",
+                                                   "tool_calls": 0}, event_id=ask_id)
+            return AskAnswer(id=ask_id, question=question, answer=chat, mode=self.mode, factory_time=now,
+                             intent="chitchat", total_ms=round((time.perf_counter() - t0) * 1000, 1))
+        cold = False
 
         # 1. PLAN
         tp = time.perf_counter()
@@ -266,6 +300,7 @@ class AskAgent:
                 if not self.settings.llm_fallback_to_mock:
                     raise
                 plan, fell_back = mock_plan(question, context), True
+                cold = "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower()
         else:
             plan = mock_plan(question, context)
         audit.append(AuditKind.LLM_CALL, "ask", {
@@ -296,6 +331,15 @@ class AskAgent:
             results.append(AskStepResult(tool=tool.value, args=step.args, ok=res.ok, error=res.error,
                                          summary=summarize(tool, res.data) if res.ok else ""))
 
+        if not plan.steps and not intercepted:
+            # nothing to look up: say so (or that the model is still loading), never guess a machine
+            intent = "model_cold" if cold else "unclear"
+            answer = COLD_REPLY if cold else UNCLEAR_REPLY
+            audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": answer, "intent": intent,
+                                                   "tool_calls": 0}, event_id=ask_id)
+            return AskAnswer(id=ask_id, question=question, answer=answer, mode=self.mode, fell_back_to_mock=fell_back,
+                             factory_time=now, intent=intent, total_ms=round((time.perf_counter() - t0) * 1000, 1))
+
         # 3. ANSWER
         ta = time.perf_counter()
         error = None
@@ -318,6 +362,8 @@ class AskAgent:
         else:
             answer = template_answer(results)
         fell_back = fell_back or answer_fell_back
+        if cold:
+            answer += "（AI 模型還在載入，這次依關鍵字規則查詢）"
         if intercepted:
             answer += f"（已攔下 {len(intercepted)} 個不允許的動作：查詢只能讀，不能變更）"
         elif change:

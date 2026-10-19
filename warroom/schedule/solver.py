@@ -35,6 +35,10 @@ Model, shared by both solvers (built in `_prepare`):
   there costs PEN_SHORT_NEW, so a repair does not take over a shortage that is not its own.
 - Identical tires of one order are interchangeable: ids are re-matched to the previous plan
   after solving so `moves` lists real moves, not id swaps.
+- Press blackouts (issue #10, the supervisor's 「9 號機今晚要保養」): `press_blackouts[press]` windows
+  hold no tire, hard in both solvers and check_schedule (a cure may neither start in nor run through
+  them). A tire already curing when the window opens cannot be moved: the window starts at its
+  de-mold instead, with a warning. The press counts as touched (repair), not as a steam suspect.
 - Gaps (SOP-HR-01): an op in a night shift with <2 people (or <3 for simultaneous de-molds)
   -> "10/03 夜班缺 1 人" with options 夜班加班 (R2) / 從 2 線調 1 人 (R3); the solver's pick
   is the transfer when allowed (page 11 02:14:25), else overtime.
@@ -136,6 +140,7 @@ class _Ctx:
     press_size: dict[str, TireSize] = field(default_factory=dict)     # M/L press -> home size (its in-progress tire)
     suspect: set[str] = field(default_factory=set)   # presses sharing a steam header with an affected one
     affected: set[str] = field(default_factory=set)  # presses the request re-cured or took out
+    blackouts: dict[str, list[tuple[int, int]]] = field(default_factory=dict)  # press -> [a, b) minutes, no tire
     slow: set[str] = field(default_factory=set)      # presses assumed to run below recipe temp (cure extended)
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
@@ -167,6 +172,9 @@ class _Ctx:
 
 def _mold_key(job: _Job | ScheduleJob) -> str:
     return job.mold_id or f"size-{job.size.value}"
+
+
+BLACKOUT_KEY = "__blackout__"     # press_busy entry for a press blackout: clashes on overlap only (no mold gap)
 
 
 def _eligible(size: TireSize, unavailable: set[str]) -> list[str]:
@@ -237,11 +245,19 @@ def _prepare(req: SolveRequest) -> _Ctx:
         ctx.free = _generate_jobs(ctx, unavailable, due_min, prio, horizon_end)
     _guard_slow_presses(ctx, unavailable)
     affected = set(req.cure_overrides_h) | unavailable
-    ctx.affected = affected
     for p in affected:
         hdr = F.MACHINE_BY_ID[p].steam_header if p in F.MACHINE_BY_ID else None
         if hdr:
             ctx.suspect |= set(F.presses_on_header(hdr)) - affected
+    # a maintenance blackout touches the press (its tires may move) but says nothing about steam
+    for p, ws in (req.press_blackouts or {}).items():
+        if p in F.CURE_PRESS_IDS and p not in unavailable:
+            got = sorted((ctx.m(a), ctx.m(b)) for a, b in ws if b > a)
+            if got:
+                ctx.blackouts[p] = got
+    affected = affected | set(ctx.blackouts)
+    ctx.suspect -= affected
+    ctx.affected = affected
     for p in F.CURE_PRESS_IDS:
         fz = sorted((j for j in ctx.frozen if j.press == p), key=lambda j: j.mold_in)
         ctx.press_mold[p] = _mold_key(fz[-1]) if fz else None
@@ -266,7 +282,27 @@ def _prepare(req: SolveRequest) -> _Ctx:
             busy += [(j.orig_mold_in + HALF_MIN, j.orig_mold_in + OP_MIN),
                      (j.orig_mold_in + j.cure_min, j.orig_mold_in + j.cure_min + HALF_MIN)]
     _assign_releases(ctx, [j for j in ctx.frozen if j.press in affected], busy)
+    _clip_blackouts(ctx)
     return ctx
+
+
+def _clip_blackouts(ctx: _Ctx) -> None:
+    """A tire curing now cannot be moved: a blackout that overlaps it starts at its de-mold."""
+    for p, ws in list(ctx.blackouts.items()):
+        out = []
+        for a, b in ws:
+            for j in ctx.frozen:
+                if j.press == p and j.mold_in < b and a < (j.release or j.mold_in + j.cure_min):
+                    end = j.release or j.mold_in + j.cure_min
+                    ctx.warnings.append(f"{p} 在製 {j.order_id} 於 {ctx.dt(end):%m/%d %H:%M} 出模，"
+                                        f"保養時段改由出模後開始")
+                    a = max(a, end)
+            if a < b:
+                out.append((a, b))
+        if out:
+            ctx.blackouts[p] = out
+        else:
+            del ctx.blackouts[p]
 
 
 def _guard_slow_presses(ctx: _Ctx, unavailable: set[str]) -> None:
@@ -397,7 +433,7 @@ def _press_clash(entries: list[tuple[int, int, str]], start: int, end: int, mold
     with `mold` collides with: overlap, or a mold change with less than MOLD_GAP_MIN between."""
     out = []
     for a, b, k in entries:
-        g = 0 if k == mold else MOLD_GAP_MIN
+        g = 0 if k == mold or BLACKOUT_KEY in (k, mold) else MOLD_GAP_MIN
         if a < end + g and start < b + g:
             out.append(b + g)
     return out
@@ -665,6 +701,9 @@ def check_schedule(sched: Schedule, req: SolveRequest, ctx: _Ctx | None = None) 
             continue
         if j.press_id in unavailable:
             errs.append(f"{j.id} 排在停用機台 {j.press_id}")
+        for a, b in ctx.blackouts.get(j.press_id, []):
+            if ctx.m(j.mold_in) < b and a < ctx.m(j.demold):
+                errs.append(f"{j.id} 在 {j.press_id} 保養時段（{ctx.dt(a):%m/%d %H:%M}–{ctx.dt(b):%H:%M}）內硫化")
         if j.size in (TireSize.M, TireSize.L) and j.press_id not in F.ML_PRESSES:
             errs.append(f"{j.id} 中大胎排在小胎專用機 {j.press_id}")
         if j.size is TireSize.S and j.press_id not in F.SMALL_ONLY_PRESSES:
@@ -721,6 +760,8 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
         press_busy[j.press].append((j.mold_in, j.release, _mold_key(j)))
     for j in ctx.locked:
         press_busy[j.press].append((j.mold_in, j.mold_in + j.cure_min, _mold_key(j)))
+    for p, ws in ctx.blackouts.items():
+        press_busy[p] += [(a, b, BLACKOUT_KEY) for a, b in ws]
     assign: dict[str, tuple[str, int]] = {}
     order = sorted(ctx.free, key=lambda j: (j.due if j.due is not None else 10**9, -j.priority,
                                             j.orig_mold_in if j.orig_mold_in is not None else 10**9, j.id))
@@ -886,6 +927,9 @@ class CpSatScheduler:
                 op_iv.append(m.NewIntervalVar(a, b - a, b, f"lk_{k}"))
             for j in ctx.locked:
                 press_iv[j.press].append(m.NewIntervalVar(j.mold_in, j.cure_min, j.mold_in + j.cure_min, f"lkp_{j.id}"))
+            for p, ws in ctx.blackouts.items():          # issue #10: maintenance window, no tire
+                for k, (a, b) in enumerate(ws):
+                    press_iv[p].append(m.NewIntervalVar(a, b - a, b, f"bo_{p}_{k}"))
             xs: dict[tuple[str, str], object] = {}
             mi_vars = {}
             for j in ctx.free:

@@ -39,7 +39,7 @@ await ph.setViewportSize({ width: 390, height: 844 })
 // ---------------- page 11
 await api('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
 await api('/api/sim/control', { action: 'speed', speed: SPEED })
-await d.goto(BASE + '/', { waitUntil: 'networkidle' })
+await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode', { timeout: 10000 })
 const mode = await d.locator('.mode').innerText()
@@ -107,7 +107,7 @@ check('dashboard: schedule impact text', t2.includes('大胎 #07 仍 17:00 入�
 await d.screenshot({ path: `${OUT}/integrated-p2-dashboard.png`, fullPage: true })
 const big = d.locator('text=大開煉').first()
 if (await big.count()) { await big.click(); await d.waitForTimeout(1500); await d.screenshot({ path: `${OUT}/integrated-p2-machine-drawer.png`, fullPage: true }); await d.keyboard.press('Escape') }
-await d.goto(BASE + '/', { waitUntil: 'networkidle' })          // close the drawer
+await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })          // close the drawer
 await d.waitForSelector('.btn-approve', { timeout: 15000 }).catch(() => {})
 const btn = d.locator('.btn-approve').first()
 check('dashboard 核准 button present', (await btn.count()) > 0)

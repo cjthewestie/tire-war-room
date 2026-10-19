@@ -85,6 +85,7 @@ try {
   await d.screenshot({ path: `${OUT}/console-agent-1440.png` })
 
   // 問戰情室: a read-only question gets an answer with its read steps
+  await d.locator('[data-testid=mode-ask]').click()       // a plan waits: the bar defaults to 討論這個計劃
   await d.locator('.askbar textarea').fill('7 號機現在怎樣？')
   await d.locator('.askbar textarea').press('Enter')
   let answered = ''
@@ -111,6 +112,7 @@ try {
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   check('390: no horizontal page scroll', overflow <= 1, `${overflow}px`)
   await p.screenshot({ path: `${OUT}/console-agent-390.png`, fullPage: true })
+  await p.locator('[data-testid=mode-ask]').click()
   await p.locator('.askbar textarea').fill('今晚夜班缺誰？')
   await p.locator('.askbar textarea').press('Enter')
   let ans390 = ''
@@ -119,7 +121,7 @@ try {
   check('390: question and answer stay inside the transcript', !!ans390 && fit390.ok, fit390.why)
   await p.locator('[data-testid=transcript]').scrollIntoViewIfNeeded()
   await p.screenshot({ path: `${OUT}/console-transcript-390.png` })
-  await p.goto(BASE + '/', { waitUntil: 'networkidle' })
+  await p.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
   await p.waitForSelector('[data-testid=approval-visual]', { timeout: 15000 }).catch(() => {})
   await p.waitForTimeout(800)
   await p.screenshot({ path: `${OUT}/console-monitor-390.png`, fullPage: true })

@@ -1,6 +1,7 @@
-// War-room dashboard (proposal page 2) + 排程與人力 tab (pages 4, 6, 11).
+// War room: the Agent 對話台 is the main page (CJ, 2026-10-20: 「我覺得對話台應該是主要頁面 儀表板次要」);
+// 產線監控 (proposal page 2) and 排程與人力 (pages 4, 6, 11) are the secondary tabs (#monitor, #schedule).
 import { lazy, Suspense, useEffect, useState } from 'react'
-import type { AskItem } from './agent/transcript'
+import type { LocalItem } from './agent/transcript'
 import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
@@ -10,7 +11,7 @@ import { useWarRoom, WarRoomProvider } from './useWarRoom'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 
-function readTab(): Tab { return location.hash === '#schedule' ? 'schedule' : location.hash === '#agent' ? 'agent' : 'monitor' }
+function readTab(): Tab { return location.hash === '#schedule' ? 'schedule' : location.hash === '#monitor' ? 'monitor' : 'agent' }
 
 function Dashboard() {
   const [tab, setTab] = useState<Tab>(readTab)
@@ -21,8 +22,8 @@ function Dashboard() {
     window.addEventListener('hashchange', f)
     return () => window.removeEventListener('hashchange', f)
   }, [])
-  const go = (t: Tab) => { history.replaceState(null, '', t === 'monitor' ? location.pathname + location.search : `${location.search}#${t}`); setTab(t) }
-  const [asks, setAsks] = useState<AskItem[]>([])
+  const go = (t: Tab) => { history.replaceState(null, '', t === 'agent' ? location.pathname + location.search : `${location.search}#${t}`); setTab(t) }
+  const [asks, setAsks] = useState<LocalItem[]>([])
   const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
   const [demoOpen, setDemoOpen] = useState(false)
@@ -38,18 +39,18 @@ function Dashboard() {
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，警示燈已亮。AI 與安全核心照常在邊緣主機運作。</div>}
       <main>{tab === 'monitor' ? <MonitorTab onMachine={setMachine} onAgent={openAgent} /> : tab === 'schedule' ? <ScheduleTab />
-        : <Suspense fallback={<div className="loading">載入 Agent 對話台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} /></Suspense>}</main>
+        : <Suspense fallback={<div className="loading">載入 Agent 對話台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測</footer>
       <nav className="bottomnav" aria-label="分頁">
+        <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} onClick={() => go('agent')}>
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>Agent 對話台{pendingN > 0 && <i className="nav-badge">{pendingN}</i>}
+        </button>
         <button className={tab === 'monitor' ? 'on' : ''} aria-current={tab === 'monitor' ? 'page' : undefined} onClick={() => go('monitor')}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M3 13h4l3-8 4 14 3-6h4" /></svg>產線監控{pendingN > 0 && <i className="nav-badge">{pendingN}</i>}
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M3 13h4l3-8 4 14 3-6h4" /></svg>產線監控
         </button>
         <button className={tab === 'schedule' ? 'on' : ''} aria-current={tab === 'schedule' ? 'page' : undefined} onClick={() => go('schedule')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 6h10M4 12h16M4 18h7" /></svg>排程與人力
-        </button>
-        <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} onClick={() => go('agent')}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>Agent 對話台
         </button>
         <button className={demoOpen ? 'on' : ''} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制

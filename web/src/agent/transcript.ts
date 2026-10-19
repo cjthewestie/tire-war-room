@@ -38,14 +38,73 @@ export interface SafetyItem extends Base { k: 'safety'; message: string; machine
 export interface AnomalyItem extends Base { k: 'anomaly'; message: string }
 export interface NoteItem extends Base { k: 'note'; text: string; tone: 'verify' | 'warn' | 'plain' }
 export interface AskItem extends Base { k: 'ask'; question: string; answer: AskAnswer | null; error: string | null }
+/** Issue #10: the conversation about a plan. me = what the supervisor typed (a discussion message or a
+ *  task); agent = the agent's reply or its plain summary of a plan at the gate. */
+export interface ChatItem extends Base {
+  k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused'; text: string; by: string
+  intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
+  pending?: boolean
+}
+/** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
+export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }
+/** A new card version replaced the discussed one (v1 → v2) and what changed. */
+export interface VersionItem extends Base { k: 'version'; to: number; from: number; approvalId: string; changes: string[] }
+
+/** Rows the console keeps locally until the server's audit carries them (asks; a message being sent). */
+export type LocalItem = AskItem | ChatItem
 
 export type Item = StateItem | ThinkItem | ToolItem | GateItem | BlockedItem | ApprovalItem | SafetyItem | AnomalyItem | NoteItem | AskItem
+  | ChatItem | ChipsItem | VersionItem
 
 export function inFilter(it: Item, f: Filter): boolean {
   if (f === 'all') return true
   if (f === 'tool') return it.k === 'tool' || it.k === 'ask'
-  if (f === 'think') return it.k === 'think' || it.k === 'state' || (it.k === 'note' && it.tone === 'verify')
-  return it.k === 'gate' || it.k === 'blocked' || it.k === 'approval' || it.k === 'safety'
+  if (f === 'think') return it.k === 'think' || it.k === 'state' || it.k === 'chat' || (it.k === 'note' && it.tone === 'verify')
+  return it.k === 'gate' || it.k === 'blocked' || it.k === 'approval' || it.k === 'safety' || it.k === 'chips' || it.k === 'version'
+}
+
+const INTENT: Record<string, string> = { question: '問題（只查不改）', change: '要改計劃', unsupported: '無法用程式保證的要求', other: '其他' }
+const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
+
+/** Issue #10 audit rows → conversation items (null: not one of them). */
+function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number }): Item | null {
+  const p = (e.payload ?? {}) as D
+  const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, x: Partial<ChatItem> = {}): ChatItem => ({
+    ...base, k: 'chat', role, kind, text, by: e.actor, intent: null, version: null, changes: [], constraints: [], classifiedBy: null, fellBack: false, ...x,
+  })
+  if (e.kind === 'system') {
+    const d = obj(p.discuss)
+    if (d.text != null) return chat('me', 'discuss', String(d.text))
+    if (typeof p.command === 'string') return chat('me', 'command', p.command)
+    const r = obj(p.discuss_reply)
+    if (r.reply != null) {
+      return chat('agent', 'reply', String(r.reply), {
+        intent: str(r.intent), version: numOr(r.version), changes: strs(r.changes), constraints: strs(r.constraints),
+        classifiedBy: str(r.classified_by), fellBack: r.fell_back === true,
+      })
+    }
+    if (typeof p.plan_summary === 'string') return chat('agent', 'summary', p.plan_summary, { version: numOr(p.version) })
+    if (typeof p.command_refused === 'string') return chat('agent', 'refused', p.command_refused)
+    if (Array.isArray(p.constraints_added)) {
+      return { ...base, k: 'chips', labels: (p.constraints_added as D[]).map((c) => String(c.label ?? '')), inForce: strs(p.constraints_in_force) }
+    }
+    if (p.card_version != null) {
+      const to = numOr(p.card_version) ?? 2
+      return { ...base, k: 'version', to, from: to - 1, approvalId: String(p.approval_id ?? ''), changes: strs(p.changes) }
+    }
+    if (p.constraint_check != null) {
+      const labels = strs(p.constraints).join('、')
+      return { ...base, k: 'note', tone: p.ok ? 'verify' : 'warn', text: p.ok
+        ? `程式檢查：排程第 ${String(p.schedule_version)} 版遵守主管條件（${labels}）`
+        : `程式檢查：求解結果違反主管條件（${strs(p.violations).join('；')}）→ 不採用` }
+    }
+    if (p.discussion_replan_guard) return { ...base, k: 'note', tone: 'warn', text: '模型的新計劃沒有重排步驟：沿用上一版的步驟，讓程式能套用主管條件' }
+  }
+  if (e.kind === 'llm_call' && e.actor === 'discuss') {
+    const how = p.classified_by === 'model' ? 'Nemotron 分類' : p.fell_back_to_mock ? '模型未給出可用結果，改用規則分類' : '規則分類'
+    return { ...base, k: 'note', tone: 'plain', text: `${how}：${INTENT[String(p.intent)] ?? String(p.intent)}${Array.isArray(p.constraints) && p.constraints.length ? `；條件：${(p.constraints as D[]).map((c) => String(c.label ?? c.kind)).join('、')}` : ''}` }
+  }
+  return null
 }
 
 type D = Record<string, unknown>
@@ -75,6 +134,8 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
   for (const e of sorted) {
     const p = e.payload ?? {}
     const base = { key: `a${e.seq}`, ts: e.ts, seq: e.seq }
+    const talk = talkItem(e, base)
+    if (talk) { out.push(talk); continue }
     switch (e.kind) {
       case 'state_transition':
         out.push({ ...base, k: 'state', from: str(p.from), to: String(p.to ?? ''), reason: String(p.reason ?? p.text ?? '') })
@@ -217,7 +278,7 @@ function pushGate(push: (it: Omit<GateItem, 'seq' | 'key' | 'ts'>) => void, step
 }
 
 /** Merge the 問戰情室 conversation into the event transcript by factory time. */
-export function withAsks(items: Item[], asks: AskItem[]): Item[] {
+export function withAsks(items: Item[], asks: LocalItem[]): Item[] {
   if (!asks.length) return items
   const t = (x: Item) => new Date(x.ts).getTime()
   return [...items, ...asks].sort((a, b) => t(a) - t(b) || (a.k === 'ask' ? 1 : 0) - (b.k === 'ask' ? 1 : 0) || a.seq - b.seq)

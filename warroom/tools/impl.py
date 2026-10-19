@@ -210,7 +210,7 @@ def solve_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Solve against the ACTIVE schedule (CP-SAT, heuristic backup) and store the result as a
     PROPOSED version. Activation happens only through confirm_schedule after approval."""
     a = SolveScheduleArgs.model_validate(args)
-    for p in [*a.unavailable_presses, *a.cure_overrides_h]:
+    for p in [*a.unavailable_presses, *a.cure_overrides_h, *a.press_blackouts]:
         if p not in F.CURE_PRESS_IDS:
             raise ToolError(f"{p!r} is not a curing press")
     sim = _need(ctx.sim, "factory sim")
@@ -229,14 +229,16 @@ def solve_schedule(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
         res, ver = reschedule(ctx.store, scheduler, now, orders, shifts,
                               unavailable_presses=unavailable, cure_overrides_h=a.cure_overrides_h,
                               time_limit_s=a.time_limit_s, allow_overtime=a.allow_overtime,
-                              allow_cross_team=a.allow_cross_team, horizon_days=a.horizon_days)
+                              allow_cross_team=a.allow_cross_team, horizon_days=a.horizon_days,
+                              press_blackouts=a.press_blackouts)
         version = ver.version if ver is not None else None   # proposal only: no bus publish (worker thread)
     else:
         res = scheduler.solve(SolveRequest(now=now, orders=orders, shifts=shifts,
                                            unavailable_presses=unavailable,
                                            cure_overrides_h=a.cure_overrides_h, horizon_days=a.horizon_days,
                                            time_limit_s=a.time_limit_s, allow_overtime=a.allow_overtime,
-                                           allow_cross_team=a.allow_cross_team))
+                                           allow_cross_team=a.allow_cross_team,
+                                           press_blackouts=a.press_blackouts))
         version = None
     out = res.model_dump(mode="json")
     out["schedule_version"] = version
