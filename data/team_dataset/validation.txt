@@ -1,0 +1,25 @@
+PASS  總條數 300  
+PASS  SO-001 數量  
+PASS  SO-002 數量  
+PASS  SO-003 數量  
+PASS  SO-004 數量  
+PASS  SO-005 數量  
+PASS  SO-006 數量  
+PASS  SO-007 數量  
+PASS  SO-008 數量  
+PASS  SO-009 數量  
+PASS  各訂單於交期前完成  
+PASS  僅 1 張訂單用到加班  SO-009
+PASS  週日無入模/出模  
+PASS  貼合/入模/出模/整修起點在班內  0
+PASS  事件2：V06/V07/V08 硫化中  
+PASS  #A-311 為 V07 下一條且於急件交期前完成  2026-10-30 10:40 <= 2026-10-31 17:00:00
+PASS  V07 事件胎為小胎  
+PASS  Arrhenius 122°C=1.4725  
+PASS  每人每月加班 ≤ 46h  4.0
+PASS  每日工時 ≤ 12h  
+PASS  S11 事件當晚病假  
+PASS  感測器含 16 種  
+PASS  V07 02:31 約 119.5°C  119.301
+PASS  A03 14:26 約 112°C 且全程 <120  112.039
+PASS  SOP 60 chunks  

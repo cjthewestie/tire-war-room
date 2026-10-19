@@ -1,6 +1,6 @@
 """CLI:  uv run python -m warroom.kb <command>
   ingest                       build the Qdrant SOP index (Settings.qdrant_path / qdrant_url)
-  search <query...>            top-3 SOPs with citations
+  search <query...>            top-3 SOPs with citations, then the top-2 team dataset SOPs
   list                         SOP ids and titles
   orders [--press CURE-07]     query_orders_shifts JSON (seed data, demo date 2026-10-03)
   export <out.xlsx>            write the seed DB as an Excel workbook (= import template)
@@ -22,12 +22,17 @@ def main(argv: list[str]) -> int:
         from warroom.kb.store import QdrantSopKB
         kb = QdrantSopKB.from_settings()
         if cmd == "ingest":
-            print(f"indexed {kb.ingest()} chunks from {len(kb.titles())} SOPs (mode={kb.mode})")
+            print(f"indexed {kb.ingest()} chunks from {len(kb.titles())} SOPs (mode={kb.mode}); "
+                  f"team dataset {len(kb._team_chunks)} chunks from {len(kb.team_titles())} SOPs "
+                  f"(mode={kb.team_mode})")
         elif cmd == "list":
             for sid, title in sorted(kb.titles().items()):
                 print(sid, title)
+            for sid, title in sorted(kb.team_titles().items()):
+                print(sid, title, "[team_dataset]")
         else:
-            for h in kb.search(" ".join(rest)):
+            q = " ".join(rest)
+            for h in kb.search(q) + kb.search_team(q):
                 print(f"[{h.score}] {h.sop_id} {h.title} ({h.source})\n{h.text[:200]}\n")
         return 0
     if cmd in ("orders", "export", "import"):

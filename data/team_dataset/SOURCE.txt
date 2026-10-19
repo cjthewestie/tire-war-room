@@ -3,3 +3,7 @@ Copied unchanged from 實心胎_合成資料.zip (data/*.csv): staff, roster, mo
 history_daily, events. Read by warroom/data/team_dataset.py; machine and group ids are mapped in
 warroom/data/team_ids.py. Dataset dates (10/20–2027-01-26, EV-1 10/22, EV-2 10/28) are shifted to the
 sim clock per scenario; the files are never edited.
+Issue #12 added the rest, also unchanged: orders, tire_unit, tire_step, ev1_affected, audit_cure, sensor_meta,
+validation.txt, sop_chunks.jsonl (zip data/), sensor_readings.csv as sensor_readings.csv.gz (gzip of the
+separate 13 MB download), and team_dataset.xlsx (= 實心胎_合成資料_V2_1.xlsx). The 27 MB SQLite
+synthetic_factory_1.db is not committed: its 13 tables equal these CSVs row for row. Details: README.md.

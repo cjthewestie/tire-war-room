@@ -204,6 +204,11 @@ class ComponentBuilder:
         clock, bus = self.clock, self.bus
 
         def sim_real():
+            replay = (self.s.replay or "").strip().lower()
+            if replay:                          # team dataset replay (NORMAL scenario only)
+                from warroom.sim.team_replay import TeamReplayFactory
+                return TeamReplayFactory(replay, clock=clock, seed=7, scenario=ScenarioName.NORMAL,
+                                         cache_dir=self.s.audit_path.parent / "team_replay")
             from warroom.sim import Factory
             return Factory(clock=clock, seed=7, scenario=ScenarioName.NORMAL)
         sim = self._t("sim", sim_real, lambda: FB.FallbackFactory(clock=clock))
