@@ -1,7 +1,9 @@
-// 3D factory walk-through (served at /factory). The player is the war-room lead: walk the hall, press F at a
-// machine for its live readings, F at the desk for the demo controls, P to raise the real /phone page.
+// 3D factory island (served at /factory). The player is a tiny war-room lead on a Minimotive-style miniature
+// island: walk the rows, press F at a machine for its live readings, F at the hut desk for the demo controls,
+// P to raise the real /phone page.
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
+import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ScenarioName } from '../contracts'
 import { DemoStrip } from '../components/DemoStrip'
@@ -12,11 +14,11 @@ import { fmtHM, fmtMD } from '../format'
 import { alertText, diffPending, type PushState } from '../phone/alert'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { HandPhone } from './HandPhone'
-import { PLACED_BY_ID, type Near } from './layout'
+import { PLACED_BY_ID, onIsland, type Near } from './layout'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
-import { player, teleport } from './pose'
+import { cam, player, teleport } from './pose'
+import { TiltShift } from './TiltShift'
 import { World } from './World'
 
 type Panel = { kind: 'machine'; id: string } | { kind: 'desk' } | null
@@ -45,28 +47,18 @@ function ring() {
   } catch { /* ignore */ }
 }
 
-function lockPointer(el: HTMLElement | null) {
-  try {
-    const p = el?.requestPointerLock?.() as unknown
-    if (p && typeof (p as Promise<void>).catch === 'function') (p as Promise<void>).catch(() => {})
-  } catch { /* not allowed here (headless, iframe): drag-to-look still works */ }
-}
-function unlockPointer() { try { if (document.pointerLockElement) document.exitPointerLock() } catch { /* ignore */ } }
-
-/** In front of a machine, in the aisle, facing it. */
+/** In front of a machine, in the aisle, facing it (camera swings behind the figure). */
 function standAt(id: string) {
   const p = PLACED_BY_ID[id]
   if (!p) return
   const side = p.line === 'CURE' ? -1 : 1   // presses: stand on the aisle north of the row
-  const z = p.z + side * (p.d / 2 + 2.0)
+  const z = p.z + side * (p.d / 2 + 0.45)
   teleport(p.x, z, side > 0 ? 0 : Math.PI)
-  player.pitch = -0.12
 }
 
 export function FactoryApp() {
   const { state, transport, connected } = useWarRoom()
   const [started, setStarted] = useState(false)
-  const [locked, setLocked] = useState(false)
   const [near, setNear] = useState<Near>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const [phoneUp, setPhoneUp] = useState(false)
@@ -108,22 +100,15 @@ export function FactoryApp() {
     return () => clearTimeout(t)
   }, [toast])
 
-  useEffect(() => {
-    const f = () => setLocked(document.pointerLockElement === canvasRef.current)
-    document.addEventListener('pointerlockchange', f)
-    return () => document.removeEventListener('pointerlockchange', f)
-  }, [])
-
   const start = useCallback(() => {
     unlockAudio()
     setStarted(true)
-    lockPointer(canvasRef.current)
     canvasRef.current?.focus()
   }, [])
 
   const raisePhone = useCallback((up: boolean) => {
     setPhoneUp(up)
-    if (up) { setPanel(null); unlockPointer() } else { window.focus(); canvasRef.current?.focus() }
+    if (up) setPanel(null); else { window.focus(); canvasRef.current?.focus() }
   }, [])
 
   const closePanel = useCallback(() => { setPanel(null); canvasRef.current?.focus() }, [])
@@ -141,7 +126,6 @@ export function FactoryApp() {
         if (phoneUp) return
         const n = nearRef.current
         if (!n) return
-        unlockPointer()
         setPanel(n.kind === 'desk' ? { kind: 'desk' } : { kind: 'machine', id: n.id })
       }
     }
@@ -154,7 +138,7 @@ export function FactoryApp() {
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
-    w.__factory3d = { teleport, standAt, player, raisePhone }
+    w.__factory3d = { teleport, standAt, player, cam, onIsland, raisePhone }
     return () => { delete w.__factory3d }
   }, [raisePhone])
 
@@ -168,17 +152,27 @@ export function FactoryApp() {
     <div className="f3-root">
       <Canvas
         className="f3-canvas"
-        onCreated={({ gl }) => { canvasRef.current = gl.domElement; gl.domElement.tabIndex = 0 }}
-        camera={{ fov: 70, near: 0.05, far: 140 }}
+        camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
         dpr={[1, 1.5]}
+        shadows="percentage"
         gl={{ antialias: true, powerPreference: 'high-performance' }}
-        onClick={() => { if (!overlay) { if (!started) start(); else if (!locked) lockPointer(canvasRef.current) } }}
+        onCreated={({ gl }) => {
+          canvasRef.current = gl.domElement
+          gl.domElement.tabIndex = 0
+          gl.toneMapping = THREE.ACESFilmicToneMapping
+          gl.toneMappingExposure = 1.05
+        }}
+        onClick={() => { if (!overlay && !started) start() }}
       >
-        <color attach="background" args={['#1a1e24']} />
-        <fog attach="fog" args={['#1a1e24', 30, 75]} />
+        <color attach="background" args={['#e9dfcf']} />
+        <fog attach="fog" args={['#e9dfcf', 32, 80]} />
         <World state={state} connected={connected} mode={transport?.mode ?? 'live'} />
-        <Player enabled={started && !overlay} onNear={setNear} />
-        <HandPhone pending={pending.length} buzzUntil={buzzUntil} hidden={phoneUp} />
+        <Player
+          enabled={started && !overlay} started={started} onNear={setNear} phoneUp={phoneUp}
+          pending={pending.length} buzzUntil={buzzUntil}
+          prompt={started && !overlay && near ? (near.kind === 'desk' ? '戰情室控制台' : `查看 ${machineLabel(near.id)}`) : null}
+        />
+        <TiltShift enabled={!phoneUp} />
       </Canvas>
 
       {/* HUD */}
@@ -193,15 +187,9 @@ export function FactoryApp() {
         </div>
         <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? '・按 P 拿手機' : ''}</div>
       </div>
-      {!overlay && <div className="f3-cross" aria-hidden>+</div>}
-      {started && !overlay && near && (
-        <div className="f3-prompt" data-testid="f3-prompt">
-          <kbd>F</kbd> {near.kind === 'desk' ? '戰情室控制台' : `查看 ${machineLabel(near.id)}`}
-        </div>
-      )}
       <div className="f3-keys">
-        <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 轉</span>
-        <span><kbd>F</kbd> 操作</span><span><kbd>P</kbd> 手機</span><span><kbd>Esc</kbd> 放開滑鼠</span>
+        <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>Q E</kbd>/拖曳 轉鏡頭</span>
+        <span><kbd>滾輪</kbd> 遠近</span><span><kbd>F</kbd> 操作</span><span><kbd>P</kbd> 手機</span>
       </div>
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
@@ -212,11 +200,11 @@ export function FactoryApp() {
       {!started && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
-            <h1>3D 工廠・戰情室</h1>
-            <p>你是戰情室負責人。從戰情室桌前出發，走進產線查看 28 台機台的即時狀態。</p>
+            <h1>工廠小島・戰情室</h1>
+            <p>你是戰情室負責人。從小屋裡的戰情室桌前出發，走遍小島上的產線，看 28 台機台的即時狀態。</p>
             <ul>
-              <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，滑鼠或 <kbd>Q</kbd>/<kbd>E</kbd> 轉向</li>
-              <li>走到機台前按 <kbd>F</kbd> 看即時讀數；在戰情室桌前按 <kbd>F</kbd> 開展示控制</li>
+              <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，<kbd>Q</kbd>/<kbd>E</kbd> 或拖曳滑鼠轉鏡頭，滾輪拉遠拉近</li>
+              <li>走到機台旁按 <kbd>F</kbd> 看即時讀數；在戰情室桌前按 <kbd>F</kbd> 開展示控制</li>
               <li><kbd>P</kbd> 拿起主管手機（真的手機頁，可核准、可問戰情室）</li>
             </ul>
             <button className="f3-go">點擊開始</button>
