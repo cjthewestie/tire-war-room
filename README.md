@@ -28,10 +28,11 @@
 
 ### 3D 工廠（戰情室負責人視角）
 
-打開 `http://localhost:8000/factory`。你是戰情室負責人，畫面是一座迷你工廠廠房（娃娃屋式切面：產線、戰情室、員工待命區、休息區、廁所、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
+打開 `http://localhost:8000/factory`。你是戰情室負責人，以第一人稱站在一座迷你工廠廠房裡（產線、戰情室、員工待命區、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
 
-- 點一下畫面開始（鎖定滑鼠）。`W A S D` 走、`Shift` 跑、滑鼠或 `Q`/`E`（方向鍵）轉向、`Esc` 放開滑鼠。
-- 走到機台前按 `F`：開即時讀數（和戰情室的機台抽屜相同）。在戰情室桌前按 `F`：展示控制台，一鍵啟動 p.11「7 號硫化機溫降」、重來、調速度、拔網路測試（和上方展示列同一組 API）。
+- 點一下畫面開始（鎖定滑鼠看四周）。`W A S D` 走、`Shift` 跑、滑鼠或 `Q`/`E`（方向鍵）轉向、`Esc` 放開滑鼠。`V` 切換俯瞰（娃娃屋視角）。
+- 戰情室牆上的大螢幕就是真的儀表板（`/`），即時更新。走到戰情室桌前按 `F` 坐下：真的儀表板全畫面打開，可切分頁、用上方展示列啟動 p.11「7 號硫化機溫降」、核准；`Esc` 或 `F` 起身。走到機台前按 `F`：開即時讀數。
+- 廠房牆上有兩扇門：**休息區**（半場籃球場）和**廁所**是另外的空間，走進門或按 `F` 傳送過去，再從門口走回工廠。在哪裡都收得到核准通知。
 - `P` 拿起主管手機：手上的就是真的 `/phone` 頁，可直接核准／駁回、打字問戰情室；`P` 或 `Esc` 放下。有新的待核准時手機會震動、響鈴，畫面上方跳通知。
 - 低多邊形、全部程式產生，不下載模型。程式：`web/src/factory3d/`；無頭測試：`node web/e2e/factory3d.mjs http://localhost:8000`（截圖在 `web/e2e/screenshots/factory-*.png`）。
 
@@ -128,10 +129,11 @@ The phone page has a 問戰情室 box. It is not a second agent: the same Nemotr
 
 ### 3D factory (the war-room lead's view)
 
-Open `http://localhost:8000/factory`. You are the war-room lead in a miniature factory building seen as a dollhouse cutaway (production lines, war room, staff corner, break area, restroom, loading dock), starting at the war-room door facing the lines. Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
+Open `http://localhost:8000/factory`. You are the war-room lead, in first person, inside a miniature factory building (production lines, war room, staff corner, loading dock), starting at the war-room door facing the lines. Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
 
-- Click to start (pointer lock). `W A S D` walk, `Shift` run, mouse or `Q`/`E` (arrow keys) to turn, `Esc` releases the mouse.
-- `F` at a machine opens its live readings (the dashboard's machine drawer). `F` at the war-room desk opens the demo controls: start the p.11 press-7 temperature drop, reset, speed, network tiers (the same API as the dashboard's demo strip).
+- Click to start (pointer lock for mouse look). `W A S D` walk, `Shift` run, mouse or `Q`/`E` (arrow keys) to turn, `Esc` releases the mouse. `V` toggles the dollhouse overview.
+- The big screen on the war-room wall is the real dashboard (`/`), live. `F` at the war-room desk sits you down at the computer: the real dashboard opens full-size (tabs, the demo strip to start the p.11 press-7 temperature drop, approvals); `Esc` or `F` stands up. `F` at a machine opens its live readings.
+- Two doors on the hall walls lead to the **break area** (half court) and the **restroom**, which are separate spaces: walk into the door or press `F` to go there, and back the same way. Approval alerts reach you anywhere.
 - `P` raises the supervisor phone: it is the real `/phone` page, so you can approve / reject and type into 問戰情室; `P` or `Esc` lowers it. A new pending approval buzzes the phone, rings and shows a toast.
 - Low-poly and fully procedural, no model downloads. Code: `web/src/factory3d/`; headless check: `node web/e2e/factory3d.mjs http://localhost:8000` (screenshots in `web/e2e/screenshots/factory-*.png`).
 
