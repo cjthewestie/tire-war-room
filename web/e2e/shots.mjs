@@ -1,5 +1,5 @@
-// End-to-end smoke + screenshots against `npm run preview` (mock mode, no backend needed).
-//   npm run build && npx vite preview --port 4173 &   then   node e2e/shots.mjs [baseUrl]
+// End-to-end smoke + screenshots against `pnpm preview` (mock mode, no backend needed).
+//   pnpm build && pnpm exec vite preview --port 4173 &   then   node e2e/shots.mjs [baseUrl]
 // Uses the `playwright` package if installed, else the playwright-core bundled with @playwright/cli.
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
@@ -12,7 +12,7 @@ function loadPlaywright() {
   for (const id of ['playwright', 'playwright-core', `${homedir()}/.local/lib/node_modules/@playwright/cli/node_modules/playwright-core`]) {
     try { return require(id) } catch { /* next */ }
   }
-  throw new Error('playwright not found: npm i -D playwright, or install @playwright/cli')
+  throw new Error('playwright not found: pnpm add -D playwright, or install @playwright/cli')
 }
 const { chromium } = loadPlaywright()
 const BASE = process.argv[2] ?? 'http://localhost:4173'
