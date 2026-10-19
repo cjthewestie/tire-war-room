@@ -26,6 +26,15 @@
 
 手機頁最下方可以直接問：「7 號機現在怎樣？」「今晚夜班缺誰？」「大開煉機過熱怎麼處理？」。走的是同一套 Agent 架構：同一個 Nemotron 先選要查哪些唯讀工具（最多 4 步），程式只執行 `ASK_TOOLS`（讀感測器、異常預測、硫化公式、訂單班表、SOP），再由 Nemotron 只根據查詢結果回答。寫入工具、`solve_schedule`（會存提案排程）和清單外的名稱一律攔下並記 `INTERCEPTED`；每次提問以 `ASK-nnnn` 寫進同一份稽核日誌。LAN 中斷時只有現場觸控螢幕能問。程式：`warroom/agent/ask.py`、`POST /api/ask`，測試 `tests/test_ask.py`。
 
+### 3D 工廠（戰情室負責人視角）
+
+打開 `http://localhost:8000/factory`。你是戰情室負責人，從戰情室桌前出發（面對大螢幕，轉身就是產線）。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
+
+- 點一下畫面開始（鎖定滑鼠）。`W A S D` 走、`Shift` 跑、滑鼠或 `Q`/`E`（方向鍵）轉向、`Esc` 放開滑鼠。
+- 走到機台前按 `F`：開即時讀數（和戰情室的機台抽屜相同）。在戰情室桌前按 `F`：展示控制台，一鍵啟動 p.11「7 號硫化機溫降」、重來、調速度、拔網路測試（和上方展示列同一組 API）。
+- `P` 拿起主管手機：手上的就是真的 `/phone` 頁，可直接核准／駁回、打字問戰情室；`P` 或 `Esc` 放下。有新的待核准時手機會震動、響鈴，畫面上方跳通知。
+- 低多邊形、全部程式產生，不下載模型。程式：`web/src/factory3d/`；無頭測試：`node web/e2e/factory3d.mjs http://localhost:8000`（截圖在 `web/e2e/screenshots/factory-*.png`）。
+
 ### 一行啟動（Mac，Apple Silicon）
 
 需要：[uv](https://docs.astral.sh/uv/)、Node.js 20+ 與 pnpm（`corepack enable pnpm`）。第一次執行會下載 Python 套件、pnpm 套件和 SOP 嵌入模型（數百 MB，之後離線可用）。
@@ -35,7 +44,7 @@
 ./start.sh ollama     # Ollama 模式：Nemotron 3.5 Lightning NVFP4（先跑一次 deploy/mac/dev.sh pull，約 23 GB）
 ```
 
-打開 `http://localhost:8000`（戰情室）和 `http://localhost:8000/phone`（主管手機）。用真手機從廠內 Wi-Fi 核准時，先設 `WARROOM_SUPERVISOR_PIN=<8 碼以上>` 再啟動，手機頁會要求輸入。
+打開 `http://localhost:8000`（戰情室）、`http://localhost:8000/phone`（主管手機）和 `http://localhost:8000/factory`（3D 工廠）。用真手機從廠內 Wi-Fi 核准時，先設 `WARROOM_SUPERVISOR_PIN=<8 碼以上>` 再啟動，手機頁會要求輸入。
 
 不開瀏覽器、只看時間軸：
 
@@ -92,7 +101,7 @@ Needs [uv](https://docs.astral.sh/uv/), Node.js 20+ and pnpm (`corepack enable p
 ./start.sh ollama     # Ollama mode: Nemotron 3.5 Lightning NVFP4 (run deploy/mac/dev.sh pull once, ~23 GB)
 ```
 
-Open `http://localhost:8000` (dashboard) and `http://localhost:8000/phone` (supervisor phone). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
+Open `http://localhost:8000` (dashboard), `http://localhost:8000/phone` (supervisor phone) and `http://localhost:8000/factory` (3D factory). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
 
 Manual steps, if you prefer: `uv sync` · `cd web && pnpm install --frozen-lockfile && pnpm build` · `uv run python -m warroom.api serve`. Tests: `uv run pytest -q`. Headless timeline: `uv run python -m warroom.api demo --scenario press7_temp_drop --seconds 1200 --auto-approve`.
 
@@ -116,6 +125,15 @@ Step by step, with what to click and what to say: [`docs/DEMO-SCRIPT.md`](docs/D
 ### Ask the war room (read-only supervisor Q&A)
 
 The phone page has a 問戰情室 box. It is not a second agent: the same Nemotron picks up to 4 read steps (JSON, schema-constrained), code runs only `ASK_TOOLS` (read sensors, predict, cure formula, orders/shifts, SOP) through the same registry, and the model then answers from those results only (numbers copied, never estimated). Write tools, `solve_schedule` (it stores a PROPOSED version) and names off the allow-list are refused and logged `INTERCEPTED`; every question, call and answer goes into the same hash-chained audit log under an `ASK-nnnn` id. Same session rule as approvals (PIN on the LAN, on-site only when the LAN is down). Code also checks the answer: a number that is not in the tool results replaces the model's answer with the results, and a change request (停掉, 重排, 調人...) never gets a model-written answer. The check covers numbers only, not wording (a real-model run once called press 7 「正常運作」). Mock mode uses keyword rules and a template answer; an invalid plan or a model failure falls back to them. Real Nemotron on the Mac (Ollama, 2026-10-18): 5 questions, 0 fallbacks, 0.5–3.2 s each once loaded. Code: `warroom/agent/ask.py`, `POST /api/ask`; tests: `tests/test_ask.py`.
+
+### 3D factory (the war-room lead's view)
+
+Open `http://localhost:8000/factory`. You are the war-room lead, starting at the war-room desk (facing the big screen; turn around for the lines). Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
+
+- Click to start (pointer lock). `W A S D` walk, `Shift` run, mouse or `Q`/`E` (arrow keys) to turn, `Esc` releases the mouse.
+- `F` at a machine opens its live readings (the dashboard's machine drawer). `F` at the war-room desk opens the demo controls: start the p.11 press-7 temperature drop, reset, speed, network tiers (the same API as the dashboard's demo strip).
+- `P` raises the supervisor phone: it is the real `/phone` page, so you can approve / reject and type into 問戰情室; `P` or `Esc` lowers it. A new pending approval buzzes the phone, rings and shows a toast.
+- Low-poly and fully procedural, no model downloads. Code: `web/src/factory3d/`; headless check: `node web/e2e/factory3d.mjs http://localhost:8000` (screenshots in `web/e2e/screenshots/factory-*.png`).
 
 ### Measured numbers vs targets
 
