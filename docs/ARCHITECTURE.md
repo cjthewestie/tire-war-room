@@ -56,6 +56,16 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 
 `POST /api/ask` → `AskAgent.ask`: PLAN (model returns `AskPlan`, ≤ `ASK_MAX_STEPS` steps; mock = keyword rules) → RUN (code runs only `ASK_TOOLS` via the same `Registry.acall`; anything else → `INTERCEPTED`) → ANSWER (model writes from the step summaries only; failure → template). Audit: `SYSTEM ask` → `LLM_CALL plan` → `TOOL_CALL`/`TOOL_RESULT` (state `ASK`) → `LLM_CALL answer` → `SYSTEM answered`, all with `event_id = ASK-nnnn`. No state machine, no gate: nothing in `ASK_TOOLS` writes, so there is nothing to gate.
 
+## The whole plant (issue #11)
+
+`warroom/sim/world.py` `World` is everything around the 28 machines: orders over time (new / rush orders, quantity and due-date changes; 待排程 → 生產中 → 完成 → 待出貨 → 已出貨), raw materials with reorder points, purchase orders and dock deliveries (sometimes late or short), finished goods and scheduled shipping trucks (10:00 / 16:00), named workers per team and shift with a state and a zone matching the 3D rooms, energy per line (peak flag), inline and final quality inspections (a defect names the machine that made it), and planned maintenance windows plus repair tickets.
+
+- `Factory.load_scenario` builds it; `Factory.step` advances it on a fixed 10-s factory-time grid. It only READS the Factory and draws from its own RNG (`Random(seed * 1_000_003 + 11)`), so readings, cure cycles, the schedule and the Factory RNG are unchanged (`tests/test_world.py::test_world_does_not_change_the_plant`, every scenario).
+- World-only orders (`#W-…`) do not occupy presses and the seed order book is never edited by the world; planned maintenance does not stop machines. These are views of the plant, not inputs to the scheduler yet.
+- API: `GET /api/world` (`WorldSnapshot`); WS `world` messages carry only the sections that changed (`full: true` on the first publish and after a scenario load; nothing extra on connect, clients read `GET /api/world` at start and on reconnect), at most once a wall second (`Runtime._publish_world`).
+- Extension point for the agent: `World.add_listener(fn)` receives every `WorldEvent` (`stockout`, `delivery_late`, `delivery_short`, `order_rush`, `defect`, `repair_open` …). Nothing wakes the state machine from it yet; the agent's 9 tools and the Action Gate do not see the world.
+- UI: dashboard tab 工廠全貌 (`web/src/components/WorldTab.tsx`); 3D workers and the dock truck (`web/src/factory3d/People.tsx`). Headless check: `node web/e2e/world.mjs http://127.0.0.1:<port>`.
+
 ## Key numbers
 
 | What | Value | Page |

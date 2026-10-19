@@ -3,7 +3,7 @@
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type DashboardSnapshot,
-  type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type WsMessage,
+  type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
@@ -104,12 +104,15 @@ export class LiveTransport implements Transport {
     let timer: ReturnType<typeof setTimeout> | undefined
     const pullSnapshot = () => getJSON<DashboardSnapshot>(API.snapshot)
       .then((s) => onMsg({ type: 'snapshot', ts: s.header.factory_time, data: s })).catch(() => {})
+    // the whole plant: full state from GET /api/world (start and every reconnect), then WS "world" deltas
+    const pullWorld = () => getJSON<WorldSnapshot>(API.world)
+      .then((w) => onMsg({ type: 'world', ts: w.factory_time, data: { ...w, full: true } })).catch(() => {})
     let soon: ReturnType<typeof setTimeout> | undefined
     const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
-      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot() }
+      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld() }
       ws.onclose = () => {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))

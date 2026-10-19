@@ -40,7 +40,7 @@ export type AuditKind =
   | "rollback" | "notify" | "system"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
-  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock"
+  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world"
 
 export const MACHINE_IDS = [
   "A-MIX", "A-OPEN", "A-BIGOPEN", "A-SMALLOPEN", "A-CAL", "A-COOL", "A-WIND",
@@ -533,6 +533,56 @@ export interface HealthStatus {
   uptime_s: number
 }
 
+// ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
+export type WorldOrderStatus = "待排程" | "生產中" | "完成" | "待出貨" | "已出貨"
+export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁" | "下班" | "請假"
+export type WorldZone =
+  | "war_room" | "staff" | "line_A" | "line_B" | "line_C" | "line_D" | "line_BOND" | "line_CURE"
+  | "break" | "toilet" | "dock" | "off_site"
+export interface WorldEvent { ts: ISODate; kind: string; text: string; ref: string | null }
+export interface WorldOrder {
+  id: string; size: TireSize; qty: number; done: number; due: string; customer: string; status: WorldOrderStatus
+  rush: boolean; source: "seed" | "world"; created_at: ISODate | null; shipped_at: ISODate | null
+}
+export interface WorldMaterial {
+  key: string; name: string; unit: string; stock: number; capacity: number; reorder_point: number; on_order: number
+  use_per_day: number; days_left: number | null; status: "ok" | "reorder" | "low" | "out"
+}
+export interface PurchaseOrder {
+  id: string; material: string; name: string; qty: number; unit: string; supplier: string; ordered_at: ISODate; eta: ISODate
+  status: "在途" | "延遲" | "卸貨中" | "已收貨"; received_qty: number | null; note: string | null
+}
+export interface WorldTruck { id: string; kind: "inbound" | "outbound"; plate: string; cargo: string; arrived_at: ISODate; leaves_at: ISODate }
+export interface DockEntry { ts: ISODate; kind: "arrive" | "depart"; direction: "inbound" | "outbound"; text: string }
+export interface WorldWorker {
+  id: string; name: string; team: TeamId; team_label: string; role: "作業員" | "組長" | "維修" | "品管" | "主管"; shift: string
+  state: WorkerState; zone: WorldZone; machine_id: string | null; since: ISODate
+}
+export interface Inspection {
+  id: string; ts: ISODate; stage: "inline" | "final"; line: string; machine_id: string; batch: string; order_id: string | null
+  result: "合格" | "不良"; cause: string | null; disposition: string | null; inspector: string
+}
+export interface MaintenanceItem {
+  id: string; machine_id: string; kind: "planned" | "repair"; title: string; start: ISODate; end: ISODate | null
+  status: "planned" | "in_progress" | "done"; assignee: string | null
+}
+export interface WorldSnapshot {
+  factory_time: ISODate
+  rev: number
+  orders: { pipeline: Record<WorldOrderStatus, number>; items: WorldOrder[]; new_today: number; rush_open: number }
+  materials: WorldMaterial[]
+  purchase_orders: PurchaseOrder[]
+  finished_goods: { by_size: Record<TireSize, number>; total: number; capacity: number; waiting_ship: number }
+  dock: { trucks: WorldTruck[]; next_departure: ISODate | null; next_arrival: ISODate | null; log: DockEntry[] }
+  people: { workers: WorldWorker[]; by_zone: Partial<Record<WorldZone, number>>; by_state: Partial<Record<WorkerState, number>>; on_duty: number; total: number }
+  energy: { total_kw: number; by_line: Record<string, number>; base_kw: number; contract_kw: number; peak: boolean; kwh_today: number; history: [ISODate, number][] }
+  quality: { inspected_today: number; defects_today: number; yield_pct: number | null; recent: Inspection[] }
+  maintenance: { in_progress: MaintenanceItem[]; upcoming: MaintenanceItem[]; recent: MaintenanceItem[] }
+  events: WorldEvent[]
+}
+/** WS "world": full = every section; otherwise only the sections that changed since the last message. */
+export type WorldDelta = { full: boolean; rev: number; factory_time: ISODate } & Partial<Omit<WorldSnapshot, "factory_time" | "rev">>
+
 // ---------------- WebSocket ----------------
 export type WsMessage =
   | { type: "snapshot"; ts: ISODate; data: DashboardSnapshot }
@@ -546,6 +596,7 @@ export type WsMessage =
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }
   | { type: "audit"; ts: ISODate; data: AuditEntry }
   | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean } }
+  | { type: "world"; ts: ISODate; data: WorldDelta }
 
 // ---------------- REST ----------------
 export const API = {
@@ -567,6 +618,7 @@ export const API = {
   sopSearch: "/api/sop/search", // ?q=...&k=3
   simControl: "/api/sim/control", // POST SimControl
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
+  world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   ws: "/ws",
 } as const
 
