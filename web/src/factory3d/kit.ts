@@ -215,3 +215,43 @@ export function mulberry(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
+
+/** Roof trusses with pendant lamps over a floor rectangle, seen from inside (first person): cross beams every ~2.2,
+ *  two long purlins, and a lamp (cord, shade, warm bulb) between each pair of beams. No roof plate: the open sky
+ *  between the beams reads as skylights, and the overview camera looks straight in. */
+export function trusses(b: { x0: number; x1: number; z0: number; z1: number }, y: number, wallTop: number, lampsAlongZ: number[]) {
+  const g = new THREE.Group()
+  const W = '#e7dcc8', D = '#cdbb9c'
+  const w = b.x1 - b.x0, d = b.z1 - b.z0
+  const n = Math.max(1, Math.round(w / 2.2))
+  for (let i = 0; i <= n; i++) {
+    const x = b.x0 + (w * i) / n
+    g.add(box(0.1, 0.14, d, W, x, y, (b.z0 + b.z1) / 2))
+    const ph = y - wallTop
+    g.add(box(0.06, ph, 0.06, D, x, wallTop + ph / 2, b.z0 + 0.1), box(0.06, ph, 0.06, D, x, wallTop + ph / 2, b.z1 - 0.1))
+  }
+  for (const f of [0.33, 0.67]) g.add(box(w, 0.08, 0.08, D, (b.x0 + b.x1) / 2, y + 0.1, b.z0 + d * f))
+  for (let i = 0; i < n; i++) {
+    const x = b.x0 + (w * (i + 0.5)) / n
+    for (const z of lampsAlongZ) {
+      g.add(cyl(0.006, 0.006, 0.3, '#5d636b', x, y - 0.15, z, 4))
+      g.add(mesh(new THREE.CylinderGeometry(0.05, 0.14, 0.08, 10), mat('#a8d5b5', { emissive: '#a8d5b5', emissiveIntensity: 0.45 }), x, y - 0.34, z))
+    }
+  }
+  g.traverse((o) => { o.castShadow = false; (o as THREE.Mesh).receiveShadow = false })
+  return g
+}
+const BULB = new THREE.MeshStandardMaterial({ color: '#fff3c4', emissive: '#ffe08a', emissiveIntensity: 1.2 })
+/** The warm bulbs under the trusses' lamp shades (separate: emissive, not merged with the beams). */
+export function bulbs(b: { x0: number; x1: number }, y: number, lampsAlongZ: number[]) {
+  const g = new THREE.Group()
+  const w = b.x1 - b.x0, n = Math.max(1, Math.round(w / 2.2))
+  for (let i = 0; i < n; i++) {
+    for (const z of lampsAlongZ) {
+      const m = new THREE.Mesh(new THREE.IcosahedronGeometry(0.035, 0), BULB)
+      m.position.set(b.x0 + (w * (i + 0.5)) / n, y - 0.39, z)
+      g.add(m)
+    }
+  }
+  return g
+}

@@ -48,33 +48,40 @@ export const PLACED: Placed[] = place()
 export const PLACED_BY_ID: Record<string, Placed> = Object.fromEntries(PLACED.map((p) => [p.id, p]))
 
 /** The factory building (dollhouse cutaway): outer-wall lines. The production floor is the west part; the east strip
- *  (x > ROOM_X) holds the break area (north), the war room + staff corner (middle) and the restroom (south). */
+ *  (x > ROOM_X) holds an open lobby (north) with the door to the 休息區, the war room + staff corner (middle), and
+ *  the loading area by the big doors (south) with the door to the 廁所 on the east wall. The 休息區 and 廁所 are
+ *  separate spaces (spaces.ts): walking through their door teleports the lead there. */
 export const BUILDING = { x0: -8.0, x1: 11.6, z0: -6.0, z1: 6.2 }
 /** Partition between the production floor and the east rooms. */
 export const ROOM_X = 4.8
 /** Wall thickness (outer and inner). */
 export const WALL_T = 0.16
 
-/** Rooms (floor rectangles, inside the walls). Decorative for now; the next game phase can use them. */
 export const ROOMS = {
-  breakArea: { x0: ROOM_X, x1: 11.6, z0: -6.0, z1: -2.4, label: '休息區' },
   warRoom: { x0: ROOM_X, x1: 9.6, z0: -2.4, z1: 2.4, label: '戰情室' },
   staff: { x0: 9.6, x1: 11.6, z0: -2.4, z1: 2.4, label: '員工待命區' },
-  restroom: { x0: 9.6, x1: 11.6, z0: 3.6, z1: 6.2, label: '廁所' },
 } as const
 export const WAR_ROOM = ROOMS.warRoom
 /** Big roll-up doors in the south wall, with the loading dock outside. */
 export const DOOR = { x0: 5.6, x1: 8.6 }
 export const DOCK = { x0: 5.2, x1: 9.0, z0: 6.2, z1: 8.0 }
-/** Half basketball court painted in the break area, hoop on the north wall. */
-export const COURT = { x0: 7.4, x1: 11.4, z0: -5.85, z1: -2.75, hoopX: 9.4 }
-export const BENCH = { x: 5.7, z: -4.4, w: 0.36, d: 1.4 }
 /** Staff corner: where the four idle workers stand. */
 /** [x, z, yaw]: yaw as for the lead (π = facing +z), so they look out over the corridor and the doors. */
 export const STAFF_SPOTS: [number, number, number][] = [[10.1, -1.3, Math.PI + 0.5], [10.85, -0.6, Math.PI - 0.3], [10.15, 0.4, Math.PI + 0.2], [10.85, 1.2, Math.PI - 0.4]]
 
 export const DESK = { x: 8.35, z: 0, w: 0.45, d: 1.5, h: 0.42 }
 export const SCREEN = { x: 9.5, z: 0, w: 2.4, h: 1.35, y: 1.2 }
+
+export type SceneId = 'factory' | 'break' | 'toilet'
+/** Doors to the other spaces, painted on an outer wall. (x, z) is the middle of the door on the wall's inner face;
+ *  `out` is the way into the hall (unit vector), `back` where the lead stands when coming back through it. */
+export interface WallDoor { to: SceneId; label: string; x: number; z: number; axis: 'x' | 'z'; out: [number, number]; back: { x: number; z: number; yaw: number }; color: string }
+export const WALL_DOORS: WallDoor[] = [
+  { to: 'break', label: '休息區', x: 8.0, z: -6.0 + WALL_T / 2, axis: 'x', out: [0, 1], back: { x: 8.0, z: -4.8, yaw: Math.PI }, color: '#8fd16a' },
+  { to: 'toilet', label: '廁所', x: 11.6 - WALL_T / 2, z: 4.6, axis: 'z', out: [-1, 0], back: { x: 10.4, z: 4.6, yaw: Math.PI / 2 }, color: '#6fa8dc' },
+]
+export const DOOR_W = 0.8
+export const DOOR_H = 1.3
 
 /** Where the overview camera circles before start: the middle of the building (and dock). */
 export const OVERVIEW_CENTER = { x: 1.8, z: 0.8 }
@@ -92,7 +99,7 @@ export interface Box { x0: number; x1: number; z0: number; z1: number }
 const PAD = 0.04
 const H = WALL_T / 2
 /** A wall along x (at z) or along z (at x) from a to b, with doorway gaps [g0, g1] left open. */
-function wall(axis: 'x' | 'z', at: number, a: number, b: number, gaps: [number, number][] = []): Box[] {
+export function wall(axis: 'x' | 'z', at: number, a: number, b: number, gaps: [number, number][] = []): Box[] {
   const out: Box[] = []
   let s = a
   for (const [g0, g1] of [...gaps].sort((m, n) => m[0] - n[0])) { if (g0 > s) out.push(seg(axis, at, s, g0)); s = Math.max(s, g1) }
@@ -110,28 +117,25 @@ export const OUTER_WALLS = {
   west: wall('z', BX0, BZ0, BZ1), east: wall('z', BX1, BZ0, BZ1),
 }
 export const INNER_WALLS: { box: Box; kind: 'solid' | 'glass' }[] = [
-  // break area: partition to the production floor with a doorway; glass wall to the war room with a doorway
-  ...wall('z', ROOM_X, BZ0, R.breakArea.z1, [[-3.7, -2.7]]).map((box) => ({ box, kind: 'solid' as const })),
+  // war room: glass to the lobby (north) and the loading area (south), each with a doorway; glass on the factory
+  // side (doorway at the C/D aisle); the solid screen wall to the staff corner
   ...wall('x', R.warRoom.z0, ROOM_X, BX1, [[5.3, 6.3]]).map((box) => ({ box, kind: 'glass' as const })),
-  // war room: glass on the factory side (doorway at the C/D aisle) and on the south; the screen wall to the staff corner
   ...wall('z', ROOM_X, R.warRoom.z0, R.warRoom.z1, [[-0.6, 0.6]]).map((box) => ({ box, kind: 'glass' as const })),
   ...wall('x', R.warRoom.z1, ROOM_X, R.staff.x0, [[5.3, 6.3]]).map((box) => ({ box, kind: 'glass' as const })),
   ...wall('z', R.staff.x0, R.warRoom.z0, R.warRoom.z1, [[1.6, 2.4]]).map((box) => ({ box, kind: 'solid' as const })),
-  // restroom: walls on the north and west, door on the west side
-  ...wall('x', R.restroom.z0, R.restroom.x0, BX1).map((box) => ({ box, kind: 'solid' as const })),
-  ...wall('z', R.restroom.x0, R.restroom.z0, BZ1, [[4.4, 5.2]]).map((box) => ({ box, kind: 'solid' as const })),
 ]
 
-const pad = (b: Box, p = PAD): Box => ({ x0: b.x0 - p, x1: b.x1 + p, z0: b.z0 - p, z1: b.z1 + p })
-const around = (x: number, z: number, w: number, d: number): Box => ({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 })
+export const pad = (b: Box, p = PAD): Box => ({ x0: b.x0 - p, x1: b.x1 + p, z0: b.z0 - p, z1: b.z1 + p })
+export const around = (x: number, z: number, w: number, d: number): Box => ({ x0: x - w / 2, x1: x + w / 2, z0: z - d / 2, z1: z + d / 2 })
 /** Dock props (crates, forklift) the lead bumps into. */
 export const DOCK_PROPS = { crates: around(8.35, 7.2, 0.7, 0.9), forklift: around(6.0, 7.35, 0.6, 0.95) }
+/** Pallets of crates in the loading area: [x, z, crates]. */
+export const PALLETS: [number, number, number][] = [[5.3, 4.7, 4], [9.2, 3.2, 6]]
 export const COLLIDERS: Box[] = [
   ...PLACED.map((p) => pad({ x0: p.x - p.w / 2, x1: p.x + p.w / 2, z0: p.z - p.d / 2, z1: p.z + p.d / 2 })),
   around(DESK.x, DESK.z, DESK.w, DESK.d),
   around(SCREEN.x - 0.05, SCREEN.z, 0.2, SCREEN.w + 0.2),
-  around(BENCH.x, BENCH.z, BENCH.w, BENCH.d),
-  around(COURT.hoopX, BZ0 + 0.35, 0.3, 0.5),
+  around(PALLETS[0][0], PALLETS[0][1], 0.7, 0.7), around(PALLETS[1][0], PALLETS[1][1], 0.7, 0.7),
   DOCK_PROPS.crates, DOCK_PROPS.forklift,
   ...Object.values(OUTER_WALLS).flat(), ...INNER_WALLS.map((w) => w.box),
 ]
@@ -147,9 +151,22 @@ export function walkable(x: number, z: number, r = PLAYER_R) {
 
 /** Push a circle (x, z, r) out of every box (machines, furniture, walls) and keep it in the building or on the dock. */
 export function collide(x: number, z: number, r = PLAYER_R): [number, number] {
+  let [px, pz] = pushOut(COLLIDERS, x, z, r)
+  // hard bounds: the building's inner face, or the dock outside the doors
+  if (pz > BZ1 - H - r && px > DOCK.x0 + r && px < DOCK.x1 - r) {
+    pz = Math.min(pz, DOCK.z1 - r)
+  } else {
+    px = Math.min(BX1 - H - r, Math.max(BX0 + H + r, px))
+    pz = Math.min(BZ1 - H - r, Math.max(BZ0 + H + r, pz))
+  }
+  return [px, pz]
+}
+
+/** Push a circle (x, z, r) out of every box. */
+export function pushOut(boxes: Box[], x: number, z: number, r: number): [number, number] {
   let px = x
   let pz = z
-  for (const b of COLLIDERS) {
+  for (const b of boxes) {
     const cx = Math.min(b.x1, Math.max(b.x0, px))
     const cz = Math.min(b.z1, Math.max(b.z0, pz))
     const dx = px - cx
@@ -170,13 +187,6 @@ export function collide(x: number, z: number, r = PLAYER_R): [number, number] {
       px = opts[0][1]
       pz = opts[0][2]
     }
-  }
-  // hard bounds: the building's inner face, or the dock outside the doors
-  if (pz > BZ1 - H - r && px > DOCK.x0 + r && px < DOCK.x1 - r) {
-    pz = Math.min(pz, DOCK.z1 - r)
-  } else {
-    px = Math.min(BX1 - H - r, Math.max(BX0 + H + r, px))
-    pz = Math.min(BZ1 - H - r, Math.max(BZ0 + H + r, pz))
   }
   return [px, pz]
 }
@@ -202,10 +212,24 @@ export const LINE_HEX: Record<Line, string> = {
   A: '#8fbf5a', B: '#6fa8dc', C: '#a993d6', D: '#f29a6b', BOND: '#e8c15a', CURE: '#e07a74',
 }
 
-export type Near = { kind: 'machine'; id: string } | { kind: 'desk' } | null
+export type Near = { kind: 'machine'; id: string } | { kind: 'desk' } | { kind: 'door'; to: SceneId; label: string } | null
+export const nearKey = (n: Near) => !n ? '' : n.kind === 'machine' ? n.id : n.kind === 'door' ? `door-${n.to}` : 'desk'
 
-/** Nearest thing within reach: the desk, else the closest machine footprint within 0.75. */
+/** Within reach of a door (centre of the doorway, on the hall side)? */
+export function doorDist(d: { x: number; z: number; out: [number, number] }, x: number, z: number) {
+  return Math.hypot(x - (d.x + d.out[0] * 0.3), z - (d.z + d.out[1] * 0.3))
+}
+
+/** Pressed against the door (walked into it): within its width and touching the wall. */
+export function doorTouch(d: { x: number; z: number; axis: 'x' | 'z' }, x: number, z: number) {
+  const along = d.axis === 'x' ? Math.abs(x - d.x) : Math.abs(z - d.z)
+  const across = d.axis === 'x' ? Math.abs(z - d.z) : Math.abs(x - d.x)
+  return along < DOOR_W / 2 - 0.05 && across < WALL_T / 2 + PLAYER_R + 0.04
+}
+
+/** Nearest thing within reach: a door, the desk, else the closest machine footprint within 0.75. */
 export function nearest(x: number, z: number): Near {
+  for (const d of WALL_DOORS) if (doorDist(d, x, z) < 0.75) return { kind: 'door', to: d.to, label: d.label }
   const ddx = Math.max(Math.abs(x - DESK.x) - DESK.w / 2, 0)
   const ddz = Math.max(Math.abs(z - DESK.z) - DESK.d / 2, 0)
   if (Math.hypot(ddx, ddz) < 0.8) return { kind: 'desk' }

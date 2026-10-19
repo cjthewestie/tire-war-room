@@ -1,12 +1,11 @@
-// 3D factory (served at /factory). The player is a tiny war-room lead in a Minimotive-style miniature factory
-// building, seen as a dollhouse cutaway: walk the rows, press F at a machine for its live readings, F at the
-// war-room desk for the demo controls, P to raise the real /phone page.
+// 3D factory (served at /factory). You are the war-room lead, in first person, inside a Minimotive-style miniature
+// factory building: walk the rows (F at a machine for its live readings), sit at the war-room computer (F at the desk)
+// to use the real dashboard, watch it live on the big wall screen, go through the doors to the 休息區 and 廁所
+// (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ScenarioName } from '../contracts'
-import { DemoStrip } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
@@ -14,14 +13,19 @@ import { fmtHM, fmtMD } from '../format'
 import { alertText, diffPending, type PushState } from '../phone/alert'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { PLACED_BY_ID, ROOMS, collide, walkable, type Near } from './layout'
+import { DeskMonitor } from './DeskMonitor'
+import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
+import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
-import { cam, player, teleport } from './pose'
+import { cam, player, teleport, view } from './pose'
+import { BreakRoom, Restroom } from './Rooms'
+import { SPACES, arrival } from './spaces'
 import { TiltShift } from './TiltShift'
-import { World } from './World'
+import { DRAWN_LIGHT, Lights, World } from './World'
 
-type Panel = { kind: 'machine'; id: string } | { kind: 'desk' } | null
+type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
+const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
 
 let audio: AudioContext | null = null
 function unlockAudio() {
@@ -47,15 +51,24 @@ function ring() {
   } catch { /* ignore */ }
 }
 
-/** In front of a machine, in the aisle, facing it. The camera sits behind and a little to the side, so neither the
- *  figure nor the reading tag hides the machine's status lamp. */
+/** In front of a machine, in the aisle, facing it. First person stands a step further back and looks up a little,
+ *  so the status lamp on its post and the reading tag above it are in view. */
 function standAt(id: string) {
   const p = PLACED_BY_ID[id]
   if (!p) return
   const side = p.line === 'CURE' ? -1 : 1   // presses: stand on the aisle north of the row
-  const z = p.z + side * (p.d / 2 + 0.45)
+  const first = view.mode === 'first'
+  const z = p.z + side * (p.d / 2 + (first ? 1.2 : 0.45))
   const yaw = side > 0 ? 0 : Math.PI
   teleport(p.x, z, yaw, yaw + 0.6)
+  if (first) player.pitch = 0.22
+}
+
+function promptText(n: Near) {
+  if (!n) return null
+  if (n.kind === 'desk') return '坐下使用戰情室電腦'
+  if (n.kind === 'door') return n.to === 'factory' ? '回到工廠' : `進入${n.label}`
+  return `查看 ${machineLabel(n.id)}`
 }
 
 export function FactoryApp() {
@@ -64,14 +77,18 @@ export function FactoryApp() {
   const [near, setNear] = useState<Near>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const [phoneUp, setPhoneUp] = useState(false)
+  const [mode, setMode] = useState<'first' | 'third'>('first')
+  const [scene, setScene] = useState<SceneId>('factory')
+  const [fading, setFading] = useState(false)
+  const [locked, setLocked] = useState(false)
   const [toast, setToast] = useState<{ title: string; body: string; at: number } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
-  const [busy, setBusy] = useState(false)
   const [buzz, setBuzz] = useState(false)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
   const nearRef = useRef<Near>(null)
   useEffect(() => { nearRef.current = near }, [near])
+  const fadingRef = useRef(false)
   const push = useRef<PushState>({ seen: new Set(), held: [] })
 
   const ev = primaryEvent(state.snapshot?.events)
@@ -80,8 +97,9 @@ export function FactoryApp() {
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
+  const fp = started && mode === 'first'
 
-  // New approval → phone buzz + ring + HUD toast (same diff the phone page uses).
+  // New approval → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
     const out = diffPending(push.current, pending, connected && !lanDown)
     if (!out.fire.length) return
@@ -103,18 +121,40 @@ export function FactoryApp() {
     return () => clearTimeout(t)
   }, [toast])
 
+  useEffect(() => {
+    const f = () => setLocked(!!document.pointerLockElement)
+    document.addEventListener('pointerlockchange', f)
+    return () => document.removeEventListener('pointerlockchange', f)
+  }, [])
+
   const start = useCallback(() => {
     unlockAudio()
     setStarted(true)
+    requestLook()
     canvasRef.current?.focus()
   }, [])
 
   const raisePhone = useCallback((up: boolean) => {
     setPhoneUp(up)
-    if (up) setPanel(null); else { window.focus(); canvasRef.current?.focus() }
+    if (up) { setPanel(null); releaseLook() } else { window.focus(); canvasRef.current?.focus() }
   }, [])
 
-  const closePanel = useCallback(() => { setPanel(null); canvasRef.current?.focus() }, [])
+  const closePanel = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
+
+  /** Go through a door: a short fade, then the lead stands in the other space (just inside its door). */
+  const goTo = useCallback((to: SceneId) => {
+    if (fadingRef.current || to === view.scene) return
+    fadingRef.current = true
+    setFading(true)
+    setTimeout(() => {
+      const a = arrival(to, view.scene)
+      view.scene = to
+      setScene(to)
+      setNear(null)
+      teleport(a.x, a.z, a.yaw)
+      setTimeout(() => { setFading(false); fadingRef.current = false }, 120)
+    }, 320)
+  }, [])
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -123,18 +163,21 @@ export function FactoryApp() {
       if (!started && (e.code === 'Enter' || e.code === 'Space')) { start(); return }
       unlockAudio()
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
-      if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel?.kind === 'desk') closePanel(); return }
+      if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
+      if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
         if (panel) { closePanel(); return }
-        if (phoneUp) return
+        if (phoneUp || !started) return
         const n = nearRef.current
         if (!n) return
-        setPanel(n.kind === 'desk' ? { kind: 'desk' } : { kind: 'machine', id: n.id })
+        if (n.kind === 'door') { goTo(n.to); return }
+        releaseLook()
+        setPanel(n.kind === 'desk' ? { kind: 'monitor' } : { kind: 'machine', id: n.id })
       }
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, start, raisePhone, closePanel])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -146,20 +189,20 @@ export function FactoryApp() {
       const c = cameraRef.current, el = canvasRef.current
       if (!c || !el) return null
       const v = new THREE.Vector3(x, y, z).project(c)
+      if (v.z > 1) return null   // behind the camera
       const r = el.getBoundingClientRect()
       return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }
     }
     const toastNow = (title = '測試通知', body = '7 號硫化機：待核准 1 件') => setToast({ title, body, at: Date.now() })
-    w.__factory3d = { teleport, standAt, player, cam, walkable, collide, raisePhone, screenOf, toast: toastNow, placed: PLACED_BY_ID, rooms: ROOMS,
-      cameraPos: () => cameraRef.current?.position.toArray() }
+    w.__factory3d = {
+      teleport, standAt, player, cam, view, walkable, collide, raisePhone, screenOf, toast: toastNow, placed: PLACED_BY_ID, rooms: ROOMS,
+      goTo, spaces: SPACES, lights: DRAWN_LIGHT, cameraPos: () => cameraRef.current?.position.toArray(),
+      fov: () => (cameraRef.current as THREE.PerspectiveCamera | null)?.fov,
+    }
     return () => { delete w.__factory3d }
-  }, [raisePhone])
+  }, [raisePhone, goTo])
 
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true)
-    try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) }
-  }
-  const scenario = (s: ScenarioName) => run(() => transport!.control({ action: 'scenario', scenario: s }))
+  const prompt = started && !overlay && !fading ? promptText(near) : null
 
   return (
     <div className="f3-root">
@@ -168,7 +211,7 @@ export function FactoryApp() {
         camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
         dpr={[1, 1.5]}
         shadows="percentage"
-        gl={{ antialias: true, powerPreference: 'high-performance' }}
+        gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
         onCreated={({ gl, camera }) => {
           canvasRef.current = gl.domElement
           cameraRef.current = camera
@@ -176,23 +219,31 @@ export function FactoryApp() {
           gl.toneMapping = THREE.ACESFilmicToneMapping
           gl.toneMappingExposure = 1.05
         }}
-        onClick={() => { if (!overlay && !started) start() }}
       >
         <color attach="background" args={['#e9dfcf']} />
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
-        <World state={state} connected={connected} mode={transport?.mode ?? 'live'} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <Lights />
+        <World state={state} active={scene === 'factory'} fp={fp} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        {scene === 'break' && <BreakRoom />}
+        {scene === 'toilet' && <Restroom />}
         <Player
-          enabled={started && !overlay} started={started} onNear={setNear} phoneUp={phoneUp}
-          pending={pending.length} buzzUntil={buzzUntil}
-          prompt={started && !overlay && near ? (near.kind === 'desk' ? '戰情室控制台' : `查看 ${machineLabel(near.id)}`) : null}
+          enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
+          pending={pending.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
+          prompt={prompt}
         />
-        <TiltShift enabled={!phoneUp} />
+        <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
       </Canvas>
+
+      {/* first person: a small aim dot, and what F does right here */}
+      {fp && !overlay && <div className="f3-cross" aria-hidden />}
+      {fp && prompt && <div className="f3-aim" data-testid="f3-prompt"><kbd>F</kbd> {prompt}</div>}
+      {fp && !overlay && !locked && <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>}
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
         <div className="f3-hud-top">
           <b>戰情室負責人</b>
+          <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}</span>
           <span className={`f3-conn ${connected ? 'ok' : 'bad'}`}>{connected ? (transport?.mode === 'mock' ? '模擬資料' : '即時連線') : '連線中'}</span>
         </div>
@@ -202,24 +253,26 @@ export function FactoryApp() {
         <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? '・按 P 拿手機' : ''}</div>
       </div>
       <div className="f3-keys">
-        <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>Q E</kbd>/拖曳 轉鏡頭</span>
-        <span><kbd>滾輪</kbd> 遠近</span><span><kbd>F</kbd> 操作</span><span><kbd>P</kbd> 手機</span>
+        <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
       </div>
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
           <b>📱 {toast.title}</b><span>{toast.body}</span><i>按 P 拿起手機核准</i>
         </div>
       )}
+      <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
 
       {!started && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
             <h1>迷你工廠・戰情室</h1>
-            <p>你是戰情室負責人。從戰情室門口出發，走遍廠房裡的產線，看 28 台機台的即時狀態。</p>
+            <p>你是戰情室負責人，從戰情室門口出發。走遍廠房看 28 台機台的即時狀態，坐到戰情室電腦前用真的儀表板。</p>
             <ul>
-              <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，<kbd>Q</kbd>/<kbd>E</kbd> 或拖曳滑鼠轉鏡頭，滾輪拉遠拉近</li>
-              <li>走到機台旁按 <kbd>F</kbd> 看即時讀數；在戰情室桌前按 <kbd>F</kbd> 開展示控制</li>
-              <li><kbd>P</kbd> 拿起主管手機（真的手機頁，可核准、可問戰情室）</li>
+              <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，滑鼠看四周（<kbd>Q</kbd>/<kbd>E</kbd> 也能轉身）</li>
+              <li>機台旁按 <kbd>F</kbd> 看即時讀數；戰情室桌前按 <kbd>F</kbd> 坐下用儀表板</li>
+              <li>牆上的門通往 <b>休息區</b> 和 <b>廁所</b>：走進去或按 <kbd>F</kbd></li>
+              <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
             </ul>
             <button className="f3-go">點擊開始</button>
           </div>
@@ -227,22 +280,7 @@ export function FactoryApp() {
       )}
 
       {panel?.kind === 'machine' && <MachineDrawer id={panel.id} onClose={closePanel} />}
-      {panel?.kind === 'desk' && (
-        <div className="f3-desk-wrap" onClick={closePanel}>
-          <section className="f3-desk" role="dialog" aria-label="戰情室控制台" onClick={(e) => e.stopPropagation()}>
-            <header><h2>戰情室控制台</h2><button className="x" onClick={closePanel} aria-label="關閉">✕</button></header>
-            <p className="muted small">與戰情室畫面上方「展示」列相同的 API（/api/sim/control）。</p>
-            <div className="f3-desk-main">
-              <button className="primary" disabled={busy || !transport} onClick={() => scenario('press7_temp_drop')}>▶ 啟動 p.11：7 號硫化機溫降</button>
-              <button disabled={busy || !transport} onClick={() => run(() => transport!.control({ action: 'reset' }))}>↺ 重來</button>
-              <button onClick={() => { standAt('CURE-07'); closePanel() }}>前往 7 號硫化機</button>
-              {ev && ev.machine_id !== 'CURE-07' && <button onClick={() => { standAt(ev.machine_id); closePanel() }}>前往事件機台（{machineLabel(ev.machine_id)}）</button>}
-            </div>
-            <DemoStrip />
-            <p className="muted small">戰情室全畫面：<a href={`/${location.search}`} target="_blank" rel="noreferrer">開啟儀表板</a></p>
-          </section>
-        </div>
-      )}
+      {panel?.kind === 'monitor' && <DeskMonitor onClose={closePanel} />}
       <PhoneOverlay up={phoneUp} onLower={() => raisePhone(false)} buzzing={buzz} />
     </div>
   )
