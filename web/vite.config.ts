@@ -15,7 +15,7 @@ const phoneRoute = (): Plugin => {
   }
 }
 
-// Dev: `npm run dev` on :5173 proxies /api and /ws to the FastAPI server on :8000.
+// Dev: `pnpm dev` on :5173 proxies /api and /ws to the FastAPI server on :8000.
 // The backend treats loopback callers as the on-box supervisor seat, so the dev server binds to
 // localhost only, and the proxy forwards the real client address (xfwd -> X-Forwarded-For): a LAN
 // client reaching Vite (WARROOM_DEV_HOST=0.0.0.0 to test the phone page on a real phone) is then

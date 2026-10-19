@@ -7,10 +7,11 @@
 # ---- web build ----
 FROM node:22-bookworm-slim AS web
 WORKDIR /src/web
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN corepack enable pnpm
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN pnpm install --frozen-lockfile
 COPY web/ ./
-RUN npm run build
+RUN pnpm build
 
 # ---- python deps ----
 FROM python:3.12-slim-bookworm AS py

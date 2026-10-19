@@ -28,7 +28,7 @@
 
 ### 一行啟動（Mac，Apple Silicon）
 
-需要：[uv](https://docs.astral.sh/uv/)、Node.js 20+。第一次執行會下載 Python 套件、npm 套件和 SOP 嵌入模型（數百 MB，之後離線可用）。
+需要：[uv](https://docs.astral.sh/uv/)、Node.js 20+ 與 pnpm（`corepack enable pnpm`）。第一次執行會下載 Python 套件、pnpm 套件和 SOP 嵌入模型（數百 MB，之後離線可用）。
 
 ```bash
 ./start.sh            # 模擬模式：不需要任何模型，整個展示用規則指揮官跑完
@@ -85,7 +85,7 @@ A single-screen war room for a solid-tire plant (4 lines, 26 processes, 28 machi
 
 ### Quick start (Mac, Apple Silicon)
 
-Needs [uv](https://docs.astral.sh/uv/) and Node.js 20+. The first run downloads Python and npm packages and the SOP embedding model (a few hundred MB); after that it runs offline.
+Needs [uv](https://docs.astral.sh/uv/), Node.js 20+ and pnpm (`corepack enable pnpm`). The first run downloads Python and pnpm packages and the SOP embedding model (a few hundred MB); after that it runs offline.
 
 ```bash
 ./start.sh            # mock mode: no model, the whole demo runs on the rule-based commander
@@ -94,7 +94,7 @@ Needs [uv](https://docs.astral.sh/uv/) and Node.js 20+. The first run downloads 
 
 Open `http://localhost:8000` (dashboard) and `http://localhost:8000/phone` (supervisor phone). For a real phone on the LAN, start with `WARROOM_SUPERVISOR_PIN=<8+ chars>`. Other knobs: `PORT` (mock mode only: in `./start.sh ollama` mode `deploy/mac/dev.sh` reuses `PORT` as the Ollama port, so the app ends up on :11435; see the demo script for the manual command), `SCENARIO` (`normal`, `press7_temp_drop`, `open_mill_overheat`, `bad_data`, `concurrent_3`), `SIM_SPEED`, and for any OpenAI-compatible server `LLM_MODE=llm BASE_URL=... MODEL=... [NVIDIA_API_KEY=...]`.
 
-Manual steps, if you prefer: `uv sync` · `cd web && npm ci && npm run build` · `uv run python -m warroom.api serve`. Tests: `uv run pytest -q`. Headless timeline: `uv run python -m warroom.api demo --scenario press7_temp_drop --seconds 1200 --auto-approve`.
+Manual steps, if you prefer: `uv sync` · `cd web && pnpm install --frozen-lockfile && pnpm build` · `uv run python -m warroom.api serve`. Tests: `uv run pytest -q`. Headless timeline: `uv run python -m warroom.api demo --scenario press7_temp_drop --seconds 1200 --auto-approve`.
 
 ### Running on the DGX Spark
 

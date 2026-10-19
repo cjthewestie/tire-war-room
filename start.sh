@@ -7,10 +7,10 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }
-command -v npm >/dev/null || { echo "Node.js/npm is required (node 20+)" >&2; exit 1; }
+command -v pnpm >/dev/null || { echo "Node.js 20+ and pnpm are required (corepack enable pnpm)" >&2; exit 1; }
 uv sync --quiet
 if [[ ! -f web/dist/index.html ]]; then
-  (cd web && { [[ -d node_modules ]] || npm ci --no-audit --no-fund; } && npm run build)
+  (cd web && { [[ -d node_modules ]] || pnpm install --frozen-lockfile; } && pnpm build)
 fi
 case "${1:-mock}" in
   mock)   LLM_MODE=mock exec uv run python -m warroom.api serve ;;

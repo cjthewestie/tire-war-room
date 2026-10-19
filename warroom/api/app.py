@@ -884,7 +884,7 @@ def _safe(fn, default):
 
 _MISSING = """<!doctype html><meta charset="utf-8"><title>戰情室</title>
 <body style="background:#0b0f0c;color:#e6e6e6;font-family:sans-serif;padding:2rem">
-<h1>實心胎智慧製造戰情室</h1><p>web/dist not built. Run <code>cd web && npm install && npm run build</code>.
+<h1>實心胎智慧製造戰情室</h1><p>web/dist not built. Run <code>cd web && pnpm install && pnpm build</code>.
 API is live: <a style="color:#76b900" href="/api/snapshot">/api/snapshot</a> · <a style="color:#76b900" href="/docs">/docs</a></p>"""
 
 

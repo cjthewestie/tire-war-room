@@ -67,8 +67,8 @@ CJ, 2026-10-18：「我希望他們改的是前端客戶體驗」。隊友的工
 
 ```bash
 cd web
-npm ci            # 第一次
-npm run dev       # 改了存檔，瀏覽器自動更新
+pnpm install      # 第一次
+pnpm dev          # 改了存檔，瀏覽器自動更新
 ```
 
 打開 `http://localhost:5173/?mock=1`（戰情室）和 `http://localhost:5173/phone.html?mock=1`（手機頁）。`?mock=1` 用瀏覽器內建的模擬工廠，展示列的情境一樣能點。要接真的後端：另一個終端機先跑 `./start.sh`，再開 `http://localhost:5173/`（不加 `?mock=1`）。
@@ -83,7 +83,7 @@ npm run dev       # 改了存檔，瀏覽器自動更新
 **開 PR 前檢查：**
 
 ```bash
-cd web && npm run build && npm run lint      # 型別檢查 + 打包 + lint
+cd web && pnpm build && pnpm lint      # 型別檢查 + 打包 + lint
 cd .. && uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py
 ```
 

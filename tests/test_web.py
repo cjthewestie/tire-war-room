@@ -1,5 +1,5 @@
 """Web module checks: the TS factory mirror matches warroom/factory.py, the mock reproduces the
-proposal's page-2 / page-11 numbers, and (when npm is available) the production build succeeds."""
+proposal's page-2 / page-11 numbers, and (when pnpm is available) the production build succeeds."""
 import pathlib
 import re
 import shutil
@@ -84,9 +84,9 @@ def test_ts_contract_imports_only_from_contracts():
         assert not re.search(r"^export (interface|type) (DashboardSnapshot|Event|ApprovalRequest)\b", txt, re.M), f.name
 
 
-@pytest.mark.skipif(shutil.which("npm") is None or not (WEB / "node_modules").exists(), reason="npm/node_modules not available")
+@pytest.mark.skipif(shutil.which("pnpm") is None or not (WEB / "node_modules").exists(), reason="pnpm/node_modules not available")
 @pytest.mark.timeout(180)
-def test_npm_build():
-    r = subprocess.run(["npm", "run", "build"], cwd=WEB, capture_output=True, text=True)
+def test_pnpm_build():
+    r = subprocess.run(["pnpm", "build"], cwd=WEB, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
     assert (WEB / "dist" / "index.html").exists() and (WEB / "dist" / "phone.html").exists()
