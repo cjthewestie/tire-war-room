@@ -32,8 +32,12 @@ try {
   const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'Asia/Taipei' })
   const d = await ctx.newPage()
   d.on('pageerror', (e) => errors.push(e.message))
-  await d.goto(BASE + '/#agent', { waitUntil: 'networkidle' })
+  await d.goto(BASE + '/', { waitUntil: 'networkidle' })
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
+  // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
+  const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
+  check('/ opens the Agent 對話台 and it is the first tab', firstTab.includes('Agent 對話台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
+  check('status strip on the console (counts, events, approvals, time, network)', /正常 \d+ 台/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))
@@ -127,6 +131,9 @@ try {
     && audit.some((e) => e.kind === 'state_transition' && e.payload?.to === 'closed'), [...kinds].join(','))
   await d.waitForTimeout(800)
   await d.screenshot({ path: `${OUT}/plan-talk-command-done-1440.png` })
+  await d.locator('[data-testid=status-strip]').click()
+  await d.waitForTimeout(500)
+  check('clicking the status strip opens 產線監控 (#monitor)', (await d.evaluate(() => location.hash)) === '#monitor' && (await d.locator('.tabs [role=tab][aria-selected=true]').innerText()).includes('產線監控'))
   check('no page errors', errors.length === 0, errors.join(' | ').slice(0, 200))
 } finally {
   await b.close()

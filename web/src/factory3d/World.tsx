@@ -495,7 +495,7 @@ function BigScreen({ active }: { active: boolean }) {
       <Html transform occlude="blending" distanceFactor={(SCREEN.w / BIG_W) * 400} zIndexRange={[2, 0]} pointerEvents="none"
         geometry={<planeGeometry args={[SCREEN.w, SCREEN.h]} />}>
         <div className="f3-bigscreen" data-testid="f3-bigscreen" style={{ width: BIG_W, height: BIG_H, display: active ? 'block' : 'none' }}>
-          <iframe title="戰情室大螢幕（儀表板）" src={`/${location.search}`} tabIndex={-1} aria-hidden />
+          <iframe title="戰情室大螢幕（儀表板）" src={`/${location.search}#monitor`} tabIndex={-1} aria-hidden />
         </div>
       </Html>
     </group>

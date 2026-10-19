@@ -19,7 +19,7 @@ const b = await pw.chromium.launch()
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 1, timezoneId: 'Asia/Taipei' })
 const d = await ctx.newPage()
 d.on('pageerror', (e) => errors.push(e.message))
-await d.goto(BASE + '/', { waitUntil: 'networkidle' })
+await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode.live', { timeout: 10000 })
 check('header has no English mock badge', !(await d.locator('.mode').innerText()).includes('mock'), await d.locator('.mode').innerText())
 

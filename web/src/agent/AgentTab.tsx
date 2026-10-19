@@ -30,9 +30,9 @@ const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需�
 const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回', superseded: '作廢此卡（討論後改版）', expired: '逾時' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
 
-export function AgentTab({ asks, setAsks, picked, setPicked }: {
+export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
-  picked: string | null; setPicked: (id: string) => void
+  picked: string | null; setPicked: (id: string) => void; onMonitor?: () => void
 }) {
   const { state } = useWarRoom()
   const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
@@ -41,6 +41,8 @@ export function AgentTab({ asks, setAsks, picked, setPicked }: {
   const pending = ev ? state.pending.filter((p) => p.event_id === ev.id) : []
   const tools = useMemo(() => items.filter((i): i is ToolItem => i.k === 'tool'), [items])
   return (
+    <>
+    <StatusStrip events={events} onMonitor={onMonitor} />
     <div className="agent">
       <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} />
       <aside className="agent-side" aria-label="計畫與核准">
@@ -49,6 +51,31 @@ export function AgentTab({ asks, setAsks, picked, setPicked }: {
         {!ev && <div className="panel agent-empty"><p className="calm-title">全廠正常</p><p className="muted">有異常時，AI 指揮官的計畫、調用的工具和待核准事項會出現在這裡。你仍可在左邊提問（只查不改）。</p></div>}
       </aside>
     </div>
+    </>
+  )
+}
+
+const NET_SHORT: Record<string, string> = { online: '網路正常', weak: '弱網', wan_down: 'WAN 中斷', lan_down: 'LAN 中斷・現場操作' }
+
+/** The plant at a glance above the conversation (the console is the main page; 產線監控 is one click away). */
+function StatusStrip({ events, onMonitor }: { events: Event[]; onMonitor?: () => void }) {
+  const { state } = useWarRoom()
+  const h = state.snapshot?.header
+  const ft = state.clock?.factory_time ?? h?.factory_time
+  const open = events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
+  const active = primaryEvent(open)
+  const pend = state.pending.length
+  const net = h?.network ?? 'online'
+  return (
+    <button type="button" className="agent-strip" onClick={onMonitor} data-testid="status-strip" title="打開完整的產線監控">
+      <span className="as-item ok"><i className="dot ok" />正常 {h?.normal_count ?? '–'} 台</span>
+      <span className={`as-item ${h && h.abnormal_count > 0 ? 'bad' : ''}`}><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
+      <span className="as-item">處理中：{active ? `${machineLabel(active.machine_id)}・${STATE_LABEL[active.state]}${open.length > 1 ? `（共 ${open.length} 件）` : ''}` : '無'}</span>
+      <span className={`as-item ${pend ? 'warn' : ''}`}>待核准 {pend} 件</span>
+      <span className={`as-item ${net !== 'online' ? 'bad' : ''}`}>{NET_SHORT[net] ?? net}</span>
+      <span className="as-item as-time">{ft ? fmtHMS(ft).slice(0, 5) : '—'}</span>
+      <span className="as-go">產線監控 →</span>
+    </button>
   )
 }
 

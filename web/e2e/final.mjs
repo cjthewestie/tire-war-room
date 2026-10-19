@@ -20,7 +20,7 @@ const b = await pw.chromium.launch()
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, timezoneId: 'Asia/Taipei' })
 const d = await ctx.newPage()
 d.on('pageerror', (e) => errors.push(e.message))
-await d.goto(BASE + '/', { waitUntil: 'networkidle' })
+await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
 check('dashboard on live backend', (await d.locator('body').innerText()).includes('訂單進度'))
 const r = await d.evaluate(async () => {
