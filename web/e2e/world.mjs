@@ -124,6 +124,12 @@ try {
   const sw = await p3.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
   check('390 px: no sideways scroll', sw.sw <= sw.cw + 1, JSON.stringify(sw))
   check('390 px: 工廠全貌 in the bottom nav', (await p3.locator('.bottomnav button', { hasText: '工廠全貌' }).count()) === 1)
+  const wraps = await p3.evaluate(() => [...document.querySelectorAll('.bottomnav button')].map((b) => {
+    const t = [...b.childNodes].filter((n) => n.nodeType === 3 && n.textContent.trim())
+    const r = document.createRange(); r.selectNodeContents(t[0] ?? b)
+    return { label: (t[0]?.textContent ?? '').trim(), lines: new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size }
+  }))
+  check('390 px: no bottom-nav label wraps', wraps.length === 5 && wraps.every((w) => w.lines === 1), wraps.map((w) => `${w.label}:${w.lines}`).join(' '))
   await p3.screenshot({ path: `${OUT}/world-390.png`, fullPage: true })
   await p3.screenshot({ path: `${OUT}/world-390-viewport.png` })
 

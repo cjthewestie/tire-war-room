@@ -828,6 +828,16 @@ class Runtime:
         self.audit.append(AuditKind.ANOMALY, "detector", an.model_dump(mode="json"))
         self._spawn(an)
 
+    def start_command(self, text: str, actor: str = "supervisor") -> Event:
+        """Issue #10: open a supervisor-command event now and run it as a tracked task (cancelled on a
+        scenario load like any event)."""
+        sm = self.state_machine
+        ev = sm.open_command(text, actor)
+        task = asyncio.create_task(sm.run_command(ev.id), name=f"command-{ev.id}")
+        self._tasks[ev.id] = task
+        task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
+        return ev
+
     def _spawn(self, an: Anomaly) -> None:
         task = asyncio.create_task(self.state_machine.handle(an), name=f"event-{an.id}")
         self._tasks[an.id] = task
@@ -870,7 +880,8 @@ class Runtime:
 
     def _open_event_id(self, machine_id: str) -> str | None:
         for ev in self.events():
-            if ev.machine_id == machine_id and ev.state not in TERMINAL_STATES:
+            if ev.machine_id == machine_id and ev.state not in TERMINAL_STATES and \
+                    getattr(ev, "source", "detector") != "supervisor":    # a typed task is not a machine alarm
                 return ev.id
         return None
 

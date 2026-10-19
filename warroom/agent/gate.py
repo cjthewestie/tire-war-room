@@ -222,7 +222,7 @@ def _bad_ids(tool: ToolName, a: BaseModel) -> list[str]:
     elif isinstance(a, NotifyTeamsArgs):
         bad += [a.machine_id] if a.machine_id and a.machine_id not in MACHINE_IDS else []
     elif isinstance(a, SolveScheduleArgs):
-        bad += [p for p in [*a.unavailable_presses, *a.cure_overrides_h] if p not in CURE_PRESS_IDS]
+        bad += [p for p in [*a.unavailable_presses, *a.cure_overrides_h, *a.press_blackouts] if p not in CURE_PRESS_IDS]
     elif isinstance(a, QueryOrdersShiftsArgs):
         bad += [p for p in (a.press_ids or []) if p not in CURE_PRESS_IDS]
     return bad

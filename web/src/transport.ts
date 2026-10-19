@@ -2,7 +2,7 @@
 // Mock mode syncs tabs over BroadcastChannel, so approving on /phone updates the dashboard.
 import {
   API, apiPath,
-  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type DashboardSnapshot,
+  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
   type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
@@ -50,6 +50,10 @@ export interface Transport {
   jump?(t: number): Promise<void>
   /** Live only: 問戰情室, a read-only question answered from the read tools (POST /api/ask). */
   ask?(question: string): Promise<AskAnswer>
+  /** Live only (issue #10): 下新任務, a task in plain Chinese that opens an event (POST /api/command). */
+  command?(text: string): Promise<CommandReply>
+  /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
+  discuss?(eventId: string, text: string): Promise<DiscussReply>
 }
 
 // ---------------- live ----------------
@@ -135,6 +139,8 @@ export class LiveTransport implements Transport {
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
   ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
+  command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
+  discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   rollback(version?: number, confirm = false) {
     return postJSON<ScheduleVersion>(API.scheduleRollback, { ...(version == null ? {} : { version }), confirm })

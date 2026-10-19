@@ -26,6 +26,16 @@
 
 手機頁最下方可以直接問：「7 號機現在怎樣？」「今晚夜班缺誰？」「大開煉機過熱怎麼處理？」。走的是同一套 Agent 架構：同一個 Nemotron 先選要查哪些唯讀工具（最多 4 步），程式只執行 `ASK_TOOLS`（讀感測器、異常預測、硫化公式、訂單班表、SOP），再由 Nemotron 只根據查詢結果回答。寫入工具、`solve_schedule`（會存提案排程）和清單外的名稱一律攔下並記 `INTERCEPTED`；每次提問以 `ASK-nnnn` 寫進同一份稽核日誌。LAN 中斷時只有現場觸控螢幕能問。程式：`warroom/agent/ask.py`、`POST /api/ask`，測試 `tests/test_ask.py`。
 
+### Agent 對話台是主畫面：下新任務、討論計劃（issue #10）
+
+打開 `http://localhost:8000` 先看到 Agent 對話台（產線監控在 `#monitor`，上方狀態列點一下就到）。輸入框有三種模式：
+
+- **討論這個計劃**（有核准卡在等時預設）：例如「9 號機今晚要保養」「不要跨組調人」「選 A」。Nemotron 用 JSON schema 判讀（失敗或模式為 mock 時用關鍵字規則），程式把它變成可強制的條件（某台硫化機某時段不可用、不加班、不跨組調人、偏好方案），套用到每次排程求解並檢查結果；舊卡作廢（寫入稽核、不能再核准），發新卡 v2 並列出改了什麼。問題只查不改；做不到的要求會直說。每個事件最多討論重排 3 次。
+- **下新任務**：例如「通知維修組明早檢查 3 號機」。開一個主管指令事件，走 計畫 → 模擬 → 把關 →（R2/R3 核准）→ 執行 → 結案，全部寫入稽核。要動到機台或 PLC 的指令（例如「把 7 號機搬走」）不開工具，直接說明做不到。
+- **只查不改**：問戰情室（見下）。打招呼、道謝會簡短回覆、不查任何資料；看不懂的不會猜機台。
+
+程式：`warroom/agent/talk.py`（規則與條件）、`warroom/agent/discuss.py`（討論）、`StateMachine.open_command / discuss_replan`、`POST /api/command`、`POST /api/events/{id}/discuss`；排程求解器支援 `press_blackouts`。測試 `tests/test_plan_talk.py`，無頭 e2e `node web/e2e/plan-talk.mjs http://localhost:8000`。
+
 ### 3D 工廠（戰情室負責人視角）
 
 打開 `http://localhost:8000/factory`。你是戰情室負責人，以第一人稱站在一座迷你工廠廠房裡（產線、戰情室、員工待命區、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。

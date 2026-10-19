@@ -67,6 +67,12 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 - Extension point for the agent: `World.add_listener(fn)` receives every `WorldEvent` (`stockout`, `delivery_late`, `delivery_short`, `order_rush`, `defect`, `repair_open` …). Nothing wakes the state machine from it yet; the agent's 9 tools and the Action Gate do not see the world.
 - UI: dashboard tab 工廠全貌 (`web/src/components/WorldTab.tsx`); 3D workers and the dock truck (`web/src/factory3d/People.tsx`). Headless check: `node web/e2e/world.mjs http://127.0.0.1:<port>`.
 
+## Supervisor commands and plan discussion (issue #10)
+
+`POST /api/command {text}` → `StateMachine.open_command` opens an Event with `source="supervisor"`, `command=text` (anomaly kind `supervisor_command`, no alarm, never a machine's open event) and runs CLASSIFY (light) → PLAN → SIMULATE → GATE → [AWAIT_APPROVAL] → EXECUTE → VERIFY (unmeasured) → CLOSED. A command that would move or set a machine (`talk.physical_request`) closes at CLASSIFY with the reason and no tool call.
+
+`POST /api/events/{id}/discuss {text}` → `PlanTalk.discuss`: CLASSIFY (model with a JSON schema; rules for mock mode, model failure, or when the rules read an explicit change the model missed) into chitchat / question / change / unclear / unsupported. A change becomes `PlanConstraint`s validated by code (the press must be named in the text; the window is computed from the words). `StateMachine.discuss_replan` adds them to `Event.constraints`, supersedes the waiting card (`ApprovalStatus.SUPERSEDED`, audited, cannot be decided) and the event goes AWAIT_APPROVAL → REPLAN → SIMULATE → GATE. Code applies the constraints to every `solve_schedule` (`press_blackouts`, `allow_overtime`, `allow_cross_team`), checks the result honours them (`constraint_check`), and the new card carries `version`, `supersedes`, `changes`, `constraints`. Discussion replans do not count toward `max_replans` or failures; `MAX_DISCUSS_REPLANS = 3`. At every gate the agent posts a code-built summary (`plan_summary`).
+
 ## Key numbers
 
 | What | Value | Page |
