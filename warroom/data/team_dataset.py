@@ -141,3 +141,176 @@ def load(root: Path = DATASET_DIR) -> TeamDataset | None:
                   for r in (_rows("history_daily.csv", root) if (root / "history_daily.csv").is_file() else []))
     return TeamDataset(staff=staff, roster=roster, roster_first=min(days), roster_last=max(days), mold_changes=molds,
                        incidents=incidents, daily=daily)
+
+
+# =====================================================================================================
+# Sensor replay, SOP chunks, past-incident store (issue #12). Same files, same id map; nothing here writes.
+#
+# Replay channel mapping (dataset sensor -> contracts.SensorReading field); only these are replayed, the
+# rest (AMP, RPM, steam flow F) have no channel and stay in the CSV:
+#   <A03|A04>.T -> temp_c, <A03|A04>.FLOW -> water_flow_lpm, A06.T -> temp_c,
+#   <V06|V07|V08>.T -> temp_c, <V..>.P -> steam_kgf_cm2 (re-scaled, see steam_from_bar_abs).
+# pressure_kgf_cm2 (hydraulic) is not in the dataset; the sim keeps its own value.
+# =====================================================================================================
+SENSOR_FILE = "sensor_readings.csv.gz"     # sensor_readings.csv (13 MB) committed gzip-compressed
+SOURCE_TAG = "team_dataset"
+_FIELD = {"T": "temp_c", "FLOW": "water_flow_lpm", "P": "steam_kgf_cm2"}
+
+# Steam: the dataset reports platen steam as bar(abs), 2.5 at the 128 °C setpoint and 1.8 at its 119.5 °C
+# floor (EV-2 steady states). Our press model (warroom/sim/physics.py) is a linearised gauge scale, 5.0
+# kgf/cm² at 128 °C and 4.3 °C per kgf/cm². To keep the detector's steam-vs-temp redundancy check meaningful,
+# the dataset's own P<->T relation is mapped onto that scale linearly: 2.5 -> 5.0, 1.8 -> steam_for_temp(119.5).
+DATASET_P_NOMINAL_BAR_ABS = 2.5
+DATASET_P_FLOOR_BAR_ABS = 1.8
+DATASET_T_FLOOR_C = 119.5
+
+
+def steam_from_bar_abs(p_bar_abs: float) -> float:
+    """Dataset steam pressure (bar abs) -> our model's steam_kgf_cm2 scale (see the note above)."""
+    from warroom.sim.physics import STEAM_NOMINAL_KGF_CM2, steam_for_temp
+    gain = (STEAM_NOMINAL_KGF_CM2 - steam_for_temp(DATASET_T_FLOOR_C)) / (
+        DATASET_P_NOMINAL_BAR_ABS - DATASET_P_FLOOR_BAR_ABS)
+    return round(STEAM_NOMINAL_KGF_CM2 + (p_bar_abs - DATASET_P_NOMINAL_BAR_ABS) * gain, 3)
+
+
+@dataclass(frozen=True)
+class ReplayWindow:
+    """One 1 Hz window of sensor_readings. `start` is where playback begins (3 min before the fault, so the
+    detector learns its baseline); `fault_at` is events.csv fault_start."""
+    name: str
+    event_id: str
+    start: datetime
+    end: datetime
+    fault_at: datetime
+    sensors: tuple[str, ...]
+
+
+def _ts(s: str) -> datetime:
+    return datetime.fromisoformat(s).replace(tzinfo=TZ)
+
+
+HISTORY_LEAD_S = 1800.0   # the 1 Hz data starts 39/41 min before playback: enough for a 30-min history
+
+# The dataset is 1 Hz only in these two windows (10 s elsewhere).
+WINDOWS: dict[str, ReplayWindow] = {
+    "ev1": ReplayWindow("ev1", "EV-1", _ts("2026-10-22 14:09:00"), _ts("2026-10-22 15:00:00"),
+                        _ts("2026-10-22 14:12:00"), ("A03.T", "A03.FLOW", "A04.T", "A04.FLOW", "A06.T")),
+    "ev2": ReplayWindow("ev2", "EV-2", _ts("2026-10-28 02:11:00"), _ts("2026-10-28 03:00:00"),
+                        _ts("2026-10-28 02:14:00"), ("V06.T", "V06.P", "V07.T", "V07.P", "V08.T", "V08.P")),
+}
+
+
+def load_table(name: str, root: Path | None = None) -> list[dict[str, str]]:
+    """Any CSV of the dataset ('orders', 'tire_unit', 'audit_cure', ...) as dicts (BOM stripped)."""
+    return _rows(f"{name}.csv", Path(root) if root else DATASET_DIR)
+
+
+def iter_sensor_rows(root: Path | None = None):
+    """Rows of sensor_readings.csv.gz: ts, sensor_id, value, quality, scenario."""
+    import gzip
+    import io
+    with gzip.open((Path(root) if root else DATASET_DIR) / SENSOR_FILE, "rb") as raw, \
+            io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as fh:
+        yield from csv.DictReader(fh)
+
+
+@lru_cache(maxsize=4)
+def _window_values(name: str, root_key: str) -> dict[datetime, dict[str, dict[str, float]]]:
+    """ts -> machine_id -> {field: value} for one window (cached; the gz file is read once per window)."""
+    w = WINDOWS[name]
+    lo = (w.start - timedelta(seconds=HISTORY_LEAD_S)).strftime("%Y-%m-%d %H:%M:%S")
+    hi = w.end.strftime("%Y-%m-%d %H:%M:%S")
+    out: dict[datetime, dict[str, dict[str, float]]] = {}
+    for row in iter_sensor_rows(Path(root_key) if root_key else None):
+        if row["sensor_id"] not in w.sensors or not lo <= row["ts"] <= hi:
+            continue
+        field = _FIELD[row["sensor_id"].split(".", 1)[1]]
+        v = float(row["value"])
+        if field == "steam_kgf_cm2":
+            v = steam_from_bar_abs(v)
+        out.setdefault(_ts(row["ts"]), {}).setdefault(machine_id(row["sensor_id"]), {})[field] = v
+    return out
+
+
+def replay_window(name: str, start_at: datetime | None = None, root: Path | None = None, lead_s: float = 0.0):
+    """The window as ticks (one list per second) of partial SensorReadings on our machine ids. start_at
+    shifts the window so its `start` lands on start_at (the sim clock); None keeps the dataset's own times.
+    lead_s (<= HISTORY_LEAD_S) also returns that many seconds before `start`. Unreplayed channels are None."""
+    from warroom.contracts import SensorReading
+    w = WINDOWS[name]
+    shift = (start_at - w.start) if start_at is not None else timedelta(0)
+    first = w.start - timedelta(seconds=min(max(lead_s, 0.0), HISTORY_LEAD_S))
+    vals = _window_values(name, str(root) if root else "")
+    return [[SensorReading(ts=ts + shift, machine_id=mid, **fields) for mid, fields in sorted(vals[ts].items())]
+            for ts in sorted(t for t in vals if t >= first)]
+
+
+def write_replay_jsonl(name: str, out: Path, start_at: datetime | None = None, root: Path | None = None,
+                       lead_s: float = 0.0) -> int:
+    """Write the window as JSONL in the shape warroom.sim.record_jsonl writes, so warroom.sim.ReplaySource
+    plays it back tick by tick. Overwrites out. Returns the number of readings written."""
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with out.open("w", encoding="utf-8") as fh:
+        for tick in replay_window(name, start_at, root, lead_s):
+            for r in tick:
+                fh.write(r.model_dump_json(exclude_none=True))
+                fh.write("\n")
+                n += 1
+    return n
+
+
+@dataclass(frozen=True)
+class TeamSopChunk:
+    chunk_id: str
+    sop_id: str
+    title: str
+    section: str
+    text: str
+    equipment: tuple[str, ...]
+    keywords: tuple[str, ...]
+
+
+def load_sop_chunks(root: Path | None = None) -> list[TeamSopChunk]:
+    """The 60 chunks of sop_chunks.jsonl (12 SOPs), in file order; [] when the file is absent."""
+    import json
+    p = (Path(root) if root else DATASET_DIR) / "sop_chunks.jsonl"
+    if not p.is_file():
+        return []
+    out = []
+    for line in p.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            d = json.loads(line)
+            out.append(TeamSopChunk(d["chunk_id"], d["sop_id"], d["title"], d["section"], d["text"],
+                                    tuple(d.get("equipment") or ()), tuple(d.get("keywords") or ())))
+    return out
+
+
+class IncidentStore:
+    """The 8 past incidents (history_incident.csv, loaded by `load()` above), read-only.
+
+    Extension point for agent memory: a future read-only tool (e.g. `past_incidents`) wraps for_machine() /
+    search() and is registered in warroom/tools + ASK_TOOLS. Nothing in the agent calls this today."""
+
+    def __init__(self, root: Path | None = None):
+        ds = load(Path(root) if root else DATASET_DIR)
+        self._rows: tuple[Incident, ...] = ds.incidents if ds else ()
+
+    def all(self) -> list[Incident]:
+        return list(self._rows)
+
+    def __len__(self) -> int:
+        return len(self._rows)
+
+    def get(self, incident_id: str) -> Incident | None:
+        return next((i for i in self._rows if i.incident_id == incident_id), None)
+
+    def for_machine(self, mid: str) -> list[Incident]:
+        """Past incidents on one of our machines ('CURE-09'), newest first."""
+        return sorted((i for i in self._rows if i.machine_id == mid), key=lambda i: i.date, reverse=True)
+
+    def search(self, text: str) -> list[Incident]:
+        """Incidents whose equipment/symptom/action/outcome contains any whitespace-separated term."""
+        terms = [t for t in text.split() if t]
+        return [i for i in self._rows if any(t in f"{i.equipment} {i.symptom} {i.action} {i.outcome}" for t in terms)]
