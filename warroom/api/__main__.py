@@ -4,7 +4,8 @@
   demo   run a scenario headless for N sim seconds and print the timeline (no server)
   check  build the runtime once and print which components are real vs fallback
 
-Env (warroom.config.Settings): LLM_MODE, BASE_URL, MODEL, NVIDIA_API_KEY, HOST, PORT, SIM_SPEED, SCENARIO.
+Env (warroom.config.Settings): LLM_MODE, BASE_URL, MODEL, NVIDIA_API_KEY, HOST, PORT, SIM_SPEED, SCENARIO,
+WARROOM_REPLAY (team_ev1 | team_ev2 | team_both: team dataset replay in the normal scenario).
 """
 from __future__ import annotations
 
@@ -29,6 +30,8 @@ def _settings(args):
         over["port"] = args.port
     if getattr(args, "llm_mode", None):
         over["llm_mode"] = args.llm_mode
+    if getattr(args, "replay", None):
+        over["replay"] = args.replay
     return Settings(**over)
 
 
@@ -122,6 +125,8 @@ def main(argv: list[str] | None = None) -> int:
         sp.add_argument("--speed", type=float)
         sp.add_argument("--llm-mode", choices=["mock", "llm"])
         sp.add_argument("--strict", action="store_true", help="fail instead of using fallback components")
+        sp.add_argument("--replay", choices=["team_ev1", "team_ev2", "team_both"],
+                        help="play the team dataset's sensor curves (normal scenario; data/team_dataset_v2)")
         if name == "serve":
             sp.add_argument("--host")
             sp.add_argument("--port", type=int)

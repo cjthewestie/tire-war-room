@@ -18,6 +18,10 @@ Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` sectio
 - Put a number in docs or slides without a file in `bench/results/`, labelled Mac or DGX Spark.
 - Merge your own PR.
 
+## Data
+
+- `data/team_dataset_v2/` is the team's official dataset (synthetic; replay + reference data). CJ, 2026-10-20: 「這份資料是隊友做的，當作團隊正式資料集」. Dataset machine codes map to ours only through `warroom/data/team_ids.py`; read `data/team_dataset_v2/README.md` before using it.
+
 ## Notes for CJ's sessions
 
 - The team guide is `CONTRIBUTING.md` (Traditional Chinese); keep it, `.github/` templates and `docs/onboarding/` in step when the workflow changes.

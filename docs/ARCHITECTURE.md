@@ -80,6 +80,8 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 - `press7_temp_drop` (p.11): 02:14:00 CURE-07 128→122 °C predicted 122±1 → wake; 02:14:01 safety: still ≥120, no stop; H1 steam pressure low; S1 cure 36.5 h, S2 #A-311 due in 3 days, night short 1; S3 #A-311 → CURE-09, take 1 from line 2; 02:16:40 approve; 02:31:00 verify 119.5 °C → H1 rejected, safety core already acted; H2 leak / sensor drift, compare CURE-06/08 (same header H2), SOP 「硫化中斷處置」 → CURE-07 out of service; 02:31:30 supervisor rejects cross-team move, picks night overtime.
 - `open_mill_overheat` (p.2): A-BIGOPEN 112 °C rising, water flow low, cause cooling insufficient; ✓ auto notify maintenance (R1); ☐ approve slow raw feed (R3); schedule impact none, 大胎 #07 still 17:00 into press.
 
+- Team dataset replay (`WARROOM_REPLAY` / `--replay team_ev1|team_ev2|team_both`): `warroom/sim/team_replay.py` plays `data/team_dataset_v2/sensor_readings.csv.gz` (EV-1 A03 → A-BIGOPEN, EV-2 V07 → CURE-07, ids via `warroom/data/team_ids.py`) through `ReplaySource` in the NORMAL scenario, time-shifted to the sim clock. Team SOP chunks are indexed in the KB's `<collection>_team` collection and come back from `sop_search` as `team_hits`; past incidents load into the read-only `warroom.data.team_dataset.IncidentStore` (no agent tool yet).
+
 ## LLM
 
 One commander, OpenAI-compatible: `LLM_MODE=mock|llm`, `BASE_URL`, `MODEL`, `NVIDIA_API_KEY`. Constrained output = `CommanderPlan.model_json_schema()` (vLLM `guided_json` / xgrammar, else `response_format: json_schema`). Mock mode reproduces both scenarios with no model. Spark target: Nemotron 3.5 Lightning 30B-A3B NVFP4 on vLLM.

@@ -51,13 +51,22 @@ def set_default_db(db: OrdersDB | None) -> None:
         _default_db = db
 
 
+TEAM_HITS_K = 2
+
+
 def sop_search_tool(ctx: Any, args: dict[str, Any]) -> dict[str, Any]:
-    """{"query", "k"} -> {"query", "mode", "hits": [SopHit json]} — each hit cites sop_id/title/source."""
+    """{"query", "k"} -> {"query", "mode", "hits": [SopHit json], "team_hits": [SopHit json]}.
+    hits = the house SOPs (warroom/kb/sop), each citing sop_id/title/source file. team_hits = the
+    best TEAM_HITS_K team dataset SOPs (source "team_dataset", synthetic reference), when the KB has them."""
     a = SopSearchArgs.model_validate(args)
     kb = getattr(ctx, "kb", None) or default_kb()
     hits = kb.search(a.query, k=a.k)
-    return {"query": a.query, "mode": getattr(kb, "mode", "unknown"),
-            "hits": [h.model_dump(mode="json") for h in hits]}
+    out = {"query": a.query, "mode": getattr(kb, "mode", "unknown"),
+           "hits": [h.model_dump(mode="json") for h in hits]}
+    search_team = getattr(kb, "search_team", None)
+    if callable(search_team):
+        out["team_hits"] = [h.model_dump(mode="json") for h in search_team(a.query, k=TEAM_HITS_K)]
+    return out
 
 
 def query_orders_shifts_tool(ctx: Any, args: dict[str, Any]) -> dict[str, Any]:

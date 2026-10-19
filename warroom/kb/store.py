@@ -8,6 +8,12 @@ SOP (its best chunk), each carrying the SOP id, title, file and section as the c
 
 If the embedding model cannot be loaded (no cache and no network), the KB degrades to a
 lexical-only in-memory index instead of failing: `mode` says which one is active.
+
+Team dataset SOPs (data/team_dataset_v2/sop_chunks.jsonl, 60 chunks / 12 SOPs, synthetic; CJ
+2026-10-20: the team's official dataset) are indexed alongside, in their own collection
+`<collection>_team`, every chunk tagged source="team_dataset". `search()` still ranks only the
+15 house SOPs (the page-11 answers stay exactly as they were); `search_team()` ranks the team
+chunks with the same hybrid score, and the sop_search tool returns both (`hits`, `team_hits`).
 """
 from __future__ import annotations
 
@@ -32,6 +38,7 @@ DEFAULT_QDRANT_PATH = ROOT / "data" / "runtime" / "qdrant"
 DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
 DEFAULT_CACHE_DIR = ROOT / "data" / "runtime" / "fastembed_cache"
 MAX_CHUNK_CHARS = 450
+TEAM_SOURCE = "team_dataset"
 
 _TITLE_RE = re.compile(r"^#\s*(SOP-[A-Z]+-\d+)\s+(.+?)\s*$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
@@ -117,6 +124,14 @@ def load_corpus(sop_dir: Path) -> list[SopChunk]:
     return chunks
 
 
+def load_team_chunks(dataset_dir: Path | None = None) -> list[SopChunk]:
+    """Team dataset SOP chunks as SopChunks: source = "team_dataset", section carries the chunk id,
+    n = position in the file (unique inside the team collection). [] when the file is absent."""
+    from warroom.data.team_dataset import load_sop_chunks
+    return [SopChunk(c.sop_id, c.title, TEAM_SOURCE, f"{c.section}（{c.chunk_id}）", i, c.text)
+            for i, c in enumerate(load_sop_chunks(dataset_dir))]
+
+
 def _bigrams(text: str) -> set[str]:
     chars = _TOKEN_RE.findall(text.lower())
     grams = {a + b for a, b in itertools.pairwise(chars)}
@@ -183,7 +198,8 @@ class QdrantSopKB:
     (url) on the Spark. Answers "硫化中斷處置" with the SOP of that title (page 11)."""
 
     def __init__(self, path: Path | str | None = None, url: str | None = None, sop_dir: Path | None = None,
-                 embed_model: str | None = None, collection: str = "sop"):
+                 embed_model: str | None = None, collection: str = "sop", team: bool = True,
+                 team_dataset_dir: Path | None = None):
         self.path = path if path is not None else DEFAULT_QDRANT_PATH
         self.url = url
         self.sop_dir = Path(sop_dir) if sop_dir else DEFAULT_SOP_DIR
@@ -192,6 +208,12 @@ class QdrantSopKB:
         self.mode = "unloaded"           # "vector" | "lexical" once ready
         self._chunks: list[SopChunk] = []
         self._ready = False
+        self.team = team
+        self.team_dataset_dir = team_dataset_dir
+        self.team_collection = f"{collection}_team"
+        self.team_mode = "unloaded"      # "vector" | "lexical" | "off"
+        self._team_chunks: list[SopChunk] = []
+        self._team_ready = False
         self._lock = threading.RLock()
 
     @classmethod
@@ -204,9 +226,9 @@ class QdrantSopKB:
     def _embed(self, texts: list[str]) -> list[list[float]]:
         return [v.tolist() for v in _get_embedder(self.embed_model).embed(texts)]
 
-    def _corpus_hash(self) -> str:
+    def _corpus_hash(self, chunks: list[SopChunk] | None = None) -> str:
         h = hashlib.sha256(self.embed_model.encode())
-        for c in self._chunks:
+        for c in (self._chunks if chunks is None else chunks):
             h.update(c.embed_text.encode())
         return h.hexdigest()[:16]
 
@@ -221,23 +243,58 @@ class QdrantSopKB:
                 log.warning("SOP KB vector index unavailable (%s); using lexical-only search", e)
                 self.mode = "lexical"
             self._ready = True
+            self._team_ready = False
+            self._ensure_team(rebuild=True)
             return len(self._chunks)
 
-    def _ingest_vectors(self) -> None:
+    def _ingest_vectors(self, chunks: list[SopChunk] | None = None, collection: str | None = None) -> None:
         from qdrant_client import models
+        chunks = self._chunks if chunks is None else chunks
+        collection = collection or self.collection
         client = _get_client(self.path, self.url)
-        vectors = self._embed([c.embed_text for c in self._chunks])
-        if client.collection_exists(self.collection):
-            client.delete_collection(self.collection)
-        client.create_collection(self.collection, vectors_config=models.VectorParams(
+        vectors = self._embed([c.embed_text for c in chunks])
+        if client.collection_exists(collection):
+            client.delete_collection(collection)
+        client.create_collection(collection, vectors_config=models.VectorParams(
             size=len(vectors[0]), distance=models.Distance.COSINE))
-        tag = self._corpus_hash()
+        tag = self._corpus_hash(chunks)
         points = [models.PointStruct(
             id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"{c.source}#{c.n}")), vector=v,
             payload={"sop_id": c.sop_id, "title": c.title, "source": c.source, "section": c.section,
                      "n": c.n, "body": c.body, "corpus": tag})
-            for c, v in zip(self._chunks, vectors)]
-        client.upsert(self.collection, points=points, wait=True)
+            for c, v in zip(chunks, vectors)]
+        client.upsert(collection, points=points, wait=True)
+
+    def _ensure_team(self, rebuild: bool = False) -> None:
+        """Index the team dataset chunks in their own collection (reused when unchanged).
+        Never raises: no file -> team_mode "off"; no model / qdrant down -> "lexical"."""
+        if self._team_ready:
+            return
+        with self._lock:
+            if self._team_ready:
+                return
+            self._team_chunks = load_team_chunks(self.team_dataset_dir) if self.team else []
+            if not self._team_chunks:
+                self.team_mode, self._team_ready = "off", True
+                return
+            if self.mode != "vector":
+                self.team_mode, self._team_ready = "lexical", True
+                return
+            try:
+                client = _get_client(self.path, self.url)
+                tag = self._corpus_hash(self._team_chunks)
+                reuse = False
+                if not rebuild and client.collection_exists(self.team_collection):
+                    pts, _ = client.scroll(self.team_collection, limit=1, with_payload=True)
+                    reuse = (client.count(self.team_collection).count == len(self._team_chunks) and bool(pts)
+                             and pts[0].payload.get("corpus") == tag)
+                if not reuse:
+                    self._ingest_vectors(self._team_chunks, self.team_collection)
+                self.team_mode = "vector"
+            except Exception as e:  # noqa: BLE001 - degrade, never fail a search
+                log.warning("team SOP vector index unavailable (%s); lexical only", e)
+                self.team_mode = "lexical"
+            self._team_ready = True
 
     def _ensure_ready(self) -> None:
         if self._ready:
@@ -262,16 +319,25 @@ class QdrantSopKB:
 
     # ---------------------------------------------------------------- search
     def search(self, query: str, k: int = 3) -> list[SopHit]:
-        """Best chunk of each of the top-k SOPs, scored by the hybrid score."""
+        """Best chunk of each of the top-k house SOPs, scored by the hybrid score."""
         self._ensure_ready()
-        if not self._chunks or not query.strip():
+        return self._rank(query, k, self._chunks, self.collection, self.mode)
+
+    def search_team(self, query: str, k: int = 2) -> list[SopHit]:
+        """Same hybrid ranking over the team dataset chunks (source "team_dataset"); [] when off."""
+        self._ensure_ready()
+        self._ensure_team()
+        return self._rank(query, k, self._team_chunks, self.team_collection, self.team_mode)
+
+    def _rank(self, query: str, k: int, chunks: list[SopChunk], collection: str, mode: str) -> list[SopHit]:
+        if not chunks or not query.strip():
             return []
         cos: dict[tuple[str, int], float] = {}
-        if self.mode == "vector":
+        if mode == "vector":
             try:
                 client = _get_client(self.path, self.url)
-                res = client.query_points(self.collection, query=self._embed([query])[0],
-                                          limit=len(self._chunks), with_payload=True)
+                res = client.query_points(collection, query=self._embed([query])[0],
+                                          limit=len(chunks), with_payload=True)
                 for p in res.points:
                     cos[(p.payload["source"], p.payload["n"])] = float(p.score)
             except Exception as e:  # noqa: BLE001 - degrade, never fail a search
@@ -279,7 +345,7 @@ class QdrantSopKB:
 
         qn = _norm(query)
         best: dict[str, tuple[float, SopChunk]] = {}
-        for c in self._chunks:
+        for c in chunks:
             tn = _norm(c.title)
             exact = EXACT_TITLE_BOOST if tn and (tn in qn or (len(qn) >= 4 and qn in tn)) else 0.0
             score = (W_COS * cos.get((c.source, c.n), 0.0)
@@ -298,11 +364,22 @@ class QdrantSopKB:
         chunks = self._chunks or load_corpus(self.sop_dir)
         return {c.sop_id: c.title for c in chunks}
 
+    def team_titles(self) -> dict[str, str]:
+        """sop_id -> title for the team dataset SOPs (empty when off)."""
+        chunks = self._team_chunks or (load_team_chunks(self.team_dataset_dir) if self.team else [])
+        return {c.sop_id: c.title for c in chunks}
+
     def get(self, sop_id: str) -> str | None:
-        """Full markdown of one SOP by id (for a citation link on the dashboard)."""
+        """Full markdown of one SOP by id (for a citation link on the dashboard). Team dataset SOPs
+        are assembled from their chunks."""
         for p in sorted(self.sop_dir.glob("*.md")):
             first = p.read_text(encoding="utf-8").split("\n", 1)[0]
             m = _TITLE_RE.match(first)
             if m and m.group(1) == sop_id:
                 return p.read_text(encoding="utf-8")
+        team = [c for c in (load_team_chunks(self.team_dataset_dir) if self.team else []) if c.sop_id == sop_id]
+        if team:
+            parts = [f"# {sop_id} {team[0].title}〔{TEAM_SOURCE}，合成資料〕"]
+            parts += [f"## {c.section}\n{c.body}" for c in team]
+            return "\n\n".join(parts) + "\n"
         return None
