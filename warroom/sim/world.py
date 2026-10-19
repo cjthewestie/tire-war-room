@@ -40,6 +40,7 @@ from pydantic import BaseModel, ConfigDict
 from warroom.contracts import Line, MachineKind, MachineStatus, ScenarioName, TeamId, TireSize
 from warroom.data import team_dataset
 from warroom.data.team_ids import WORK_GROUP_MACHINES, WORK_GROUP_TEAM
+from warroom.sim.work import GoodsTracker, GoodsView, TaskBoard, TasksView, goods_view
 from warroom.factory import (
     CURE_HOURS,
     CURE_TEMP_MIN_C,
@@ -172,7 +173,7 @@ ZONE_LABELS: dict[str, str] = {
     "line_D": "D 尼龍布", "line_BOND": "貼合", "line_CURE": "硫化區", "break": "休息區", "toilet": "廁所",
     "dock": "碼頭", "off_site": "廠外",
 }
-WorkerState = Literal["待命", "在機台", "搬運", "休息", "如廁", "下班", "請假"]
+WorkerState = Literal["待命", "在機台", "搬運", "休息", "如廁", "下班", "請假", "前往中", "執行中"]   # 前往中/執行中: a task (issue #17)
 OrderStatus = Literal["待排程", "生產中", "完成", "待出貨", "已出貨"]
 ORDER_STAGES: tuple[str, ...] = ("待排程", "生產中", "完成", "待出貨", "已出貨")
 
@@ -401,10 +402,12 @@ class WorldSnapshot(_W):
     quality: QualityView
     maintenance: MaintenanceView
     events: list[WorldEvent]
+    tasks: TasksView                 # issue #17: worker tasks from approved steps
+    goods: GoodsView                 # issue #17: every planned tyre's status + progress ring
 
 
 WORLD_SECTIONS: tuple[str, ...] = ("orders", "materials", "purchase_orders", "finished_goods", "dock", "people",
-                                   "energy", "quality", "maintenance", "events")
+                                   "energy", "quality", "maintenance", "events", "tasks", "goods")
 
 
 # ------------------------------------------------------------------ internal state
@@ -548,6 +551,9 @@ class World:
         self._maint: list[_Maint] = self._plan_maintenance(t0) + self._dataset_mold_changes(t0)
         self._repairs: dict[str, _Maint] = {}
         self._closed_repairs: deque[_Maint] = deque(maxlen=8)
+        self._extra_absent: dict[tuple[str, date], str] = {}   # issue #17: (staff id, date) -> note (a sick call)
+        self.tasks = TaskBoard(self)
+        self.goods = GoodsTracker()
         self._observe_factory(t0, first=True)
         self._update_people(t0, 0.0)
         self._update_energy(t0, 0.0)
@@ -574,7 +580,8 @@ class World:
         return WorldSnapshot(factory_time=t, rev=self.rev, orders=self._orders_view(t), materials=self._materials_view(),
                              purchase_orders=self._po_view(), finished_goods=self._fg_view(), dock=self._dock_view(t),
                              people=self._people_view(), energy=self._energy_view(t), quality=self._quality_view(),
-                             maintenance=self._maint_view(t), events=list(reversed(self.events)))
+                             maintenance=self._maint_view(t), events=list(reversed(self.events)),
+                             tasks=self.tasks.view(), goods=goods_view(self, t))
 
     # ------------------------------------------------------------------ step
     def _step(self, t: datetime, dt: float) -> None:
@@ -584,6 +591,7 @@ class World:
         self._update_dock(t)
         self._update_quality(t)
         self._update_maintenance(t)
+        self.tasks.update(t)
         self._update_people(t, dt)
         self._update_energy(t, dt)
 
@@ -612,6 +620,7 @@ class World:
             prev = self._press_jobs.get(pid)
             if not first and prev is not None and (cur is None or cur[0] != prev[0]):
                 self._final_inspection(t, pid, *prev)
+                self.goods.demolded(prev[0], prev[1], prev[2], pid, t)
             self._press_jobs[pid] = cur
             if cur is not None:
                 m = self.f._m[pid]
@@ -1156,6 +1165,16 @@ class World:
                 return start, False
         return None, False
 
+    def _sick_call(self, w: _Worker, start: datetime | None) -> bool:
+        """Issue #17: a scripted sick call (PlantInput absence) for this staff member on this shift's date."""
+        if start is None or w.staff_id is None:
+            return False
+        note = self._extra_absent.get((w.staff_id, start.date()))
+        if note is None:
+            return False
+        w.note = note
+        return True
+
     def _absent(self, w: _Worker, start: datetime) -> bool:
         """Page 11: the 胎體／胎面膠組 night shift of the scenario date is one operator short (10/03 夜班缺 1 人)."""
         return (w.team is TeamId.BODY and w.sd.name == "夜班" and start.date() == self.f._gap_date
@@ -1213,8 +1232,20 @@ class World:
     def _update_people(self, t: datetime, dt: float) -> None:
         rng = self.rng
         dock_busy = bool(self._trucks)
+        busy = self.tasks.busy_worker_ids()
         for w in self._workers:
             start, absent = self._duty(w, t)
+            if start is not None and not absent and self._sick_call(w, start):
+                absent = True
+            if w.id in busy:
+                # on a task (issue #17): walk to its place, then do it there. The RNG draw of a normal step is
+                # still taken so the world's random stream does not depend on who is busy
+                if dt > 0 and start is not None and not absent:
+                    rng.random()
+                tk = self.tasks.task_of(w.id)
+                if tk is not None:
+                    self._set(w, t, "前往中" if tk.status == "前往中" else "執行中", tk.zone, tk.machine_id)
+                    continue
             if start is None:
                 self._set(w, t, "下班", "off_site")
                 continue
@@ -1248,6 +1279,95 @@ class World:
                 self._set(w, t, "休息", "break", until=t + timedelta(minutes=rng.randint(*COFFEE_MIN)))
             else:
                 self._work(w, t)
+
+    # ------------------------------------------------------------------ issue #17: plant inputs, tasks, goods
+    def on_plant_input(self, pin: Any, at: datetime) -> None:
+        """A scripted plant input (the Factory already changed the order book / shifts): show it in the feed and
+        mark a sick call on the roster."""
+        if pin.kind == "absence" and pin.staff_id:
+            self._extra_absent[(pin.staff_id, at.date())] = f"病假：{pin.note}" if pin.note else "病假"
+            self._emit(at, "absence", pin.text, pin.staff_id)
+        elif pin.kind == "rush_order" and pin.order is not None:
+            self._emit(at, "order_rush", pin.text, pin.order.id)
+        elif pin.kind == "shift_start":
+            self._emit(at, "shift_start", pin.text, None)
+
+    def leave_now(self) -> list[dict[str, Any]]:
+        """People on leave today, any shift (the team dataset roster's sick days, scripted sick calls, and anyone
+        on leave right now), for query_orders_shifts."""
+        out: dict[str, dict[str, Any]] = {}
+        today = self._t.date()
+        for w in self._workers:
+            note = None
+            if w.state == "請假":
+                note = w.note or "請假"
+            elif w.staff_id and (w.staff_id, today) in self._extra_absent:
+                note = self._extra_absent[(w.staff_id, today)]
+            elif w.staff_id and self.ds is not None:
+                row = self.ds.roster.get((w.staff_id, self._ds_date(today)))
+                if row is not None and row.code == "病":
+                    note = f"病假：{row.note}" if row.note else "病假"
+            if note is not None:
+                out[w.id] = {"id": w.id, "name": w.name, "group": w.group, "team_label": w.group or TEAM_LABELS[w.team],
+                             "shift": w.sd.name, "note": note}
+        return list(out.values())
+
+    def on_duty_count(self) -> int:
+        return sum(1 for w in self._workers if w.state not in ("下班", "請假"))
+
+    def plan(self) -> Any:
+        """The ACTIVE schedule the plant runs (None without one)."""
+        try:
+            return self.f._plan()
+        except Exception:  # noqa: BLE001
+            return None
+
+    def started_job_ids(self) -> set[str]:
+        return set(getattr(self.f, "_plan_started", set()))
+
+    def order_status(self, order_id: str) -> str:
+        o = self.f._orders.get(order_id)
+        return self._seed_status(o, self._t) if o is not None else "待排程"
+
+    def next_press_for(self, order_id: str) -> str | None:
+        plan = self.plan()
+        if plan is None:
+            return None
+        started = self.started_job_ids()
+        js = sorted((j for j in plan.jobs if j.order_id == order_id and not j.frozen and j.id not in started),
+                    key=lambda j: j.mold_in)
+        return js[0].press_id if js else None
+
+    def materials_status(self) -> list[dict[str, Any]]:
+        return [m.model_dump() for m in self._materials_view()]
+
+    def worker_name(self, worker_id: str | None) -> str | None:
+        w = next((w for w in self._workers if w.id == worker_id), None)
+        if w is None:
+            return None
+        return f"{w.name}（{w.group}）" if w.group and w.name == w.staff_id else w.name
+
+    def walk_minutes(self, worker_id: str, zone: str) -> float:
+        from warroom.sim.work import WALK_DOCK_MIN, WALK_MIN, WALK_SAME_ZONE_MIN
+        w = next((w for w in self._workers if w.id == worker_id), None)
+        here = w.zone if w is not None else "staff"
+        if here == zone:
+            return WALK_SAME_ZONE_MIN
+        return WALK_DOCK_MIN if "dock" in (here, zone) else WALK_MIN
+
+    def pick_worker(self, team: TeamId, machine_id: str | None, busy: set[str], any_team: bool = False) -> str | None:
+        """A free on-duty person for a task: same team first (one who runs that machine, then one at work, then
+        anyone of the team on duty), else, when allowed, any free production operator. Deterministic."""
+        def free(w: _Worker) -> bool:
+            return w.id not in busy and w.state not in ("下班", "請假", "如廁") and w.role != "主管"
+        pool = [w for w in self._workers if free(w) and w.team is team]
+        if not pool and any_team:
+            pool = [w for w in self._workers if free(w) and w.role in ("作業員", "組長")]
+        if not pool:
+            return None
+        pool.sort(key=lambda w: (machine_id not in (w.machines or ()) and w.home != machine_id,
+                                 w.state not in ("在機台", "待命"), w.slot, w.id))
+        return pool[0].id
 
     def _people_view(self) -> PeopleView:
         workers = [Worker(id=w.id, name=w.name, team=w.team, team_label=w.group or TEAM_LABELS[w.team],

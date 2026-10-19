@@ -1,4 +1,4 @@
-// The plant's people and the dock truck, driven by the live world (GET /api/world, WS "world"; issue #11).
+// Task workers (issue #17; everyone else stands by, two patrol) and the dock truck, driven by the live world (GET /api/world, WS "world"; issue #11).
 // Every on-duty worker is a chibi figure that walks (along the aisles and the east corridor) to where the sim
 // says they are: at their machine, in the war room, the staff corner, the dock; going to the 休息區 or 廁所 they
 // walk to that door and step through it. The truck at the dock drives in when a delivery or a shipment arrives
@@ -95,97 +95,123 @@ const LOOKS = [
 ]
 const ROLE_LOOK: Record<string, number> = { 主管: 2, 維修: 4, 品管: 5 }
 
-interface Walker { f: Figure; path: P[]; yaw: number; vanish: boolean; key: string; shown: boolean; carry: THREE.Object3D }
+interface Walker {
+  f: Figure; path: P[]; yaw: number; key: string; phase: 'to' | 'at' | 'back'; task: THREE.Object3D
+  ring: THREE.Mesh; progress: number; target: P; taskId: string
+}
 
-/** On-duty workers in the hall. Returns null (the static staff corner and loop walkers stay) without a world. */
+/** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
+ *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
+function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Quaternion): boolean {
+  const r = wk.f.root
+  wk.ring.quaternion.copy(camQ)
+  wk.task.rotateY(dt * 2)
+  if (wk.path.length) {
+    const [tx, tz] = wk.path[0]
+    const dx = tx - r.position.x, dz = tz - r.position.z
+    const d = Math.hypot(dx, dz)
+    const step = SPEED * dt
+    if (d <= step) { r.position.set(tx, 0, tz); wk.path.shift() } else {
+      r.position.x += (dx / d) * step
+      r.position.z += (dz / d) * step
+      r.rotation.y = Math.atan2(dx, dz)
+    }
+    walkCycle(wk.f, t, 10, 0.5)
+    if (!wk.path.length) {
+      restPose(wk.f)
+      if (wk.phase === 'back') return true
+      wk.phase = 'at'
+    }
+    return false
+  }
+  r.rotation.y = wk.yaw
+  wk.f.body.position.y = 0.36 + Math.sin(t * 2 + i) * 0.007
+  if (wk.key.startsWith('執行中')) wk.f.armR.rotation.x = -0.6 + Math.sin(t * 3 + i) * 0.25
+  return false
+}
+
+const STANDBY: P = [10.45, 0.1]          // 員工待命區: where a task worker comes from and goes back to
+const ON_TASK = new Set(['前往中', '執行中'])
+
+function ringGeo(p: number) {
+  return new THREE.RingGeometry(0.07, 0.1, 24, 1, Math.PI / 2, -Math.max(0.02, Math.min(1, p)) * Math.PI * 2)
+}
+
+/** Workers on a real task (issue #17). Everyone else stands by in the staff corner (StaffCorner) and two patrol the
+ *  aisles (Walkers): CJ, 2026-10-20 「恢復人力待命 有一兩個人巡邏」. A worker with a task (world state 前往中 / 執行中 and
+ *  a matching item in world.tasks) leaves the staff corner, walks to the task's machine with a marker and a progress
+ *  ring over the head, works there, and walks back into standby when the task is 完成. */
 export function WorldPeople({ world }: { world: WorldSnapshot }) {
   const group = useMemo(() => new THREE.Group(), [])
   const walkers = useRef(new Map<string, Walker>())
-  // the target of each worker follows the live world; the walk itself is per frame
   useEffect(() => {
-    const seen = new Set<string>()
+    const tasks = world.tasks?.items ?? []
+    const active = new Set<string>()
     world.people.workers.forEach((w, k) => {
-      seen.add(w.id)
-      let wk = walkers.current.get(w.id)
+      const t = tasks.find((x) => x.worker_id === w.id && ON_TASK.has(x.status))
+      if (!t || !ON_TASK.has(w.state)) return
+      active.add(w.id)
       const s = spot(w, k)
-      const key = `${w.state}|${w.zone}|${w.machine_id ?? ''}`
+      let wk = walkers.current.get(w.id)
       if (!wk) {
         const idx = ROLE_LOOK[w.role] ?? (k % 4)
         const f = makeFigure(LOOKS[idx])
         f.root.scale.setScalar(0.85)
         restPose(f)
-        const carry = box(0.16, 0.13, 0.16, '#c9a06a', 0, -0.05, 0.08)
-        carry.visible = false
-        f.handR.add(carry)
+        const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: '#f5b83d' }))
+        task.position.set(0, 1.05, 0)
+        f.root.add(task)
+        const ring = new THREE.Mesh(ringGeo(0), new THREE.MeshBasicMaterial({ color: '#76b900', side: THREE.DoubleSide }))
+        ring.position.set(0, 1.3, 0)
+        f.root.add(ring)
         group.add(f.root)
-        wk = { f, path: [], yaw: s.yaw, vanish: s.vanish, key: '', shown: !s.vanish, carry }
-        f.root.position.set(s.p[0], 0, s.p[1])
-        f.root.visible = wk.shown
+        f.root.position.set(STANDBY[0], 0, STANDBY[1])
+        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id }
         walkers.current.set(w.id, wk)
+      } else if (wk.phase === 'back' || wk.taskId !== t.id || wk.target[0] !== s.p[0] || wk.target[1] !== s.p[1]) {
+        // a new task (or the same one again after starting back): head for its place from where they are
+        wk.path = route([wk.f.root.position.x, wk.f.root.position.z], s.p)
+        wk.phase = 'to'
+        wk.target = s.p
+        wk.taskId = t.id
       }
-      if (wk.key !== key) {
-        const from: P = [wk.f.root.position.x, wk.f.root.position.z]
-        if (!wk.shown && !s.vanish) {
-          // coming back into the hall: appear at the door they left by (or the big doors)
-          const back = w.zone === 'off_site' ? BIG_DOOR : from
-          wk.f.root.position.set(back[0], 0, back[1])
-          wk.shown = true
-          wk.f.root.visible = true
-          wk.path = route(back, s.p)
-        } else if (wk.shown) {
-          wk.path = route(from, s.p)
-        }
-        wk.yaw = s.yaw
-        wk.vanish = s.vanish
-        wk.key = key
-        wk.carry.visible = w.state === '搬運'
+      wk.yaw = s.yaw
+      wk.key = `${w.state}|${t.id}`
+      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
+      if (Math.abs(wk.progress - t.progress) > 0.01) {
+        wk.progress = t.progress
+        wk.ring.geometry.dispose()
+        wk.ring.geometry = ringGeo(t.progress)
       }
     })
+    // task done (or reassigned away): walk back to standby, then join the staff corner
     for (const [id, wk] of walkers.current) {
-      if (!seen.has(id)) { group.remove(wk.f.root); walkers.current.delete(id) }
+      if (active.has(id) || wk.phase === 'back') continue
+      wk.phase = 'back'
+      wk.key = 'back'
+      wk.path = route([wk.f.root.position.x, wk.f.root.position.z], STANDBY)
+      wk.task.visible = false
+      wk.ring.visible = false
     }
-  }, [world.people.workers, group])
-  // test hook (headless e2e only: dev build or ?test=1): where each figure is and whether it is in the hall
+  }, [world.people.workers, world.tasks, group])
+  // test hook (headless e2e only: dev build or ?test=1): the task walkers (nobody else leaves standby)
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
     w.__world3d = {
       walkers: () => [...walkers.current.entries()].map(([id, wk]) => ({
-        id, shown: wk.shown, walking: wk.path.length > 0, x: wk.f.root.position.x, z: wk.f.root.position.z, key: wk.key,
+        id, shown: true, walking: wk.path.length > 0, x: wk.f.root.position.x, z: wk.f.root.position.z, key: wk.key,
+        phase: wk.phase, task: wk.phase === 'back' ? null : wk.key.split('|')[0], task_id: wk.taskId,
+        target: wk.target, progress: wk.progress,
       })),
     }
     return () => { delete w.__world3d }
   }, [])
-  useFrame(({ clock }, dt0) => {
+  useFrame(({ clock, camera }, dt0) => {
     const dt = Math.min(dt0, 0.05)
-    const t = clock.elapsedTime
     let i = 0
-    for (const wk of walkers.current.values()) {
-      i++
-      const r = wk.f.root
-      if (!wk.shown) continue
-      if (wk.path.length) {
-        const [tx, tz] = wk.path[0]
-        const dx = tx - r.position.x, dz = tz - r.position.z
-        const d = Math.hypot(dx, dz)
-        const step = SPEED * dt
-        if (d <= step) { r.position.set(tx, 0, tz); wk.path.shift() } else {
-          r.position.x += (dx / d) * step
-          r.position.z += (dz / d) * step
-          r.rotation.y = Math.atan2(dx, dz)
-        }
-        walkCycle(wk.f, t, 10, 0.5)
-        if (wk.carry.visible) wk.f.armR.rotation.x = -0.9
-        if (!wk.path.length) {
-          restPose(wk.f)
-          if (wk.vanish) { wk.shown = false; r.visible = false }
-        }
-      } else {
-        r.rotation.y = wk.yaw
-        wk.f.body.position.y = 0.36 + Math.sin(t * 2 + i) * 0.007
-        // at a machine: a little working motion
-        if (wk.key.startsWith('在機台')) wk.f.armR.rotation.x = -0.6 + Math.sin(t * 3 + i) * 0.25
-      }
+    for (const [id, wk] of walkers.current) {
+      if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); walkers.current.delete(id) }
     }
   })
   return <primitive object={group} />

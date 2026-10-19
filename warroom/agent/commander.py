@@ -116,8 +116,8 @@ def _tool_catalogue() -> str:
         "- confirm_schedule {schedule_version: int, reason} 確認新排程（寫，需主管核准）",
         "- set_cure_time {press_id, total_cure_h, reason} 設定硫化時間建議值（寫，需主管核准）",
         "- notify_teams {teams: [curing|body|side|bead_nylon|bigopen|bond|maintenance|qc|supervisor], "
-        "kind: maintenance|info|slow_feed|pause_feed|staff_move|overtime|machine_out, message, machine_id?} "
-        "通知各組（寫；maintenance/info 自動，其餘需核准）",
+        "kind: maintenance|info|slow_feed|pause_feed|staff_move|overtime|machine_out|dispatch, message, machine_id?} "
+        "通知各組（寫；maintenance/info 自動，其餘需核准；dispatch=派工，核准後由程式轉成人員任務）",
     ])
 
 
@@ -147,7 +147,8 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 10. 若方案讓事件機台停用（machine_out 或 unavailable_presses 含該機），程式以「停用已完成」驗證，expectation 可為 null；其餘方案的 expectation 一律由程式依異常通道定界。
 11. phase=replan 且 context 有 supervisor_rejected（主管否決）、supervisor_discussion（主管討論）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。
 12. context.source=supervisor 時，這不是異常，是主管下的指令（context.command）：hypothesis.cause_code 填 supervisor_command、statement 寫要完成的事、expectation 為 null；只用工具做得到的部分（通知某組用 notify_teams，message 寫清楚要做什麼、何時、哪台機；排程變更用 solve_schedule 再 confirm_schedule；只想知道狀況用讀取工具）。工具做不到的事（搬動機台、改機台設定、開關閥、任何 PLC 動作）不可假裝能做：steps=[]，rationale 說明做不到的原因與可行的替代做法。
-13. context 有 supervisor_discussion 時：主管在核准前提出的條件（constraints，例如某台機某時段保養、不加班、不跨組調人）由程式在每次 solve_schedule 強制套用並檢查結果；你只需保留原計畫的步驟（含 solve_schedule、confirm_schedule 與同一輪的寫入步驟），重新求解。"""
+13. context 有 supervisor_discussion 時：主管在核准前提出的條件（constraints，例如某台機某時段保養、不加班、不跨組調人）由程式在每次 solve_schedule 強制套用並檢查結果；你只需保留原計畫的步驟（含 solve_schedule、confirm_schedule 與同一輪的寫入步驟），重新求解。
+14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
 
 
 def build_user_message(req: CommanderRequest) -> str:
@@ -376,6 +377,27 @@ class OpenAICommander:
 
 
 # =====================================================================================
+# Stable cure temperature (page 11 physics input)
+# =====================================================================================
+def stable_cure_temp(a: Any) -> tuple[float, str | None]:
+    """The temperature a press is expected to cure at from now on, for the Arrhenius formula: the detector's
+    prediction (page 11: 128 -> 122 °C, 預測穩定在 122±1), never below the cure band's floor.
+
+    Why the floor (team dataset EV-2 replay, issue #17): the detector can fire while the curve is still falling
+    (7 號 128 -> 126 °C at -0.89 °C/min); its 30-min forecast is then a straight-line extrapolation (99.8 °C), not a
+    level the press settles at. Curing at 99.8 °C would need 131.6 h, past the 96 h cap, and the event would
+    safe-stop instead of following page 11. Below CURE_TEMP_MIN_C (120 °C) the safety core holds the press anyway
+    (扣模), so no cure plan runs under it: the floor is the coldest temperature a cure plan can mean. Returns
+    (value, why it was floored or None). A prediction at or above the floor is used unchanged (page 11 identical)."""
+    pred = getattr(a, "prediction", None)
+    v = float(pred.predicted_value) if pred is not None else float(a.value)
+    if v < CURE_TEMP_MIN_C:
+        return float(CURE_TEMP_MIN_C), (f"預測 30 分後 {_fmt(v)}°C 為仍在下降的直線外推；"
+                                        f"取硫化下限 {CURE_TEMP_MIN_C:.0f}°C（低於下限安全核心直接扣模）")
+    return v, None
+
+
+# =====================================================================================
 # Deterministic mock commander
 # =====================================================================================
 def _round_half(x: float) -> float:
@@ -417,6 +439,8 @@ class MockCommander:
         ctx = req.context or {}
         if a.kind is AnomalyKind.SUPERVISOR_COMMAND:          # issue #10: a task the supervisor typed
             return self._command(req, hid)
+        if a.kind in (AnomalyKind.SHIFT_START, AnomalyKind.ORDER_RUSH, AnomalyKind.STAFFING_SHORT):   # issue #17
+            return self._plant(req, hid)
         if ctx.get("sop_path"):
             return self._sop_path(req, hid, rejected_ids)
         if len(req.rejected) >= 2:
@@ -468,7 +492,7 @@ class MockCommander:
         size = TireSize(job.get("size", TireSize.M.value))
         ref = float(job.get("setpoint_c") or CURE_TEMP_NOMINAL_C)
         elapsed = float(job.get("cure_elapsed_h", 10.0))
-        stable = a.prediction.predicted_value if a.prediction else a.value
+        stable, floored = stable_cure_temp(a)
         actual = _round_half(stable)
         band = (a.prediction.band_hi - a.prediction.predicted_value) if a.prediction else 1.0
         exp_val = round(actual - max(band, 1.0))
@@ -497,6 +521,8 @@ class MockCommander:
                            "message": f"{lbl}延長硫化至 ${{S1.total_cure_h}} h（+${{S1.extra_h}} h），已依新排程調整下一模"}),
         ]
         stable_txt = f"{_fmt(stable)}±{_fmt(band)}°C"
+        if floored:
+            stable_txt = f"{_fmt(stable)}°C（下限）"
         return CommanderPlan(
             goal=f"{machine_label(mid, short=True)}降溫，大胎不能延誤",
             hypothesis=Hypothesis(
@@ -769,6 +795,69 @@ class MockCommander:
             alert_card=AlertCard(title=f"主管指令：{text}"[:20], summary=why[:60] or text[:60]),
             rationale=why,
         )
+
+    def _plant(self, req: CommanderRequest, hid: str) -> CommanderPlan:
+        """Issue #17 plant events, rule mode. The schedule numbers come from the solver; the A/B staffing options
+        from the solver's staffing_options; the worker tasks from code after approval (派工). A supervisor reject or
+        a tool failure ends with no step (the plan in force stays)."""
+        a, ctx = req.anomaly, req.context or {}
+        pe = ctx.get("plant_event") or {}
+        all_teams = [TeamId.BODY.value, TeamId.BIGOPEN.value, TeamId.SIDE.value, TeamId.BEAD_NYLON.value,
+                     TeamId.BOND.value, TeamId.CURING.value]
+        if req.phase == "replan" and (ctx.get("supervisor_rejected") or ctx.get("sop_path")):
+            why = "主管否決：維持現行排程，不派工" if ctx.get("supervisor_rejected") else "工具失敗：維持現行排程，交主管人工處理"
+            return CommanderPlan(goal=f"{a.message}"[:80],
+                                 hypothesis=Hypothesis(id=hid, statement=why, cause_code=a.kind.value,
+                                                       status=HypothesisStatus.ACTIVE),
+                                 steps=[], alert_card=AlertCard(title=why[:20], summary=a.message[:60]), rationale=why)
+        if a.kind is AnomalyKind.SHIFT_START:
+            steps = [
+                PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查今日訂單、班表、出勤與原料", args={}),
+                PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"], purpose="依今日訂單與出勤排程",
+                         args={"time_limit_s": 10.0}),
+                PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認今日排程（需主管核准）",
+                         args={"schedule_version": "$S2.schedule_version", "reason": "早班開工：今日計畫"}),
+                PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"], purpose="派工：今日計畫（需主管核准）",
+                         args={"teams": all_teams, "kind": NotifyKind.DISPATCH.value,
+                               "message": "今日計畫：依 SOP 暖機（密煉 → 開煉），首批膠料補到 A 線，依排程開工"}),
+            ]
+            return CommanderPlan(
+                goal="早班開工：今日訂單準時開工", steps=steps,
+                hypothesis=Hypothesis(id=hid, statement="依今日訂單與出勤開工，暖機與補料完成後即可依排程生產",
+                                      cause_code="shift_start", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+                alert_card=AlertCard(title="早班開工：今日計畫", summary="已查訂單、出勤、暖機順序與原料；今日計畫待核准。"),
+                rationale="開班例行：讀取今日狀況，排程由求解器產生，派工需主管核准，任務由程式派給現場。")
+        if a.kind is AnomalyKind.ORDER_RUSH:
+            oid = str(((pe.get("order") or {}).get("id")) or "急單")
+            steps = [
+                PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose=f"查 {oid} 與現有訂單交期", args={}),
+                PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"], purpose=f"插入 {oid} 重排，看誰延後",
+                         args={"time_limit_s": 10.0}),
+                PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認插單排程（需主管核准）",
+                         args={"schedule_version": "$S2.schedule_version", "reason": f"插單 {oid}"}),
+                PlanStep(id="S4", tool=ToolName.NOTIFY_TEAMS, depends_on=["S3"], purpose=f"派工：{oid} 補料、備模（需主管核准）",
+                         args={"teams": [TeamId.BODY.value, TeamId.CURING.value], "kind": NotifyKind.DISPATCH.value,
+                               "message": f"急單 {oid} 插單：依新排程補料、備模"}),
+            ]
+            return CommanderPlan(
+                goal=f"插單 {oid}：排入急單，看清誰延後、誰誤交期", steps=steps,
+                hypothesis=Hypothesis(id=hid, statement=f"{oid} 可插入現有排程，其他訂單仍在交期內",
+                                      cause_code="order_rush", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+                alert_card=AlertCard(title=f"插單：{oid}", summary=f"{a.message[:40]}；重排看誰延後。"),
+                rationale="急單加入訂單簿；求解器重排並列出延後的訂單，主管核准後才生效。")
+        steps = [
+            PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查班表缺口與出勤", args={}),
+            PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"], purpose="依缺人重排，提出補人方案",
+                     args={"time_limit_s": 10.0}),
+            PlanStep(id="S3", tool=ToolName.CONFIRM_SCHEDULE, depends_on=["S2"], purpose="確認排程與補人方案（需主管核准）",
+                     args={"schedule_version": "$S2.schedule_version", "reason": f"人力缺口：{a.message}"[:120]}),
+        ]
+        return CommanderPlan(
+            goal="人力缺口：出入模不中斷", steps=steps,
+            hypothesis=Hypothesis(id=hid, statement="缺 1 人可由加班或跨組支援補上，排程不變", cause_code="staffing_short",
+                                  status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+            alert_card=AlertCard(title="人力缺口", summary=f"{a.message[:40]}；求解器提出補人方案。"),
+            rationale="缺人由求解器找出受影響的班別並提出加班／調人方案（A/B），主管選擇後派工。")
 
     def _sop_path(self, req: CommanderRequest, hid: str, rejected_ids: list[str]) -> CommanderPlan:
         a, ctx = req.anomaly, req.context or {}

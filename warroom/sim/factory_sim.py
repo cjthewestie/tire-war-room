@@ -27,6 +27,7 @@ from warroom.contracts import (
     MachineStatus,
     Order,
     OrderProgress,
+    PlantInput,
     SafetyAction,
     SafetyActionKind,
     Scenario,
@@ -134,6 +135,13 @@ class Factory:
         self._pending: list[tuple[datetime, ScenarioStep]] = sorted(
             ((t0 + timedelta(seconds=s.at_offset_s), s) for s in sc.steps if s.fault is not None),
             key=lambda x: x[0])
+        # issue #17: scripted plant inputs (shift start, rush order, sick call) change the order book or the
+        # roster, never a machine; each one fired is handed to the runtime (drain_plant_inputs) as a plant event
+        self._plant_pending: list[tuple[datetime, PlantInput]] = sorted(
+            ((t0 + timedelta(seconds=s.at_offset_s), s.plant) for s in sc.steps if s.plant is not None),
+            key=lambda x: x[0])
+        self._plant_fired: list[tuple[datetime, PlantInput]] = []
+        self._absences: list[tuple[TeamId, date, str, int]] = []
         self.safety_log = []
         self._m: dict[str, _Mach] = {}
         for i, d in enumerate(MACHINES):
@@ -148,7 +156,10 @@ class Factory:
             self._m[d.id] = m
         self._init_orders(t0)
         self._init_presses(t0)
-        self._gap_date: date = t0.date()
+        # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
+        # staffing gap, if any, is the scripted sick call)
+        from warroom.sim.scenarios import PLANT_SCENARIOS
+        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS else t0.date()
         if self.backfill_min > 0:
             self._backfill(t0, self.backfill_min)
         # the rest of the plant (orders over time, materials, dock, people, energy, quality, maintenance):
@@ -376,6 +387,9 @@ class Factory:
         while self._pending and self._pending[0][0] <= now:
             at, st = self._pending.pop(0)
             self.inject_fault(st.fault, at=at)          # type: ignore[arg-type]
+        while self._plant_pending and self._plant_pending[0][0] <= now:
+            at, pin = self._plant_pending.pop(0)
+            self.apply_plant_input(pin, at)
         n_sub = min(MAX_SUBSTEPS, max(1, math.ceil(dt))) if dt > 0 else 0
         h = dt / n_sub if n_sub else 0.0
         for k in range(n_sub):
@@ -609,6 +623,7 @@ class Factory:
                 head = sd.headcount
                 if d == self._gap_date and sd.team is TeamId.BODY and sd.name == "夜班":
                     head = sd.headcount - 1
+                head -= sum(n for team, day, name, n in self._absences if team is sd.team and day == d and name == sd.name)
                 out.append(Shift(id=f"{sd.team.value}-{d:%Y%m%d}-{sd.name}", team=sd.team, name=sd.name,
                                  start=start, end=end, headcount=head, required=sd.headcount))
         return out
@@ -654,6 +669,33 @@ class Factory:
             if m.status in (MachineStatus.RUNNING, MachineStatus.WARNING, MachineStatus.IDLE):
                 m.status = MachineStatus.ALARM
             m.note = f"警示：{action.message}"
+
+    # ------------------------------------------------------------------ issue #17: plant inputs (not machine faults)
+    def apply_plant_input(self, pin: PlantInput, at: datetime | None = None) -> None:
+        """A rush order joins the order book (the scheduler sees it on the next solve); a sick call takes a
+        person off a shift (factory shifts() headcount, the world's roster). The shift start changes nothing.
+        Machines are never touched."""
+        at = at or self._t
+        if pin.kind == "rush_order" and pin.order is not None:
+            self.add_order(pin.order)
+        elif pin.kind == "absence" and pin.team is not None and pin.shift_name:
+            self._absences.append((TeamId(pin.team), at.date(), pin.shift_name, max(1, pin.people)))
+        self._plant_fired.append((at, pin))
+        try:
+            self.world.on_plant_input(pin, at)
+        except Exception:  # noqa: BLE001 - the world view must never break the plant loop
+            log.exception("world plant input failed")
+
+    def drain_plant_inputs(self) -> list[tuple[datetime, PlantInput]]:
+        """Plant inputs fired since the last call (the runtime opens a plant event for each)."""
+        out, self._plant_fired = self._plant_fired, []
+        return out
+
+    def add_order(self, order: Order) -> None:
+        if order.id in self._orders:
+            return
+        self._orders[order.id] = order
+        self._in_press.setdefault(order.id, 0)
 
     def set_machine_status(self, machine_id: str, status: MachineStatus, note: str | None = None) -> None:
         m = self._m[machine_id]

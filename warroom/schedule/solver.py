@@ -243,6 +243,23 @@ def _prepare(req: SolveRequest) -> _Ctx:
                                  priority=prio(pj.order_id), orig_press=pj.press_id, orig_mold_in=mi))
     if not ctx.free:
         ctx.free = _generate_jobs(ctx, unavailable, due_min, prio, horizon_end)
+    # issue #17 (插單): a rush order the active plan does not carry at all (it arrived after that plan was made)
+    # gets its tyres here, so a re-solve inserts it and shows who moves. Only rush orders (priority >= 2) with no
+    # tyre in the plan: a plan that already carries every rush order is solved exactly as before.
+    planned = {j.order_id for j in ctx.frozen + ctx.free} | {pj.order_id for pj in prev_jobs}
+    used_ids = {j.id for j in ctx.frozen + ctx.free}
+    for o in sorted(req.orders, key=lambda o: (o.due, -o.priority, o.id)):
+        if o.priority < 2 or o.id in planned or o.qty - o.done <= 0:
+            continue
+        seq = 0
+        for _ in range(o.qty - o.done):
+            seq += 1
+            while (jid := f"J-{o.id.lstrip('#')}-{seq:02d}") in used_ids:
+                seq += 1
+            used_ids.add(jid)
+            ctx.free.append(_Job(jid, o.id, o.size, o.mold_id, int(F.CURE_HOURS[o.size] * 60), False,
+                                 _eligible(o.size, unavailable), lb=now_m + F.BACKPROP[o.size]["a_feed_min"],
+                                 due=due_min(o.id), priority=o.priority))
     _guard_slow_presses(ctx, unavailable)
     affected = set(req.cure_overrides_h) | unavailable
     for p in affected:
@@ -576,6 +593,12 @@ def _finalize(ctx: _Ctx, assign: dict[str, tuple[str, int]], solver: SolverName,
     prev = {pj.id: pj for pj in req.previous.jobs} if req.previous else {}
     for sj in jobs:
         pj = prev.get(sj.id)
+        if pj is None and not sj.frozen and req.previous is not None and \
+                not any(p.order_id == sj.order_id for p in req.previous.jobs):
+            # issue #17: a tyre of an order the previous plan did not carry (an inserted rush order)
+            moves.append(JobMove(job_id=sj.id, order_id=sj.order_id, from_press=None, to_press=sj.press_id,
+                                 from_mold_in=None, to_mold_in=sj.mold_in))
+            continue
         if pj is None or sj.frozen:
             continue
         if pj.press_id != sj.press_id or pj.mold_in != sj.mold_in:

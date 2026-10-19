@@ -1,0 +1,26 @@
+/* issue #17: progress rings, worker tasks, goods queue. Functional only; uses the shared tokens. */
+.pring { flex: none; vertical-align: middle; }
+.pring-bg { stroke: var(--panel-3); }
+.pring-fg { stroke: var(--accent); transition: stroke-dasharray .6s; }
+.pring-idle .pring-fg { stroke: var(--ink-faint); }
+.pring-warn .pring-fg { stroke: var(--warn); }
+.pring-alarm .pring-fg { stroke: var(--alarm); }
+.pring-done .pring-fg { stroke: var(--accent); }
+.pring-t { font-size: 9px; fill: currentColor; }
+.tasks, .goods { list-style: none; margin: 0; padding: 0; }
+.task { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
+.task-b { min-width: 0; flex: 1; }
+.tasks.compact .task { padding: 4px 0; }
+.tchip { font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--panel-3); }
+.tchip.st-前往中 { color: var(--warn); }
+.tchip.st-執行中 { color: var(--accent); }
+.tchip.st-完成 { opacity: .7; }
+.good { display: flex; gap: 6px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.good-s { font-size: 12px; min-width: 3.5em; }
+.good-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.good.blocked .good-s, .good.late .good-s { color: var(--warn); }
+.tag.moved.later { color: var(--warn); }
+.tag.moved.earlier { color: var(--accent); }
+.order-ring { display: inline-flex; align-items: center; gap: 6px; }
+.event-tasks { margin-top: 8px; }
+@media (prefers-reduced-motion: reduce) { .pring-fg { transition: none; } }

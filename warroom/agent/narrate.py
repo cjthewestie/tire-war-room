@@ -5,7 +5,7 @@ from the model. Formatters are defensive (``.get``) because tool payloads are di
 from __future__ import annotations
 
 import re
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from warroom.contracts import Channel, Line, NotifyKind, PlanStep, ToolName
@@ -26,7 +26,8 @@ CHANNEL_LABELS = {Channel.TEMP: "溫度", Channel.PRESSURE: "壓力", Channel.WA
                   Channel.STEAM: "蒸汽壓"}
 NOTIFY_LABELS = {NotifyKind.MAINTENANCE: "通知維修", NotifyKind.INFO: "通知", NotifyKind.SLOW_FEED: "放慢生料投入",
                  NotifyKind.PAUSE_FEED: "暫停投料", NotifyKind.STAFF_MOVE: "跨組調人",
-                 NotifyKind.OVERTIME: "加班", NotifyKind.MACHINE_OUT: "機台停用"}
+                 NotifyKind.OVERTIME: "加班", NotifyKind.MACHINE_OUT: "機台停用",
+                 NotifyKind.DISPATCH: "派工"}
 LINE_PREFIX = {Line.A: "A 線", Line.B: "B 線", Line.C: "C 線", Line.D: "D 線", Line.BOND: "貼合", Line.CURE: ""}
 
 
@@ -204,22 +205,69 @@ def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
     """Press moves grouped by order and target press, one phrase per order (page 11: '#A-311 改 9 號';
     many molds of one order: '#M-201 ×2 → 8 號、×3 → 9 號'). Same-press time shifts are left out."""
     per_order: dict[str, dict[str, int]] = {}
+    new_order: dict[str, dict[str, int]] = {}
     for mv in moves or []:
         to = mv.get("to_press")
+        if to and not mv.get("from_press"):          # issue #17: a tyre of an inserted order (no previous slot)
+            tgt = new_order.setdefault(str(mv.get("order_id")), {})
+            tgt[str(to)] = tgt.get(str(to), 0) + 1
+            continue
         if not to or mv.get("from_press") == to:
             continue
         tgt = per_order.setdefault(str(mv.get("order_id")), {})
         tgt[str(to)] = tgt.get(str(to), 0) + 1
     out: list[str] = []
+
+    def where(p: str) -> str:
+        n = press_no(p)
+        return f"{n} 號" if n else machine_label(p)
+    for oid, targets in new_order.items():
+        out.append(f"{oid} 排入 " + "、".join(f"{where(p)}" + (f" ×{n}" if n > 1 else "") for p, n in targets.items()))
     for oid, targets in per_order.items():
-        def where(p: str) -> str:
-            n = press_no(p)
-            return f"{n} 號" if n else machine_label(p)
         if len(targets) == 1 and next(iter(targets.values())) == 1:
             out.append(f"{oid} 改 {where(next(iter(targets)))}")
         else:
             out.append(f"{oid} " + "、".join(f"×{n} → {where(p)}" for p, n in targets.items()))
     return out
+
+
+def order_shifts(moves: list[dict[str, Any]] | None, jobs: list[dict[str, Any]] | None = None) -> list[str]:
+    """Issue #17 (插單 card): per order, how far its last planned tyre moved in time with this solve (+ = later),
+    from the moves and the solved jobs: old last = the moves' previous slots plus the unmoved jobs, new last =
+    the solved jobs. Inserted orders: '#R-009 新排 2 模（首模 9 號 10/07 14:00）'."""
+    moved: dict[str, list[dict[str, Any]]] = {}
+    for mv in moves or []:
+        moved.setdefault(str(mv.get("order_id")), []).append(mv)
+    by_order: dict[str, list[dict[str, Any]]] = {}
+    for j in jobs or []:
+        if not j.get("frozen"):
+            by_order.setdefault(str(j.get("order_id")), []).append(j)
+
+    def ts(v: Any) -> datetime | None:
+        try:
+            return datetime.fromisoformat(str(v)) if v else None
+        except ValueError:
+            return None
+    out_new: list[str] = []
+    shifts: list[tuple[str, float]] = []
+    for oid, mvs in moved.items():
+        if all(not m.get("from_press") for m in mvs):
+            first = min(mvs, key=lambda m: str(m.get("to_mold_in")))
+            at = ts(first.get("to_mold_in"))
+            p = press_no(str(first.get("to_press") or ""))
+            out_new.append(f"{oid} 新排 {len(mvs)} 模（首模 {p} 號 {at:%m/%d %H:%M}）" if at and p else f"{oid} 新排 {len(mvs)} 模")
+            continue
+        ids = {m.get("job_id") for m in mvs}
+        new_times = [t for j in by_order.get(oid, []) if (t := ts(j.get("mold_in")))]
+        old_times = [t for m in mvs if (t := ts(m.get("from_mold_in")))]
+        old_times += [t for j in by_order.get(oid, []) if j.get("id") not in ids and (t := ts(j.get("mold_in")))]
+        if not new_times or not old_times:
+            continue
+        h = (max(new_times) - max(old_times)).total_seconds() / 3600.0
+        if abs(h) >= 0.1:
+            shifts.append((oid, h))
+    shifts.sort(key=lambda x: -abs(x[1]))
+    return out_new + [f"{oid} 完工{'延後' if h > 0 else '提前'} {fmt_num(abs(round(h, 1)))} h" for oid, h in shifts]
 
 
 def staffing_label(c: dict[str, Any]) -> str:

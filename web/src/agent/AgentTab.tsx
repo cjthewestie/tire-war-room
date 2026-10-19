@@ -11,6 +11,7 @@ import { primaryEvent } from '../store'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { useWarRoom } from '../useWarRoom'
 import { STATE_LABEL } from '../components/common'
+import { TaskList } from '../components/TaskList'
 import { ApprovalVisual, PlanFlow, ToolChips } from './ApprovalVisual'
 import { currentRoundTools, planNodes, toolUses } from './approvalView'
 import { ToolIcon } from './ToolIcon'
@@ -48,6 +49,12 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor }: {
       <aside className="agent-side" aria-label="計畫與核准">
         {pending.map((p) => <ApprovalVisual key={p.id} req={p} ev={ev} items={items} layout="side" />)}
         {!pending.length && ev && <EventSummary ev={ev} items={items} tools={tools} />}
+        {ev && state.world?.tasks && state.world.tasks.items.some((t) => t.event_id === ev.id) && (
+          <section className="panel event-tasks" aria-label="人員任務">
+            <h4 className="apv-bh">人員執行（核准後由程式派工）</h4>
+            <TaskList tasks={state.world.tasks.items} eventId={ev.id} compact testId="event-tasks" />
+          </section>
+        )}
         {!ev && <div className="panel agent-empty"><p className="calm-title">全廠正常</p><p className="muted">有異常時，AI 指揮官的計畫、調用的工具和待核准事項會出現在這裡。你仍可在左邊提問（只查不改）。</p></div>}
       </aside>
     </div>
