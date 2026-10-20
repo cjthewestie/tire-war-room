@@ -40,6 +40,14 @@ class UploadBody(BaseModel):
     overwrite: bool = False
 
 
+class PlantDraftBody(BaseModel):
+    text: str = Field(..., max_length=4000)
+
+
+class PlantShaBody(BaseModel):
+    sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+
 class NoteBody(BaseModel):
     machine_id: str
     text: str = Field(..., min_length=1, max_length=500)
@@ -260,6 +268,64 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
     async def reindex_status(_: Any = ADMIN) -> dict[str, Any]:
         return job.as_dict()
 
+    # ------------------------------------------------------------------ 工廠指示 PLANT.md (refs #34)
+    def pp():
+        from warroom.agent import plant
+        return plant.current()
+
+    @app.get(P + "/plant")
+    async def plant_get(_: Any = ADMIN) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            p = pp()
+            ov = p.overview()
+            d = ov["draft"]
+            ov["draft_diff"] = _line_diff(ov["active"]["text"], d["text"]) if d else []
+            return ov
+        return await asyncio.to_thread(run)
+
+    @app.post(P + "/plant/draft")
+    async def plant_draft(body: PlantDraftBody, session: Any = ADMIN) -> dict[str, Any]:
+        d = await asyncio.to_thread(pp().save_draft, body.text, session.actor, rt().now())
+        audit(session, {"action": "plant_draft_save", "sha256": d["sha256"], "chars": d["chars"]})
+        return d
+
+    @app.post(P + "/plant/test")
+    async def plant_test(session: Any = ADMIN) -> dict[str, Any]:
+        """試跑: the page-11 plan once with the draft (rule commander always; the model too when LLM mode is on
+        and it answers), against the active version. Mock plans do not read prompts, so they only check format."""
+        p = pp()
+        draft = p.overview()["draft"]
+        if not draft:
+            raise HTTPException(status_code=409, detail="沒有草稿可以試跑；先存草稿")
+        result = await _plant_test(rt(), draft["text"], p.active_text())
+        result.update({"sha256": draft["sha256"], "at": rt().now().isoformat(), "by": session.actor})
+        await asyncio.to_thread(p.record_test, draft["sha256"], result)
+        audit(session, {"action": "plant_test", "sha256": draft["sha256"], "ok": result["ok"],
+                        "llm_ran": result["llm"] is not None})
+        return result
+
+    @app.post(P + "/plant/activate")
+    async def plant_activate(body: PlantShaBody, session: Any = ADMIN) -> dict[str, Any]:
+        p = pp()
+        test = p.overview()["tests"].get(body.sha256)
+        if not test or not test.get("ok"):
+            raise HTTPException(status_code=409, detail="這個版本還沒有通過試跑；先按「試跑」")
+        try:
+            r = await asyncio.to_thread(p.activate, body.sha256, session.actor, rt().now(), "activate")
+        except KeyError:
+            raise HTTPException(status_code=404, detail="找不到這個版本") from None
+        audit(session, {"action": "plant_activate", "sha256": r["sha256"], "previous": r["previous"]})
+        return r
+
+    @app.post(P + "/plant/rollback")
+    async def plant_rollback(body: PlantShaBody, session: Any = ADMIN) -> dict[str, Any]:
+        try:
+            r = await asyncio.to_thread(pp().activate, body.sha256, session.actor, rt().now(), "rollback")
+        except KeyError:
+            raise HTTPException(status_code=404, detail="找不到這個版本") from None
+        audit(session, {"action": "plant_rollback", "sha256": r["sha256"], "previous": r["previous"]})
+        return r
+
     # ------------------------------------------------------------------ memory
     @app.get(P + "/memory")
     async def memory(_: Any = ADMIN) -> dict[str, Any]:
@@ -394,3 +460,66 @@ def _memory(r: Any, notes: Any) -> dict[str, Any]:
     return {"incidents": incidents, "closed_events": sorted(closed.values(), key=lambda c: c["closed_at"], reverse=True),
             "notes": [n.__dict__ for n in sorted(notes.all(), key=lambda n: n.created_at, reverse=True)],
             "agent_reads_notes": False}
+
+
+def _line_diff(a: str, b: str) -> list[dict[str, str]]:
+    import difflib
+    out = []
+    for ln in difflib.ndiff(a.splitlines(), b.splitlines()):
+        if ln.startswith(("+ ", "- ")):
+            out.append({"op": ln[0], "text": ln[2:]})
+    return out
+
+
+def _p11_request():
+    from warroom.contracts import (
+        Anomaly,
+        AnomalyKind,
+        Channel,
+        CommanderRequest,
+        Prediction,
+        Severity,
+        ToolName,
+    )
+    t0 = datetime(2026, 10, 3, 2, 14, tzinfo=F.TZ)
+    pred = Prediction(machine_id="CURE-07", channel=Channel.TEMP, now_value=122.0, predicted_value=122.0,
+                      band_lo=121.0, band_hi=123.0, horizon_s=1800, trend_per_min=0.0)
+    a = Anomaly(id="AN-PLANT-TEST", ts=t0, machine_id="CURE-07", kind=AnomalyKind.TEMP_DROP, channel=Channel.TEMP,
+                value=122.0, baseline=128.0, prediction=pred, severity=Severity.WARN, message="7 號 128 → 122°C，預測穩定在 122±1°C")
+    return CommanderRequest(phase="plan", event_id="PLANT-TEST", anomaly=a, allowed_tools=list(ToolName))
+
+
+def _plan_view(plan: Any) -> dict[str, Any]:
+    ids = {s.id for s in plan.steps}
+    problems = [f"{s.id} 依賴不存在的步驟 {d}" for s in plan.steps for d in s.depends_on if d not in ids]
+    return {"alert": plan.alert_card.title, "hypothesis": f"{plan.hypothesis.id} {plan.hypothesis.cause_code}：{plan.hypothesis.statement}",
+            "steps": [f"{s.id} {s.tool}" for s in plan.steps], "safe_stop": plan.safe_stop, "valid": not problems and bool(plan.steps),
+            "problems": problems}
+
+
+async def _plant_test(r: Any, draft: str, active: str) -> dict[str, Any]:
+    from warroom.agent.commander import MockCommander
+    req = _p11_request()
+    mock_plan, _ = await MockCommander().plan(req)
+    mock = {**_plan_view(mock_plan), "note": "規則模式不讀提示詞：只檢查計畫格式"}
+    llm = None
+    if r.llm_mode.value == "llm" and await r.llm_reachable():
+        from warroom.agent.commander import OpenAICommander
+
+        async def one(text: str) -> dict[str, Any]:
+            c = OpenAICommander(r.settings)
+            c.plant_override = text
+            t = time.perf_counter()
+            try:
+                plan, info = await c.plan(req)
+            except Exception as e:  # noqa: BLE001 - reported, never raised to the admin page
+                return {"valid": False, "error": f"{type(e).__name__}: {e}"[:300], "ms": round((time.perf_counter() - t) * 1000)}
+            v = _plan_view(plan)
+            v.update({"valid": v["valid"] and not info.fell_back_to_mock, "fell_back": info.fell_back_to_mock,
+                      "error": c.last_error, "ms": round((time.perf_counter() - t) * 1000)})
+            return v
+        d, a = await asyncio.gather(one(draft), one(active))
+        llm = {"draft": d, "active": a, "model": r.settings.model,
+               "same_steps": d.get("steps") == a.get("steps"), "same_hypothesis": d.get("hypothesis") == a.get("hypothesis")}
+    ok = mock["valid"] and (llm is None or bool(llm["draft"].get("valid")) or bool(llm["active"].get("fell_back")))
+    return {"ok": ok, "mock": mock, "llm": llm, "prompt_diff": _line_diff(active, draft)}

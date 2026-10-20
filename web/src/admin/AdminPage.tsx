@@ -12,9 +12,9 @@ import { adminFetch } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import './admin.css'
 
-type Page = 'status' | 'rag' | 'memory' | 'runs'
+type Page = 'status' | 'rag' | 'plant' | 'memory' | 'runs'
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'status', label: '狀態' }, { id: 'rag', label: 'RAG 知識庫' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
+  { id: 'status', label: '狀態' }, { id: 'rag', label: 'RAG 知識庫' }, { id: 'plant', label: '工廠指示 PLANT.md' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
 interface Job { state: 'idle' | 'running' | 'done' | 'failed'; phase: string; files: number; chunks: number | null; team_chunks: number | null; mode: string | null; error: string | null; elapsed_s: number | null }
@@ -49,7 +49,7 @@ export function AdminPage() {
         </nav>
         <span className="muted small">只限廠內網路・需主管 PIN（現場螢幕免輸入）・每次寫入都記稽核</span>
       </header>
-      {page === 'status' ? <StatusPage /> : page === 'rag' ? <RagPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
+      {page === 'status' ? <StatusPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
     </div>
   )
 }
@@ -360,6 +360,115 @@ function RunsPage() {
         </table>
       </div>
       {!runs.length && data && <p className="muted">沒有紀錄。</p>}
+    </section>
+  )
+}
+
+// ---------------------------------------------------------------- 工廠指示 PLANT.md (refs #34)
+interface PlanView { alert?: string; hypothesis?: string; steps?: string[]; safe_stop?: boolean; valid: boolean; problems?: string[]; fell_back?: boolean; error?: string | null; ms?: number; note?: string }
+interface PlantTest { ok: boolean; sha256: string; at: string; by: string; mock: PlanView; llm: { draft: PlanView; active: PlanView; model: string; same_steps: boolean; same_hypothesis: boolean } | null; prompt_diff: { op: string; text: string }[] }
+interface Plant {
+  active: { sha256: string; text: string; chars: number; seed: boolean; seed_path: string }
+  draft: { text: string; sha256: string; saved_at: string; by: string; chars: number } | null
+  draft_diff: { op: string; text: string }[]; max_chars: number
+  history: { sha256: string; at: string | null; by: string; action: string; chars: number; previous?: string }[]
+  tests: Record<string, PlantTest>
+}
+const ACTION: Record<string, string> = { activate: '核准啟用', rollback: '回復', seed: '初始版（config/plant/PLANT.md）' }
+const short = (sha: string) => sha.slice(0, 12)
+
+function PlantPage() {
+  const { data: p, err, reload } = useLoad<Plant>('/api/admin/plant')
+  const [text, setText] = useState<string | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [msg, setMsg] = useState<string | null>(null)
+  const [test, setTest] = useState<PlantTest | null>(null)
+  const cur = text ?? p?.draft?.text ?? p?.active.text ?? ''
+  const dirty = !!p && cur !== (p.draft?.text ?? p.active.text)
+  const lastTest = test ?? (p?.draft ? p.tests[p.draft.sha256] ?? null : null)
+  const run = async (what: string, f: () => Promise<unknown>, ok: string) => {
+    setBusy(what); setMsg(null)
+    try { await f(); setMsg(ok); reload() } catch (e) { setMsg(`${what}失敗：${String(e).replace(/^Error: /, '')}`) } finally { setBusy(null) }
+  }
+  const save = () => run('存草稿', async () => { await adminFetch('/api/admin/plant/draft', { method: 'POST', body: { text: cur } }); setText(null); setTest(null) }, '草稿已存（還沒啟用；記在稽核紀錄）')
+  const tryRun = () => run('試跑', async () => setTest(await adminFetch<PlantTest>('/api/admin/plant/test', { method: 'POST' })), '試跑完成（記在稽核紀錄）')
+  const activate = () => p?.draft && window.confirm(`啟用草稿 ${short(p.draft.sha256)}？\n之後每次 AI 呼叫都會帶這一版，稽核紀錄記下它的 sha256。`)
+    && run('核准啟用', () => adminFetch('/api/admin/plant/activate', { method: 'POST', body: { sha256: p.draft!.sha256 } }), '已啟用（記在稽核紀錄）')
+  const rollback = (sha: string) => window.confirm(`回復到 ${short(sha)}？`) && run('回復', () => adminFetch('/api/admin/plant/rollback', { method: 'POST', body: { sha256: sha } }), `已回復到 ${short(sha)}`)
+  return (
+    <section className="admin-body" data-testid="plant-page">
+      <Err err={err} />
+      <p className="note">兩層提示詞：角色、9 個工具、JSON 規則、安全規則寫在程式裡（commander.py、ask.py、discuss.py），這裡改不到。這頁只管第二層「工廠補充說明」：本廠的班別、機台習慣、用語，接在核心提示詞後面，最多 {p?.max_chars ?? 1500} 字。它<b>不能</b>新增工具、改狀態、風險等級或核准規則（程式的動作把關不讀這段）。</p>
+      {msg && <p className="note">{msg}</p>}
+      {p && (
+        <>
+          <div className="admin-cards">
+            <Card title="目前生效" tone="ok"><b data-testid="plant-active-sha">{short(p.active.sha256)}</b><span>{p.active.seed ? `初始版 ${p.active.seed_path}` : '後台啟用的版本'}・{p.active.chars} / {p.max_chars} 字</span></Card>
+            <Card title="草稿" tone={p.draft ? 'warn' : 'muted'}><b>{p.draft ? short(p.draft.sha256) : '沒有草稿'}</b><span>{p.draft ? `${fmtMD(p.draft.saved_at)} ${fmtHM(p.draft.saved_at)}・${p.draft.by}・${p.draft.chars} 字` : '改下面的內容後存草稿'}</span></Card>
+            <Card title="試跑" tone={lastTest ? (lastTest.ok ? 'ok' : 'bad') : 'muted'}><b>{lastTest ? (lastTest.ok ? '通過' : '沒通過') : '還沒試跑'}</b><span>{lastTest ? `${lastTest.llm ? `規則＋${lastTest.llm.model}` : '規則模式（模型未開）'}` : 'p.11 情境跑一次計劃'}</span></Card>
+          </div>
+          <label className="plant-edit">
+            <span className="sub">內容（Markdown）<small className={cur.trim().length > p.max_chars ? 'warn' : 'muted'}>{cur.trim().length} / {p.max_chars} 字{cur.trim().length > p.max_chars ? '・超過的部分不會送進提示詞' : ''}</small></span>
+            <textarea value={cur} onChange={(e) => setText(e.target.value)} rows={16} spellCheck={false} data-testid="plant-text" />
+          </label>
+          <div className="admin-row">
+            <button className="btn-ghost" onClick={save} disabled={!!busy || !dirty} data-testid="plant-save">{busy === '存草稿' ? '存檔中…' : '存草稿'}</button>
+            <button className="btn-ghost" onClick={tryRun} disabled={!!busy || !p.draft || dirty} data-testid="plant-test">{busy === '試跑' ? '試跑中…（模型約 15–30 秒）' : '試跑（p.11 情境）'}</button>
+            <button className="btn-approve" onClick={() => void activate()} disabled={!!busy || !p.draft || dirty || !lastTest?.ok || lastTest.sha256 !== p.draft.sha256} data-testid="plant-activate">核准啟用</button>
+            <span className="muted small">{dirty ? '有未存的修改' : !p.draft ? '先存草稿' : !lastTest ? '啟用前要先試跑' : !lastTest.ok ? '試跑沒通過，不能啟用' : '試跑通過，可以啟用'}</span>
+          </div>
+          {p.draft && p.draft_diff.length > 0 && <Diff title="草稿和目前生效版的差異" lines={p.draft_diff} />}
+          {lastTest && <TestResult t={lastTest} />}
+          <h3 className="sub">版本紀錄</h3>
+          <div className="admin-table-wrap">
+            <table className="admin-table" data-testid="plant-history">
+              <thead><tr><th>動作</th><th>版本 sha256</th><th>誰</th><th>時間</th><th>字數</th><th aria-label="回復" /></tr></thead>
+              <tbody>{p.history.map((h, i) => (
+                <tr key={i}>
+                  <td>{ACTION[h.action] ?? h.action}</td><td><code>{short(h.sha256)}</code>{h.sha256 === p.active.sha256 && i === p.history.findIndex((x) => x.sha256 === p.active.sha256) && <em className="tag">生效中</em>}</td>
+                  <td>{h.by}</td><td className="muted">{h.at ? `${fmtMD(h.at)} ${fmtHM(h.at)}` : '—'}</td><td>{h.chars}</td>
+                  <td>{h.sha256 !== p.active.sha256 && <button className="btn-ghost" onClick={() => void rollback(h.sha256)} disabled={!!busy}>回復到這版</button>}</td>
+                </tr>
+              ))}</tbody>
+            </table>
+          </div>
+          {!p.history.length && <p className="muted small">還沒有啟用過其他版本；目前用的是初始版。</p>}
+          <details className="admin-team"><summary>目前生效的全文（{short(p.active.sha256)}）</summary><pre className="plant-pre">{p.active.text}</pre></details>
+        </>
+      )}
+    </section>
+  )
+}
+
+function Diff({ title, lines }: { title: string; lines: { op: string; text: string }[] }) {
+  return (
+    <div className="plant-diff"><h4>{title}</h4>
+      <ul>{lines.map((l, i) => <li key={i} className={l.op === '+' ? 'add' : 'del'}><span aria-hidden>{l.op === '+' ? '＋' : '－'}</span>{l.text || ' '}</li>)}</ul>
+    </div>
+  )
+}
+
+function TestResult({ t }: { t: PlantTest }) {
+  const plan = (v: PlanView, k: string) => (
+    <div className={`plant-plan ${v.valid ? 'ok' : 'bad'}`}>
+      <b>{k}：{v.valid ? '計劃有效' : '計劃無效'}{v.ms != null ? `・${v.ms} ms` : ''}</b>
+      {v.note && <small className="muted">{v.note}</small>}
+      {v.hypothesis && <span>{v.hypothesis}</span>}
+      {v.steps && <span className="muted">{v.steps.join(' → ')}</span>}
+      {v.fell_back && <span className="warn">模型輸出沒通過檢查（{v.error}）</span>}
+      {!!v.problems?.length && <span className="warn">{v.problems.join('；')}</span>}
+    </div>
+  )
+  return (
+    <section className="plant-test" data-testid="plant-test-result">
+      <h3 className="sub">試跑結果：{t.ok ? '通過' : '沒通過'}<small className="muted">{fmtMD(t.at)} {fmtHM(t.at)}・{t.by}・草稿 {short(t.sha256)}</small></h3>
+      {plan(t.mock, '規則模式')}
+      {t.llm ? <>
+        {plan(t.llm.draft, `${t.llm.model}（草稿）`)}
+        {plan(t.llm.active, `${t.llm.model}（目前生效版）`)}
+        <p className="muted small">和目前生效版相比：步驟{t.llm.same_steps ? '相同' : '不同'}、假設{t.llm.same_hypothesis ? '相同' : '不同'}</p>
+      </> : <p className="muted small">模型沒開（規則模式）或連不上，只跑了規則模式；規則模式不讀提示詞，所以只檢查計劃格式。</p>}
+      {t.prompt_diff.length > 0 && <Diff title="提示詞差異" lines={t.prompt_diff} />}
     </section>
   )
 }

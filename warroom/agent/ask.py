@@ -23,6 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom import factory as F
+from warroom.agent import plant
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
 from warroom.agent.state_machine import _brief
@@ -256,7 +257,7 @@ class AskAgent:
         user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
         r = await self.client.chat.completions.create(
             model=self.settings.model, temperature=0.0, max_tokens=400,
-            messages=[{"role": "system", "content": PLAN_SYSTEM}, {"role": "user", "content": user}],
+            messages=[{"role": "system", "content": PLAN_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "AskPlan", "schema": ask_plan_schema()}},
             **self._extra())
         text = (r.choices[0].message.content or "").strip()
@@ -267,7 +268,7 @@ class AskAgent:
         lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
         r = await self.client.chat.completions.create(
             model=self.settings.model, temperature=0.0, max_tokens=300,
-            messages=[{"role": "system", "content": ANSWER_SYSTEM},
+            messages=[{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
                       {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
             **self._extra())
         text = (r.choices[0].message.content or "").strip()
@@ -306,7 +307,8 @@ class AskAgent:
         audit.append(AuditKind.LLM_CALL, "ask", {
             "phase": "plan", "mode": self.mode.value, "model": self.settings.model if self.mode is LLMMode.LLM else None,
             "total_ms": round((time.perf_counter() - tp) * 1000, 1), "fell_back_to_mock": fell_back, "error": error,
-            "steps": [s.model_dump(mode="json") for s in plan.steps], "rationale": plan.rationale}, event_id=ask_id)
+            "steps": [s.model_dump(mode="json") for s in plan.steps], "rationale": plan.rationale,
+            "plant_sha256": plant.active_sha()}, event_id=ask_id)
 
         # 2. RUN: only ASK_TOOLS, at most ASK_MAX_STEPS
         results: list[AskStepResult] = []
@@ -371,7 +373,8 @@ class AskAgent:
         audit.append(AuditKind.LLM_CALL, "ask", {
             "phase": "answer", "mode": self.mode.value, "total_ms": round((time.perf_counter() - ta) * 1000, 1),
             "fell_back_to_mock": answer_fell_back, "error": error, "ungrounded": ungrounded,
-            "skipped": "change request: facts only" if change and self.mode is LLMMode.LLM else None},
+            "skipped": "change request: facts only" if change and self.mode is LLMMode.LLM else None,
+            "plant_sha256": plant.active_sha()},
             event_id=ask_id)
         audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": answer}, event_id=ask_id)
         return AskAnswer(id=ask_id, question=question, answer=answer, steps=results, intercepted=intercepted,

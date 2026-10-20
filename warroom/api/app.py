@@ -432,6 +432,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     async def lifespan(app: FastAPI):
         r = rt()
         app.state.runtime = r
+        from warroom.agent import plant           # PLANT.md versions live next to the audit log (issue #37)
+        plant.configure(Path(r.settings.audit_path).parent)
         await r.start()
         try:
             yield

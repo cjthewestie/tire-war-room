@@ -74,3 +74,20 @@
   .admin-table[data-testid="sop-docs"] tr:last-child { border-bottom: 0; }
   .admin-table code { word-break: break-all; }
 }
+.plant-edit { display: flex; flex-direction: column; gap: 6px; }
+.plant-edit .sub { margin: 4px 0 0; display: flex; gap: 10px; align-items: baseline; }
+.plant-edit .sub small { font-weight: 400; font-size: 12.5px; }
+.plant-edit textarea { width: 100%; background: var(--panel); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 14px; line-height: 1.6; resize: vertical; }
+.plant-edit textarea:focus { outline: none; border-color: var(--accent); }
+.plant-diff { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 14px 10px; }
+.plant-diff h4 { margin: 6px 0; font-size: 14px; }
+.plant-diff ul { list-style: none; margin: 0; padding: 0; font-size: 13px; font-family: ui-monospace, Menlo, monospace; }
+.plant-diff li { padding: 1px 6px; border-radius: 4px; white-space: pre-wrap; }
+.plant-diff li span { margin-right: 6px; }
+.plant-diff li.add { background: var(--accent-soft); color: var(--accent); }
+.plant-diff li.del { background: var(--alarm-soft); color: var(--alarm); }
+.plant-test { display: flex; flex-direction: column; gap: 8px; }
+.plant-test .sub small { font-weight: 400; margin-left: 8px; font-size: 12px; }
+.plant-plan { display: flex; flex-direction: column; gap: 2px; background: var(--panel); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; padding: 8px 12px; font-size: 13.5px; }
+.plant-plan.bad { border-left-color: var(--alarm); }
+.plant-pre { white-space: pre-wrap; font-size: 13px; margin: 8px 0; }
