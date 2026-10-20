@@ -288,7 +288,7 @@ def test_websocket_two_clients_and_disconnect(client, rt):
 
 # ---------------------------------------------------------------- web
 def test_web_pages(client):
-    for path in ("/", "/phone", "/factory"):
+    for path in ("/", "/phone", "/factory", "/worker"):
         r = client.get(path)
         assert r.status_code == 200 and "<" in r.text
 
