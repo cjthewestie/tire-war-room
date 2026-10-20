@@ -43,6 +43,8 @@ from warroom.contracts import (
 from warroom.factory import TZ
 
 ACTOR = "main_agent"
+_WRITE_LABEL = {"confirm_schedule": "確認排程", "set_cure_time": "設定硫化時間", "notify_teams": "通知"}
+_DECISION = {"approve": "核准", "reject": "駁回", "modify": "修改", "superseded": "作廢", "expired": "逾時"}
 
 # subagent types (Chinese labels for the UI) and their model-queue priority (lower = sooner)
 TYPES: dict[str, str] = {"machine": "機台處理", "order": "訂單處理", "material": "原料處理", "staff": "人力調度",
@@ -315,7 +317,7 @@ class Orchestrator:
         if ev.source == "supervisor" and self._pending_dispatch:
             d = self._pending_dispatch.pop(0)
             t, p, via, why = d["type"], PRIORITY[d["type"]], d["by"], d["reason"]
-            extra = {"dispatch": d["dispatch"], "text": ev.command, "model": d.get("model"),
+            extra = {"dispatch": d["dispatch"], "task": ev.command, "model": d.get("model"),
                      "fell_back": d.get("fell_back"), "error": d.get("error"), "ms": d.get("ms")}
         else:
             t, p = route(ev)
@@ -369,7 +371,11 @@ class Orchestrator:
         for sr in [*(s for r in ev.prior_rounds for s in r.steps), *ev.steps]:
             tool = str(getattr(sr.step.tool, "value", sr.step.tool))
             if tool in {t.value for t in WRITE_TOOLS} and str(getattr(sr.state, "value", sr.state)) == "ok":
-                writes.append(f"{sr.step.id} {tool}")
+                sid = sr.step.id
+                if sid.startswith("AP-"):                      # an approval-option step: 「核准 B」
+                    opt = sid.rsplit("-", 1)[-1]
+                    sid = f"方案 {opt}" if len(opt) == 1 else "核准步驟"
+                writes.append(f"{_WRITE_LABEL.get(tool, tool)}（{sid}）")
         decided = []
         if self.approvals is not None:
             for rid in ev.approvals:
@@ -378,7 +384,8 @@ class Orchestrator:
                 except Exception:  # noqa: BLE001, S112 - an unknown card id: nothing to report
                     continue
                 if r.decision is not None:
-                    decided.append(f"{r.decision.decision.value}{'・方案 ' + r.decision.option_id if r.decision.option_id else ''}")
+                    decided.append(f"{_DECISION.get(r.decision.decision.value, r.decision.decision.value)}"
+                                   f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
         head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "安全中止"
         parts = [f"{TYPES[sub.type]}子 agent {head}：{(ev.outcome or '').strip() or '無需動作'}"]
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
@@ -446,15 +453,17 @@ class Orchestrator:
 
     # ---------------------------------------------------------------- read
     def _status(self, ev: Event, sub: SubAgent | None, waiting: set[str], running: set[str]) -> str:
+        board = self._board()
         if ev.state in TERMINAL_STATES:
             if sub is not None and sub.interrupted:
                 return "interrupted"
+            if ev.state is EventState.CLOSED and board is not None and any(t.status != "完成" for t in board.for_event(ev.id)):
+                return "waiting_tasks"                       # the plan is done; people are still carrying it out
             return "done" if ev.state is EventState.CLOSED else "failed"
         if ev.id in waiting or ev.id in running:
             return "waiting_model"
         if ev.state is EventState.AWAIT_APPROVAL:
             return "waiting_approval"
-        board = self._board()
         if board is not None and ev.state in (EventState.EXECUTE, EventState.VERIFY) \
                 and any(t.status != "完成" for t in board.for_event(ev.id)):
             return "waiting_tasks"

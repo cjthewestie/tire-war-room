@@ -83,6 +83,18 @@ CJ, 2026-10-20: 「突發狀況(人力調度或機器故障或插單) 早上訂�
 
 `POST /api/events/{id}/discuss {text}` → `PlanTalk.discuss`: CLASSIFY (model with a JSON schema; rules for mock mode, model failure, or when the rules read an explicit change the model missed) into chitchat / question / change / unclear / unsupported. A change becomes `PlanConstraint`s validated by code (the press must be named in the text; the window is computed from the words). `StateMachine.discuss_replan` adds them to `Event.constraints`, supersedes the waiting card (`ApprovalStatus.SUPERSEDED`, audited, cannot be decided) and the event goes AWAIT_APPROVAL → REPLAN → SIMULATE → GATE. Code applies the constraints to every `solve_schedule` (`press_blackouts`, `allow_overtime`, `allow_cross_team`), checks the result honours them (`constraint_check`), and the new card carries `version`, `supersedes`, `changes`, `constraints`. Discussion replans do not count toward `max_replans` or failures; `MAX_DISCUSS_REPLANS = 3`. At every gate the agent posts a code-built summary (`plan_summary`).
 
+## 主 agent (orchestrator) and subagents (issue #54)
+
+CJ, 2026-10-20: 「我希望主控台的 agent 叫做主 agent，是 orchestrator，負責針對我計劃區的內容派發子 agent 完成任務；正在進行中的子 agent 會在 agent 頁面顯示進度，隨時也可以討論跟中斷，然後有結果會回報給主控台 agent。」
+
+- `warroom/agent/orchestrator.py` is code, not an LLM loop. Each subagent is one state-machine run (an Event) with its own gate and approvals; nothing in the safety core changes and the 9 tools stay the same.
+- Routing: detector and plant events are routed by anomaly kind (`ROUTES`: machine / order / material / staff / shift). A supervisor's free-text task (下新任務) is dispatched by Nemotron choosing ONE of `dispatch_machine_task` / `dispatch_order_task` / `dispatch_material_task` / `dispatch_staff_task` (JSON schema); keyword rules otherwise or on any model failure. A dispatch is R0: it only starts a run.
+- One `ModelQueue` for the local model: safety > machine faults > orders / materials > staffing > questions. The commander is wrapped (`QueuedCommander`), 問戰情室 waits last; each call's wait is audited.
+- The state machine calls `on_open` / `on_end` hooks: the main agent audits a dispatch row at the start and a code-built report (outcome, writes, approvals) at the end. All rows are `kind=system`, `actor=main_agent`, `{"orch": "dispatch" | "report" | "interrupt" | "queue"}`.
+- Interrupt (`POST /api/subagents/{id}/interrupt`, supervisor rules): cancel the run's task (no new tool call), supersede its waiting cards, cancel its workers' open tasks, keep the schedule in force, SAFE_STOP 「主管中斷」.
+- API: `GET /api/subagents` (rows + the model queue), WS `subagents`; `GET /api/preclass` (the detector's pre-classification: rule, checks, validation, forecast, routing; rejected bad data).
+- Checks: `tests/test_orchestrator.py`, `node web/e2e/orch54.mjs http://127.0.0.1:<port>`.
+
 ## Key numbers
 
 | What | Value | Page |
