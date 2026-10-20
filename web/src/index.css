@@ -1,3 +1,5 @@
+/* Noto Sans TC bundled (SIL OFL 1.1): the DGX Spark is offline Linux and has no PingFang, so the UI font ships with the app. */
+@import '@fontsource-variable/noto-sans-tc';
 :root {
   --bg: #0b0d10;
   --panel: #14171c;
@@ -25,7 +27,7 @@
   --radius: 12px;
   --gap: 16px;
   --nav-h: 0px;
-  font-family: "Noto Sans TC", "PingFang TC", "Heiti TC", system-ui, sans-serif;
+  font-family: "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Heiti TC", system-ui, sans-serif;
   color: var(--ink);
   background: var(--bg);
   font-size: 16px;
