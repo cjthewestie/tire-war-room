@@ -17,6 +17,7 @@ from warroom.contracts import (
     TireSize,
 )
 from warroom.factory import COMPOUND_MACHINES, CURE_PRESS_IDS, MACHINE_IDS, TZ
+from warroom import factory as F
 from warroom.sim import Factory, ReplaySource, get_scenario, list_scenarios, record_jsonl
 
 
@@ -85,9 +86,11 @@ def test_page2_dashboard_numbers():
     f = Factory(backfill_min=0)
     f.step(1)
     prog = {p.size: p for p in f.order_progress()}
-    assert (prog[TireSize.S].done, prog[TireSize.S].total, prog[TireSize.S].remaining_h) == (38, 100, 208)
-    assert (prog[TireSize.M].done, prog[TireSize.M].total, prog[TireSize.M].remaining_h) == (12, 100, 1241)
-    assert (prog[TireSize.L].done, prog[TireSize.L].total, prog[TireSize.L].remaining_h) == (8, 100, 2162)
+    # the team dataset's tyres de-molded by 10/28 08:00 (shifted onto 10/03), not the proposal's 38/12/8 (issue #20)
+    for size, done in ((TireSize.S, 23), (TireSize.M, 9), (TireSize.L, 8)):
+        d0, total, h = F.DEMO_ORDER_PROGRESS[size]
+        assert (prog[size].done, prog[size].total) == (done, 100)
+        assert prog[size].remaining_h == round(h * (total - done) / (total - d0), 1)
     sf = f.semi_finished()
     assert sf.tire_label == "大胎 #07" and sf.size is TireSize.L
     assert [(p.part, p.status_text) for p in sf.parts] == [("A", "預熱中"), ("B", "成形中"), ("C", "包布中"),
@@ -357,10 +360,11 @@ def test_approved_press_move_reaches_the_plant():
     from warroom.contracts import TireSize
     from warroom.schedule import back_propagate
     f = Factory(seed=7, scenario=ScenarioName.NORMAL)
-    free9 = f.machine("CURE-04").cure_job.planned_demold_at + timedelta(minutes=30)
+    p4 = next(p for p in ("CURE-04", "CURE-05", "CURE-06") if f.machine(p).cure_job is not None)
+    free9 = f.machine(p4).cure_job.planned_demold_at + timedelta(minutes=30)
     free7 = f.machine("CURE-07").cure_job.planned_demold_at + timedelta(minutes=30)
     on7 = back_propagate("J-A311-01", "#A-311", TireSize.S, "CURE-07", free7, mold_id="#A-311")
-    on9 = back_propagate("J-A311-01", "#A-311", TireSize.S, "CURE-04", free9, mold_id="#A-311")
+    on9 = back_propagate("J-A311-01", "#A-311", TireSize.S, p4, free9, mold_id="#A-311")
     v1, v2 = _plan_with(f, [on7]), _plan_with(f, [on9])
     active = {"s": v1}
     f.attach_plan(lambda: active["s"])
@@ -368,7 +372,7 @@ def test_approved_press_move_reaches_the_plant():
     end = max(free7, free9) + timedelta(hours=1)
     while f.now() < end:
         f.step(60.0)
-    j9, j7 = f.machine("CURE-04").cure_job, f.machine("CURE-07").cure_job
+    j9, j7 = f.machine(p4).cure_job, f.machine("CURE-07").cure_job
     assert j9 is not None and j9.order_id == "#A-311" and j9.mold_in_at == free9
     assert j7 is None or j7.order_id != "#A-311"
 

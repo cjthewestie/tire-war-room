@@ -13,11 +13,16 @@ def _sim(scenario=ScenarioName.PRESS7_TEMP_DROP) -> Factory:
     return Factory(scenario=scenario)
 
 
+def _rem(size, done, nd=1):
+    """The page-2 estimate scaled by tyres left (Factory.order_progress)."""
+    d0, total, h = F.DEMO_ORDER_PROGRESS[size]
+    return round(h * (total - done) / (total - d0), nd)
+
+
 def test_orders_match_page2_when_all_presses_up():
     got = {o.size: (o.done, o.total, o.remaining_h, o.note) for o in order_progress(_sim(), [])}
-    for s in TireSize:
-        d, t, h = F.DEMO_ORDER_PROGRESS[s]
-        assert got[s] == (d, t, h, None)
+    for s, done in ((TireSize.S, 21), (TireSize.M, 9), (TireSize.L, 7)):    # dataset tyres de-molded by 10/28 02:12
+        assert got[s] == (done, 100, _rem(s, done), None)
 
 
 def test_press7_out_of_service_grows_small_remaining():
@@ -26,8 +31,8 @@ def test_press7_out_of_service_grows_small_remaining():
     sim.set_machine_status("CURE-07", MachineStatus.OUT_OF_SERVICE, "7 號機停用")
     got = {o.size: o for o in order_progress(sim, [])}
     for s in (TireSize.M, TireSize.L):
-        assert got[s].remaining_h == F.DEMO_ORDER_PROGRESS[s][2] and got[s].note is None
-    assert got[TireSize.S].remaining_h == round(F.DEMO_ORDER_PROGRESS[TireSize.S][2] * 7 / 6, 1)
+        assert got[s].remaining_h == _rem(s, got[s].done) and got[s].note is None
+    assert got[TireSize.S].remaining_h == round(_rem(TireSize.S, got[TireSize.S].done, 1) * 7 / 6, 1)
     assert "7 號機停用" in got[TireSize.S].note and "6/7" in got[TireSize.S].note
 
 
