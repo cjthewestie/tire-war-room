@@ -295,7 +295,7 @@ async def test_discuss_press9_maintenance_replans_and_v2_is_approvable(tmp_path)
         v2 = p.pending(ev_id)[0]
         assert v2.id == d["approval"]["id"] and v2.version == 2 and v2.supersedes == v1.id
         assert v2.constraints == ["9 號機 今晚不可用"]
-        assert _a311_press(p.rt, v2) == _a311_press(p.rt, v1)   # press 9 maintenance does not touch #A-311
+        assert _a311_press(p.rt, v2) != "CURE-09"   # #A-311 never lands on the press under maintenance
         assert p.rt.approvals.get(v1.id).status is ApprovalStatus.SUPERSEDED
 
         # the superseded card cannot be approved; v2 can

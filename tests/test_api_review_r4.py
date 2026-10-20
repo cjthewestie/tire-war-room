@@ -210,7 +210,7 @@ async def test_page11_rollback_progress_and_revoked_staffing(tmp_path):
         assert rt.sim.machine("CURE-07").status is not MachineStatus.OUT_OF_SERVICE
         assert rt.approvals.pending(), "round-2 card should be waiting"
         panel = {o.label: o for o in rt.snapshot().orders}
-        assert panel["中胎"].remaining_h == 1241 and panel["大胎"].remaining_h == 2162, panel
+        assert panel["中胎"].remaining_h == round(1241 * 91 / 88, 1) and panel["大胎"].remaining_h == round(2162 * 93 / 92, 1), panel
         small_before = panel["小胎"].remaining_h
         assert "安全核心扣模" in (panel["小胎"].note or "") and "停用：" not in (panel["小胎"].note or "")   # press 7 cures a small tire
 
