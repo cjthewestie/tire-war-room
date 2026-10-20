@@ -389,7 +389,7 @@ class SemiFinishedProgress(_M):
     size: TireSize
     parts: list[SemiFinishedPart]
     planned_mold_in_at: datetime | None = None   # "大胎 #07 仍 17:00 入硫化機"
-    note: str | None = None                      # e.g. "7 號機硫化中 10.0／36.5 h" when following a press event's tire
+    note: str | None = None                      # e.g. "7 號機硫化中 14.4／28.5 h" when following a press event's tire
     note_state: Literal["waiting", "in_progress", "done", "alert"] | None = None
 
 
@@ -572,9 +572,9 @@ class CureFormulaArgs(_M):
 class CureFormulaData(_M):
     rate_ratio: float                 # 0.679 for 122 vs 128°C
     remaining_ref_h: float            # 18.0
-    remaining_actual_h: float         # 26.5
-    total_cure_h: float               # 36.5 (page 11)
-    extra_h: float                    # +8.5
+    remaining_actual_h: float         # 14.1
+    total_cure_h: float               # 28.5 (page 11, dataset EV-2)
+    extra_h: float                    # +4.5
     formula: str
 
 

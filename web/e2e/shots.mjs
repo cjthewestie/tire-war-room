@@ -80,7 +80,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   check('schedule versions', s.includes('第 1 版') && s.includes('第 2 版') && s.includes('第 3 版'))
   check('schedule steps', s.includes('solve_schedule') && s.includes('sop_search') && s.includes('換假設'))
   check('timeline rows', ['02:14:00', '02:14:01', '02:14:11', '02:16:40', '02:31:00', '02:31:04'].every((x) => s.includes(x)))
-  check('timeline numbers', s.includes('36.5 h') && s.includes('+8.5 h') && s.includes('119.5°C') && s.includes('#A-311'))
+  check('timeline numbers', s.includes('28.5 h') && s.includes('+4.5 h') && s.includes('119.5°C') && s.includes('#A-311'))
   check('labor chart', s.includes('硫化機（運轉）') && s.includes('胎體／胎面膠組'))
   check('capacity', s.includes('13.3 → 9.3 週') && s.includes('4.9'))
   check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.g-job.hot title')].some((t) => t.textContent?.includes('9 號硫化機'))))
