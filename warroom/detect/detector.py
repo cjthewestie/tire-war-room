@@ -475,7 +475,11 @@ class StreamDetector:
                 return None
             if held and (t - tr.onset_t >= PRESS_CONFIRM_S or beyond):
                 kind = AnomalyKind.TEMP_DROP if dev < 0 else AnomalyKind.OVERHEAT
-                return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+                return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                    "rule": "press_deviation_held", "label": "硫化機溫度偏離基準並持續",
+                    "checks": [f"偏離 {dev:+.1f}°C（門檻 ±{dev_thr}°C）", f"持續 {t - tr.alarm_since:.0f} 秒（門檻 {ALARM_HOLD_S:.0f} 秒）",
+                               f"確認 {t - tr.onset_t:.0f} 秒（門檻 {PRESS_CONFIRM_S:.0f} 秒）" if not beyond else
+                               f"已超出 {CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C"]})
             # slow drift (e.g. a leak): a significant trend heading out of 120–130 within 30 min
             if tr.onset_t is not None and t - tr.onset_t >= PRESS_TREND_MIN_AGE_S and \
                     self._significant_trend(tr, t, tr.onset_sign, PRESS_TREND_MIN_C_PER_MIN):
@@ -483,9 +487,13 @@ class StreamDetector:
                 if res is not None:
                     falling = tr.onset_sign < 0
                     lim = CURE_TEMP_MIN_C if falling else CURE_TEMP_MAX_C
-                    if self._crossing_s(res[1], t, lim, not falling, 1800.0) is not None:
+                    cross = self._crossing_s(res[1], t, lim, not falling, 1800.0)
+                    if cross is not None:
                         kind = AnomalyKind.TEMP_DROP if falling else AnomalyKind.OVERHEAT
-                        return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+                        return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                            "rule": "press_slow_drift", "label": "硫化機緩慢漂移，預測 30 分內出界",
+                            "checks": [f"斜率 {res[1].slope_per_min(t):+.2f}°C/分（門檻 {PRESS_TREND_MIN_C_PER_MIN}°C/分）",
+                                       f"預測約 {cross / 60:.0f} 分後越過 {lim:.0f}°C"]})
             return None
         # compound / other machines
         rising_trend = tr.onset_t is not None and tr.onset_sign > 0 and t - tr.onset_t >= 5.0 and \
@@ -495,20 +503,27 @@ class StreamDetector:
             crosses = limit is not None and res is not None and \
                 self._crossing_s(res[1], t, limit, True, 1800.0) is not None
             if tr.flow_low_since is not None or crosses:
-                return self._make(tr, ts, t, AnomalyKind.OVERHEAT, Channel.TEMP, v, temp.baseline)
+                return self._make(tr, ts, t, AnomalyKind.OVERHEAT, Channel.TEMP, v, temp.baseline, rule={
+                    "rule": "compound_rising", "label": "膠溫持續上升（冷卻水偏低或預測達上限）",
+                    "checks": [f"上升趨勢 ≥ {TREND_MIN_C_PER_MIN}°C/分",
+                               "冷卻水流低於基準 70%" if tr.flow_low_since is not None else f"預測 30 分內達 {limit:.0f}°C 上限"]})
         if held:
             kind = AnomalyKind.OVERHEAT if dev > 0 else AnomalyKind.TEMP_DROP
-            return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+            return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                "rule": "deviation_held", "label": "溫度偏離基準並持續",
+                "checks": [f"偏離 {dev:+.1f}°C（門檻 ±{dev_thr}°C）", f"持續 {t - tr.alarm_since:.0f} 秒（門檻 {ALARM_HOLD_S:.0f} 秒）"]})
         if tr.flow_low_since is not None and t - tr.flow_low_since >= FLOW_ONLY_HOLD_S:
             return self._make(tr, ts, t, AnomalyKind.WATER_FLOW_LOW, Channel.WATER_FLOW, flow.last_valid[1],
-                              flow.baseline)
+                              flow.baseline, rule={"rule": "flow_low", "label": "冷卻水流偏低並持續",
+                                                   "checks": [f"低於基準 {FLOW_LOW_FRAC:.0%}", f"持續 ≥ {FLOW_ONLY_HOLD_S:.0f} 秒"]})
         if tr.pressure_low_since is not None and t - tr.pressure_low_since >= PRESSURE_HOLD_S:
             return self._make(tr, ts, t, AnomalyKind.PRESSURE_LOW, Channel.PRESSURE, pres.last_valid[1],
-                              pres.baseline)
+                              pres.baseline, rule={"rule": "pressure_low", "label": "壓力偏低並持續",
+                                                   "checks": [f"低於基準 {PRESSURE_LOW_FRAC:.0%}", f"持續 ≥ {PRESSURE_HOLD_S:.0f} 秒"]})
         return None
 
     def _make(self, tr: _Track, ts: datetime, t: float, kind: AnomalyKind, ch: Channel, value: float,
-              baseline: float) -> Anomaly:
+              baseline: float, rule: dict | None = None) -> Anomaly:
         d = MACHINE_BY_ID[tr.mid]
         is_press = d.kind is MachineKind.CURING_PRESS
         horizon = 1800.0
@@ -553,9 +568,24 @@ class StreamDetector:
                 latency = round((ts - fs).total_seconds(), 1)
         tr.emitted = True
         tr.normal_since = None
+        # issue #54: the pre-classification the dashboard shows before any LLM runs
+        chan = tr.chans[ch]
+        validation = {"range": "通過", "jump": "通過", "stale": "通過",
+                      "quality": self.last_quality.get(tr.mid, DataQuality.OK).value}
+        if is_press and tr.expected_temp is not None and ch is Channel.TEMP:
+            validation["steam_model"] = f"蒸汽推算 {tr.expected_temp:.1f}°C，差 {abs(value - tr.expected_temp):.1f}°C（容許 {REDUNDANT_TOL_C}°C）"
+        if related:
+            validation["neighbours"] = f"同蒸汽管線 {len(related)} 台比對"
+        preclass = {**(rule or {"rule": kind.value, "label": kind.value, "checks": []}),
+                    "kind": kind.value, "channel": ch.value, "value": round(value, 2), "baseline": round(baseline, 2),
+                    "sigma": round(chan.sigma, 3), "severity": severity.value, "validation": validation,
+                    "forecast": None if pred is None else {"model": fit.model, "predicted": pred.predicted_value,
+                                                           "band": [pred.band_lo, pred.band_hi], "horizon_min": round(horizon / 60),
+                                                           "trend_per_min": pred.trend_per_min},
+                    "limit": limit}
         return Anomaly(id=f"AN-{ts:%Y%m%d-%H%M%S}-{tr.mid}", ts=ts, machine_id=tr.mid, kind=kind, channel=ch,
                        value=round(value, 2), baseline=round(baseline, 2), prediction=pred, severity=severity,
-                       message=msg, related_machines=related, detection_latency_s=latency)
+                       message=msg, related_machines=related, detection_latency_s=latency, preclass=preclass)
 
     # ------------------------------------------------------------------ public ingest
     def ingest(self, readings: list[SensorReading]) -> list[Anomaly]:

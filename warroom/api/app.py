@@ -735,6 +735,48 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
 
+    # ------------------------------------------------------------------ issue #54: 主 agent and its subagents
+    @app.get("/api/subagents")
+    async def subagents() -> dict[str, Any]:
+        """The main agent's subagents (one per state-machine run) with status and progress, and the model queue."""
+        o = rt().orch
+        return {"items": o.subagents(), "queue": o.queue.view()}
+
+    @app.post("/api/subagents/{event_id}/interrupt")
+    async def interrupt_subagent(event_id: str, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """Stop a subagent safely (no new tool call, waiting cards superseded, open worker tasks cancelled,
+        schedule kept, SAFE_STOP 「主管中斷」). Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        try:
+            return await r.orch.interrupt(event_id, session.actor)
+        except KeyError:
+            raise _404(event_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/preclass")
+    async def preclass() -> dict[str, Any]:
+        """The detector's pre-classification before any LLM: per anomaly the rule, signals and thresholds, the
+        validation it passed, the forecast and where the main agent routes it; plus readings rejected as bad data."""
+        from warroom.agent.orchestrator import PRIORITY_LABEL, TYPES, route
+        r = rt()
+        evs = {e.anomaly.id: e for e in r.events()}
+        items = []
+        for a in reversed(r.anomalies):
+            t, p = route(a.kind.value, a.severity)
+            ev = evs.get(a.id)
+            items.append({**a.model_dump(mode="json"), "route": {"type": t, "type_label": TYPES[t], "priority": p,
+                                                                  "priority_label": PRIORITY_LABEL[p]},
+                          "event_id": ev.id if ev else None, "event_state": ev.state.value if ev else None})
+        h = r.snapshot().header
+        det = r.c.detector
+        log_ = list(getattr(det, "bad_data_log", []))[-30:]
+        bad = [{"ts": ts.isoformat(), "machine_id": mid, "channel": getattr(ch, "value", str(ch)),
+                "quality": getattr(q, "value", str(q))} for ts, mid, ch, q in reversed(log_)]
+        return {"items": items, "bad_data": [b.model_dump(mode="json") for b in (h.bad_data or [])], "bad_log": bad}
+
     # ------------------------------------------------------------------ 每日事件紀錄 (issue #37): read-only, from the audit log
     def _daylog():
         from warroom.api import daylog
@@ -791,8 +833,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕提問")
         if r.c.tools is None:
             raise HTTPException(status_code=503, detail="tools unavailable (degraded mode)")
-        return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
-                                       now=r.clock.now(), actor=session.actor)
+        from warroom.agent.orchestrator import PRIORITY
+        async with r.orch.queue.slot(PRIORITY["question"], "ask", None, "問戰情室"):   # questions wait last (issue #54)
+            return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
+                                           now=r.clock.now(), actor=session.actor)
 
     # ------------------------------------------------------------------ issue #10: 下新任務 / 討論這個計劃
     def _ask_agent(r: Runtime):
@@ -828,11 +872,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
             return CommandReply(event_id="", accepted=False, reply=chat)
-        ev = r.start_command(body.text.strip(), session.actor)
+        # issue #54: the main agent picks ONE subagent (model in its queue slot, or keyword rules), then starts it
+        from warroom.agent.orchestrator import TYPES
+        ev, d = await r.orch.dispatch_command(body.text.strip(), session.actor, r.start_command)
         from warroom.agent.talk import physical_request
         refusal = physical_request(body.text)
+        how = "模型判斷" if d["by"] == "model" else "關鍵字規則" + ("（模型失敗改用規則）" if d.get("fell_back") else "")
         return CommandReply(event_id=ev.id, accepted=refusal is None,
-                            reply=refusal or f"收到，已開任務事件 {ev.id}，AI 指揮官規劃中；需要核准的動作會送出核准卡。")
+                            reply=refusal or f"主 agent 已派發子 agent：{TYPES[d['type']]}（{how}：{d['reason']}），任務 {ev.id} 規劃中；"
+                                             "需要核准的動作會送出核准卡，結果會回報在這裡。")
 
     @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
     async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
