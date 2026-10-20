@@ -1,6 +1,6 @@
 // Scripted demo scenarios for the standalone mock mode (pages 2 and 11 of the proposal).
 // Everything is a pure function of factory time + supervisor decisions, so history, replay and
-// "jump to 02:31:05" are deterministic. Physics numbers are the proposal's own (36.5 h, 119.5 °C, …).
+// "jump to 02:31:05" are deterministic. Physics numbers follow the team dataset's EV-2 (small tire S-027: 28.5 h, 119.5 °C, …).
 import type {
   ApprovalDecision, ApprovalOption, ApprovalRequest, Channel, Event, EventState, FocusPanel, GateDecision,
   Hypothesis, MachineStatus, PlanStep, RiskLevel, SafetyAction, ScheduleVersion, StepRun, TimelineItem, ToolName,
@@ -95,7 +95,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
   const R1_CREATED = at(26), R1_DEADLINE = at(160)          // 02:16:40
   const VERIFY = at(1020), H2_T = at(1024), SAFETY_T = at(877) // 02:31:00, 02:31:04, 02:28:37
   const R2_CREATED = at(1032), R2_DEADLINE = at(1050)       // 02:31:30
-  const moldIn07 = A - 10 * HOUR                             // 10 h into a 28 h medium cure (page 11)
+  const moldIn07 = A - 14.4 * HOUR                           // 14.4 h into a 24 h small cure (dataset EV-2, S-027)
   const NIGHT = isoTaipei(A).slice(5, 10).replace('-', '/')  // "10/03"
 
   const temp07 = (t: number) => {
@@ -125,43 +125,43 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
   }
 
   function versions(now: number, ctx: Ctx): ScheduleVersion[] {
-    const anchors = { 'CURE-07': { moldIn: moldIn07, orderId: '#M-207', moldId: 'M-207' } }
+    const anchors = { 'CURE-07': { moldIn: moldIn07, orderId: '#S-307', moldId: 'S-307' } }
     const next = { 'CURE-07': { orderId: '#A-311', moldId: 'A-311' } }
     const base = baseJobs(A, anchors, next)
     const out: ScheduleVersion[] = []
     const v1 = makeSchedule('SCH-v1', A - 2 * 24 * HOUR, base)
     out.push(version(1, null, 'active', A - 2 * 24 * HOUR, '週排程（硫化機為中心，出模排進有人時段）', null, v1))
     if (now < at(25)) return out
-    // v2: CURE-07 cure extended to 36.5 h; #A-311 moved to CURE-09; night shift takes 1 from line 2
+    // v2: CURE-07 cure extended to 28.5 h (small tire, dataset EV-2); #A-311 (small) still fits on press 7;
+    //     night shift takes 1 from line 2
     let j2 = base.map((j) => ({ ...j }))
-    const a311 = j2.find((j) => j.order_id === '#A-311')!
-    j2 = j2.filter((j) => j !== a311)
-    const i07 = j2.findIndex((j) => j.press_id === 'CURE-07' && j.order_id === '#M-207')
-    j2[i07] = makeJob('CURE-07', 'M', moldIn07, 36.5, '#M-207', 'M-207', false)
-    j2[i07].id = base.find((j) => j.order_id === '#M-207')!.id
+    const i07 = j2.findIndex((j) => j.press_id === 'CURE-07' && j.order_id === '#S-307')
+    j2[i07] = makeJob('CURE-07', 'S', moldIn07, 28.5, '#S-307', 'S-307', false)
+    j2[i07].id = base.find((j) => j.order_id === '#S-307')!.id
     j2[i07].frozen = true
     j2 = reflow(j2, 'CURE-07', Date.parse(j2[i07].demold) + 30 * MIN)
-    const cur09 = j2.filter((j) => j.press_id === 'CURE-09' && Date.parse(j.mold_in) <= A && Date.parse(j.demold) > A)[0]
-    const slot = cur09 ? Date.parse(cur09.demold) + 30 * MIN : A + HOUR
-    const moved = makeJob('CURE-09', 'M', slot, 28, '#A-311', 'A-311', true)
-    moved.id = a311.id
-    const after = isoTaipei(Date.parse(moved.demold) + 30 * MIN)
-    j2 = j2.map((j) => (j.press_id === 'CURE-09' && Date.parse(j.mold_in) >= slot - 1 ? { ...j, mold_in: after } : j))
-    j2.push(moved)
-    j2 = reflow(j2, 'CURE-09', Date.parse(after))
     const transfer = { kind: 'transfer' as const, shift_date: isoTaipei(A).slice(0, 10), shift_name: '夜班', to_team: 'body' as const, from_team: 'side' as const, from_label: '2 線', people: 1, label: `${NIGHT} 夜班從 2 線調 1 人` }
-    const v2s = makeSchedule('SCH-v2', at(25), j2, [transfer], ['7 號硫化時間延長至 36.5 h（+8.5 h）'])
+    const v2s = makeSchedule('SCH-v2', at(25), j2, [transfer], ['7 號硫化時間延長至 28.5 h（+4.5 h）'])
     const res1 = r1Res(now, ctx)
     const v2active = !!res1 && res1.d.decision !== 'reject'
     out[0].status = v2active ? 'superseded' : 'active'
-    out.push(version(2, 1, v2active ? 'active' : res1 ? 'superseded' : 'proposed', at(25), 'S3 求解：#A-311 移 9 號機、夜班從 2 線調 1 人', EV, v2s))
+    out.push(version(2, 1, v2active ? 'active' : res1 ? 'superseded' : 'proposed', at(25), 'S3 求解：#A-311 維持 7 號機、夜班從 2 線調 1 人', EV, v2s))
     if (now < at(1031)) return out
     // v3: CURE-07 out of service; overtime (A) or transfer (B)
     const res2 = r2Res(now, ctx)
     const optB = res2?.d.option_id === 'B'
-    const j3 = j2.filter((j) => !(j.press_id === 'CURE-07' && Date.parse(j.mold_in) > A))
+    const a311 = j2.find((j) => j.order_id === '#A-311')!
+    let j3 = j2.filter((j) => !(j.press_id === 'CURE-07' && Date.parse(j.mold_in) > A))
+    const cur04 = j3.filter((j) => j.press_id === 'CURE-04' && Date.parse(j.mold_in) <= A && Date.parse(j.demold) > A)[0]
+    const slot04 = cur04 ? Date.parse(cur04.demold) + 30 * MIN : A + HOUR
+    const moved = makeJob('CURE-04', 'S', slot04, 24, '#A-311', 'A-311', true)
+    moved.id = a311.id
+    const after04 = isoTaipei(Date.parse(moved.demold) + 30 * MIN)
+    j3 = j3.map((j) => (j.press_id === 'CURE-04' && Date.parse(j.mold_in) >= slot04 - 1 ? { ...j, mold_in: after04 } : j))
+    j3.push(moved)
+    j3 = reflow(j3, 'CURE-04', Date.parse(after04))
     const staffing = optB ? [transfer] : [{ kind: 'overtime' as const, shift_date: transfer.shift_date, shift_name: '夜班', to_team: 'body' as const, from_team: null, from_label: null, people: 1, label: `${NIGHT} 夜班加班 1 人` }]
-    const v3s = makeSchedule('SCH-v3', at(1031), j3, staffing, ['7 號機停用（硫化中斷處置）；後續中胎模次改由 8 號機與週末班吸收'])
+    const v3s = makeSchedule('SCH-v3', at(1031), j3, staffing, ['7 號機停用（硫化中斷處置）；#A-311 改排 4 號機，後續小胎模次由其他小胎機與週末班吸收'])
     const v3active = !!res2 && res2.d.decision !== 'reject'
     if (v3active) out.forEach((v) => { if (v.status === 'active') v.status = 'superseded' })
     out.push(version(3, out[out.length - 1].version, v3active ? 'active' : res2 ? 'superseded' : 'proposed', at(1031), '7 號停用重排：' + (optB ? '從 2 線調 1 人' : '夜班加班'), EV, v3s))
@@ -190,8 +190,8 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     push(at(1), '安全核心', '仍在 120–130°C，不停機（低於 120°C 直接處置，不等 AI）', 'safety')
     push(at(3), '指揮官', '[工具] 讀 30 分鐘溫度、[工具] 查 SOP → 假設 H1：蒸汽壓不足，溫度會穩定', 'decision')
     push(at(9), '指揮官', '拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知；預期：30 分內 ≥ 121°C', 'info')
-    push(at(11), '工具', `[工具] S1：122°C 總需 36.5 h（+8.5 h）　[工具] S2：下一模 #A-311 交期 3 天後，夜班缺 1 人`, 'tool')
-    push(at(25), '求解器', '[工具] S3：#A-311 移到 9 號機、夜班從 2 線調 1 人，交期全部滿足', 'tool')
+    push(at(11), '工具', `[工具] S1：122°C 總需 28.5 h（+4.5 h）　[工具] S2：下一模 #A-311 交期 3 天後，夜班缺 1 人`, 'tool')
+    push(at(25), '求解器', '[工具] S3：#A-311 仍排 7 號機、夜班從 2 線調 1 人，交期全部滿足', 'tool')
     if (res1) {
       const txt = res1.d.decision === 'reject'
         ? `[人工] 主管駁回新排程${res1.d.reason ? `（${res1.d.reason}）` : ''}；維持 v1，寫入稽核日誌`
@@ -212,25 +212,25 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     }
 
     // ---- plan + steps ----
-    const s1 = step('S1', 'cure_formula', { size: 'M', ref_temp_c: 128, actual_temp_c: 122, elapsed_h: 10, activation_energy_kj_mol: 85 }, [], '122°C 下等效硫化還需多久')
+    const s1 = step('S1', 'cure_formula', { size: 'S', ref_temp_c: 128, actual_temp_c: 122, elapsed_h: 14.4, activation_energy_kj_mol: 85 }, [], '122°C 下等效硫化還需多久')
     const s2 = step('S2', 'query_orders_shifts', { press_ids: ['CURE-07'] }, [], '下一模訂單交期與夜班人力')
     const s3 = step('S3', 'solve_schedule', { cure_overrides_h: { 'CURE-07': '$S1.total_cure_h' }, allow_cross_team: true }, ['S1', 'S2'], '重排硫化機，交期不延誤')
-    const s4 = step('S4', 'confirm_schedule', { schedule_version: 2, reason: '7 號延長硫化 8.5 h' }, ['S3'], '主管核准新排程')
-    const s5 = step('S5', 'notify_teams', { teams: ['curing', 'body'], kind: 'info', message: '#A-311 改 9 號機' }, ['S4'], '通知硫化機組與夜班')
+    const s4 = step('S4', 'confirm_schedule', { schedule_version: 2, reason: '7 號延長硫化 4.5 h' }, ['S3'], '主管核准新排程')
+    const s5 = step('S5', 'notify_teams', { teams: ['curing', 'body'], kind: 'info', message: '7 號延長硫化至 28.5 h，夜班從 2 線調 1 人' }, ['S4'], '通知硫化機組與夜班')
     const st = (t: number, after: StepRun['state'], before: StepRun['state'] = 'pending') => (now >= t ? after : before)
     let steps: StepRun[]
     let plan: Event['plan']
     if (!round2) {
       steps = [
-        run(s1, st(at(11), 'ok', now >= at(9) ? 'running' : 'pending'), now >= at(11) ? result('cure_formula', { rate_ratio: 0.679, remaining_ref_h: 18, remaining_actual_h: 26.5, total_cure_h: 36.5, extra_h: 8.5, formula: 'Arrhenius Ea=85 kJ/mol' }, 3) : null),
+        run(s1, st(at(11), 'ok', now >= at(9) ? 'running' : 'pending'), now >= at(11) ? result('cure_formula', { rate_ratio: 0.679, remaining_ref_h: 9.6, remaining_actual_h: 14.1, total_cure_h: 28.5, extra_h: 4.5, formula: 'Arrhenius Ea=85 kJ/mol' }, 3) : null),
         run(s2, st(at(11), 'ok', now >= at(9) ? 'running' : 'pending'), now >= at(11) ? result('query_orders_shifts', { next_order: '#A-311', due_in_days: 3, gaps: [`${NIGHT} 夜班缺 1 人`] }, 18) : null),
-        run(s3, st(at(25), 'ok', now >= at(11) ? 'running' : 'pending'), now >= at(25) ? result('solve_schedule', { feasible: true, solver: 'cp-sat', moves: ['#A-311 → CURE-09'], staffing: ['夜班從 2 線調 1 人'], all_due_met: true, proposed_version: 2 }, 1840) : null),
+        run(s3, st(at(25), 'ok', now >= at(11) ? 'running' : 'pending'), now >= at(25) ? result('solve_schedule', { feasible: true, solver: 'cp-sat', moves: [], staffing: ['夜班從 2 線調 1 人'], all_due_met: true, proposed_version: 2 }, 1840) : null),
         run(s4, res1 ? (res1.d.decision === 'reject' ? 'rejected' : 'ok') : st(R1_CREATED, 'awaiting_approval'), res1 && res1.d.decision !== 'reject' ? result('confirm_schedule', { active_version: 2 }, 12) : null, now >= at(25) ? gate('S4', 'confirm_schedule', 'R3') : null),
         run(s5, res1 && now >= d1 + SEC ? (res1.d.decision === 'reject' ? 'skipped' : 'ok') : 'pending', res1 && res1.d.decision !== 'reject' && now >= d1 + SEC ? result('notify_teams', { sent: 2 }, 6) : null, now >= at(25) ? gate('S5', 'notify_teams', 'R1', 'allow') : null),
       ]
       plan = now >= at(9) ? {
         goal: '7 號機溫降，大胎與後續訂單不得延誤', hypothesis: H1, rejected_hypothesis_ids: [], steps: [s1, s2, s3, s4, s5],
-        alert_card: { title: '7 號機溫降 128→122°C', summary: '假設 H1 蒸汽壓不足；延長硫化 8.5 h，#A-311 改 9 號機' }, safe_stop: false,
+        alert_card: { title: '7 號機溫降 128→122°C', summary: '假設 H1 蒸汽壓不足；延長硫化 4.5 h，#A-311 維持 7 號機' }, safe_stop: false,
         rationale: '溫度仍在 120–130°C，先延長硫化保品質，再以求解器重排避免交期延誤',
       } : null
     } else {
@@ -258,7 +258,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     const approvals: ApprovalRequest[] = []
     if (now >= R1_CREATED) approvals.push(approval({
       id: 'APR-P7-1', event: EV, step: 'S4', round: 1, created: R1_CREATED, risk: 'R3',
-      title: '7 號延長硫化，#A-311 改 9 號機', reason: '7 號 128 → 122°C；S1 硫化公式：總需 36.5 h（+8.5 h）',
+      title: '7 號延長硫化 4.5 h，夜班從 2 線調 1 人', reason: '7 號 128 → 122°C；S1 硫化公式：總需 28.5 h（+4.5 h）',
       done: ['安全核心監看中（仍在 120–130°C）', '已讀 30 分鐘溫度與 SOP'], gaps: [`${NIGHT} 夜班缺 1 名操作員`], impact: '交期全部滿足',
       options: [{ id: 'A', label: '核准新排程（夜班從 2 線調 1 人）', tool: 'confirm_schedule', args: { schedule_version: 2 }, recommended: true }],
       res: res1,
@@ -266,7 +266,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     if (now >= R2_CREATED) approvals.push(approval({
       id: 'APR-P7-2', event: EV, step: 'S4', round: 2, created: R2_CREATED, risk: 'R3',
       title: '7 號機停用，重排中', reason: 'H1 不成立：溫度續降至 119.5°C',
-      done: ['安全核心已處置', '#A-311 改 9 號'], gaps: [`${NIGHT} 夜班缺 1 名操作員`], impact: '不受影響',
+      done: ['安全核心已處置', '#A-311 維持 7 號'], gaps: [`${NIGHT} 夜班缺 1 名操作員`], impact: '不受影響',
       options: [
         { id: 'A', label: '夜班加班', tool: 'confirm_schedule', args: { schedule_version: 3, staffing: 'overtime' }, recommended: false },
         { id: 'B', label: '從 2 線調 1 人', tool: 'confirm_schedule', args: { schedule_version: 3, staffing: 'transfer' }, recommended: true },
@@ -283,10 +283,10 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     // ---- focus (③) ----
     const tNow = r1(temp07(now))
     const outOfService = now >= H2_T
-    const elapsedH = r1(10 + (now - A) / HOUR)
+    const elapsedH = r1(14.4 + (now - A) / HOUR)
     const auto: string[] = ['安全核心監看中：120–130°C 內不停機']
-    if (now >= at(11)) auto.push('S1 硫化公式：122°C 總需 36.5 h（+8.5 h）')
-    if (now >= at(25)) auto.push('S3 求解：#A-311 移 9 號機，交期全部滿足')
+    if (now >= at(11)) auto.push('S1 硫化公式：122°C 總需 28.5 h（+4.5 h）')
+    if (now >= at(25)) auto.push('S3 求解：#A-311 仍排 7 號機，交期全部滿足')
     if (res1 && res1.d.decision !== 'reject') auto.push('新排程 v2 已生效')
     if (now >= SAFETY_T) auto.push('安全核心已保溫保壓（< 120°C）')
     if (outOfService) auto.push('7 號機停用（SOP 硫化中斷處置）')
@@ -304,7 +304,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
       ],
       auto_done: auto,
       pending: pend.flatMap((a) => a.options.map((o) => ({ approval_id: a.id, option_id: o.id, label: `${o.id} ${o.label}` }))),
-      schedule_impact: round2 ? '7 號停用；#A-311 已改 9 号機，交期不受影響'.replace('号', '號') : now >= at(25) ? '#A-311 改 9 號機；交期全部滿足' : '計算中…',
+      schedule_impact: round2 ? '7 號停用；#A-311 已改 4 號機，交期不受影響' : now >= at(25) ? '#A-311 維持 7 號機；交期全部滿足' : '計算中…',
       state, timeline: T,
     }
 
