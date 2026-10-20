@@ -37,11 +37,15 @@ export function Phone() {
           <ThemeToggle className="ph-tog" />
         </div>
         {top && <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>}
-        {!alerts.armed ? (
-          <button className="ph-arm" onClick={() => void alerts.arm()}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
+        {!alerts.enabled ? (
+          <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
-          <div className="ph-armed muted">核准提醒已開啟{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</div>
+          <div className="ph-armed muted" data-testid="phone-alerts">
+            <span>核准提醒已開啟{alerts.armed ? '' : '・點一下畫面啟用聲音'}{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</span>
+            <button className="ph-arm-off" onClick={(e) => { e.stopPropagation(); alerts.setEnabled(false) }}>關閉</button>
+          </div>
         )}
+        {alerts.enabled && alerts.blocked && <p className="ph-blocked small" role="status" data-testid="phone-alerts-blocked">{alerts.blocked}</p>}
         {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}

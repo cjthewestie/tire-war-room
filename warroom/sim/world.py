@@ -211,6 +211,7 @@ class WorldEvent(_W):
     ts: datetime
     kind: str            # order_new | order_rush | order_change | order_done | shipment | po_created | delivery
     #                      | delivery_late | delivery_short | stockout | defect | maint_start | maint_end
+    #                      | material_short (issue #36 模擬事件)
     #                      | repair_open | repair_close | truck_arrive
     text: str
     ref: str | None = None
@@ -1291,6 +1292,19 @@ class World:
             self._emit(at, "order_rush", pin.text, pin.order.id)
         elif pin.kind == "shift_start":
             self._emit(at, "shift_start", pin.text, None)
+        elif pin.kind == "delivery_late" and pin.material:      # issue #36 模擬事件: the supplier calls, it comes later
+            p = next((p for p in self._pos if p.key == pin.material and p.status in ("在途", "延遲")), None)
+            if p is not None:
+                p.arrive_at = self._receiving_slot(max(p.arrive_at, p.eta) + timedelta(hours=pin.late_h or 6.0))
+            self._emit(at, "delivery_late", pin.text, p.id if p is not None else pin.material)
+        elif pin.kind == "material_short" and pin.material in MATERIAL_BY_KEY:   # issue #36: a lot fails / count is off
+            m = MATERIAL_BY_KEY[pin.material]
+            self._stock[m.key] = min(self._stock[m.key], round(m.reorder_point * 0.4))
+            self._emit(at, "material_short", pin.text, m.key)
+
+    def in_transit(self) -> list[tuple[str, str]]:
+        """Issue #36: (PO id, material key) of the deliveries still on the way, for the random-event generator."""
+        return [(p.id, p.key) for p in self._pos if p.status in ("在途", "延遲")]
 
     def leave_now(self) -> list[dict[str, Any]]:
         """People on leave today, any shift (the team dataset roster's sick days, scripted sick calls, and anyone

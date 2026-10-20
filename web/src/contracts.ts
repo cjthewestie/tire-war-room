@@ -15,6 +15,7 @@ export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_
 export type DataQuality = "ok" | "out_of_range" | "jump" | "stale" | "neighbor_mismatch" | "missing"
 export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip" | "supervisor_command"
   | "shift_start" | "order_rush" | "staffing_short"  // issue #17 plant events
+  | "material_short"  // issue #36: a delivery comes late or a material runs short
 export type Severity = "info" | "warn" | "critical"
 export type TileStatus = "normal" | "warn" | "alarm"
 export type EventState =
@@ -521,6 +522,8 @@ export interface MachineTile {
   short_name: string
   status: MachineStatus
   temp_c: number | null
+  /** issue #36: current batch / step progress 0-1 (press: cure elapsed / required); null = no batch */
+  step_progress?: number | null
 }
 
 export interface HeaderStatus {
@@ -558,6 +561,16 @@ export interface MachineDetail {
   history: SensorReading[]
   prediction: Prediction | null
 }
+
+// ---------------- issue #36 模擬事件 (warroom/sim/events.py) ----------------
+export interface SimEventDef { kind: string; label: string; weight: number; source: "fault" | "plant" }
+export interface SimEventFired { at: ISODate; kind: string; label: string; text: string; source: "random" | "manual"; ref: string | null }
+export interface SimEventsView {
+  enabled: boolean; every_min: number; seed: number; next_at: ISODate | null; fired: SimEventFired[]; catalog: SimEventDef[]
+}
+export interface SimEventsBody { enabled?: boolean; every_min?: number; seed?: number }
+/** In every WS "clock" message: the generator's state, so every page shows the same switch. */
+export interface RandomEventsClock { enabled: boolean; every_min: number; seed: number; fired: number; last: string | null }
 
 export interface SimControl {
   action: "play" | "pause" | "speed" | "reset" | "scenario"
@@ -668,7 +681,7 @@ export type WsMessage =
   | { type: "approval_resolved"; ts: ISODate; data: ApprovalRequest }
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }
   | { type: "audit"; ts: ISODate; data: AuditEntry }
-  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean } }
+  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; random_events?: RandomEventsClock } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
 
 // ---------------- REST ----------------
@@ -690,6 +703,8 @@ export const API = {
   audit: "/api/audit", // ?since_seq=N&limit=200
   sopSearch: "/api/sop/search", // ?q=...&k=3
   simControl: "/api/sim/control", // POST SimControl
+  simEvents: "/api/sim/events", // GET SimEventsView; POST SimEventsBody (issue #36 模擬事件)
+  simEventsFire: "/api/sim/events/fire", // POST {kind} -> {ok, fired}
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)

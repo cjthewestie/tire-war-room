@@ -282,6 +282,17 @@ class ClearBody(BaseModel):
     machine_id: str | None = None
 
 
+class SimEventsBody(BaseModel):
+    """Issue #36 模擬事件 settings; omitted fields keep their value."""
+    enabled: bool | None = None
+    every_min: float | None = Field(default=None, ge=5.0, le=240.0)
+    seed: int | None = Field(default=None, ge=0, le=2**31 - 1)
+
+
+class FireEventBody(BaseModel):
+    kind: str = Field(min_length=1, max_length=32)
+
+
 class NetworkBody(BaseModel):
     network: Literal["online", "weak", "wan_down", "lan_down"]
 
@@ -848,6 +859,32 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                          duration_s=body.duration_s, params=body.params)
         r.inject_fault(spec)
         return {"ok": True, "fault": spec.model_dump(mode="json")}
+
+    # issue #36 模擬事件: random / chosen plant events through the normal detector -> state machine -> gate path
+    @app.get("/api/sim/events")
+    async def sim_events() -> dict[str, Any]:
+        return rt().sim_events.view()
+
+    @app.post("/api/sim/events")
+    async def sim_events_set(body: SimEventsBody, _: Session = Depends(demo)) -> dict[str, Any]:
+        r = rt()
+        r.sim_events.configure(body.enabled, body.every_min, body.seed)
+        r.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "模擬事件設定", **body.model_dump(exclude_none=True)})
+        r.bus.publish(WsType.CLOCK, r.clock_info())
+        return r.sim_events.view()
+
+    @app.post("/api/sim/events/fire")
+    async def sim_events_fire(body: FireEventBody, _: Session = Depends(demo)) -> dict[str, Any]:
+        from warroom.sim.events import CATALOG_BY_KIND
+        if body.kind not in CATALOG_BY_KIND:
+            raise _404(body.kind)
+        r = rt()
+        try:
+            fired = r.fire_sim_event(body.kind, source="manual")
+        except RuntimeError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        r.bus.publish(WsType.CLOCK, r.clock_info())
+        return {"ok": True, "fired": fired}
 
     @app.post("/api/sim/clear")
     async def sim_clear(body: ClearBody | None = Body(default=None), _: Session = Depends(demo)) -> dict[str, Any]:

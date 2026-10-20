@@ -3,7 +3,8 @@
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
-  type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type WorldSnapshot, type WsMessage,
+  type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+  type SimEventsView, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
@@ -54,6 +55,10 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
+  /** Live only (issue #36 模擬事件): the generator's settings and log, change them, fire one event now. */
+  simEvents?(): Promise<SimEventsView>
+  setSimEvents?(b: SimEventsBody): Promise<SimEventsView>
+  fireEvent?(kind: string): Promise<SimEventFired>
 }
 
 // ---------------- live ----------------
@@ -142,6 +147,9 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
+  simEvents() { return getJSON<SimEventsView>(API.simEvents) }
+  setSimEvents(b: SimEventsBody) { return postJSON<SimEventsView>(API.simEvents, b) }
+  async fireEvent(kind: string) { return (await postJSON<{ ok: boolean; fired: SimEventFired }>(API.simEventsFire, { kind })).fired }
   rollback(version?: number, confirm = false) {
     return postJSON<ScheduleVersion>(API.scheduleRollback, { ...(version == null ? {} : { version }), confirm })
   }

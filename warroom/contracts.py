@@ -114,6 +114,7 @@ class AnomalyKind(StrEnum):
     SHIFT_START = "shift_start"
     ORDER_RUSH = "order_rush"
     STAFFING_SHORT = "staffing_short"
+    MATERIAL_SHORT = "material_short"   # issue #36: a delivery comes late or a material runs short
 
 
 class Severity(StrEnum):
@@ -427,7 +428,7 @@ class PlantInput(_M):
     """Issue #17: something that happens to the plant that is not a machine fault, scripted by a scenario.
     It changes the plant's inputs (the order book, the roster), never a machine, and wakes the state
     machine as a plant event."""
-    kind: Literal["shift_start", "rush_order", "absence"]
+    kind: Literal["shift_start", "rush_order", "absence", "delivery_late", "material_short"]
     text: str                         # "急單 #R-009 到：客戶G 中胎 2 條，交期 10/09"
     order: Order | None = None      # rush_order: the order that arrives
     staff_id: str | None = None       # absence: team dataset staff id (S13)
@@ -435,6 +436,8 @@ class PlantInput(_M):
     shift_name: str | None = None     # absence: "早班" (factory.OPTIMISED_SHIFTS name)
     people: int = 1
     note: str | None = None
+    material: str | None = None       # issue #36 delivery_late / material_short: world material key ("carbon_black")
+    late_h: float | None = None       # issue #36 delivery_late: hours the delivery slips
 
 
 class ScenarioStep(_M):
@@ -1008,6 +1011,9 @@ class MachineTile(_M):
     short_name: str
     status: MachineStatus
     temp_c: float | None = None
+    # issue #36: how far the current batch / step is (0-1): a press's cure (elapsed / required), any other
+    # machine's batch (MachineState.step_elapsed_min / its cycle). None = no batch (an empty press).
+    step_progress: float | None = None
 
 
 class BadDataMark(_M):
@@ -1105,6 +1111,9 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/audit", None, "AuditEntry[]"),                  # ?since_seq=N&limit=200
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
     ("POST", "/api/sim/control", "SimControl", "{ok: bool}"),
+    ("GET", "/api/sim/events", None, "SimEventsView"),                  # issue #36 模擬事件
+    ("POST", "/api/sim/events", "SimEventsBody", "SimEventsView"),
+    ("POST", "/api/sim/events/fire", "{kind}", "{ok: bool, fired}"),
     ("POST", "/api/ask", "AskRequest", "AskAnswer"),               # 問戰情室: read-only Q&A
     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)

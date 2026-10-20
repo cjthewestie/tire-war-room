@@ -14,6 +14,8 @@ import type { WarRoomState } from '../store'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
 import { GoodsRings } from './GoodsRings'
+import { MachineRings } from './MachineRings'
+import { machineRing } from './machineRing'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
   ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
@@ -149,7 +151,7 @@ const GLOW = typeof document !== 'undefined' ? glowTexture() : null
 
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
-function MachineStatus({ p, tile, hot, focus }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean }) {
+function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null }) {
   const light: Light = statusLight(tile?.status)
   useEffect(() => { DRAWN_LIGHT[p.id] = light }, [p.id, light])
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
@@ -208,6 +210,7 @@ function MachineStatus({ p, tile, hot, focus }: { p: Placed; tile: MachineTile |
             <b>{tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
             <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>
+            {work && <em data-testid={`work-${p.id}`}>{work}</em>}
           </div>
         </Html>
       )}
@@ -714,7 +717,8 @@ export function World({ state, focusId, active, fp }: { state: WarRoomState; foc
       <OuterWalls />
       <Roof b={BUILDING} y={2.5} wallTop={1.85} lamps={HALL_LAMPS} />
       <Machines />
-      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id} />)}
+      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
+        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, state.world ? Date.parse(state.world.factory_time) : 0).label : null} />)}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
@@ -733,6 +737,7 @@ export function World({ state, focusId, active, fp }: { state: WarRoomState; foc
       <Walkers count={state.world ? 2 : WALKER_LOOPS.length} />
       {state.world && <WorldPeople world={state.world} />}
       {state.world?.goods && <GoodsRings goods={state.world.goods} />}
+      <MachineRings tiles={tiles} world={state.world} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <Ambient />
     </group>

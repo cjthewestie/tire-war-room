@@ -457,6 +457,8 @@ class Runtime:
         self._oob_seen: dict[str, datetime] = {}
         self._safety_unrecorded: list[SafetyAction] = []   # applied, but audit/attach failed: retried
         self._last_plant_persist = -1e9
+        from warroom.sim.events import SimEvents
+        self.sim_events = SimEvents()            # issue #36 模擬事件: off by default, kept across scenario loads
         if components is None and want_resume and getattr(self.builder, "reopened_store", False):
             self.resumed = True
             self._restore_plant()                # factory clock continues; the script is not replayed
@@ -742,6 +744,7 @@ class Runtime:
             self.clock.advance(dt_s)
         self.ticks += 1
         self.safety_pass(readings)              # RED path first: nothing below can delay it
+        self._random_event()                    # issue #36: off by default
         self._plant_inputs()                    # issue #17: a scripted shift start / rush order / sick call
         readings = self.ingest.transport(readings)
         self.ingest.record(readings)
@@ -1026,14 +1029,52 @@ class Runtime:
         self.sim.inject_fault(fault)
         self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "fault injected", "fault": fault.model_dump(mode="json")})
 
+    # ------------------------------------------------------------------ issue #36 模擬事件
+    def _random_event(self) -> None:
+        try:
+            if self.sim_events.due(self.clock.now()):
+                self.fire_sim_event(self.sim_events.pick(), source="random")
+        except Exception:  # noqa: BLE001 - a demo generator must never stop the plant loop
+            log.exception("random event failed")
+
+    def fire_sim_event(self, kind: str, source: str = "manual") -> dict[str, Any]:
+        """Inject one 模擬事件. A machine event is a FaultSpec in the sim (the detector must see it in the readings,
+        exactly like POST /api/sim/fault); a plant event is a PlantInput (the next tick opens a plant event in the
+        state machine, exactly like a scripted rush order). Nothing here calls a tool or the gate."""
+        from warroom.contracts import FaultSpec
+        from warroom.sim.events import fault_text
+        now = self.clock.now()
+        busy = {m for m in F.MACHINE_IDS if self._open_event_id(m)} | \
+            {f.machine_id for f in (self.sim.faults() if callable(getattr(self.sim, "faults", None)) else [])}
+        out = self.sim_events.build(kind, self.sim, now, busy)
+        if isinstance(out, FaultSpec):
+            self.inject_fault(out)
+            fired = self.sim_events.log(now, kind, fault_text(out), source, out.machine_id)
+        else:
+            apply = getattr(self.sim, "apply_plant_input", None)
+            if not callable(apply):
+                raise RuntimeError("this sim takes no plant events")
+            apply(out, now)
+            ref = out.order.id if out.order else out.staff_id or out.material
+            fired = self.sim_events.log(now, "material_short" if out.kind == "material_short" and kind == "delivery_late"
+                                        else kind, out.text, source, ref)
+        self.audit.append(AuditKind.SYSTEM, "supervisor" if source == "manual" else "sim_events",
+                          {"msg": "模擬事件", "kind": fired.kind, "text": fired.text, "source": source,
+                           "seed": self.sim_events.seed})
+        return {"at": fired.at.isoformat(), "kind": fired.kind, "label": fired.label, "text": fired.text,
+                "source": source, "ref": fired.ref}
+
     def clear_faults(self, machine_id: str | None = None) -> None:
         self.sim.clear_faults(machine_id)
         self.c.detector.reset(machine_id)
         self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "faults cleared", "machine_id": machine_id})
 
     def clock_info(self) -> dict[str, Any]:
+        ev = self.sim_events
         return {"factory_time": self.clock.now().isoformat(), "speed": self.speed, "paused": self.paused,
-                "scenario": self.scenario.value}
+                "scenario": self.scenario.value,
+                "random_events": {"enabled": ev.enabled, "every_min": ev.every_min, "seed": ev.seed,
+                                  "fired": len(ev.fired), "last": ev.fired[-1].text if ev.fired else None}}
 
     # ------------------------------------------------------------------ read models
     @property
@@ -1121,8 +1162,24 @@ class Runtime:
             m = by_id[d.id]
             out.append(MachineTile(machine_id=d.id, line=d.line, short_name=d.short_name,
                                    status=self._effective_status(m),
-                                   temp_c=m.last_reading.temp_c if m.last_reading else None))
+                                   temp_c=m.last_reading.temp_c if m.last_reading else None,
+                                   step_progress=self._step_progress(m)))
         return out
+
+    @staticmethod
+    def _step_progress(m: MachineState) -> float | None:
+        """Issue #36: the 3D ring above a machine. A press: cure elapsed / required; any other machine: minutes
+        into its batch / the batch length (physics.NOMINALS cycle_min). None when there is no batch."""
+        if m.cure_job is not None:
+            req = m.cure_job.cure_required_h
+            return round(min(1.0, max(0.0, m.cure_job.cure_elapsed_h / req)), 3) if req > 0 else None
+        if m.batch_id is None:
+            return None
+        from warroom.sim.physics import NOMINALS
+        nom = NOMINALS.get(m.machine_id)
+        if nom is None or nom.cycle_min <= 0:
+            return None
+        return round(min(1.0, max(0.0, m.step_elapsed_min / nom.cycle_min)), 3)
 
     def machine_states(self, line: str | None = None) -> list[MachineState]:
         order = {mid: i for i, mid in enumerate(F.MACHINE_IDS)}
@@ -1205,7 +1262,7 @@ class Runtime:
         if ev.machine_id not in F.MACHINE_BY_ID:
             # a plant event (issue #17) or a supervisor command about the whole plant: no machine, no tiles
             auto_done, pending = self._actions_for(ev)
-            kind = {"shift_start": "早班開工", "order_rush": "插單", "staffing_short": "人力缺口",
+            kind = {"shift_start": "早班開工", "order_rush": "插單", "staffing_short": "人力缺口", "material_short": "原料事件",
                     "supervisor_command": "主管指令"}.get(ev.anomaly.kind.value, "工廠事件")
             return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=f"{kind}：{ev.goal or ev.anomaly.message}"[:60],
                               detail=ev.anomaly.message, tiles=[], auto_done=auto_done, pending=pending,

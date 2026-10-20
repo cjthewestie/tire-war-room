@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { HeaderStatus, ScenarioName } from '../contracts'
 import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
+import { SimEventControls } from './SimEvents'
 
 const SPEEDS = [1, 5, 10, 60]
 const JUMPS: Partial<Record<ScenarioName, { label: string; iso: string }[]>> = {
@@ -44,6 +45,7 @@ export function DemoStrip() {
           {JUMPS[current]!.map((j) => <button key={j.iso} onClick={() => run(() => transport.jump!(Date.parse(j.iso)))}>{j.label}</button>)}
         </div>
       )}
+      <SimEventControls busy={busy} run={run} />
       <div className="seg net" role="group" aria-label="拔網路測試" title="模擬離線分層（p.9）：弱網→Agent 不受影響，只延後同步與推播；WAN 斷→手機走廠內 LAN；LAN 斷→現場觸控螢幕＋警示燈">
         {(['online', 'weak', 'wan_down', 'lan_down'] as const).map((n) => (
           <button key={n} disabled={busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}

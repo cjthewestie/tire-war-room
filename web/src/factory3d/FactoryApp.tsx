@@ -192,6 +192,14 @@ export function FactoryApp() {
         transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
+      if (e.code === 'Digit4') {          // issue #36: 隨機事件 on / off (the same switch as the demo strip)
+        if (!transport?.setSimEvents || e.repeat) return
+        const on = !state.clock?.random_events?.enabled
+        transport.setSimEvents({ enabled: on }).then(
+          (v) => setDemoNote({ text: v.enabled ? `隨機事件：開（每 ${v.every_min} 分）` : '隨機事件：關', at: Date.now() }),
+          (err) => { console.warn(err); setDemoNote({ text: '隨機事件：沒有成功', at: Date.now() }) })
+        return
+      }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
       if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
@@ -207,7 +215,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -288,7 +296,7 @@ export function FactoryApp() {
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
-        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
+        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>4</kbd> 隨機事件 <kbd>0</kbd> 暫停／播放</span>}
       </div>
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (

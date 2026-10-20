@@ -1,9 +1,9 @@
 // Client state: one reducer fed by WsMessages (from the live /ws or from the mock engine).
 import type {
-  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
+  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
 
-export interface ClockState { factory_time: string; speed: number; paused: boolean }
+export interface ClockState { factory_time: string; speed: number; paused: boolean; random_events?: RandomEventsClock }
 
 export interface WarRoomState {
   snapshot: DashboardSnapshot | null
