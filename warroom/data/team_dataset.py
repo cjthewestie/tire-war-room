@@ -32,6 +32,7 @@ SCENARIO_ANCHOR: dict[ScenarioName, date] = {
     ScenarioName.SHIFT_START: date(2026, 10, 27),
     ScenarioName.STAFFING: date(2026, 10, 26),
     ScenarioName.RUSH_ORDER: date(2026, 10, 21),
+    ScenarioName.DAY_LOOP: date(2026, 10, 21),        # issue #36: the sim date IS the dataset's quiet day
 }
 
 
@@ -249,6 +250,31 @@ def replay_window(name: str, start_at: datetime | None = None, root: Path | None
     vals = _window_values(name, str(root) if root else "")
     return [[SensorReading(ts=ts + shift, machine_id=mid, **fields) for mid, fields in sorted(vals[ts].items())]
             for ts in sorted(t for t in vals if t >= first)]
+
+
+# Issue #36 一日循環: the one full quiet day in sensor_readings (10 s steps, scenario 0). 10-22 holds EV-1 and
+# 10-28 EV-2; the file has no rows for 10-23 .. 10-27.
+QUIET_DAY = date(2026, 10, 21)
+
+
+@lru_cache(maxsize=2)
+def day_ticks(day: date = QUIET_DAY, root_key: str = "") -> tuple[tuple[datetime, tuple[tuple[str, tuple[tuple[str, float], ...]], ...]], ...]:
+    """One whole dataset day as (ts, ((machine_id, ((field, value), ...)), ...)) in time order, on our machine ids
+    and our units (steam re-scaled). Only the channels we model (temp, cooling water, steam). Cached, immutable."""
+    key = day.isoformat()
+    out: dict[datetime, dict[str, dict[str, float]]] = {}
+    for row in iter_sensor_rows(Path(root_key) if root_key else None):
+        if not row["ts"].startswith(key) or not row["value"]:
+            continue
+        field = _FIELD.get(row["sensor_id"].split(".", 1)[1])
+        mid = machine_id(row["sensor_id"])
+        if field is None or mid is None:
+            continue
+        v = float(row["value"])
+        if field == "steam_kgf_cm2":
+            v = steam_from_bar_abs(v)
+        out.setdefault(_ts(row["ts"]), {}).setdefault(mid, {})[field] = v
+    return tuple((ts, tuple((m, tuple(sorted(f.items()))) for m, f in sorted(out[ts].items()))) for ts in sorted(out))
 
 
 def write_replay_jsonl(name: str, out: Path, start_at: datetime | None = None, root: Path | None = None,

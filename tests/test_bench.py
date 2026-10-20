@@ -451,8 +451,8 @@ def test_bench_and_preload_send_the_commanders_exact_call():
     """Finding: bench/preload used their own short SYSTEM, so the prefix cache was warmed for a prompt the
     commander never sends. Now every judged bench and the preload go through commander.build_messages."""
     from bench import preload
-    from bench.prompts import (ANOMALIES, COMMANDER_ALLOWED_TOOLS, commander_format, commander_messages,
-                               commander_request, live_anomaly)
+    from bench.prompts import (ANOMALIES, COMMANDER_ALLOWED_TOOLS, COMMANDER_MAX_TOKENS, commander_format,
+                               commander_messages, commander_request, live_anomaly)
     from warroom.agent.commander import SYSTEM_PROMPT, OpenAICommander, build_messages
     from warroom.config import Settings
     from warroom.contracts import EventState, TOOLS_BY_STATE, WRITE_TOOLS
@@ -469,7 +469,7 @@ def test_bench_and_preload_send_the_commanders_exact_call():
     import httpx
     cmd = OpenAICommander(Settings(base_url="http://127.0.0.1:9/v1", model="m"), http_client=httpx.AsyncClient())
     kw = cmd.request_kwargs(commander_request(live_anomaly(ANOMALIES[0], nonce="t")))
-    assert kw["response_format"] == commander_format() and kw["max_tokens"] == 1200
+    assert kw["response_format"] == commander_format() and kw["max_tokens"] == COMMANDER_MAX_TOKENS == 4096
 
 
 def test_stream_chat_times_alert_card_inside_plan_stream(env_fake):

@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     model: str = "nemotron"
     api_key: str = "none"                 # NVIDIA_API_KEY also accepted, see api_key_effective
     nvidia_api_key: str | None = None
-    llm_timeout_s: float = 30.0
+    llm_timeout_s: float = 60.0           # LLM_TIMEOUT_S; 30 s timed out plan and replan on a live p.11 run
+    # COMMANDER_MAX_TOKENS: completion cap for a commander plan. 1200 cut the live p.11 plan mid-JSON
+    # (Nemotron pretty-prints, ~1.2-1.5k tokens for a full plan); a cut plan is audited as "truncated"
+    commander_max_tokens: int = 4096
     llm_fallback_to_mock: bool = True     # invalid JSON / unreachable -> mock plan, logged
     guided_json: bool = True              # vLLM extra_body guided_json; else response_format json_schema
 
@@ -42,7 +45,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     sim_speed: float = 1.0
-    scenario: str = "normal"
+    scenario: str = "day_loop"             # issue #36: 一日循環 is the normal running state
     # Team dataset replay (data/team_dataset): "" off | team_ev1 | team_ev2 | team_both.
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))

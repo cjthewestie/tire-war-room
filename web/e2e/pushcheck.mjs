@@ -35,15 +35,18 @@ await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
 await api('/api/sim/network', { network: 'online' })
 await api('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await ph.waitForTimeout(1500)
-check('arm button shown', (await ph.locator('.ph-arm').count()) === 1)
-await ph.click('.ph-arm')
-check('alerts armed', (await ph.locator('.ph-armed').count()) === 1, await ph.locator('.ph-armed').innerText().catch(() => ''))
+// issue #36: alerts are on by default; the first tap anywhere unlocks sound and asks for notification permission
+check('alerts on by default (no arm button)', (await ph.locator('.ph-arm').count()) === 0 && (await ph.locator('.ph-armed').count()) === 1,
+  await ph.locator('.ph-armed').innerText().catch(() => ''))
+await ph.mouse.click(195, 400)
+await ph.waitForTimeout(300)
+check('first tap unlocks sound', !(await ph.locator('.ph-armed').innerText()).includes('點一下畫面'), await ph.locator('.ph-armed').innerText().catch(() => ''))
 const before = (await pushes()).length
 
 // 1) online: approval arrives while the phone is just sitting there
 await api('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
 await api('/api/sim/control', { action: 'speed', speed: 30 })
-check('approval card arrived', await waitPending('.ph-opt'))
+check('approval card arrived', await waitPending('.ph-approval'))   // not .ph-opt: the 問一句 examples use it too
 await ph.waitForTimeout(500)
 const p1 = (await pushes()).slice(before)
 check('system notification fired', p1.some((x) => x.kind === 'notify'), p1.find((x) => x.kind === 'notify')?.title)

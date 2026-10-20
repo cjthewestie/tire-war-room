@@ -148,7 +148,7 @@ services:
       QDRANT_URL: http://${QDRANT_BIND:-127.0.0.1}:6333
       AUDIT_PATH: /app/data/runtime/audit.jsonl
       SCHEDULE_DIR: /app/data/runtime/schedules
-      SCENARIO: ${SCENARIO:-normal}
+      SCENARIO: ${SCENARIO:-day_loop}
       SIM_SPEED: ${SIM_SPEED:-1.0}
       HOST: 0.0.0.0                       # all host interfaces: 127.0.0.1 for the touchscreen, LAN for the phone
       PORT: "8000"
