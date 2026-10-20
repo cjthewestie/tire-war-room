@@ -22,3 +22,8 @@ export function teleport(x: number, z: number, yaw?: number, camYaw?: number) {
   if (yaw != null) { player.yaw = yaw; player.pitch = 0; cam.yaw = camYaw ?? yaw }
   cam.snap = true
 }
+
+/** Phones and tablets (no mouse): the overview is the default view and on-screen controls stand in for the keys. */
+export const TOUCH_DEVICE = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+/** On-screen stick (TouchControls): forward / strafe, each −1…1, read by the controller like W/S and A/D. */
+export const stick = { fw: 0, st: 0 }

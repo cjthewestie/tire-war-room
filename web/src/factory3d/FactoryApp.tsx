@@ -4,6 +4,7 @@
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo
 // never has to leave the 3D view; ?demo=1 also lists them in the key strip.
+// Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
@@ -22,10 +23,11 @@ import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from 
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
-import { cam, player, teleport, view } from './pose'
+import { TOUCH_DEVICE, cam, player, teleport, view } from './pose'
 import { BreakRoom, Restroom } from './Rooms'
 import { SPACES, arrival } from './spaces'
 import { TiltShift } from './TiltShift'
+import { TouchControls } from './TouchControls'
 import { DRAWN_LIGHT, Lights, World } from './World'
 
 type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
@@ -90,7 +92,7 @@ export function FactoryApp() {
   const [near, setNear] = useState<Near>(null)
   const [panel, setPanel] = useState<Panel>(null)
   const [phoneUp, setPhoneUp] = useState(false)
-  const [mode, setMode] = useState<'first' | 'third'>('first')
+  const [mode, setMode] = useState<'first' | 'third'>(TOUCH_DEVICE ? 'third' : 'first')
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
@@ -264,8 +266,10 @@ export function FactoryApp() {
 
       {/* first person: a small aim dot, and what F does right here */}
       {fp && !overlay && <div className="f3-cross" aria-hidden />}
-      {fp && prompt && <div className="f3-aim" data-testid="f3-prompt"><kbd>F</kbd> {prompt}</div>}
-      {fp && !overlay && !locked && <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>}
+      {fp && prompt && <div className="f3-aim" data-testid="f3-prompt">{!TOUCH_DEVICE && <kbd>F</kbd>} {prompt}</div>}
+      {fp && !overlay && !locked && (TOUCH_DEVICE
+        ? <div className="f3-look-hint">拖曳畫面看四周</div>
+        : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
@@ -278,9 +282,10 @@ export function FactoryApp() {
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
           {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
         </div>
-        <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? '・按 P 拿手機' : ''}</div>
+        <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
       </div>
-      <div className="f3-keys">
+      {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
+      <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
         {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
@@ -288,7 +293,7 @@ export function FactoryApp() {
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
-          <b>📱 {toast.title}</b><span>{toast.body}</span><i>按 P 拿起手機核准</i>
+          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機核准' : '按 P 拿起手機核准'}</i>
         </div>
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
@@ -298,12 +303,19 @@ export function FactoryApp() {
           <div>
             <h1>迷你工廠・戰情室</h1>
             <p>你是戰情室負責人，從戰情室門口出發。走遍廠房看 28 台機台的即時狀態，坐到戰情室電腦前用真的儀表板。</p>
-            <ul>
+            {TOUCH_DEVICE ? (
+              <ul>
+                <li>左下搖桿移動，推到底是跑步</li>
+                <li>拖曳畫面轉視角，兩指捏合縮放</li>
+                <li>靠近機台或門，右下會出現操作按鈕</li>
+                <li>「手機」拿起主管手機（真的手機頁，在哪都能核准）・「第一人稱」切換視角</li>
+              </ul>
+            ) : <ul>
               <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，滑鼠看四周（<kbd>Q</kbd>/<kbd>E</kbd> 也能轉身）</li>
               <li>機台旁按 <kbd>F</kbd> 看即時讀數；戰情室桌前按 <kbd>F</kbd> 坐下用儀表板</li>
               <li>牆上的門通往 <b>休息區</b> 和 <b>廁所</b>：走進去或按 <kbd>F</kbd></li>
               <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
-            </ul>
+            </ul>}
             <button className="f3-go">點擊開始</button>
           </div>
         </div>
