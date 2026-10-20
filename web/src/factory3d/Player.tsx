@@ -4,6 +4,7 @@
 // V switches to the overview: the chibi lead (hard hat, vest, phone in hand) followed by an orbit camera at a diorama
 // angle, as before (Q/E or drag orbit, wheel zooms). The two cameras blend into each other over about a second.
 // Collision comes from the current space (spaces.ts): machines, furniture, walls; walking into a door goes through it.
+// Touch (#26): the on-screen stick adds to WASD, one finger drags the view, two fingers pinch-zoom the overview.
 import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
@@ -11,7 +12,7 @@ import * as THREE from 'three'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
 import { OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
-import { CAM_LIMITS, OVERVIEW_DIST, cam, player, view } from './pose'
+import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, player, stick, view } from './pose'
 import { SPACES } from './spaces'
 import { lock, releaseLook, requestLook } from './look'
 
@@ -67,7 +68,8 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
   const { camera, gl } = useThree()
   const keys = useRef(new Set<string>())
   const lastNear = useRef<string>('')
-  const drag = useRef<{ x: number; y: number } | null>(null)
+  const drag = useRef<{ x: number; y: number; id: number } | null>(null)
+  const pinch = useRef<{ pts: Map<number, { x: number; y: number }>; d: number }>({ pts: new Map(), d: 0 })
   const enabledRef = useRef(enabled)
   useEffect(() => { enabledRef.current = enabled }, [enabled])
   const lead = useMemo(() => buildLead(), [])
@@ -105,6 +107,16 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     const blur = () => keys.current.clear()
     const move = (e: PointerEvent) => {
       if (!enabledRef.current) return
+      const pc = pinch.current
+      if (pc.pts.has(e.pointerId)) pc.pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pc.pts.size === 2) {   // two fingers: zoom the overview, no look
+        const [a, b] = [...pc.pts.values()]
+        const d = Math.hypot(a.x - b.x, a.y - b.y)
+        if (view.mode === 'third' && pc.d > 0 && d > 0) cam.dist = Math.max(CAM_LIMITS.distMin, Math.min(CAM_LIMITS.distMax, cam.dist * pc.d / d))
+        pc.d = d
+        return
+      }
+      if (drag.current && e.pointerId !== drag.current.id) return   // another finger (the stick) moving
       if (view.mode === 'first') {
         if (document.pointerLockElement === el) {
           player.yaw -= e.movementX * LOOK
@@ -112,21 +124,27 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
         } else if (drag.current) {
           player.yaw -= (e.clientX - drag.current.x) * LOOK * 1.4
           player.pitch -= (e.clientY - drag.current.y) * LOOK * 1.4
-          drag.current = { x: e.clientX, y: e.clientY }
+          drag.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
         }
         player.pitch = Math.max(-1.25, Math.min(1.25, player.pitch))
       } else if (drag.current) {
         cam.yaw -= (e.clientX - drag.current.x) * 0.006
         cam.pitch = Math.max(CAM_LIMITS.pitchMin, Math.min(CAM_LIMITS.pitchMax, cam.pitch + (e.clientY - drag.current.y) * 0.004))
-        drag.current = { x: e.clientX, y: e.clientY }
+        drag.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
       }
     }
     const pdown = (e: PointerEvent) => {
       if (e.button !== 0 || !enabledRef.current) return
-      drag.current = { x: e.clientX, y: e.clientY }
+      const pc = pinch.current
+      pc.pts.set(e.pointerId, { x: e.clientX, y: e.clientY })
+      if (pc.pts.size === 2) { pc.d = 0; drag.current = null; return }
+      drag.current = { x: e.clientX, y: e.clientY, id: e.pointerId }
       requestLook()
     }
-    const pup = () => { drag.current = null }
+    const pup = (e: PointerEvent) => {
+      pinch.current.pts.delete(e.pointerId)
+      if (drag.current?.id === e.pointerId) drag.current = null
+    }
     const wheel = (e: WheelEvent) => {
       if (!enabledRef.current || view.mode !== 'third') return
       e.preventDefault()
@@ -138,6 +156,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     window.addEventListener('pointermove', move)
     el.addEventListener('pointerdown', pdown)
     window.addEventListener('pointerup', pup)
+    window.addEventListener('pointercancel', pup)
     el.addEventListener('wheel', wheel, { passive: false })
     return () => {
       window.removeEventListener('keydown', down)
@@ -146,12 +165,13 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
       window.removeEventListener('pointermove', move)
       el.removeEventListener('pointerdown', pdown)
       window.removeEventListener('pointerup', pup)
+      window.removeEventListener('pointercancel', pup)
       el.removeEventListener('wheel', wheel)
       if (lock.el === el) lock.el = null
     }
   }, [gl])
 
-  useEffect(() => { if (!enabled) { keys.current.clear(); drag.current = null } }, [enabled])
+  useEffect(() => { if (!enabled) { keys.current.clear(); drag.current = null; pinch.current.pts.clear(); stick.fw = 0; stick.st = 0 } }, [enabled])
 
   useFrame(({ clock }, dtRaw) => {
     const dt = Math.min(dtRaw, 0.05)
@@ -170,10 +190,13 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
       if (k.has('KeyS') || k.has('ArrowDown')) fw -= 1
       if (k.has('KeyD')) st += 1
       if (k.has('KeyA')) st -= 1
+      fw += stick.fw
+      st += stick.st
       const len = Math.hypot(fw, st)
-      if (len > 0) {
-        player.running = k.has('ShiftLeft') || k.has('ShiftRight')
-        const v = (player.running ? RUN : WALK) * dt / len
+      if (len > 0.05) {
+        const push = Math.min(1, len)   // the stick walks slower when pushed less; a key is always a full step
+        player.running = k.has('ShiftLeft') || k.has('ShiftRight') || Math.hypot(stick.fw, stick.st) > 0.95
+        const v = (player.running ? RUN : WALK) * push * dt / len
         const yaw = first ? player.yaw : cam.yaw
         const sin = Math.sin(yaw)
         const cos = Math.cos(yaw)
@@ -276,7 +299,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
         <primitive object={lead.f.root} />
         {prompt && mode === 'third' && (
           <Html position={[0, 0, 0]} zIndexRange={[14, 12]} style={{ pointerEvents: 'none' }}>
-            <div className="f3-prompt" data-testid="f3-prompt"><kbd>F</kbd> {prompt}</div>
+            <div className="f3-prompt" data-testid="f3-prompt">{!TOUCH_DEVICE && <kbd>F</kbd>} {prompt}</div>
           </Html>
         )}
       </group>
