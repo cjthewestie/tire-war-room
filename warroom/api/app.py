@@ -89,6 +89,12 @@ log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
 
 
+class MainMessage(BaseModel):
+    """Issue #54: a message to the 主 agent (it classifies it itself)."""
+    text: str = Field(min_length=1, max_length=300)
+    event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
+
+
 class RollbackBody(BaseModel):
     version: int | None = None
     confirm: bool = False      # the supervisor saw the preview (versions, diff) and confirmed: the R2/R3 approval
@@ -601,6 +607,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
         _safe(r.sync_warning_light, False)
+        _safe(lambda: r.orch.on_decided(out), None)        # issue #54: 核准並派發 -> the main agent dispatches execution
         return out
 
     # ------------------------------------------------------------------ schedule
@@ -879,8 +886,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         refusal = physical_request(body.text)
         how = "模型判斷" if d["by"] == "model" else "關鍵字規則" + ("（模型失敗改用規則）" if d.get("fell_back") else "")
         return CommandReply(event_id=ev.id, accepted=refusal is None,
-                            reply=refusal or f"主 agent 已派發子 agent：{TYPES[d['type']]}（{how}：{d['reason']}），任務 {ev.id} 規劃中；"
-                                             "需要核准的動作會送出核准卡，結果會回報在這裡。")
+                            reply=refusal or f"主 agent 已請子 agent 規劃：{TYPES[d['type']]}（{how}：{d['reason']}）。"
+                                             "計劃好了會送到計劃區給你核准；核准後派發執行，完成後在這裡回報。")
 
     @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
     async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
@@ -899,6 +906,44 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                      ask_agent=_ask_agent(r), tools=r.c.tools, audit=r.audit,
                                      context=r.ask_context(), now=r.clock.now())
         _safe(r.sync_warning_light, False)
+        return out
+
+    # ------------------------------------------------------------------ issue #54: one input, one 主 agent
+    def _main_chat(r: Runtime):
+        if "main" not in holder:
+            from warroom.agent.main_chat import MainChat
+            holder["main"] = MainChat(r.settings)
+        return holder["main"]
+
+    @app.post("/api/main/message")
+    async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """The supervisor talks to the 主 agent; it classifies the message itself: chitchat (direct reply, no tool),
+        question (read-only 查詢), change (discuss the selected waiting plan), task (a plan proposal by a subagent,
+        approved before it runs), unclear (one clarifying question). Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        text = body.text.strip()
+        waiting = None
+        if body.event_id:
+            sm = r.state_machine
+            card = getattr(sm, "waiting_card", lambda _e: None)(body.event_id)
+            waiting = card.title if card is not None else None
+        from warroom.agent.orchestrator import ACTOR, PRIORITY
+        async with r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "主 agent 判讀"):
+            c = await _main_chat(r).classify(text, waiting is not None, waiting)
+        r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "intent": c["intent"], "by": c["by"],
+                                                  "fell_back": c["fell_back"], "error": c["error"], "reply": c["reply"],
+                                                  "selected": body.event_id})
+        out: dict[str, Any] = {**c, "event_id": None, "ask": None, "discuss": None}
+        if c["intent"] == "question":
+            out["ask"] = (await ask(AskRequest(question=text), session)).model_dump(mode="json")
+        elif c["intent"] == "change" and body.event_id:
+            out["discuss"] = (await discuss(body.event_id, DiscussRequest(text=text), session)).model_dump(mode="json")
+            out["event_id"] = body.event_id
+        elif c["intent"] == "task":
+            rep = await command(CommandRequest(text=text), session)
+            out["event_id"], out["reply"] = rep.event_id or None, rep.reply
         return out
 
     # ------------------------------------------------------------------ sim control (demo)

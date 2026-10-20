@@ -41,11 +41,13 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
   const replans = useReplans()
   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
+  // switch only while the supervisor is still looking at that order (never pull the screen away from something else)
+  const looking = sel && picked === sel.key ? sel.orderId : null        // the supervisor opened it (not the default pick)
   useEffect(() => {
     if (!arrived?.eventId) return
     setReplan(arrived.orderId, { state: 'ready' })
-    setPicked(arrived.eventId)
-  }, [arrived?.eventId, arrived?.orderId, setPicked])
+    if (looking === arrived.orderId) setPicked(arrived.eventId)
+  }, [arrived?.eventId, arrived?.orderId, looking, setPicked])
   // the task ended without a card (nothing to change, or a safe stop): say so on the item instead of planning forever
   const ended = Object.values(replans).map((r) => ({ r, ev: r.state === 'planning' ? events.find((e) => e.id === r.eventId) : undefined }))
     .find((x) => x.ev && (x.ev.state === 'closed' || x.ev.state === 'safe_stop'))
@@ -57,7 +59,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
-      <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
+      <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} />
     </div>
     </>

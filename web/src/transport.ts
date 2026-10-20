@@ -4,7 +4,7 @@ import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
   type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
-  type SimEventsView, type SubagentsView, type WorldSnapshot, type WsMessage,
+  type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
@@ -57,6 +57,8 @@ export interface Transport {
   discuss?(eventId: string, text: string): Promise<DiscussReply>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
+  /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
+  message?(text: string, eventId: string | null): Promise<MainReply>
   /** Live only (issue #36 模擬事件): the generator's settings and log, change them, fire one event now. */
   simEvents?(): Promise<SimEventsView>
   setSimEvents?(b: SimEventsBody): Promise<SimEventsView>
@@ -176,6 +178,7 @@ export class LiveTransport implements Transport {
   ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
+  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId }) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   simEvents() { return getJSON<SimEventsView>(API.simEvents) }

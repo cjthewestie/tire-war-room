@@ -82,7 +82,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
         </div>
         <select className="trace-pick" value={askOnly ? ASKS : ev?.id ?? ''} onChange={(e) => pick(e.target.value)} aria-label="選擇事件">
           {listed.map((e) => <option key={e.id} value={e.id}>{subs.get(e.id)?.type_label ?? evName(e)}・{evName(e)}・{fmtHMS(e.opened_at).slice(0, 5)}・{subs.get(e.id) ? SUB_STATUS[subs.get(e.id)!.status] : STATE_LABEL[e.state]}</option>)}
-          {asks.length > 0 && <option value={ASKS}>問戰情室（這次開啟）</option>}
+          {asks.length > 0 && <option value={ASKS}>查詢（這次開啟）</option>}
         </select>
         <ul className="trace-list tree" role="listbox" aria-label="子 agent">
           {listed.map((e) => {
@@ -103,7 +103,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           })}
           {asks.length > 0 && (
             <li role="option" aria-selected={askOnly}>
-              <button className={askOnly ? 'on' : ''} onClick={() => pick(ASKS)}><b>問戰情室</b><small className="muted">這次開啟問了 {asks.filter((a) => a.k === 'ask').length} 題（只查不改）</small></button>
+              <button className={askOnly ? 'on' : ''} onClick={() => pick(ASKS)}><b>查詢</b><small className="muted">這次開啟問了 {asks.filter((a) => a.k === 'ask').length} 題（只查不改）</small></button>
             </li>
           )}
           {!listed.length && <li className="muted small">沒有事件。</li>}

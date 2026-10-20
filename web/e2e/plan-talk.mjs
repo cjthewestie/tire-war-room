@@ -49,7 +49,7 @@ try {
   check('v1 is version 1 and sends #A-311 to press 9', v1?.version === 1 && (v1?.actions ?? []).some((a) => a.includes('#A-311 改 9 號')), (v1?.actions ?? [])[0])
 
   // ---------------- (a) discuss the waiting plan
-  check('input defaults to 討論這個計劃 while a plan waits', (await d.locator('[data-testid=mode-discuss]').getAttribute('aria-checked')) === 'true')
+  check('one 主 agent input (no mode switch) that knows the waiting plan', (await d.locator('[data-testid=mode-discuss]').count()) === 0 && (await d.locator('.console .askbar-hint').innerText()).includes('待核准計劃'))
   await d.locator('[data-testid=chat-input]').fill('9 號機今晚要保養')
   await d.locator('[data-testid=chat-input]').press('Enter')
   const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').innerText().catch(() => '')) === 'v2')
@@ -109,7 +109,6 @@ try {
   check('v2 approved from the card', approved)
 
   // ---------------- (b) a new task in plain Chinese
-  await d.locator('[data-testid=mode-command]').click()
   await d.locator('[data-testid=chat-input]').fill('通知維修組明早檢查 3 號機')
   await d.locator('[data-testid=chat-input]').press('Enter')
   let cmd = null

@@ -326,8 +326,9 @@ class Orchestrator:
         sub = SubAgent(ev.id, t, p, via, why, self._now().isoformat())
         self.subs[ev.id] = sub
         self.queue.tags[ev.id] = (t, p)
-        self._audit({"orch": "dispatch", "type": t, "type_label": TYPES[t], "priority": p, "by": via, "reason": why,
-                     "machine_id": ev.machine_id, "text": f"已派發子 agent：{TYPES[t]}（{self._what(ev)}）", **extra}, ev.id)
+        self._audit({"orch": "dispatch", "phase": "plan", "type": t, "type_label": TYPES[t], "priority": p, "by": via,
+                     "reason": why, "machine_id": ev.machine_id,
+                     "text": f"已請子 agent 規劃：{TYPES[t]}（{self._what(ev)}）；計劃好了會送核准，核准後派發執行", **extra}, ev.id)
         self.publish()
 
     async def dispatch_command(self, text: str, actor: str, start: Callable[[str, str], Event]) -> tuple[Event, dict[str, Any]]:
@@ -350,6 +351,27 @@ class Orchestrator:
             return f"{machine_label(ev.machine_id)}・{ev.anomaly.message[:24]}" if ev.source == "detector" else ev.anomaly.message[:28]
         except Exception:  # noqa: BLE001
             return ev.anomaly.message[:28]
+
+    def on_decided(self, req: Any) -> None:
+        """The supervisor approved a plan (核准並派發): the main agent dispatches its subagent to execute it — the
+        run continues with the writes this approval covers, each still through its gate. A rejection is noted."""
+        ev_id = getattr(req, "event_id", None)
+        d = getattr(req, "decision", None)
+        if not ev_id or d is None:
+            return
+        sub = self.subs.get(ev_id)
+        t = sub.type if sub else "machine"
+        kind = d.decision.value
+        if kind in ("approve", "modify"):
+            text = f"已核准，派發子 agent 執行：{TYPES.get(t, t)}{'（方案 ' + d.option_id + '）' if d.option_id else ''}；完成後回報"
+        elif kind == "reject":
+            text = f"主管駁回{TYPES.get(t, t)}子 agent 的計劃，不執行"
+        else:
+            return
+        self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
+                     "type_label": TYPES.get(t, t), "by": "supervisor", "decision": kind, "option": d.option_id,
+                     "approval_id": req.id, "text": text}, ev_id)
+        self.publish()
 
     # ---------------------------------------------------------------- report back
     def _ended(self, ev: Event) -> None:

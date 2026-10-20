@@ -743,3 +743,9 @@ export interface Subagent {
 }
 export interface QueueTicket { who: string; event_id: string | null; label: string; priority: number; priority_label: string; since: string; state: "running" | "waiting" }
 export interface SubagentsView { items: Subagent[]; queue: { slots: number; running: QueueTicket[]; waiting: QueueTicket[] } }
+
+/** POST /api/main/message: the 主 agent classified the message itself (issue #54). */
+export interface MainReply {
+  intent: "chitchat" | "question" | "change" | "task" | "unclear"; by: "model" | "rules"; fell_back: boolean; error: string | null
+  reply: string | null; event_id: string | null; ask: AskAnswer | null; discuss: DiscussReply | null; ms: number
+}

@@ -89,12 +89,11 @@ try {
   // 討論 puts the caret in the docked conversation in 討論這個計劃 mode
   await apv.locator('[data-testid=visual-discuss]').click()
   await d.waitForTimeout(300)
-  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.locator('[data-testid=mode-discuss]').getAttribute('aria-checked')) === 'true' && (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
+  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
   check('no duplicate element ids', (await d.evaluate(() => { const ids = [...document.querySelectorAll('[id]')].map((e) => e.id); return ids.length === new Set(ids).size })))
   await d.screenshot({ path: `${OUT}/console-agent-1440.png` })
 
   // 問戰情室: a read-only question gets an answer with its read steps
-  await d.locator('[data-testid=mode-ask]').click()       // a plan waits: the bar defaults to 討論這個計劃
   await d.locator('.askbar textarea').fill('7 號機現在怎樣？')
   await d.locator('.askbar textarea').press('Enter')
   let answered = ''
@@ -102,7 +101,7 @@ try {
   check('chat question answered', answered.length > 0, answered.slice(0, 80))
   const fit = await askFits(d)
   check('1440: question and answer stay inside the transcript', fit.ok, fit.why)
-  check('answer labelled 只查不改 (its read steps are on the Agent page)', (await d.locator('[data-testid=ask-answer] .ro').count()) > 0 && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) === 0)
+  check('answer labelled 查詢 (its read steps are on the Agent page)', (await d.locator('[data-testid=ask-answer] .ro').innerText()) === '查詢' && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) === 0)
   await d.screenshot({ path: `${OUT}/console-agent-ask-1440.png` })
 
   // dashboard tab carries the same visual card
@@ -130,7 +129,6 @@ try {
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   check('390: no horizontal page scroll', overflow <= 1, `${overflow}px`)
   await p.screenshot({ path: `${OUT}/console-agent-390.png`, fullPage: true })
-  await p.locator('[data-testid=mode-ask]').click()
   await p.locator('.askbar textarea').fill('今晚夜班缺誰？')
   await p.locator('.askbar textarea').press('Enter')
   let ans390 = ''
@@ -146,7 +144,8 @@ try {
   await m.close()
 
   // approve from the visual card (option B), confirm via GET /api/approvals
-  const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => a[0]?.id))
+  // the press-7 card (a delivery-risk plan the 主 agent drafted on its own may also be waiting: issue #54)
+  const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => (a.find((r) => r.event_id.includes('CURE-07')) ?? a[0])?.id))
   await d.locator('.monitor-wrap [data-testid=option-B]').first().click()
   await d.locator('.monitor-wrap [data-testid=visual-approve]').first().click()
   let status = ''

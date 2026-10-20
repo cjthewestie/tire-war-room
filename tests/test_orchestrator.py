@@ -142,7 +142,7 @@ async def test_page11_unchanged_under_the_main_agent(tmp_path):
     kinds = [r["orch"] for r in rows]
     assert kinds[0] == "dispatch" and kinds[-1] == "report" and kinds.count("queue") >= 2
     d, rep = rows[0], rows[-1]
-    assert d["type"] == "machine" and d["by"] == "code" and "已派發子 agent：機台處理" in d["text"]
+    assert d["type"] == "machine" and d["by"] == "code" and "已請子 agent 規劃：機台處理" in d["text"]
     assert "機台處理子 agent 完成" in rep["text"] and rep["writes"] and rep["approvals"] and not rep["interrupted"]
     sub = o.subagents()[0]
     assert sub["status"] == "done" and sub["round"] == 2 and sub["tools_called"] >= 4
@@ -236,7 +236,7 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
         r = await p.http.post("/api/command", json={"text": "#M-201 可能晚交，請重排保交期"})
         assert r.status_code == 200, r.text
         eid = r.json()["event_id"]
-        assert "主 agent 已派發子 agent：訂單處理" in r.json()["reply"]
+        assert "主 agent 已請子 agent 規劃：訂單處理" in r.json()["reply"]
         await p.until(lambda: p.pending(eid) or p.rt.state_machine.get(eid).state.value in ("closed", "safe_stop"))
         if p.pending(eid):
             d = await p.http.post(f"/api/approvals/{p.pending(eid)[0].id}/decision",
@@ -310,3 +310,65 @@ async def test_detector_preclass_fields():
     pc = found[0].preclass
     assert pc and pc["rule"] and pc["label"] and pc["checks"] and pc["validation"]["range"] == "通過"
     assert pc["kind"] == found[0].kind.value
+
+
+# ---------------------------------------------------------------- one input, one 主 agent (PR #58 review)
+from warroom.agent.main_chat import IDENTITY_REPLY, UNCLEAR_MAIN, MainChat, rule_intent  # noqa: E402
+
+
+@pytest.mark.parametrize("text,waiting,want", [
+    ("妳是誰", False, "chitchat"), ("你是誰？", True, "chitchat"), ("你好", False, "chitchat"), ("謝謝", False, "chitchat"),
+    ("7 號機現在怎樣？", False, "question"), ("今晚夜班缺誰？", False, "question"),
+    ("#M-201 可能晚交，請重排保交期", False, "task"), ("通知維修組明早檢查 3 號機", False, "task"),
+    ("9 號機今晚要保養", True, "change"), ("不要跨組調人", True, "change"), ("9 號機今晚要保養", False, "task"),
+    ("嗯嗯", False, "unclear"),
+])
+def test_main_rule_intent(text, waiting, want):
+    intent, reply = rule_intent(text, waiting)
+    assert intent == want, (text, intent)
+    if text in ("妳是誰", "你是誰？"):
+        assert reply == IDENTITY_REPLY
+    if want == "unclear":
+        assert reply == UNCLEAR_MAIN and "我不確定要查什麼" not in reply
+
+
+async def test_main_identity_never_goes_to_the_model():
+    llm = _FakeLLM(json.dumps({"intent": "question", "reply": ""}))
+    c = await MainChat(_settings(), client=llm).classify("妳是誰", False)
+    assert c["intent"] == "chitchat" and c["reply"] == IDENTITY_REPLY and not llm.calls
+
+
+async def test_main_model_intent_and_fallback():
+    c = await MainChat(_settings(), client=_FakeLLM(json.dumps({"intent": "change", "reply": ""}))).classify("改成明天", False)
+    assert c["intent"] == "task" and c["by"] == "model"          # no waiting plan: a change is a new task
+    c = await MainChat(_settings(), client=_FakeLLM(raise_=TimeoutError())).classify("7 號機現在怎樣？", False)
+    assert c["intent"] == "question" and c["by"] == "rules" and c["fell_back"]
+
+
+async def test_main_message_api(tmp_path):
+    from tests.test_plan_talk import Plant, _rt
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        n0 = len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL])
+        r = (await p.http.post("/api/main/message", json={"text": "妳是誰"})).json()
+        assert r["intent"] == "chitchat" and r["reply"] == IDENTITY_REPLY and r["ask"] is None and r["event_id"] is None
+        assert len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL]) == n0     # zero tools
+        q = (await p.http.post("/api/main/message", json={"text": "7 號機現在怎樣？"})).json()
+        assert q["intent"] == "question" and q["ask"] and q["ask"]["answer"] and "我不確定要查什麼" not in q["ask"]["answer"]
+        t = (await p.http.post("/api/main/message", json={"text": "#M-201 可能晚交，請重排保交期"})).json()
+        assert t["intent"] == "task" and t["event_id"] and "已請子 agent 規劃" in t["reply"]
+        eid = t["event_id"]
+        await p.until(lambda: p.pending(eid))
+        ch = (await p.http.post("/api/main/message", json={"text": "不要跨組調人", "event_id": eid})).json()
+        assert ch["intent"] == "change" and ch["discuss"] and ch["event_id"] == eid
+        await p.until(lambda: p.pending(eid))
+        card = p.pending(eid)[0]
+        d = await p.http.post(f"/api/approvals/{card.id}/decision", json={"request_id": card.id, "decision": "approve", "option_id": card.options[0].id if card.options else None})
+        assert d.status_code == 200, d.text
+        rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent" and e.payload.get("orch") == "dispatch"]
+        assert [x.get("phase") for x in rows][:1] == ["plan"] and any(x.get("phase") == "execute" and "核准，派發子 agent 執行" in x["text"] for x in rows)
+        await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
+
+
+def test_main_question_about_the_plant_while_a_plan_waits():
+    assert rule_intent("今晚夜班缺誰？", True)[0] == "question"
+    assert rule_intent("為什麼用 9 號機？", True)[0] == "change"
