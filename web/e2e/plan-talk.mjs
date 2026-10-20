@@ -37,7 +37,7 @@ try {
   // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
   const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
   check('/ opens the 主控台 and it is the first tab', firstTab.includes('主控台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
-  check('status strip on the console (counts, events, approvals, time, network)', /正常 \d+ 台/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
+  check('ticker on the console: fixed 正常 / 異常 / 待核准 counts', /正常\s*\d+[\s\S]*異常\s*\d+[\s\S]*待核准\s*\d+/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))

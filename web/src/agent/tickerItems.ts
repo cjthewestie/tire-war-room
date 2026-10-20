@@ -20,7 +20,7 @@ export interface Success { key: string; kind: 'done' | 'shipped'; orderIds: stri
 export function successOf(e: WorldEvent): Success | null {
   const kind = e.kind === 'order_completed' || e.kind === 'order_done' ? 'done' : e.kind === 'shipment_departed' ? 'shipped' : null
   if (!kind) return null
-  const ids = e.order_ids?.length ? e.order_ids : (/#[A-Z]-\d+/.exec(e.text) ?? []).slice(0, 1)
+  const ids = e.order_ids?.length ? e.order_ids : (/#\p{Lu}-\d+/u.exec(e.text) ?? []).slice(0, 1)
   return { key: `${e.ts}|${e.kind}|${ids.join(',')}`, kind, orderIds: ids, qty: e.qty ?? null, onTime: e.on_time ?? null, ts: e.ts, text: e.text }
 }
 export function successText(s: Success): string {

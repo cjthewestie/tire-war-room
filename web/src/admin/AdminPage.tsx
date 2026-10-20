@@ -39,6 +39,11 @@ export function AdminPage() {
   const { transport } = useWarRoom()
   const [page, setPage] = useState<Page>(() => (/#admin\/(\w+)/.exec(location.hash)?.[1] as Page) || 'status')
   const go = (p: Page) => { setPage(p); history.replaceState(null, '', `${location.pathname}${location.search}#admin/${p}`) }
+  useEffect(() => {
+    const f = () => { const m = /#admin\/(\w+)/.exec(location.hash)?.[1] as Page | undefined; if (m && PAGES.some((x) => x.id === m)) setPage(m) }
+    window.addEventListener('hashchange', f)
+    return () => window.removeEventListener('hashchange', f)
+  }, [])
   if (transport?.mode === 'mock') return <div className="loading">後台需要連線後端（瀏覽器模擬模式沒有知識庫與稽核紀錄）。</div>
   return (
     <div className="admin" data-testid="admin-page">

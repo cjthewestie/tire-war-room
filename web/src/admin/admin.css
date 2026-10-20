@@ -60,7 +60,7 @@
 @media (max-width: 599px) {
   .mem-groups { grid-template-columns: minmax(0, 1fr); }
   .admin-team ul { columns: 1; }
-  .admin-h .seg { width: 100%; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .admin-h .seg { width: 100%; display: grid; grid-template-columns: repeat(auto-fit, minmax(88px, 1fr)); }
   .admin-h .seg button { padding: 6px 4px; font-size: 13px; }
 }
 @media (max-width: 599px) {

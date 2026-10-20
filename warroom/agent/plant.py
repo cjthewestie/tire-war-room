@@ -115,7 +115,7 @@ class PlantPrompt:
         st = self._state()
         text = self.active_text()
         draft = st.get("draft")
-        return {"active": {"sha256": sha256(text), "text": text, "chars": len(text.strip()), "seed": not st.get("active"),
+        return {"active": {"sha256": sha256(text), "text": text, "chars": len(text.strip()), "seed": sha256(text) == sha256(self._seed_text()),
                            "seed_path": str(self.seed.relative_to(ROOT)) if self.seed.is_relative_to(ROOT) else str(self.seed)},
                 "draft": draft, "max_chars": MAX_CHARS, "history": list(reversed(st.get("history", []))),
                 "tests": st.get("tests", {})}

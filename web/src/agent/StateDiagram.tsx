@@ -18,7 +18,7 @@ const LOOP = new Set(['verify>replan', 'replan>simulate', 'gate>replan', 'await_
 function edgePath(a: EventState, b: EventState): { d: string; lx: number; ly: number } {
   const [x1, y1] = POS[a], [x2, y2] = POS[b]
   const hw = NODE_W / 2, hh = NODE_H / 2
-  if (y1 === y2 && x2 > x1 && Math.abs(x2 - x1) < 130) return { d: `M${x1 + hw},${y1} L${x2 - hw},${y2}`, lx: (x1 + x2) / 2, ly: y1 - 8 }
+  if (y1 === y2 && x2 > x1 && Math.abs(x2 - x1) < 130) return { d: `M${x1 + hw},${y1} L${x2 - hw},${y2}`, lx: (x1 + x2) / 2, ly: y1 - hh - 6 }
   if (a === 'classify' && b === 'closed') return { d: `M${x1},${y1 - hh} C${x1},${y1 - 70} ${x2},${y2 - 70} ${x2},${y2 - hh}`, lx: (x1 + x2) / 2, ly: y1 - 56 }
   if (a === 'execute' && b === 'await_approval') return { d: `M${x1 - 20},${y1 - hh} C${x1 - 30},${y1 - 44} ${x2 + 30},${y2 - 44} ${x2 + 20},${y2 - hh}`, lx: (x1 + x2) / 2, ly: y1 - 40 }
   if (b === 'safe_stop') return { d: `M${x1 + (a === 'closed' ? 0 : 18)},${y1 + hh} C${x1 + 18},${y2} ${x2 - 60},${y2} ${x2 - hw},${y2}`, lx: (x1 + x2) / 2, ly: y2 - 6 }

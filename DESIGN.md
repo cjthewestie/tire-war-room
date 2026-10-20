@@ -6,7 +6,7 @@ The visual system as shipped in `web/`, recorded from the code (tokens in `web/s
 
 - **Light (default).** Near-white neutrals, dark ink, the green accent darkened for text and buttons.
 - **Dark.** The original palette, unchanged except `--ink-faint` (raised from `#7f867e` to `#868d85` so it reaches 4.5:1 on `--panel-2`).
-- Switch: one icon button (aria-label 「切換亮色／暗色」) at the right end of the home status line and in the phone header. The choice is kept in `localStorage` under `warroom-theme` (read and written inside try/catch). With nothing stored the page is light; the system preference is not used. An inline script in `index.html` and `phone.html` sets `data-theme` before first paint, and `theme.ts` keeps it in sync and updates `<meta name="theme-color">`.
+- Switch: one icon button (aria-label 「切換亮色／暗色」) at the right end of the 主控台 ticker and in the phone header. The choice is kept in `localStorage` under `warroom-theme` (read and written inside try/catch). With nothing stored the page is light; the system preference is not used. An inline script in `index.html` and `phone.html` sets `data-theme` before first paint, and `theme.ts` keeps it in sync and updates `<meta name="theme-color">`.
 - Mechanism: `:root` holds the dark values; `:root[data-theme="light"]` overrides them. Every colour that used to be hard-coded below `:root` now reads a variable whose fallback is its original dark value (`var(--c-ffd0cb, #ffd0cb)`, `rgb(var(--alarm-rgb, 255 93 82) / .45)`), so the dark look is byte-for-byte the old one and the light theme only defines variables. New code uses the tokens below, never a raw hex, and never a hard-coded white or black surface.
 
 ## Tokens
@@ -35,7 +35,7 @@ Contrast (WCAG, measured on `--panel` and `--panel-2`): light ink 17.0 / 14.8, i
 ## Layout (UX brief, prototype v12)
 
 - **Header:** product name, tabs 主控台 · 產線監控 · 人力排程 · 訂單 · Agent · 狀態機 · 後台 (工廠全貌 merged into 產線監控, issue #37), factory time, network / LLM status. No extra buttons; demo controls stay in the 展示 strip (bottom sheet under 1024 px).
-- **主控台 (home; was 對話台):** a status line (machines normal / abnormal, today's de-molds vs schedule, next truck, people short on the current shift, pending approvals, theme toggle), then three docked columns at ≥1100 px:
+- **主控台 (home; was 對話台):** a 產線監控 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」): fixed 正常 / 異常 / 待核准 counts on the left, then live plant items scrolling (per line, each curing press, output vs plan, next truck, materials, dock, staffing, latest closed event, order completions and shipments); alarm / warning items pinned first in their colour; hover or focus pauses it; an item opens 產線監控 on its machine or line; reduced motion shows a static wrapping row; theme toggle at the right end; at 390 px the counts sit above the ticker. Then three docked columns at ≥1100 px:
   - 核准區 list (260 px), ranked ① 安全／機台異常 ② 交期風險 ③ 插單／人力決定 ④ 執行中 ⑤ AI 已自行處理 (collapsed);
   - 計劃板 (the rest): a dotted-grid board of step cards S1…Sn joined by `depends_on` arrows (waiting cards outlined in `--warn`, cards a new version changed marked 「改」), then 對交期的影響, 核准後誰去做, the option picker, and **核准 / 討論** pinned at the bottom;
   - Agent 對話 (360 px), which follows the selected item or shows 全部.

@@ -13,6 +13,7 @@ import { STATE_CODE } from '../agent/stateGraph'
 import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import { BOARD, CATEGORY_LABEL, categoryOf, enteredAt, waitingOn, type Category, type Day, type DayRun } from './runs'
+import '../admin/admin.css'
 import './statemachine.css'
 
 type View = 'live' | 'day'
@@ -24,6 +25,11 @@ export function StateMachinePage() {
   const { transport } = useWarRoom()
   const [view, setView] = useState<View>(() => (/#sm\/day/.test(location.hash) ? 'day' : 'live'))
   const go = (v: View) => { setView(v); history.replaceState(null, '', `${location.pathname}${location.search}#sm${v === 'day' ? '/day' : ''}`) }
+  useEffect(() => {
+    const f = () => { if (/^#sm/.test(location.hash)) setView(/#sm\/day/.test(location.hash) ? 'day' : 'live') }
+    window.addEventListener('hashchange', f)
+    return () => window.removeEventListener('hashchange', f)
+  }, [])
   return (
     <div className="smp" data-testid="sm-page">
       <header className="admin-h">

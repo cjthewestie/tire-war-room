@@ -516,6 +516,7 @@
   .tk-fixed { justify-content: space-between; }
   .tk-run { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
   .tk-pinned { max-width: none; width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+  .tk-view { flex: 1 1 100%; }
   .tk-toast { left: 16px; right: 16px; text-align: center; }
 }
 
@@ -529,7 +530,7 @@
 .sm-wrap { overflow-x: auto; scrollbar-width: thin; }
 .sm-wrap svg { display: block; width: 100%; min-width: 720px; height: auto; }
 .sm-e path { fill: none; stroke: var(--panel-3); stroke-width: 1.6; }
-.sm-e.rail path { stroke-dasharray: 2 4; opacity: .7; }
+.sm-e.rail path { stroke-dasharray: 2 4; opacity: .45; }
 .sm-e.on path { stroke: var(--accent); stroke-width: 2.6; }
 .sm-e.on.loop path { stroke: var(--line-c); stroke-dasharray: 8 5; animation: sm-flow 1.2s linear infinite; }
 @keyframes sm-flow { to { stroke-dashoffset: -26; } }
