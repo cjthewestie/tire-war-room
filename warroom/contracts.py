@@ -834,6 +834,8 @@ class LLMCallInfo(_M):
     completion_tokens: int | None = None
     valid_json: bool = True
     fell_back_to_mock: bool = False
+    prompt_tokens_est: int | None = None                 # approx_tokens() of the request as sent (issue #33)
+    trimmed: list[str] = Field(default_factory=list)     # context parts cut to fit the context window (#33)
 
 
 # =====================================================================================
