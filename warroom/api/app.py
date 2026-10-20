@@ -722,6 +722,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
 
+    # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
+    from warroom.api.admin import build_admin_router
+    app.include_router(build_admin_router(rt, supervisor))
+
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
     async def ask(body: AskRequest, session: Session = Depends(supervisor)) -> AskAnswer:
