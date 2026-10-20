@@ -418,6 +418,9 @@ class Runtime:
         resume (crash, kill, watchdog restart) reopens the store, reapplies the holds and continues
         the factory clock from the last persisted time instead of replaying the script."""
         self.settings = settings or get_settings()
+        self.strict = not allow_fallback
+        if self.strict:      # --strict: a model failure is surfaced, never answered by the rule fallback
+            self.settings = self.settings.model_copy(update={"llm_fallback_to_mock": False})
         self.builder = None if components else (builder or ComponentBuilder(self.settings, allow_fallback, use_real))
         try:
             self.scenario = ScenarioName(self.settings.scenario)

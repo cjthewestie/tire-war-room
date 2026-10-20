@@ -124,6 +124,7 @@ from warroom.contracts import (
     WsType,
 )
 from warroom.agent.gate import cure_notice_press
+from warroom.agent.strict import failure_cause, strict_reason
 from warroom.factory import (
     CURE_PRESS_IDS,
     CURE_TEMP_MAX_C,
@@ -253,6 +254,7 @@ class _Run:
     replan_why: str = ""                                     # why the current replan happened (narration)
     newly_rejected: str | None = None                        # hypothesis VERIFY rejected just before this replan
     sop_handoff: bool = False                                # tools failed: the plan hands the event to people (SOP)
+    commander_error: str | None = None                       # why the latest commander call produced no plan
     current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
     approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
     stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
@@ -417,7 +419,7 @@ class StateMachine:
         self._to(ev, EventState.PLAN, "ask commander (supervisor command)")
         plan = await self._ask(run, "plan", {})
         if plan is None or plan.safe_stop:
-            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            self._safe_stop(run, "指揮官要求安全中止" if plan else (run.commander_error or "指揮官無回應"))
             return
         await self._loop(run)
 
@@ -464,7 +466,7 @@ class StateMachine:
         run.base_context = await self._classify_plant(run, s)
         plan = await self._ask(run, "plan", {})
         if plan is None or plan.safe_stop:
-            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            self._safe_stop(run, "指揮官要求安全中止" if plan else (run.commander_error or "指揮官無回應"))
             return
         await self._loop(run)
 
@@ -846,7 +848,7 @@ class StateMachine:
         self._to(ev, EventState.PLAN, "ask commander")
         plan = await self._ask(run, "plan", {})
         if plan is None or plan.safe_stop:
-            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            self._safe_stop(run, "指揮官要求安全中止" if plan else (run.commander_error or "指揮官無回應"))
             return
         await self._loop(run)
 
@@ -1168,9 +1170,14 @@ class StateMachine:
                 plan, info = await self.commander.plan(req)
                 on_alert(plan.alert_card)
         except Exception as e:  # noqa: BLE001
+            # --strict (llm_fallback_to_mock=False): no rule plan; the reason ends the event via SAFE_STOP
+            strict = getattr(getattr(self.commander, "settings", None), "llm_fallback_to_mock", True) is False
+            run.commander_error = strict_reason(e) if strict else f"指揮官呼叫失敗（{type(e).__name__}）"
             self.audit.append(AuditKind.LLM_CALL, "commander",
-                              {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500]}, event_id=ev.id)
-            self._note(ev, "指揮官", f"指揮官呼叫失敗（{type(e).__name__}）", "dynamic")
+                              {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
+                               "fell_back_to_mock": False, "plan_source": None, "strict": strict,
+                               "reason": run.commander_error}, event_id=ev.id)
+            self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
             self.compute_inflight -= 1
@@ -1183,6 +1190,7 @@ class StateMachine:
                             "fallback_steps": [s.id for s in plan.steps],
                             "fallback_hypothesis": plan.hypothesis.id,
                             "error": getattr(self.commander, "last_error", None),
+                            "cause": getattr(self.commander, "last_cause", None),
                             "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                             "raw_chars": len(raw), "raw_excerpt": raw[:600]})
         else:
@@ -1439,7 +1447,7 @@ class StateMachine:
                 run.replan_tools.append(f"[工具] SOP「{hits[0]['title']}」")
         plan = await self._ask(run, "replan", extra)
         if plan is None or plan.safe_stop:
-            self._safe_stop(run, "指揮官要求安全中止" if plan else "指揮官無回應")
+            self._safe_stop(run, "指揮官要求安全中止" if plan else (run.commander_error or "指揮官無回應"))
             return False
         if discussion and prior is not None and any(st.tool is ToolName.SOLVE_SCHEDULE for st in prior.steps) \
                 and not any(st.tool is ToolName.SOLVE_SCHEDULE for st in plan.steps):

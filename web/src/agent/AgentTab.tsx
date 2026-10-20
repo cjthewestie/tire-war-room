@@ -2,18 +2,19 @@
 // one event (state changes, the plan the model returned, every tool call and result, the gate, the
 // supervisor), plus the input bar at the bottom with three modes (issue #10): 討論這個計劃 (POST
 // /api/events/{id}/discuss), 下新任務 (POST /api/command) and 只查不改 (POST /api/ask).
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AskAnswer, CommandReply, DiscussReply, Event } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHMS } from '../format'
 import { RISK_PLAIN, hypName, plain } from '../plain'
-import { primaryEvent } from '../store'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { useWarRoom } from '../useWarRoom'
 import { STATE_LABEL } from '../components/common'
-import { TaskList } from '../components/TaskList'
-import { ApprovalVisual, PlanFlow, ToolChips } from './ApprovalVisual'
-import { currentRoundTools, planNodes, toolUses } from './approvalView'
+import { ApprovalList } from './ApprovalList'
+import { HomeStatus } from './HomeStatus'
+import { nextUp } from './homeItems'
+import { useHomeSelection } from './homeSelection'
+import { PlanArea } from './PlanArea'
 import { ToolIcon } from './ToolIcon'
 import {
   expectationText, inFilter, thinkContext, withAsks,
@@ -31,82 +32,39 @@ const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需�
 const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回', superseded: '作廢此卡（討論後改版）', expired: '逾時' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
 
+export interface BarFocus { mode?: BarMode; text?: string; n: number }
+
+/** Home 對話台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
+ *  one status line, then three docked columns — LEFT the ranked 核准區 list, CENTER the 計劃板 of the selected item
+ *  (step cards + arrows, delivery impact, who does what, 核准 / 討論 pinned), RIGHT the Agent conversation, which
+ *  follows the selected item (or 全部); 討論 puts the caret in its input in 討論這個計劃 mode. */
 export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   picked: string | null; setPicked: (id: string) => void; onMonitor?: () => void
 }) {
   const { state } = useWarRoom()
-  const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
-  const ev = events.find((e) => e.id === picked) ?? primaryEvent(events)
+  const { events, list, sel, ev, now } = useHomeSelection(picked)
   const { items } = useTranscript(ev)
-  const pending = ev ? state.pending.filter((p) => p.event_id === ev.id) : []
-  const tools = useMemo(() => items.filter((i): i is ToolItem => i.k === 'tool'), [items])
+  const [all, setAll] = useState(false)
+  const [focus, setFocus] = useState<BarFocus | null>(null)
+  const chat = (mode?: BarMode, text?: string) => { setAll(false); setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
+  const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
   return (
     <>
-    <StatusStrip events={events} onMonitor={onMonitor} />
-    <div className="agent">
-      <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} />
-      <aside className="agent-side" aria-label="計畫與核准">
-        {pending.map((p) => <ApprovalVisual key={p.id} req={p} ev={ev} items={items} layout="side" />)}
-        {!pending.length && ev && <EventSummary ev={ev} items={items} tools={tools} />}
-        {ev && state.world?.tasks && state.world.tasks.items.some((t) => t.event_id === ev.id) && (
-          <section className="panel event-tasks" aria-label="人員任務">
-            <h4 className="apv-bh">人員執行（核准後由程式派工）</h4>
-            <TaskList tasks={state.world.tasks.items} eventId={ev.id} compact testId="event-tasks" />
-          </section>
-        )}
-        {!ev && <div className="panel agent-empty"><p className="calm-title">全廠正常</p><p className="muted">有異常時，AI 指揮官的計畫、調用的工具和待核准事項會出現在這裡。你仍可在左邊提問（只查不改）。</p></div>}
-      </aside>
+    <HomeStatus onMonitor={onMonitor} />
+    <div className="home">
+      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
+      <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
+      <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} />
     </div>
     </>
   )
 }
 
-const NET_SHORT: Record<string, string> = { online: '網路正常', weak: '弱網', wan_down: 'WAN 中斷', lan_down: 'LAN 中斷・現場操作' }
-
-/** The plant at a glance above the conversation (the console is the main page; 產線監控 is one click away). */
-function StatusStrip({ events, onMonitor }: { events: Event[]; onMonitor?: () => void }) {
-  const { state } = useWarRoom()
-  const h = state.snapshot?.header
-  const ft = state.clock?.factory_time ?? h?.factory_time
-  const open = events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
-  const active = primaryEvent(open)
-  const pend = state.pending.length
-  const net = h?.network ?? 'online'
-  return (
-    <button type="button" className="agent-strip" onClick={onMonitor} data-testid="status-strip" title="打開完整的產線監控">
-      <span className="as-item ok"><i className="dot ok" />正常 {h?.normal_count ?? '–'} 台</span>
-      <span className={`as-item ${h && h.abnormal_count > 0 ? 'bad' : ''}`}><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
-      <span className="as-item">處理中：{active ? `${machineLabel(active.machine_id)}・${STATE_LABEL[active.state]}${open.length > 1 ? `（共 ${open.length} 件）` : ''}` : '無'}</span>
-      <span className={`as-item ${pend ? 'warn' : ''}`}>待核准 {pend} 件</span>
-      <span className={`as-item ${net !== 'online' ? 'bad' : ''}`}>{NET_SHORT[net] ?? net}</span>
-      <span className="as-item as-time">{ft ? fmtHMS(ft).slice(0, 5) : '—'}</span>
-      <span className="as-go">產線監控 →</span>
-    </button>
-  )
-}
-
-function EventSummary({ ev, items, tools }: { ev: Event; items: Item[]; tools: ToolItem[] }) {
-  const nodes = planNodes(ev, currentRoundTools(items))
-  const uses = toolUses(ev, tools)
-  const closed = ev.state === 'closed' || ev.state === 'safe_stop'
-  return (
-    <section className="apv calm" data-testid="event-summary">
-      <header className="apv-h">
-        <div className="apv-tags"><span className="apv-round">{machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
-        <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.anomaly.message)}</h3>
-        {closed && ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}
-        {!closed && <p className="apv-reason">目前沒有等待核准的事項。</p>}
-      </header>
-      {nodes.length > 0 && <div className="apv-b"><h4 className="apv-bh"><span className="apv-n">1</span>處理計畫</h4><PlanFlow nodes={nodes} /></div>}
-      {uses.length > 0 && <div className="apv-b"><h4 className="apv-bh"><span className="apv-n">2</span>調用的工具</h4><ToolChips uses={uses} /></div>}
-    </section>
-  )
-}
-
-function Console({ ev, events, onPick, items, asks, setAsks }: {
+function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAll, focus }: {
   ev: Event | null; events: Event[]; onPick: (id: string) => void; items: Item[]
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
+  all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null
 }) {
   const { state } = useWarRoom()
   const [filter, setFilter] = useState<Filter>('all')
@@ -122,7 +80,7 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
     if (el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
   }
   const last = shown[shown.length - 1]
-  const tail = `${shown.length}:${last?.key}:${last?.k === 'tool' ? last.status : ''}:${last?.k === 'ask' ? !!last.answer : ''}`
+  const tail = `${allView}:${events.length}:${shown.length}:${last?.key}:${last?.k === 'tool' ? last.status : ''}:${last?.k === 'ask' ? !!last.answer : ''}`
   useLayoutEffect(() => {
     const el = scroller.current
     if (el && pinned) el.scrollTop = el.scrollHeight
@@ -139,13 +97,13 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
     <section className="console panel" aria-label="Agent 對話台">
       <header className="con-h">
         <div className="con-title">
-          <h2><span className="num">◆</span>Agent 對話台</h2>
-          {events.length > 1 ? (
-            <select className="con-pick" value={ev?.id ?? ''} onChange={(e) => onPick(e.target.value)} aria-label="選擇事件">
-              {events.map((e) => <option key={e.id} value={e.id}>{machineLabel(e.machine_id)}・{STATE_LABEL[e.state]}・{fmtHMS(e.opened_at).slice(0, 5)}</option>)}
-            </select>
-          ) : ev ? <span className="con-ev">{machineLabel(ev.machine_id)}・{fmtHMS(ev.opened_at).slice(0, 5)}</span> : null}
-          {ev && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
+          <h2>Agent 對話台</h2>
+          <div className="seg sm con-view" role="group" aria-label="對話範圍">
+            <button className={!allView ? 'on' : ''} aria-pressed={!allView} onClick={() => setAll(false)} disabled={!ev} data-testid="con-follow">
+              {ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・${fmtHMS(ev.opened_at).slice(0, 5)}` : '此事項'}</button>
+            <button className={allView ? 'on' : ''} aria-pressed={allView} onClick={() => setAll(true)} data-testid="con-all">全部</button>
+          </div>
+          {ev && !allView && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
         </div>
         <div className="con-filters" role="group" aria-label="篩選">
           {FILTERS.map((f) => (
@@ -157,9 +115,11 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
       </header>
       <div className="con-body" ref={scroller} onScroll={onScroll} data-testid="transcript">
         {hidden > 0 && <button className="con-more" onClick={() => setCap((c) => c + MAX_ROWS)}>顯示較早的 {Math.min(hidden, MAX_ROWS)} 筆（共 {hidden} 筆未顯示）</button>}
-        {!shown.length && <p className="muted con-empty">{ev ? (filter === 'all' ? '讀取稽核紀錄中…' : '這個篩選沒有紀錄') : '目前沒有事件。下方可直接提問。'}</p>}
-        {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} />)}
-        {open && (filter === 'all') && (
+        {allView && events.slice().reverse().map((e) => <EventFeed key={e.id} ev={e} filter={filter} onPick={onPick} />)}
+        {allView && !events.length && <p className="muted con-empty">目前沒有事件。下方可直接提問。</p>}
+        {!allView && !shown.length && <p className="muted con-empty">{ev ? (filter === 'all' ? '讀取稽核紀錄中…' : '這個篩選沒有紀錄') : '目前沒有事件。下方可直接提問。'}</p>}
+        {(allView ? shown.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)) : shown).map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} />)}
+        {!allView && open && (filter === 'all') && (
           <div className={`con-live ${waiting ? 'wait' : ''}`} role="status" aria-live="polite">
             {waiting ? <><i className="pulse" />等待主管核准…（{state.pending.filter((p) => p.event_id === ev.id).map((p) => RISK_PLAIN[p.risk]).join('、') || '核准卡在右側'}）</>
               : <><i className="spin" />AI 指揮官{STATE_LABEL[ev.state]}中{running ? '・工具執行中' : ''}…</>}
@@ -167,8 +127,25 @@ function Console({ ev, events, onPick, items, asks, setAsks }: {
         )}
       </div>
       {!pinned && <button className="con-jump" onClick={jump}>↓ 跳到最新</button>}
-      <ChatBar ev={ev} waiting={!!waiting && state.pending.some((p) => p.event_id === ev?.id)} setAsks={setAsks} onPick={onPick} />
+      <ChatBar ev={ev} waiting={!!waiting && state.pending.some((p) => p.event_id === ev?.id)} setAsks={setAsks} onPick={onPick} focus={focus} />
     </section>
+  )
+}
+
+/** 全部: every event's conversation in one feed, oldest first, each under a heading that selects it. */
+function EventFeed({ ev, filter, onPick }: { ev: Event; filter: Filter; onPick: (id: string) => void }) {
+  const { items } = useTranscript(ev)
+  const rows = items.filter((i) => inFilter(i, filter))
+  const thinkIdx = new Map<string, number>()
+  let n = 0
+  for (const i of items) if (i.k === 'think' && i.stepIds.length) thinkIdx.set(i.key, n++)
+  return (
+    <div className="feed-ev">
+      <button type="button" className="feed-ev-h" onClick={() => onPick(ev.id)}>
+        {ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・{fmtHMS(ev.opened_at).slice(0, 5)}・{STATE_LABEL[ev.state]}
+      </button>
+      {rows.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} />)}
+    </div>
   )
 }
 
@@ -378,13 +355,23 @@ const PLACEHOLDER: Record<BarMode, string> = {
   ask: '問戰情室，例如：9 號機下一模是哪張訂單？（Enter 送出）',
 }
 
-function ChatBar({ ev, waiting, setAsks, onPick }: {
+function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
   ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+  focus: BarFocus | null
 }) {
   const { transport, state } = useWarRoom()
   const [q, setQ] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   const [picked, setPicked] = useState<BarMode | null>(null)
+  const input = useRef<HTMLTextAreaElement>(null)
+  // 討論 / 問 AI / 請 AI 重排 in the plan area: switch the bar's mode, prefill, and put the caret here
+  const [seen, setSeen] = useState(0)
+  if (focus && focus.n !== seen) {
+    setSeen(focus.n)
+    if (focus.mode) setPicked(focus.mode)
+    if (focus.text) setQ(focus.text)
+  }
+  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
   const mode: BarMode = picked === 'discuss' && !waiting ? 'ask' : picked ?? (waiting ? 'discuss' : 'ask')
   const can = mode === 'ask' ? !!transport?.ask : mode === 'command' ? !!transport?.command : !!transport?.discuss && waiting
   const lanDown = state.snapshot?.header.network === 'lan_down'
@@ -451,7 +438,7 @@ function ChatBar({ ev, waiting, setAsks, onPick }: {
         {EXAMPLES[mode].map((x) => <button type="button" key={x} disabled={!can || !!busy} onClick={() => void send(x)}>{x}</button>)}
       </div>
       <div className="askbar-in">
-        <textarea rows={1} maxLength={300} value={q} disabled={!can || !!busy} aria-label={MODES.find((m) => m.id === mode)?.label}
+        <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || !!busy} aria-label={MODES.find((m) => m.id === mode)?.label}
           data-testid="chat-input"
           placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : PLACEHOLDER[mode]) : transport?.mode === 'mock' ? '模擬資料模式不支援，需連線後端' : '目前沒有等待核准的計劃'}
           onChange={(e) => setQ(e.target.value)}

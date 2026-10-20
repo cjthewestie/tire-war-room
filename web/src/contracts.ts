@@ -573,6 +573,7 @@ export interface HealthStatus {
   model: string
   llm_reachable: boolean
   qdrant_ok: boolean
+  strict?: boolean          // --strict: model failures surfaced, no rule-based fallback
   sim_running: boolean
   factory_time: ISODate
   uptime_s: number

@@ -100,3 +100,15 @@ html, body, #root { height: 100%; overflow: hidden; }
   .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
 }
 @keyframes f3-rise { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* presenter keys (#25): the hint in the key strip (?demo=1) and a short note when one is pressed */
+.f3-demo-keys { color: var(--c-ink); }
+.f3-demo-note { position: absolute; z-index: 16; left: 50%; bottom: 100px; transform: translateX(-50%); background: var(--c-ink); color: var(--c-paper-solid); border-radius: 999px; padding: 6px 16px; font-size: 14px; font-weight: 700; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .2s ease-out; }
+
+/* touch (#26): the walking stick bottom-left, action buttons bottom-right; the key strip makes no sense without keys */
+.f3-keys.touch { display: none; }
+.f3-stick { position: absolute; z-index: 11; left: max(18px, env(safe-area-inset-left)); bottom: max(22px, env(safe-area-inset-bottom)); width: 124px; height: 124px; border-radius: 50%; background: var(--c-paper); box-shadow: var(--c-shadow); display: grid; place-items: center; touch-action: none; }
+.f3-stick i { width: 56px; height: 56px; border-radius: 50%; background: #8fd16a; box-shadow: 0 4px 0 #6aa84a; pointer-events: none; }
+.f3-touch-btns { position: absolute; z-index: 11; right: max(18px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom)); display: grid; gap: 10px; justify-items: end; }
+.f3-tbtn { min-width: 76px; min-height: 48px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--c-paper-solid); color: var(--c-ink); font-size: 15px; font-weight: 700; box-shadow: var(--c-shadow); touch-action: manipulation; }
+.f3-tbtn.act { background: #8fd16a; color: #1f3a0e; box-shadow: 0 4px 0 #6aa84a; max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

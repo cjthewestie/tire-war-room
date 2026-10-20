@@ -118,6 +118,9 @@ try {
       check('1440 工廠全貌: rush tyres in the goods queue', rushItems.length > 0, rushItems.join(','))
       await page.screenshot({ path: `${OUT}/scenarios-1440-world.png`, fullPage: true })
       await page.goto(`${BASE}/?live=1`, { waitUntil: 'domcontentloaded' })
+      // home (#16): ④ 執行中 items carry the task progress; selecting one shows its TaskList under the plan board
+      await until(() => page.locator('.hl-item', { hasText: '任務' }).count(), 15000)
+      await page.locator('.hl-item', { hasText: '任務' }).first().click().catch(() => {})
       const et = await until(() => page.locator('[data-testid=event-tasks] [data-testid=task-row]').count(), 15000)
       check('1440 agent console: event TaskList', !!et, `${et} rows`)
       await page.screenshot({ path: `${OUT}/scenarios-1440-console.png` })
@@ -131,6 +134,8 @@ try {
       await p3.locator('[data-testid=world-goods]').scrollIntoViewIfNeeded()
       await p3.screenshot({ path: `${OUT}/scenarios-390-world-goods.png` })
       await p3.goto(`${BASE}/?live=1`, { waitUntil: 'domcontentloaded' })
+      await until(() => p3.locator('.hl-item', { hasText: '任務' }).count(), 15000)
+      await p3.locator('.hl-item', { hasText: '任務' }).first().click().catch(() => {})
       await until(() => p3.locator('[data-testid=event-tasks]').count(), 15000)
       await p3.locator('[data-testid=event-tasks]').scrollIntoViewIfNeeded().catch(() => {})
       await p3.screenshot({ path: `${OUT}/scenarios-390-console.png` })
