@@ -46,7 +46,7 @@
   --alarm: #c0352a; --alarm-soft: #fbe3e0; --warn: #935e00; --warn-soft: #fbefd3; --warn-fill: #f5b83d; --info: #1f6db3;
   --line-a: #4a7a18; --line-b: #1f6db3; --line-c: #6b4fae; --line-d: #b4501a;
   --accent-rgb: 79 138 0; --warn-rgb: 194 133 0; --alarm-rgb: 195 48 42; --info-rgb: 31 109 179; --shade-rgb: 24 34 24;
-  --bar-rgb: 255 255 255; --bar2-rgb: 255 255 255; --panel-rgb: 255 255 255;
+  --bar-rgb: 255 255 255; --panel-rgb: 255 255 255;
   --c-16191e: #f1f3ef; --c-17230d: #e9f3dc; --c-1b1e24: #ffffff; --c-1f2229: #f4f6f2; --c-20252c: #eef0ec; --c-23272e: #e2e6df;
   --c-241f12: #fbf3df; --c-262a31: #e2e6df; --c-2a1614: #fbe6e3; --c-2a2009: #fdf3dc; --c-2a2e35: #dfe3dc; --c-2a2f37: #dfe3dc;
   --c-2a3038: #e4e8e1; --c-2a3c55: #c9daee; --c-2b2140: #ece6f7; --c-2b3a52: #c9daee; --c-3a3e46: #d3d8cf; --c-3b4048: #b9bfb6;
@@ -527,7 +527,7 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 
   .bottomnav { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
     height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 0 max(env(safe-area-inset-left), 8px) env(safe-area-inset-bottom) max(env(safe-area-inset-right), 8px);
-    background: rgb(var(--bar2-rgb, 14 16 20) / .94); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-top: 1px solid var(--border); }
+    background: var(--panel); border-top: 1px solid var(--border); }   /* solid: page text must not show through the tabs (#24) */
   .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 12px; white-space: nowrap; min-width: 0; }
   .bottomnav button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .bottomnav button:last-child svg { fill: currentColor; stroke: none; }
