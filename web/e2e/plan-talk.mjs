@@ -36,12 +36,12 @@ try {
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
   // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
   const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
-  check('/ opens the Agent 對話台 and it is the first tab', firstTab.includes('Agent 對話台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
+  check('/ opens the 對話台 and it is the first tab', firstTab.includes('對話台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
   check('status strip on the console (counts, events, approvals, time, network)', /正常 \d+ 台/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))
-  const side = d.locator('.agent-side')
+  const side = d.locator('[data-testid=plan-area]')
   const gotCard = await until(d, async () => (await side.locator('[data-testid=approval-visual]').count()) > 0, 150)
   await api(d, '/api/sim/control', { action: 'speed', speed: 5 })      // keep the plant running while we talk
   check('approval card v1 reached the agent tab', gotCard)

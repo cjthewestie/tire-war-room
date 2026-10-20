@@ -1,6 +1,7 @@
-// Supervisor phone (proposal page 11 card): approve / modify / reject over the factory LAN.
+// Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
+// talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
 import { useState } from 'react'
-import type { ApprovalRequest, AskAnswer, DecisionKind } from '../contracts'
+import type { ApprovalRequest, AskAnswer } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
 import { RISK_PLAIN, plain } from '../plain'
@@ -9,12 +10,18 @@ import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { useApprovalAlerts } from './alert'
+import { ThemeToggle } from '../components/ThemeToggle'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
 export function Phone() {
   const { state, transport, connected } = useWarRoom()
-  const pending = [...state.pending].sort((a, b) => (a.created_at < b.created_at ? 1 : -1))
+  // the most urgent card first: R3 before R2, then the newest
+  const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))
+  const [pick, setPick] = useState<string | null>(null)
+  const top = pending.find((p) => p.id === pick) ?? pending[0]
+  // kept here, not in the card: the card is replaced by its new version once the agent has replanned
+  const [sent, setSent] = useState<string | null>(null)
   const net = state.snapshot?.header.network ?? 'online'
   const lanDown = net === 'lan_down'
   const ev = primaryEvent(state.snapshot?.events)
@@ -27,12 +34,15 @@ export function Phone() {
           <span>主管手機</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : ''}</span>
           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
+          <ThemeToggle className="ph-tog" />
         </div>
+        {top && <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>}
         {!alerts.armed ? (
           <button className="ph-arm" onClick={() => void alerts.arm()}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
           <div className="ph-armed muted">核准提醒已開啟{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</div>
         )}
+        {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
         {pending.length === 0 ? (
@@ -45,7 +55,15 @@ export function Phone() {
               <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
             ))}
           </div>
-        ) : pending.map((a) => <ApprovalCard key={a.id} a={a} disabled={lanDown || !transport} />)}
+        ) : <>
+          <ApprovalCard key={top.id} a={top} disabled={lanDown || !transport} onSent={setSent} />
+          {pending.length > 1 && (
+            <div className="ph-more" data-testid="phone-more">
+              <b>還有 {pending.length - 1} 件待核准</b>
+              {pending.filter((p) => p.id !== top.id).map((p) => <button key={p.id} className="ph-more-i" onClick={() => setPick(p.id)}>{RISK_PLAIN[p.risk]}・{plain(p.title)}</button>)}
+            </div>
+          )}
+        </>}
         {transport?.ask && <AskBox disabled={lanDown} />}
       </div>
     </div>
@@ -75,7 +93,7 @@ function AskBox({ disabled }: { disabled: boolean }) {
   }
   return (
     <div className="ph-card ph-ask" data-testid="ask-box">
-      <h2 className="ph-title">問戰情室</h2>
+      <h2 className="ph-title">問一句</h2>
       <p className="muted small">只查不改：答案只來自感測器、訂單班表與 SOP，提問會寫入稽核日誌。</p>
       <div className="ph-opts">
         {ASK_EXAMPLES.map((x) => (
@@ -102,40 +120,30 @@ function AskBox({ disabled }: { disabled: boolean }) {
 
 const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時', superseded: '已改版（討論後由新版取代）' }
 
-function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }) {
+function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: boolean; onSent: (text: string) => void }) {
   const { transport, state } = useWarRoom()
   const ev = state.snapshot?.events.find((e) => e.id === a.event_id) ?? null
   const [opt, setOpt] = useState<string | null>(null)
-  const [mode, setMode] = useState<DecisionKind | null>(null)
-  const [reason, setReason] = useState('')
+  const [talk, setTalk] = useState(false)
+  const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
-  const chosen = opt ?? (a.options.length === 1 ? a.options[0].id : null)
-  // What 修改 can actually change: the option (a different staffing choice than the system's).
-  // A free-text note never becomes tool args (every *Args model is extra='forbid'), so a modify that
-  // picks no other option executes nothing: it goes back to the commander as a reject with the note,
-  // and the state machine replans (pages 5/7: 主管 核准／修改／否決; nothing he refused may run).
   const base = (a.options.find((o) => o.recommended) ?? a.options[0])?.id ?? null
-  const changesOption = chosen != null && chosen !== base
-  const chosenOpt = a.options.find((o) => o.id === chosen)
-  const send = async (decision: DecisionKind) => {
+  const chosen = opt ?? base
+  // 核准 executes the chosen option (the system's unless the supervisor picked another one)
+  const approve = async () => {
     if (!transport) return
-    if (decision === 'reject' && !reason.trim()) { setMode('reject'); setErr('駁回需要填寫理由'); return }
-    if (decision === 'modify' && !reason.trim()) { setMode('modify'); setErr('修改需要填寫修改內容'); return }
-    if (decision === 'approve' && !chosen) { setErr('請先選擇方案'); return }
-    const note = reason.trim()
-    let d: { decision: DecisionKind; option_id: string | null; reason: string }
-    if (decision === 'modify' && changesOption) {
-      d = { decision: 'modify', option_id: chosen, reason: `修改：改選「${chosenOpt?.label ?? chosen}」；${note}` }
-    } else if (decision === 'modify') {
-      d = { decision: 'reject', option_id: null, reason: `退回修改：${note}（未改選方案，原方案不執行，請依修改內容重排）` }
-    } else {
-      d = { decision, option_id: decision === 'reject' ? null : chosen, reason: note || defaultReason(a, chosen) }
-    }
+    if (a.options.length > 0 && !chosen) { setErr('請先選擇方案'); return }
     setBusy(true); setErr(null)
     try {
-      await transport.decide({ request_id: a.id, ...d, modified_args: null, decided_by: '主管', via: 'phone' })
+      await transport.decide({ request_id: a.id, decision: 'approve', option_id: chosen, reason: defaultReason(a, chosen), modified_args: null, decided_by: '主管', via: 'phone' })
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
+  }
+  // 討論: changing or refusing the plan is said in words; the agent replans and the card comes back as a new version
+  const discuss = async () => {
+    if (!transport?.discuss || !text.trim()) return
+    setBusy(true); setErr(null)
+    try { const t = text.trim(); onSent(t); setText(''); setTalk(false); await transport.discuss(a.event_id, t) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
   }
   return (
     <div className="ph-card ph-approval">
@@ -146,50 +154,49 @@ function ApprovalCard({ a, disabled }: { a: ApprovalRequest; disabled: boolean }
         {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
       </div>
       <h2 className="ph-title">{plain(a.title)}</h2>
+      <p className="ph-problem">{plain(a.reason)}</p>
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">
           <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
           {(a.constraints ?? []).length > 0 && <div className="muted">主管條件：{(a.constraints ?? []).join('、')}</div>}
         </div>
       )}
-      {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       <dl className="ph-info">
-        <dt>原因</dt><dd>{plain(a.reason)}</dd>
-        <dt>已做</dt><dd>{a.done.length ? a.done.map(plain).join('；') : '—'}</dd>
-        <dt>缺口</dt><dd>{a.gaps.length ? a.gaps.map(plain).join('；') : '無'}</dd>
-        <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
         {a.actions?.length ? (<>
-          <dt>要核准</dt>
+          <dt>建議</dt>
           <dd><ul className="ph-acts-list">{a.actions.map((x, i) => <li key={i}>{plain(x)}</li>)}</ul></dd>
         </>) : null}
+        <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
+        {a.gaps.length > 0 && <><dt>缺口</dt><dd>{a.gaps.map(plain).join('；')}</dd></>}
       </dl>
+      <details className="ph-why">
+        <summary>為什麼</summary>
+        {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
+        {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
+      </details>
       </div>
       <div className="ph-col-b">
-      <p className="ph-q">選一個人力方案</p>
-      <div className="ph-opts" role="radiogroup" aria-label="方案">
-        {a.options.map((o) => (
-          <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}
-            className={`ph-opt ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
-            <b>{o.id}</b>　{o.label}{chosen === o.id ? '（主管選擇）' : o.recommended ? <small>系統建議</small> : null}
-          </button>
-        ))}
-      </div>
-      {mode && (
-        <textarea className="ph-reason" placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容（必填，寫入稽核日誌）'} value={reason} onChange={(e) => setReason(e.target.value)} rows={2} />
-      )}
-      {mode === 'modify' && (
-        <p className="ph-modify-hint" data-testid="modify-hint">{changesOption
-          ? `送出後執行：${chosen} ${chosenOpt?.label ?? ''}（取代系統建議）＋其餘核准內容。修改內容寫入稽核日誌，不改硫化時間等公式數值。`
-          : '未改選方案：原方案全部不執行，修改內容退回指揮官重新規劃（記為退回）。要換人力方案，請先點選另一個方案。'}</p>
+      {a.options.length > 1 && <>
+        <p className="ph-q">選一個人力方案</p>
+        <div className="ph-opts" role="radiogroup" aria-label="方案">
+          {a.options.map((o) => (
+            <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}
+              className={`ph-opt ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
+              <b>{o.id}</b>　{o.label}{o.recommended ? <small>系統建議</small> : null}
+            </button>
+          ))}
+        </div>
+      </>}
+      {talk && (
+        <textarea className="ph-reason" rows={2} maxLength={300} autoFocus value={text} onChange={(e) => setText(e.target.value)}
+          placeholder="例如：不要加班／9 號機今晚要保養／這個不行，改用 B" aria-label="跟 AI 討論這個計劃" data-testid="phone-discuss-input" />
       )}
       {err && <p className="err">{err}</p>}
       <div className="ph-acts">
-        {!chosen && !mode && <p className="ph-hint">請先選方案，再按核准</p>}
-        <button className="ph-approve" disabled={disabled || busy || !chosen} onClick={() => send('approve')}>{busy ? '送出中…' : `核准${chosen ? ` ${chosen}` : ''}`}</button>
-        <button className="ph-sec" disabled={disabled || busy} onClick={() => (mode === 'modify' ? send('modify') : setMode('modify'))}>{mode === 'modify' ? (changesOption ? `送出修改（改選 ${chosen}）` : '退回重排') : '修改'}</button>
-        <button className="ph-sec danger" disabled={disabled || busy} onClick={() => (mode === 'reject' ? send('reject') : setMode('reject'))}>{mode === 'reject' ? '確認駁回' : '駁回'}</button>
+        <button className="ph-approve" disabled={disabled || busy || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>{busy ? '送出中…' : `核准${chosen && a.options.length > 1 ? `（${chosen}）` : ''}`}</button>
+        <button className="ph-sec" disabled={disabled || busy || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
       </div>
-      <p className="ph-foot">決定與理由會寫入稽核日誌，系統接著往下執行。</p>
+      <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
       </div>
     </div>
   )

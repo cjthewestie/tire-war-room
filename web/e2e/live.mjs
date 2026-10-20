@@ -47,7 +47,7 @@ if (hasCard) {
   const after = await ph.locator('body').innerText()
   check('phone approve accepted', !after.includes('請先選擇') && !after.includes('失敗'), after.slice(0, 160).replace(/\n/g, ' | '))
 }
-await d.click('text=排程與人力')
+await d.click('text=人力排程')
 await d.waitForTimeout(2500)
 const s = await d.locator('body').innerText()
 check('schedule tab renders gantt', (await d.locator('.gantt svg').count()) === 1)

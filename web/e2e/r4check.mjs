@@ -1,6 +1,6 @@
 // Round-4 UI review fixes against a live backend:
 //   uv run python -m warroom.api serve --port 8793   then   node web/e2e/r4check.mjs http://localhost:8793
-// 1 phone 修改 never runs an unchanged plan; 2 a stopped press shows 扣模待 QC (drawer, Gantt, outcome);
+// 1 phone 討論 never runs the plan (changes go through the conversation; no 修改/駁回 buttons since #16); 2 a stopped press shows 扣模待 QC (drawer, Gantt, outcome);
 // 3 bad data is visible on the main screen (header chip, ③ note, machine marks, drawer).
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -45,29 +45,25 @@ const pctx = await b.newContext({ viewport: { width: 390, height: 844 }, timezon
 const ph = await pctx.newPage()
 ph.on('pageerror', (e) => errors.push(e.message))
 await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
-const waitOpts = async (n = 1) => { for (let i = 0; i < 240; i++) { if ((await ph.locator('.ph-opt').count()) >= n) return true; await ph.waitForTimeout(1000) } return false }
-// round 1: keep the system option, write a note, 修改 → must be 退回重排, nothing runs
+const waitOpts = async (n = 1) => { for (let i = 0; i < 240; i++) { if ((await ph.locator('.ph-approval .ph-opt').count()) >= n) return true; await ph.waitForTimeout(1000) } return false }
+// round 1: 討論 instead of approving — the note goes to the agent (POST /api/events/{id}/discuss), nothing runs
 await waitOpts(2)
-await ph.locator('.ph-sec', { hasText: '修改' }).click()
-await ph.fill('.ph-reason', '硫化改 34 h，不要調人')
-const hint = await ph.locator('[data-testid=modify-hint]').innerText()
-check('modify without another option says nothing runs', hint.includes('原方案全部不執行'), hint)
+check('phone card has only 核准 and 討論', (await ph.locator('.ph-approval button', { hasText: /修改|駁回/ }).count()) === 0 && (await ph.locator('[data-testid=phone-discuss]').count()) === 1)
+await ph.locator('[data-testid=phone-discuss]').click()
+await ph.fill('[data-testid=phone-discuss-input]', '不要調人')
 await ph.screenshot({ path: `${OUT}/r4fix-phone-modify-390.png`, fullPage: true })
-await ph.locator('.ph-sec', { hasText: '退回重排' }).click()
+await ph.locator('[data-testid=phone-discuss]').click()
 await ph.waitForTimeout(4000)
 let evs = await d.evaluate(() => fetch('/api/events').then((r) => r.json()))
 let ev = evs.find((e) => e.machine_id === 'CURE-07')
-let tl = (ev?.timeline ?? []).map((x) => x.text).join('\n')
-check('timeline: 退回修改, not 修改後核准', tl.includes('主管退回修改') && !tl.includes('修改後核准'))
+check('討論 sent from the phone (confirmation shown)', (await ph.locator('.ph-sent').count()) === 1)
 const sv = await d.evaluate(() => fetch('/api/schedule').then((r) => r.json()))
-check('schedule unchanged (v1) after 退回', sv.version === 1, `v${sv.version}`)
+check('schedule unchanged (v1) after 討論', sv.version === 1, `v${sv.version}`)
 // approve every later round with the first option (overtime) until closed
 for (let i = 0; i < 400; i++) {
   await d.waitForTimeout(1000)
-  if (await ph.locator('.ph-card .ph-opt').count()) {
-    await ph.locator('.ph-opt').first().click()
-    if (await ph.locator('.ph-approve:enabled').count()) { await ph.locator('.ph-approve:enabled').first().click(); await ph.waitForTimeout(1500) }
-  }
+  if (await ph.locator('.ph-approval .ph-opt').count()) await ph.locator('.ph-approval .ph-opt').first().click()
+  if (await ph.locator('.ph-approval .ph-approve:enabled').count()) { await ph.locator('.ph-approval .ph-approve:enabled').first().click(); await ph.waitForTimeout(1500) }
   evs = await d.evaluate(() => fetch('/api/events').then((r) => r.json()))
   ev = evs.find((e) => e.machine_id === 'CURE-07')
   if (ev && ['closed', 'safe_stop'].includes(ev.state)) break
@@ -84,7 +80,7 @@ const dr = await d.locator('.drawer').innerText()
 check('drawer: 扣模待品管, no de-mold ETA', dr.includes('扣模待品管') && !dr.includes('預計出模'), dr.split('\n').filter((x) => x.includes('扣模') || x.includes('出模')).join(' | '))
 await d.screenshot({ path: `${OUT}/r4fix-p11-drawer7-1440.png` })
 await d.keyboard.press('Escape')
-await d.locator('.tabs button', { hasText: '排程與人力' }).click()
+await d.locator('.tabs button', { hasText: '人力排程' }).click()
 await d.waitForTimeout(1500)
 check('Gantt marks press 7 stopped', (await d.locator('.g-held').count()) >= 1)
 await d.screenshot({ path: `${OUT}/r4fix-p11-sched-1440.png`, fullPage: true })

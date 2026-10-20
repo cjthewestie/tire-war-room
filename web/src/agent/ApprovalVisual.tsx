@@ -1,11 +1,11 @@
 // Visual approval card (issue #8, part B): the plan as a flow diagram, the schedule before/after,
-// the staffing options side by side, the tools that ran and the conclusion — then approve / modify / reject.
+// the staffing options side by side, the tools that ran and the conclusion — then 核准 or 討論 (no separate 修改/駁回).
 import { useId, useMemo, useState } from 'react'
-import type { ApprovalRequest, DecisionKind, Event } from '../contracts'
+import type { ApprovalRequest, DecisionKind, Event, ScheduleJob } from '../contracts'
 import { machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, fmtMD, ms } from '../format'
 import { RISK_PLAIN, hypName, plain } from '../plain'
-import { TOOL_LABEL, NOTIFY_LABEL } from '../stepText'
+import { TOOL_LABEL, NOTIFY_LABEL, resultText } from '../stepText'
 import { useWarRoom } from '../useWarRoom'
 import { useWidth } from '../components/common'
 import {
@@ -24,13 +24,15 @@ export function PendingApproval({ req, onAgent }: { req: ApprovalRequest; onAgen
   const { state } = useWarRoom()
   const ev = state.snapshot?.events.find((e) => e.id === req.event_id) ?? null
   const { items } = useTranscript(ev)
-  return <ApprovalVisual req={req} ev={ev} items={items} onAgent={onAgent} />
+  return <ApprovalVisual req={req} ev={ev} items={items} onAgent={onAgent} onDiscuss={onAgent} />
 }
 
-/** `side` = the narrow column of the Agent tab: the conclusion comes right under the title and the
- *  decision bar stays pinned to the bottom of the column, so both are read without scrolling. */
-export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
-  req: ApprovalRequest; ev: Event | null; items: Item[]; onAgent?: () => void; layout?: 'wide' | 'side'
+/** `plan` = the 計劃 area of the home screen (UX brief, CJ 2026-10-20): problem in one line, delivery impact, who
+ *  does what after approval, the option picker when there is a choice, and only two actions — 核准 and 討論
+ *  (CJ: 「agent 計劃就只有核准跟討論」; changing or rejecting a plan happens by talking to the agent).
+ *  `wide` = 產線監控: the same decision plus the evidence (plan diagram, schedule before/after, tools). */
+export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide' }: {
+  req: ApprovalRequest; ev: Event | null; items: Item[]; onAgent?: () => void; onDiscuss?: () => void; layout?: 'wide' | 'plan'
 }) {
   const { transport, state } = useWarRoom()
   const versions = useVersions()
@@ -49,28 +51,23 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
   const chosen = pick ?? base
   const chosenOpt = req.options.find((o) => o.id === chosen)
   const changesOption = chosen != null && chosen !== base
-  const [mode, setMode] = useState<DecisionKind | null>(null)
-  const [reason, setReason] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
 
-  // same rules as the phone card: a 修改 that changes no option executes nothing and goes back as a reject with the note
-  const send = async (decision: DecisionKind) => {
+  // 核准 only: the chosen option (or the system's) executes; a different option than the system's is recorded as such.
+  // Changing or rejecting the plan is done by talking (討論 → POST /api/events/{id}/discuss replans and issues v2).
+  const send = async () => {
     if (!transport) return
-    if (decision === 'reject' && !reason.trim()) { setMode('reject'); setErr('駁回需要填寫理由'); return }
-    if (decision === 'modify' && !reason.trim()) { setMode('modify'); setErr('修改需要填寫修改內容'); return }
-    if (decision === 'approve' && req.options.length > 0 && !chosen) { setErr('請先選擇方案'); return }
-    const note = reason.trim()
-    let d: { decision: DecisionKind; option_id: string | null; reason: string }
-    if (decision === 'modify' && changesOption) d = { decision: 'modify', option_id: chosen, reason: `修改：改選「${chosenOpt?.label ?? chosen}」；${note}` }
-    else if (decision === 'modify') d = { decision: 'reject', option_id: null, reason: `退回修改：${note}（未改選方案，原方案不執行，請依修改內容重排）` }
-    else if (decision === 'reject') d = { decision, option_id: null, reason: note }
-    else d = { decision, option_id: chosen, reason: note || (changesOption ? `否決「${req.options.find((o) => o.id === base)?.label}」，改選「${chosenOpt?.label}」` : chosenOpt ? `核准「${chosenOpt.label}」` : '戰情室核准') }
+    if (req.options.length > 0 && !chosen) { setErr('請先選擇方案'); return }
+    const d: { decision: DecisionKind; option_id: string | null; reason: string } = {
+      decision: 'approve', option_id: chosen,
+      reason: changesOption ? `否決「${req.options.find((o) => o.id === base)?.label}」，改選「${chosenOpt?.label}」` : chosenOpt ? `核准「${chosenOpt.label}」` : '戰情室核准',
+    }
     setBusy(true); setErr(null)
     try {
       await transport.decide({ request_id: req.id, ...d, modified_args: null, decided_by: '主管', via: lanDown ? 'touchscreen' : 'dashboard' })
-      setDone(d.decision === 'approve' ? `已核准${d.option_id ? ` ${d.option_id}` : ''}` : d.decision === 'modify' ? `已修改（改選 ${d.option_id}）` : '已退回指揮官')
+      setDone(`已核准${d.option_id ? ` ${d.option_id}` : ''}`)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
 
@@ -80,7 +77,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
   const expires = req.expires_at ? `${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前` : null
   // one delivery line for all options when the solver gives no per-option figure
   const dLine = deliveryLine(req.delivery_impact, facts)
-  const side = layout === 'side'
+  const planLayout = layout === 'plan'
 
   const plan = (n: number) => (
     <Block key="plan" n={n} title="處理計畫" hint={nodes.length ? `${nodes.length} 步・箭頭＝相依` : undefined}>
@@ -142,13 +139,53 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
             {afterSteps.map((n) => <li key={n.id}>接著自動（R1）：{TOOL_LABEL[n.tool]}・{plain(n.purpose)}</li>)}
           </ul>
         </dd>
-        <dt className="no">駁回後</dt>
-        <dd>原方案全部不執行，退回 AI 指揮官重新規劃{activeV != null ? `；排程維持第 ${activeV} 版` : ''}。</dd>
+        <dt className="no">不同意時</dt>
+        <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
       </dl>
     </Block>
   )
-  // wide: two columns (plan + schedule | options + tools + conclusion); side: conclusion first, one column
-  const order = side ? [conclusion, plan, options, sched, toolsUsed] : [plan, sched, options, toolsUsed, conclusion]
+  // 對交期的影響: one row per order the proposed schedule changes (code-built diff of the two schedule versions)
+  const impactRows = diff ? impactTable(diff, facts) : []
+  const impact = (n: number) => (
+    <Block key="impact" n={n} title="對交期的影響" className="apv-impact">
+      {impactRows.length > 0 && (
+        <table className="impact-t" data-testid="impact-table">
+          <thead><tr><th>訂單</th><th>原本</th><th>改後</th><th>交期</th></tr></thead>
+          <tbody>{impactRows.map((r) => (
+            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
+          ))}</tbody>
+        </table>
+      )}
+      {!impactRows.length && cure && <p className="impact-line">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</p>}
+      <p className="impact-line">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>
+    </Block>
+  )
+  // 核准後誰去做: what executes on approval (the card's actions, the chosen staffing option, the R1 steps after)
+  const whoRows = [
+    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => splitAction(plain(a))),
+    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ who: o.who ?? (o.teams.join('、') || '人力'), what: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
+    ...afterSteps.map((n) => ({ who: '系統（R1 自動）', what: `${TOOL_LABEL[n.tool]}・${plain(n.purpose)}` })),
+  ]
+  const who = (n: number) => (
+    <Block key="who" n={n} title="核准後誰去做" className="apv-who">
+      {whoRows.length ? <ul className="who-list" data-testid="who-does-what">{whoRows.map((r, i) => <li key={i}><b>{r.who}</b><span>{r.what}</span></li>)}</ul>
+        : <p className="muted small">這張卡沒有列出要執行的動作</p>}
+    </Block>
+  )
+  const optionPick = (n: number) => opts.length > 1 && options(n)
+  // 計劃板: the steps as cards, key result per card (from the tool results), arrows = depends_on
+  const lines: Record<string, string> = {}
+  for (const sr of ev?.steps ?? []) {
+    if (sr.result?.ok) { try { lines[sr.step.id] = plain(resultText(sr.step.tool, sr.step.args, sr.result.data)) } catch { /* purpose shown instead */ } }
+  }
+  const changedIds = planLayout && ev ? changedSteps(ev.id, req.version ?? 1, nodes, lines) : undefined
+  const boardBlock = (n: number) => (
+    <Block key="board" n={n} title="計劃板" hint={nodes.length ? `${nodes.length} 步・箭頭＝相依${changedIds?.size ? `・本版改了 ${changedIds.size} 步` : ''}` : undefined}>
+      {nodes.length ? <PlanFlow nodes={nodes} board lines={lines} changed={changedIds} /> : <p className="muted small">尚無計畫步驟資料</p>}
+    </Block>
+  )
+  // plan: impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
+  const order = planLayout ? [boardBlock, impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
   let k = 0
   const blocks = order.map((f) => { const el = f(k + 1); if (el) k++; return el })
 
@@ -176,8 +213,8 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
         )}
       </header>
 
-      {side
-        ? <div className="apv-col">{blocks}</div>
+      {planLayout
+        ? <div className="apv-col apv-plan-body">{blocks}</div>
         : (
           <div className="apv-grid">
             <div className="apv-col">{blocks.slice(0, 2)}</div>
@@ -187,22 +224,13 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
 
       <footer className="apv-act">
         {done ? <p className="apv-done" role="status">{done}・決定已寫入稽核日誌，系統接著往下執行</p> : <>
-          {mode && (
-            <textarea className="apv-reason-in" rows={2} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)}
-              placeholder={mode === 'reject' ? '駁回理由（必填）' : '修改內容（必填，寫入稽核日誌）'} aria-label={mode === 'reject' ? '駁回理由' : '修改內容'} />
-          )}
-          {mode === 'modify' && (
-            <p className="apv-hint">{changesOption
-              ? `送出後執行：${chosen} ${chosenOpt?.label ?? ''}（取代系統建議）＋其餘核准內容。`
-              : '未改選方案：原方案全部不執行，修改內容退回指揮官重新規劃（記為退回）。要換方案，請先點另一個方案。'}</p>
-          )}
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">
-            <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send('approve')} data-testid="visual-approve">
-              {busy ? '送出中…' : `核准${chosen ? ` ${chosen}` : ''}`}
+            <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
+              {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
-            <button className="btn-sec" disabled={busy} onClick={() => (mode === 'modify' ? void send('modify') : setMode('modify'))}>{mode === 'modify' ? (changesOption ? `送出修改（改選 ${chosen}）` : '退回重排') : '修改'}</button>
-            <button className="btn-sec danger" disabled={busy} onClick={() => (mode === 'reject' ? void send('reject') : setMode('reject'))}>{mode === 'reject' ? '確認駁回' : '駁回'}</button>
+            {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
+            <span className="apv-hint">要改或不同意，按「討論」跟 AI 說</span>
           </div>
         </>}
       </footer>
@@ -211,6 +239,43 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide' }: {
 }
 
 function round1(n: number): number { return Math.round(n * 10) / 10 }
+function clip(t: string, n: number): string { const a = Array.from(t); return a.length > n ? `${a.slice(0, Math.max(1, n - 1)).join('')}…` : t }
+
+// which board cards a new version of the card changed: remembered per event across versions (cards remount per id)
+const boardMemory = new Map<string, { version: number; sigs: Map<string, string>; changed: Set<string> }>()
+function changedSteps(evId: string, version: number, nodes: PlanNode[], lines: Record<string, string>): Set<string> {
+  const sigs = new Map(nodes.map((n) => [n.id, `${n.tool}|${plain(n.purpose)}|${lines[n.id] ?? ''}`]))
+  const mem = boardMemory.get(evId)
+  if (mem && mem.version === version) return mem.changed
+  const changed = new Set<string>()
+  if (mem && version > mem.version) for (const [id, sig] of sigs) if (mem.sigs.get(id) !== sig) changed.add(id)
+  boardMemory.set(evId, { version, sigs, changed })
+  return changed
+}
+
+interface ImpactRow { order: string; before: string; after: string; verdict: string; late: boolean; ok: boolean }
+function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: string[] }): ImpactRow[] {
+  const byOrder = new Map<string, { before: ScheduleJob | null; after: ScheduleJob }>()
+  for (const c of diff.changes) {
+    if (c.kind !== 'moved' && c.kind !== 'cure') continue
+    const cur = byOrder.get(c.job.order_id)
+    if (!cur || ms(c.job.demold) > ms(cur.after.demold)) byOrder.set(c.job.order_id, { before: c.before, after: c.job })
+  }
+  const at = (j: ScheduleJob) => `${Number(j.press_id.slice(5))} 號・${fmtMD(j.demold)} ${fmtHM(j.demold)} 出模`
+  return [...byOrder.entries()].map(([order, { before, after }]) => {
+    const late = facts.late.some((l) => l.includes(order))
+    return { order, before: before ? at(before) : '—', after: at(after), late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
+  })
+}
+
+/** Who carries out one approved action: the line's own label ("人力：…", "通知：…"), else by what it changes. */
+function splitAction(a: string): { who: string; what: string } {
+  const m = /^([^：:（(]{1,8})[：:]\s*(.+)$/.exec(a)
+  if (m) return { who: m[1], what: m[2] }
+  if (a.includes('排程')) return { who: '排程（系統生效）', what: a }
+  if (a.includes('硫化')) return { who: '硫化機（系統設定）', what: a }
+  return { who: '系統', what: a }
+}
 
 function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {
   const bits = [plain(impact)]
@@ -229,7 +294,11 @@ function Block({ n, title, hint, children, className = '' }: { n: number; title:
 }
 
 // ---------------------------------------------------------------- flow diagram (inline SVG)
-export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
+/** `board` = the 計劃板 of the home screen (CJ, 2026-10-20: 「我的plancanvas 那樣」): bigger step cards on a dotted
+ *  grid with each step's key result and owner, and the cards a new plan version changed marked 「改」. */
+export function PlanFlow({ nodes, board = false, lines = {}, changed }: {
+  nodes: PlanNode[]; board?: boolean; lines?: Record<string, string>; changed?: Set<string>
+}) {
   const [ref, w] = useWidth<HTMLDivElement>()
   const arrowId = `flow-arrow${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const levels = Math.max(...nodes.map((n) => n.level)) + 1
@@ -237,11 +306,11 @@ export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
   const widest = Math.max(...byLevel.map((l) => l.length))
   const horiz = w >= 560
   const GAP = horiz ? 30 : 14, VGAP = horiz ? 12 : 26
-  let NW: number, NH = 58
+  let NW: number, NH = board ? 78 : 58
   const pos = new Map<string, { x: number; y: number }>()
   let W: number, Hh: number
   if (horiz) {
-    NW = Math.min(170, (w - GAP * (levels - 1)) / levels)
+    NW = Math.min(board ? 200 : 170, (w - GAP * (levels - 1)) / levels)
     W = levels * NW + (levels - 1) * GAP
     Hh = widest * NH + (widest - 1) * VGAP
     byLevel.forEach((col, l) => {
@@ -249,8 +318,8 @@ export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
       col.forEach((n, i) => pos.set(n.id, { x: l * (NW + GAP), y: (Hh - colH) / 2 + i * (NH + VGAP) }))
     })
   } else {
-    NW = Math.min(170, (w - GAP * (widest - 1)) / widest)
-    NH = 54
+    NW = Math.min(board ? 200 : 170, (w - GAP * (widest - 1)) / widest)
+    NH = board ? 74 : 54
     W = Math.max(200, w)
     Hh = levels * NH + (levels - 1) * VGAP
     byLevel.forEach((row, l) => {
@@ -259,7 +328,7 @@ export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
     })
   }
   return (
-    <div ref={ref} className="flow" data-testid="plan-flow">
+    <div ref={ref} className={`flow ${board ? 'plan-board' : ''}`} data-testid={board ? 'plan-board' : 'plan-flow'}>
       <svg width={W + 4} viewBox={`-2 -2 ${W + 4} ${Hh + 4}`} role="img" aria-label={`處理計畫：${nodes.map((n) => `${n.id} ${TOOL_LABEL[n.tool]} ${NODE_LABEL[n.status]}`).join('，')}`}>
         <defs>
           <marker id={arrowId} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -277,12 +346,16 @@ export function PlanFlow({ nodes }: { nodes: PlanNode[] }) {
         {nodes.map((n) => {
           const p = pos.get(n.id)!
           const risk = n.risk && (n.status === 'wait' || n.status === 'after' || n.status === 'auto') ? ` ${n.risk}` : ''
+          const line = board ? clip(lines[n.id] || plain(n.purpose), Math.floor((NW - 20) / 12)) : ''
+          const isNew = !!changed?.has(n.id)
           return (
-            <g key={n.id} transform={`translate(${p.x},${p.y})`} className={`fnode fs-${n.status}`}>
-              <title>{`${n.id} ${TOOL_LABEL[n.tool]}：${plain(n.purpose)}（${NODE_LABEL[n.status]}${risk}）`}</title>
+            <g key={n.id} transform={`translate(${p.x},${p.y})`} className={`fnode fs-${n.status} ${isNew ? 'fs-changed' : ''}`} data-step={n.id}>
+              <title>{`${n.id} ${TOOL_LABEL[n.tool]}：${plain(n.purpose)}${lines[n.id] ? `｜${lines[n.id]}` : ''}（${NODE_LABEL[n.status]}${risk}）`}</title>
               <rect width={NW} height={NH} rx={9} />
               <text x={10} y={21} className="fn-t"><tspan className="fn-id">{n.id}</tspan> {TOOL_LABEL[n.tool]}</text>
-              <text x={10} y={NH - 13} className="fn-s">{statusGlyph(n.status)} {NODE_LABEL[n.status]}{risk}</text>
+              {board && <text x={10} y={42} className="fn-l">{line}</text>}
+              <text x={10} y={NH - 13} className="fn-s">{statusGlyph(n.status)} {n.status === 'wait' ? '等你核准' : NODE_LABEL[n.status]}{risk}</text>
+              {isNew && <g className="fn-new"><rect x={NW - 30} y={6} width={24} height={17} rx={4} /><text x={NW - 18} y={18.5} textAnchor="middle">改</text></g>}
             </g>
           )
         })}
