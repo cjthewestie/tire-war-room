@@ -113,3 +113,8 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-touch-btns { position: absolute; z-index: 11; right: max(18px, env(safe-area-inset-right)); bottom: max(22px, env(safe-area-inset-bottom)); display: grid; gap: 10px; justify-items: end; }
 .f3-tbtn { min-width: 76px; min-height: 48px; padding: 0 16px; border: 0; border-radius: 999px; background: var(--c-paper-solid); color: var(--c-ink); font-size: 15px; font-weight: 700; box-shadow: var(--c-shadow); touch-action: manipulation; }
 .f3-tbtn.act { background: #8fd16a; color: #1f3a0e; box-shadow: 0 4px 0 #6aa84a; max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* issue #36: 一日循環 label and the success moment (訂單完成 / 出貨已出廠) */
+.f3-loop { font-size: 12px; font-weight: 700; color: #3f7d00; background: #eaf6d8; border-radius: 999px; padding: 2px 9px; }
+.f3-success { position: absolute; z-index: 16; left: 50%; top: 18px; transform: translateX(-50%); background: #eaf6d8; color: #23410a; border: 3px solid #76b900; border-radius: 999px; padding: 8px 20px; font-size: 16px; font-weight: 800; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .25s ease-out; }
+@media (max-width: 700px) { .f3-success { top: auto; bottom: 150px; font-size: 14px; max-width: calc(100vw - 32px); white-space: normal; text-align: center; } }

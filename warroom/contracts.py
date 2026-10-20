@@ -286,6 +286,7 @@ class ScenarioName(StrEnum):
     SHIFT_START = "shift_start"                # 早班開工 08:00: today's plan card
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
+    DAY_LOOP = "day_loop"                      # issue #36 一日循環: one dataset day 00:00 -> 24:00, repeated
 
 
 class AuditKind(StrEnum):
@@ -1076,9 +1077,11 @@ class WsMessage(_M):
 
 
 class SimControl(_M):
-    action: Literal["play", "pause", "speed", "reset", "scenario"]
+    action: Literal["play", "pause", "speed", "reset", "scenario", "jump"]
     speed: float | None = None          # sim seconds per wall second
     scenario: ScenarioName | None = None
+    preroll: bool = False               # issue #36 scenario: run headless to ~15 s before the first scripted step
+    at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")   # issue #36 jump (一日循環): "HH:MM"
 
 
 class HealthStatus(_M):

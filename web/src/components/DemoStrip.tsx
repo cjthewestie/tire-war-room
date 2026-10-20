@@ -13,10 +13,17 @@ const JUMPS: Partial<Record<ScenarioName, { label: string; iso: string }[]>> = {
   ],
 }
 
+// issue #36 一日循環: jump to a time of day (the plant runs forward through it, 10 s steps; past midnight it wraps)
+const DAY_JUMPS = [
+  { at: '07:55', label: '08:00 開工' }, { at: '09:10', label: '10:00 出貨' },
+  { at: '15:10', label: '16:00 出貨' }, { at: '23:55', label: '24:00 換日' },
+]
+
 export function DemoStrip() {
   const { state, transport } = useWarRoom()
   const [scenario, setScenario] = useState<ScenarioName | null>(null)
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
   if (!transport) return null
   const clock = state.clock
   const net = state.snapshot?.header.network ?? 'online'
@@ -30,9 +37,10 @@ export function DemoStrip() {
       <div className="seg" role="group" aria-label="情境（注入故障）">
         {SCENARIOS.map((s) => (
           <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''}
-            onClick={() => { setScenario(s.name); run(() => transport.control({ action: 'scenario', scenario: s.name })) }}>{s.label}</button>
+            onClick={() => { setScenario(s.name); setLoading(s.label); run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null)) }}>{s.label}</button>
         ))}
       </div>
+      {loading && <span className="demo-loading" role="status" data-testid="demo-loading">載入情境…（{loading}）</span>}
       <div className="seg" role="group" aria-label="播放">
         <button disabled={busy} onClick={() => run(() => transport.control({ action: clock?.paused ? 'play' : 'pause' }))}>{clock?.paused ? '▶ 播放' : '❚❚ 暫停'}</button>
         {SPEEDS.map((s) => (
@@ -40,6 +48,14 @@ export function DemoStrip() {
         ))}
         <button disabled={busy} onClick={() => run(() => transport.control({ action: 'reset' }))}>↺ 重來</button>
       </div>
+      {!mock && state.clock?.day_loop && (
+        <div className="seg" role="group" aria-label="跳到時間（一日循環）" data-testid="day-jumps">
+          {DAY_JUMPS.map((j) => (
+            <button key={j.at} disabled={busy} title={`快轉到 ${j.at}（照常跑過中間的時間）`}
+              onClick={() => { setLoading(`跳到 ${j.at}`); run(() => transport.control({ action: 'jump', at: j.at })).finally(() => setLoading(null)) }}>{j.label}</button>
+          ))}
+        </div>
+      )}
       {mock && current && JUMPS[current] && (
         <div className="seg" role="group" aria-label="跳到">
           {JUMPS[current]!.map((j) => <button key={j.iso} onClick={() => run(() => transport.jump!(Date.parse(j.iso)))}>{j.label}</button>)}

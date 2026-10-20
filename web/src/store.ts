@@ -3,7 +3,11 @@ import type {
   ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
 
-export interface ClockState { factory_time: string; speed: number; paused: boolean; random_events?: RandomEventsClock }
+export interface ClockState {
+  factory_time: string; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock
+  /** issue #36 一日循環: which loop of the day is playing (null outside the loop) */
+  day_loop?: { loop: number; day: string; source_day: string } | null
+}
 
 export interface WarRoomState {
   snapshot: DashboardSnapshot | null

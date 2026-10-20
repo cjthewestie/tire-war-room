@@ -209,8 +209,9 @@ class ComponentBuilder:
                 from warroom.sim.team_replay import TeamReplayFactory
                 return TeamReplayFactory(replay, clock=clock, seed=7, scenario=ScenarioName.NORMAL,
                                          cache_dir=self.s.audit_path.parent / "team_replay")
-            from warroom.sim import Factory
-            return Factory(clock=clock, seed=7, scenario=ScenarioName.NORMAL)
+            # issue #36: Factory plus the 一日循環 overlay, armed only in DAY_LOOP (every other scenario is plain Factory)
+            from warroom.sim.day_loop import LoopFactory
+            return LoopFactory(clock=clock, seed=7, scenario=ScenarioName.NORMAL)
         sim = self._t("sim", sim_real, lambda: FB.FallbackFactory(clock=clock))
         if self.orders_db is not None:
             sim = ImportedPlanSim(sim, self.orders_db)
@@ -738,6 +739,8 @@ class Runtime:
         path never waits on the LLM (page 5); only the simulated plant's clock does."""
         if self._switching:                     # components are being swapped (load_scenario)
             return
+        if getattr(self.sim, "day_end", None) is not None:      # issue #36 一日循環
+            await self._day_loop_tick()
         before = self.clock.now()
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
@@ -845,6 +848,7 @@ class Runtime:
         runs as a tracked task (cancelled on a scenario load like any event)."""
         drain = getattr(self.sim, "drain_plant_inputs", None)
         sm = self.state_machine
+        self._watch_world()
         if not callable(drain) or not callable(getattr(sm, "open_plant_event", None)):
             return
         self._watch_tasks()
@@ -853,6 +857,20 @@ class Runtime:
             task = asyncio.create_task(sm.run_plant(ev.id), name=f"plant-{ev.id}")
             self._tasks[ev.id] = task
             task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
+
+    def _watch_world(self) -> None:
+        """Issue #36: an order completed or a shipment that left is audited (the world feed carries it over WS)."""
+        w = getattr(self.sim, "world", None)
+        if w is None or getattr(w, "_success_audited", False) or not callable(getattr(w, "add_listener", None)):
+            return
+        w._success_audited = True
+
+        def on_event(ev: Any) -> None:
+            if ev.kind in ("order_completed", "shipment_departed"):
+                self.audit.append(AuditKind.SYSTEM, "world",
+                                  {"msg": ev.text, "kind": ev.kind, "order_ids": ev.order_ids, "qty": ev.qty,
+                                   "on_time": ev.on_time, "at": ev.ts.isoformat()})
+        w.add_listener(on_event)
 
     def _watch_tasks(self) -> None:
         """Audit every worker-task status change of the current world's task board (once per World)."""
@@ -973,7 +991,11 @@ class Runtime:
                 saved_now = self.clock.now()
                 saved_degraded = dict(self.builder.degraded)
                 try:
-                    comps = self.builder.build(new_scenario, sleep=self.sim_sleep, fresh_store=True, staged=True)
+                    # off the event loop (issue #36: the switch froze /ws and every request ~5 s): the plant and
+                    # the seed schedule solve run in a worker thread. Nothing ticks meanwhile (_switching, loop
+                    # cancelled); the shared clock is lock-guarded; the bus and audit are only constructed into.
+                    comps = await asyncio.to_thread(self.builder.build, new_scenario, sleep=self.sim_sleep,
+                                                    fresh_store=True, staged=True)
                     self.builder.commit_store(self.c.store, comps.store)
                 except Exception as e:
                     self.builder.discard_staging()
@@ -1010,6 +1032,80 @@ class Runtime:
 
     async def reset(self) -> None:
         await self.load_scenario(self.scenario)
+
+    # ------------------------------------------------------------------ issue #36 一日循環
+    async def _day_loop_tick(self) -> None:
+        sim = self.sim
+        if sim._day_snap is None:
+            sim.snapshot_day()                  # 00:00 of the first loop: the plant every later loop starts from
+        if self.clock.now() >= sim.day_end:
+            await self._wrap_day()
+
+    async def _wrap_day(self) -> None:
+        """24:00 -> 00:00 of the same date, without rebuilding anything (no freeze): open events are cancelled
+        (their approvals retire), the schedule goes back to the day's first version, the plant (machines, cure
+        cycles, orders, goods, people, trucks) to its start-of-day snapshot, and the detector, validation and
+        baselines start fresh so the seam raises nothing. The audit log keeps going, with a marker."""
+        ended = self.clock.now()
+        await self._cancel_events()
+        self._wake_sleepers(cancel=True)
+        store = self.c.store
+        try:
+            if store is not None and store.current().version != 1:
+                store.rollback(1)
+        except Exception:  # noqa: BLE001 - a store without v1 history keeps what it has
+            log.exception("day loop: schedule not reset")
+        n = self.sim.restore_day()
+        self.c.detector.reset(None)
+        self.ingest.reset()
+        self._baseline.clear()
+        self._oob_seen.clear()
+        self._world_obj, self._world_rev = None, -1            # next WORLD message is a full one
+        self.audit.append(AuditKind.SYSTEM, "day_loop", {"msg": f"新的一天（循環 {n}）", "loop": n,
+                                                         "ended_at": ended.isoformat(),
+                                                         "factory_time": self.clock.now().isoformat()})
+        self._publish_periodic(force=True)
+
+    def day_loop_info(self) -> dict[str, Any] | None:
+        sim = self.sim
+        if getattr(sim, "day_end", None) is None:
+            return None
+        return {"loop": sim.loop_n, "day": sim.day0.date().isoformat(), "source_day": "2026-10-21"}
+
+    JUMP_STEP_S = 10.0                          # the world's own grid; a 24 h jump is ~8.6k ticks
+
+    async def jump_to(self, hhmm: str) -> float:
+        """一日循環: run the plant forward to the next HH:MM (through the 24:00 wrap when it is earlier today), in
+        10 s ticks through the normal path. Returns the factory seconds run."""
+        if getattr(self.sim, "day_end", None) is None:
+            raise RuntimeError("jump works in the 一日循環 (day_loop) only")
+        h, m = map(int, hhmm.split(":"))
+        now = self.clock.now()
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        left = (target - now).total_seconds() % (24 * 3600)
+        done = 0.0
+        while done < left:
+            dt = min(self.JUMP_STEP_S, left - done)
+            await self.tick(dt, publish=False, hold_compute=False)
+            done += dt
+        self._publish_periodic(force=True)
+        self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "跳到時間", "at": hhmm, "seconds": done})
+        return done
+
+    PREROLL_LEAD_S = 15.0
+
+    async def preroll(self) -> float:
+        """Issue #36: a demo button lands ~15 factory s before the scenario's first scripted step instead of minutes
+        before it. The plant runs those seconds headless through the normal tick (safety core, detector, world),
+        so what happens next is exactly what would have happened at 1x. Returns the seconds run."""
+        sc = getattr(self.sim, "scenario", None)
+        if getattr(sc, "name", None) is ScenarioName.DAY_LOOP:
+            return 0.0                          # the loop is live time: its 08:00 step is not a "first fault"
+        offsets = [s.at_offset_s for s in getattr(sc, "steps", []) or []]
+        lead = max(0.0, min(offsets) - self.PREROLL_LEAD_S) if offsets else 0.0
+        if lead >= 1.0:
+            await self.run_seconds(int(lead))
+        return float(int(lead)) if lead >= 1.0 else 0.0
 
     def set_speed(self, speed: float) -> None:
         if not 0 < speed <= 3600:
@@ -1072,7 +1168,7 @@ class Runtime:
     def clock_info(self) -> dict[str, Any]:
         ev = self.sim_events
         return {"factory_time": self.clock.now().isoformat(), "speed": self.speed, "paused": self.paused,
-                "scenario": self.scenario.value,
+                "scenario": self.scenario.value, "day_loop": self.day_loop_info(),
                 "random_events": {"enabled": ev.enabled, "every_min": ev.every_min, "seed": ev.seed,
                                   "fired": len(ev.fired), "last": ev.fired[-1].text if ev.fired else None}}
 

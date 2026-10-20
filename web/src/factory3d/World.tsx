@@ -16,6 +16,7 @@ import { DockTruck, WorldPeople } from './People'
 import { GoodsRings } from './GoodsRings'
 import { MachineRings } from './MachineRings'
 import { machineRing } from './machineRing'
+import { DockCelebration } from './DockCelebration'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
   ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
@@ -702,7 +703,7 @@ const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
 /** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean }) {
+export function World({ state, focusId, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
   const R = ROOMS
@@ -739,6 +740,7 @@ export function World({ state, focusId, active, fp }: { state: WarRoomState; foc
       {state.world?.goods && <GoodsRings goods={state.world.goods} />}
       <MachineRings tiles={tiles} world={state.world} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
+      <DockCelebration at={celebrate} />
       <Ambient />
     </group>
   )

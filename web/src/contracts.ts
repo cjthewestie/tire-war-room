@@ -37,6 +37,7 @@ export type SolverName = "cp-sat" | "heuristic"
 export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
+  | "day_loop"  // issue #36 一日循環
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
@@ -573,9 +574,13 @@ export interface SimEventsBody { enabled?: boolean; every_min?: number; seed?: n
 export interface RandomEventsClock { enabled: boolean; every_min: number; seed: number; fired: number; last: string | null }
 
 export interface SimControl {
-  action: "play" | "pause" | "speed" | "reset" | "scenario"
+  action: "play" | "pause" | "speed" | "reset" | "scenario" | "jump"
   speed?: number | null
   scenario?: ScenarioName | null
+  /** issue #36: run headless to ~15 factory s before the scenario's first scripted step */
+  preroll?: boolean
+  /** issue #36 jump (一日循環 only): run the plant forward to this time of day, "HH:MM" (through 24:00 if earlier) */
+  at?: string | null
 }
 
 export interface HealthStatus {
@@ -595,7 +600,11 @@ export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁
 export type WorldZone =
   | "war_room" | "staff" | "line_A" | "line_B" | "line_C" | "line_D" | "line_BOND" | "line_CURE"
   | "break" | "toilet" | "dock" | "off_site"
-export interface WorldEvent { ts: ISODate; kind: string; text: string; ref: string | null }
+export interface WorldEvent {
+  ts: ISODate; kind: string; text: string; ref: string | null
+  /** issue #36 order_completed / shipment_departed */
+  order_ids?: string[]; qty?: number | null; on_time?: boolean | null
+}
 export interface WorldOrder {
   id: string; size: TireSize; qty: number; done: number; due: string; customer: string; status: WorldOrderStatus
   rush: boolean; source: "seed" | "world"; created_at: ISODate | null; shipped_at: ISODate | null
@@ -681,7 +690,7 @@ export type WsMessage =
   | { type: "approval_resolved"; ts: ISODate; data: ApprovalRequest }
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }
   | { type: "audit"; ts: ISODate; data: AuditEntry }
-  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; random_events?: RandomEventsClock } }
+  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
 
 // ---------------- REST ----------------

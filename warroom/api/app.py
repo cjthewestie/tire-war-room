@@ -820,6 +820,13 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 r.set_speed(ctl.speed)
             except ValueError as e:
                 raise HTTPException(status_code=422, detail=str(e)) from None
+        elif ctl.action == "jump":
+            if ctl.at is None:
+                raise HTTPException(status_code=422, detail="at required")
+            try:
+                await r.jump_to(ctl.at)
+            except RuntimeError as e:
+                raise HTTPException(status_code=409, detail=str(e)) from None
         elif ctl.action in ("reset", "scenario"):
             if ctl.action == "scenario" and ctl.scenario is None:
                 raise HTTPException(status_code=422, detail="scenario required")
@@ -829,6 +836,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 raise HTTPException(status_code=503, detail={
                     "message": f"情境切換失敗，維持原情境 {r.scenario.value}：{type(e).__name__}: {e}"[:400],
                     "scenario": r.scenario.value}) from None
+        if ctl.preroll and ctl.action in ("reset", "scenario"):
+            await r.preroll()
         if ctl.speed is not None and ctl.action != "speed":
             r.set_speed(ctl.speed)
         r.bus.publish(WsType.CLOCK, r.clock_info())

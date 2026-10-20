@@ -46,6 +46,14 @@
 
 核准後，**程式**（不是模型）把每個核准步驟轉成人員任務（誰、去哪、做什麼、預計幾點完成）：工人在 3D 走過去做，任務狀態 待派 → 前往中 → 執行中 → 完成 即時更新並寫入稽核（`task`）。工廠事件的驗證等所有任務完成才結案；機台事件（p.11、p.2）的任務照樣派、照樣追蹤，但驗證仍以讀值為準。每條胎有狀態與進度圈：待補料 → 備料中 → 生產中 → 硫化中 → 完成 → 待出貨 → 已出貨；訂單的補料任務沒完成前，它的胎停在「待補料」。程式：`warroom/sim/work.py`、`StateMachine.open_plant_event`；測試 `tests/test_plant_events.py`。
 
+### 一日循環：預設的正常運轉（issue #36）
+
+不選情境時，工廠跑「一日循環」：團隊資料集 2026-10-21 一整天（資料集裡唯一沒有腳本事件的完整一天；10/22 有 EV-1、10/28 有 EV-2，10/23–10/27 沒有資料）。A03 大開煉機、A04 小開煉機、A06 冷卻機、V06–V08 硫化機播放當天實際曲線（10 秒一筆，中間線性內插、70 秒移動平均；A03 當天 ±3.7°C 的慢擺幅縮成 ±2°C，否則偵測器會把最慢的爬升當成過熱），其餘 22 台由模擬器在同一天運轉、用當天班表。24:00 回到 00:00：開著的事件取消、排程回到當天第一版、機台／訂單／貨品／人員／卡車回到當天起點、偵測器重新學基準，稽核日誌記一筆「新的一天（循環 n）」。畫面時間旁顯示「一日循環・第 n 輪」；展示列可跳到 08:00 開工、10:00 出貨、16:00 出貨、24:00 換日（照常快轉過中間的時間）。
+
+當天有完整的訂單到出貨：#W-0397 06:30 完成、10:00 出車，#W-0396 13:30 完成、16:00 出車；09:10、10:40 各進一張新單（後者是急單）。訂單完成與出貨出廠是世界事件 `order_completed`、`shipment_departed`（訂單號、條數、是否準時），寫入稽核、經 `/ws` 送出；3D 工廠跳出「訂單 #X 完成」「出貨 #X 已出廠（n 條）」並在碼頭放彩帶。程式：`warroom/sim/day_loop.py`、`Runtime._wrap_day`；測試 `tests/test_day_loop.py`。
+
+展示列的情境按鈕現在帶情境自己的速度，並先在背景快轉到故障前 15 秒；情境切換在背景執行緒建廠，畫面不再卡住。7 號機溫降從按下到核准卡：152.6 秒 → 16.6 秒（Mac、規則模式，量測於 2026-10-20）。
+
 ### 模擬事件：展示時讓工廠自己出狀況（issue #36）
 
 展示列多了 **隨機事件** 開關（3D 工廠按 `4` 也一樣）：打開後每 10／30／60 個模擬分鐘，從加權清單抽一件事件——硫化機蒸汽壓不足、蒸汽洩漏、開煉機冷卻水不足、感測器壞資料（不叫醒 AI）、急單插單、人員請病假、原料到貨延遲、原料短缺。**觸發事件 ▾** 可以立刻觸發指定的一件。事件不走捷徑：機台故障注入模擬器（和 `/api/sim/fault` 同一條路），要被事件偵測從讀值看出來；插單、病假、原料是工廠事件，由狀態機開事件、寫入一律經閘門（Action Gate）。預設關閉；同一個種子（seed，預設 36）抽出同一串事件；關閉時 p.11 腳本結果不變（`tests/test_sim_events.py`）。程式：`warroom/sim/events.py`、`Runtime.fire_sim_event`；API：`GET/POST /api/sim/events`、`POST /api/sim/events/fire`。
@@ -153,6 +161,10 @@ Step by step, with what to click and what to say: [`docs/DEMO-SCRIPT.md`](docs/D
 ### Ask the war room (read-only supervisor Q&A)
 
 The phone page has a 問戰情室 box. It is not a second agent: the same Nemotron picks up to 4 read steps (JSON, schema-constrained), code runs only `ASK_TOOLS` (read sensors, predict, cure formula, orders/shifts, SOP) through the same registry, and the model then answers from those results only (numbers copied, never estimated). Write tools, `solve_schedule` (it stores a PROPOSED version) and names off the allow-list are refused and logged `INTERCEPTED`; every question, call and answer goes into the same hash-chained audit log under an `ASK-nnnn` id. Same session rule as approvals (PIN on the LAN, on-site only when the LAN is down). Code also checks the answer: a number that is not in the tool results replaces the model's answer with the results, and a change request (停掉, 重排, 調人...) never gets a model-written answer. The check covers numbers only, not wording (a real-model run once called press 7 「正常運作」). Mock mode uses keyword rules and a template answer; an invalid plan or a model failure falls back to them. Real Nemotron on the Mac (Ollama, 2026-10-18): 5 questions, 0 fallbacks, 0.5–3.2 s each once loaded. Code: `warroom/agent/ask.py`, `POST /api/ask`; tests: `tests/test_ask.py`.
+
+### Day loop: the default running state (issue #36)
+
+With no scenario chosen, the plant plays one day of the team dataset (2026-10-21, the only full day without a scripted event) from 00:00 to 24:00 and wraps back to 00:00 with no freeze and no false alarm: open events are cancelled, the schedule, machines, orders, goods, people and trucks return to their start-of-day state, the detector relearns, and the audit log records 「新的一天（循環 n）」. The six dataset machines replay that day's curves (A03's ±3.7 °C swing scaled to ±2 °C); the other 22 run the simulator on the same date and roster. The day carries a full order-to-shipment chain, with `order_completed` and `shipment_departed` world events (order id, qty, on time) shown as a success moment in the 3D factory. Demo buttons now send their scenario speed and pre-roll to 15 s before the fault; the scenario build runs off the event loop (press-7 button to approval card: 152.6 s → 16.6 s, Mac, rule mode).
 
 ### Simulated events (issue #36)
 
