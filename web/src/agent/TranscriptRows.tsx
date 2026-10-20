@@ -52,11 +52,12 @@ function ChatRow({ it }: { it: ChatItem }) {
       </div>
     )
   }
-  const head = it.kind === 'summary' ? `AI 指揮官${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'AI 指揮官・無法執行' : 'AI 指揮官・回覆'
+  const head = it.kind === 'dispatch' ? '主 agent・派發' : it.kind === 'report' ? '主 agent・回報' : it.kind === 'interrupt' ? '主 agent・中斷'
+    : it.kind === 'summary' ? `子 agent${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? '子 agent・無法執行' : '子 agent・回覆'
   return (
-    <div className={`r-chat agent k-${it.kind}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : 'chat-agent'}>
+    <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
-        {it.classifiedBy && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
       {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}

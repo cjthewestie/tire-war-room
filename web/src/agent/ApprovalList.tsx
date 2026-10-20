@@ -3,6 +3,8 @@
 import { ProgressRing } from '../components/ProgressRing'
 import { RANK_LABEL, type HomeItem, type Rank } from './homeItems'
 import { REPLAN_HINT, useReplans, type Replan } from './replanStore'
+import { useWarRoom } from '../useWarRoom'
+import { SUB_STATUS } from './subagents'
 
 export function ApprovalList({ items, selected, onPick, next }: {
   items: HomeItem[]; selected: string | null; onPick: (key: string) => void; next: string[]
@@ -41,6 +43,7 @@ export function ApprovalList({ items, selected, onPick, next }: {
 
 /** `rp`: a ② item's replan (null = not asked yet → the hint line; undefined = not an order item). */
 function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: string) => void; rp?: Replan | null }) {
+  const sub = useWarRoom().state.subagents?.items.find((s) => s.id === i.eventId)
   const planning = rp?.state === 'sending' || rp?.state === 'planning'
   return (
     <button type="button" className={`hl-item tone-${i.tone} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
@@ -49,6 +52,7 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
         <span className="hl-t">{i.title}</span>
       </span>
       <span className="hl-s">{i.sub}</span>
+      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">子 agent：{sub.type_label}・{SUB_STATUS[sub.status]}</span>}
       {rp === null && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />AI 規劃中…完成後會自動跳到核准卡</span>}
       {rp?.state === 'ready' && <span className="hl-hint">方案已送出，見 ③ 的待核准卡</span>}

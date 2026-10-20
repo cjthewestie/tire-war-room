@@ -41,7 +41,7 @@ export interface AskItem extends Base { k: 'ask'; question: string; answer: AskA
 /** Issue #10: the conversation about a plan. me = what the supervisor typed (a discussion message or a
  *  task); agent = the agent's reply or its plain summary of a plan at the gate. */
 export interface ChatItem extends Base {
-  k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused'; text: string; by: string
+  k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused' | 'dispatch' | 'report' | 'interrupt'; text: string; by: string
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
 }
@@ -75,6 +75,18 @@ function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number })
   const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, x: Partial<ChatItem> = {}): ChatItem => ({
     ...base, k: 'chat', role, kind, text, by: e.actor, intent: null, version: null, changes: [], constraints: [], classifiedBy: null, fellBack: false, ...x,
   })
+  // issue #54: the main agent's own rows — dispatch, report back, interrupt (dialogue) and model-queue waits (a step)
+  if (e.kind === 'system' && e.actor === 'main_agent') {
+    const o = String(p.orch ?? '')
+    if (o === 'dispatch' || o === 'report' || o === 'interrupt') {
+      return chat('agent', o, String(p.text ?? ''), { by: 'main_agent', classifiedBy: o === 'dispatch' ? str(p.by) : null, fellBack: p.fell_back === true })
+    }
+    if (o === 'queue') {
+      const ms = numOr(p.waited_ms) ?? 0
+      return { ...base, k: 'note', tone: 'plain', text: `等模型 ${ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`}（優先：${String(p.priority_label ?? p.priority)}${Number(p.ahead) ? `・前面 ${String(p.ahead)} 個` : ''}）` }
+    }
+    return null
+  }
   if (e.kind === 'system') {
     const d = obj(p.discuss)
     if (d.text != null) return chat('me', 'discuss', String(d.text))

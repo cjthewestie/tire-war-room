@@ -109,7 +109,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，紀錄在右邊 Agent 對話' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{closed ? '已結案，主 agent 的回報在右邊' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )

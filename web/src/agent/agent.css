@@ -556,3 +556,37 @@
 .trace-chat { z-index: 5; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 -6px 18px rgb(var(--shade-rgb, 0 0 0) / .12); }
 .trace-chat .askbar { border-top: 0; }
 @media (min-width: 1024px) { .trace-chat { position: sticky; bottom: 8px; } }   /* phones: at the end of the transcript, like a chat */
+
+/* ---------- issue #54: 主 agent rows and subagent tags ---------- */
+.r-chat.agent.main { border-left: 3px solid var(--line-c); }
+.r-chat.agent.main header b { color: var(--line-c); }
+.r-chat.agent.k-interrupt { border-left-color: var(--alarm); }
+.hl-agent { display: inline-block; margin-top: 4px; font-size: 11.5px; padding: 0 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
+.hl-agent.s-waiting_approval, .hl-agent.s-waiting_model, .hl-agent.s-queued { background: var(--warn-soft); color: var(--warn); }
+.hl-agent.s-running, .hl-agent.s-waiting_tasks { background: var(--c-2a3c55, #2a3c55); color: var(--info); }
+.hl-agent.s-done { background: var(--accent-soft); color: var(--accent); }
+.hl-agent.s-failed, .hl-agent.s-interrupted { background: var(--alarm-soft); color: var(--alarm); }
+
+/* ---------- Agent page: 主 agent → 子 agent tree, model queue, interrupt (issue #54) ---------- */
+.mq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; margin-bottom: var(--gap); }
+.mq-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.mq-t { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--panel-3); }
+.mq-t.run { border-color: var(--info); color: var(--info); }
+.mq-t small { color: var(--ink-faint); font-size: 11px; }
+.tree-root h2 { display: flex; align-items: center; gap: 8px; color: var(--line-c); font-size: 16px; }
+.tree-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line-c); display: inline-block; }
+.trace-list.tree { border-left: 2px solid var(--panel-3); margin-left: 4px; padding-left: 8px; }
+.trace-list.tree li { position: relative; }
+.trace-list.tree li::before { content: ""; position: absolute; left: -10px; top: 20px; width: 8px; border-top: 2px solid var(--panel-3); }
+.sub-pill { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.sub-pill.t-live { background: var(--c-2a3c55, #2a3c55); color: var(--info); }
+.sub-pill.t-wait { background: var(--warn-soft); color: var(--warn); }
+.sub-pill.t-done { background: var(--accent-soft); color: var(--accent); }
+.sub-pill.t-bad { background: var(--alarm-soft); color: var(--alarm); }
+.sub-bar { flex-basis: 100%; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; display: block; }
+.sub-bar i { display: block; height: 100%; background: var(--accent); }
+.sub-head { border: 1px solid var(--border); border-left: 3px solid var(--line-c); border-radius: 10px; padding: 8px 12px; }
+.sub-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tree-from { color: var(--line-c); font-weight: 700; font-size: 13px; }
+.sub-stop { margin-left: auto; }
+.sub-tasks .sub { margin: 8px 0 4px; font-size: 13.5px; }

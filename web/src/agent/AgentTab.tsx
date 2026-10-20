@@ -90,10 +90,10 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
   const running = items.some((i) => i.k === 'tool' && i.status === 'running')
   const full = (id?: string) => (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(id) } }
   return (
-    <section className="console panel" aria-label="Agent 對話">
+    <section className="console panel" aria-label="主 agent 對話">
       <header className="con-h">
         <div className="con-title">
-          <h2>Agent 對話</h2>
+          <h2 title="主 agent（orchestrator）：派發子 agent、回報結果；CJ 2026-10-20">主 agent</h2>
           <div className="seg sm con-view" role="group" aria-label="對話範圍">
             <button className={!allView ? 'on' : ''} aria-pressed={!allView} onClick={() => setAll(false)} disabled={!ev} data-testid="con-follow">
               {ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・${fmtHMS(ev.opened_at).slice(0, 5)}` : '此事項'}</button>
