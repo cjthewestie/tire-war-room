@@ -24,8 +24,8 @@ def test_machine_names_match_python():
             continue
         pat = rf"id: '{re.escape(m.id)}', line: '{m.line.value}', name: '{m.name}', short: '{m.short_name}'"
         assert re.search(pat, FACTORY_TS), m.id
-    assert "ML_PRESSES = ['CURE-07', 'CURE-08', 'CURE-09', 'CURE-10']" in FACTORY_TS
-    assert list(F.ML_PRESSES) == ["CURE-07", "CURE-08", "CURE-09", "CURE-10"]
+    assert "ML_PRESSES = ['CURE-08', 'CURE-09', 'CURE-10', 'CURE-11']" in FACTORY_TS
+    assert list(F.ML_PRESSES) == ["CURE-08", "CURE-09", "CURE-10", "CURE-11"]
     for h in ("H1", "H2", "H3"):
         ids = F.presses_on_header(h)
         assert f"{h}: [{', '.join(repr(i) for i in ids)}]" in FACTORY_TS, h

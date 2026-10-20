@@ -59,14 +59,13 @@ MACHINES: tuple[MachineDef, ...] = (
     # Bonding 貼合
     _m("BOND-01", Line.BOND, "油壓機", "油壓", "貼合", MachineKind.HYDRAULIC_PRESS, 1),
 ) + tuple(
-    # Curing 硫化, 11 presses. Decision (architect): presses 07-10 are the 4 shared
-    # medium+large presses, the other 7 are small-only. Page 3 draws 7 small then 4 M/L
-    # but page 11 has press 7 curing a MEDIUM tire and #A-311 moved to press 9, so both
-    # 7 and 9 must be M/L-capable. Steam header H2 = presses 06,07,08 (page 11:
-    # "對照 6、8 號同管線").
+    # Curing 硫化, 11 presses. Decision (CJ, 2026-10-20, team dataset V1-V11): presses 08-11 are the
+    # 4 shared medium+large presses, presses 01-07 are small-only (page 3 draws 7 small then 4 M/L).
+    # Press 7 therefore cures a SMALL tire (EV-2: S-027, 24 h). Steam header H2 = presses 06,07,08
+    # (page 11: "對照 6、8 號同管線").
     _m(
         f"CURE-{i:02d}", Line.CURE, "硫化機", str(i), "硫化", MachineKind.CURING_PRESS, i,
-        small_only=i not in (7, 8, 9, 10),
+        small_only=i not in (8, 9, 10, 11),
         steam_header="H1" if i <= 5 else ("H2" if i <= 8 else "H3"),
         channels=("temp_c", "pressure_kgf_cm2", "steam_kgf_cm2"),
     )

@@ -177,7 +177,7 @@ class Factory:
         orders = [
             Order(id="#S-101", size=TireSize.S, qty=60, done=s_done, due=d0 + timedelta(days=5), customer="客戶甲",
                   mold_id="MD-S101"),
-            Order(id="#S-102", size=TireSize.S, qty=40, done=0, due=d0 + timedelta(days=12), customer="客戶乙",
+            Order(id="#S-102", size=TireSize.S, qty=39, done=0, due=d0 + timedelta(days=12), customer="客戶乙",
                   mold_id="MD-S102"),
             Order(id="#M-201", size=TireSize.M, qty=50, done=m_done, due=d0 + timedelta(days=21), customer="客戶丙",
                   mold_id="MD-M201"),
@@ -185,26 +185,26 @@ class Factory:
                   mold_id="MD-M202"),
             Order(id="#L-301", size=TireSize.L, qty=59, done=l_done, due=d0 + timedelta(days=30), customer="客戶戊",
                   mold_id="MD-L301"),
-            Order(id="#A-311", size=TireSize.L, qty=1, done=0, due=d0 + timedelta(days=3), customer="客戶己",
+            Order(id="#A-311", size=TireSize.S, qty=1, done=0, due=d0 + timedelta(days=3), customer="客戶己",
                   mold_id="#A-311", priority=2),
-            Order(id="#L-302", size=TireSize.L, qty=40, done=0, due=d0 + timedelta(days=60), customer="客戶庚",
+            Order(id="#L-302", size=TireSize.L, qty=41, done=0, due=d0 + timedelta(days=60), customer="客戶庚",
                   mold_id="MD-L302"),
         ]
         self._orders: dict[str, Order] = {o.id: o for o in orders}
         self._remaining0 = {s: DEMO_ORDER_PROGRESS[s][1] - DEMO_ORDER_PROGRESS[s][0] for s in TireSize}
 
     def _init_presses(self, t0: datetime) -> None:
-        # press -> (order, elapsed h at start). CURE-07 reaches exactly 10 h of a 28 h medium cure
-        # at 02:14:00 in the page-11 scenario (start 02:12:00).
+        # press -> (order, elapsed h at start). CURE-07 (small-only, dataset EV-2 tire S-027) reaches exactly
+        # 14.4 h of a 24 h small cure at 02:14:00 in the page-11 scenario (start 02:12:00).
         plan: dict[str, tuple[str, float]] = {
             "CURE-01": ("#S-101", 2.0), "CURE-02": ("#S-101", 6.0), "CURE-03": ("#S-101", 10.0),
             "CURE-04": ("#S-101", 14.0), "CURE-05": ("#S-101", 18.0), "CURE-06": ("#S-101", 21.0),
-            "CURE-11": ("#S-101", 16.0),
-            "CURE-07": ("#M-201", 10.0 - 2.0 / 60.0), "CURE-08": ("#L-301", 20.0),
+            "CURE-07": ("#S-101", 14.4 - 2.0 / 60.0),
+            "CURE-11": ("#M-201", 10.0), "CURE-08": ("#L-301", 20.0),
             "CURE-09": ("#M-201", 24.0), "CURE-10": ("#L-301", 6.0),
         }
-        queues = {"CURE-07": ["#A-311", "#M-201"], "CURE-08": ["#L-301"], "CURE-09": ["#M-201"],
-                  "CURE-10": ["#L-301"]}
+        queues = {"CURE-07": ["#A-311", "#S-101"], "CURE-08": ["#L-301"], "CURE-09": ["#M-201"],
+                  "CURE-10": ["#L-301"], "CURE-11": ["#M-201"]}
         self._press: dict[str, _Press] = {}
         self._in_press: dict[str, int] = {o: 0 for o in self._orders}
         self._plan_started: set[str] = set()       # schedule job ids already loaded into a press
@@ -431,7 +431,7 @@ class Factory:
 
         With a plan attached, a free press loads the plan's next not-yet-started job on that press,
         at max(planned T, de-mold + 30 min), with the plan's order, mold and cure_h; and stays idle
-        when the plan has nothing for it. So an approved move (#A-311 -> press 9) and the staffed
+        when the plan has nothing for it. So an approved move of #A-311 off press 7 and the staffed
         de-mold windows reach the plant. Without a plan the sim keeps its own queue (tests, replay)."""
         if source is None:
             self._plan_source = None

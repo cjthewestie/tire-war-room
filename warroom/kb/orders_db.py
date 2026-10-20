@@ -5,7 +5,7 @@ reads a workbook with the sheets 訂單 / 班表 / 人員 / 排程 / 半成品 /
 
 Seed data reproduces the proposal's demo:
 - order totals = factory.DEMO_ORDER_PROGRESS (page 2): S 38/100, M 12/100, L 8/100;
-- #A-311 (medium) is the next mold on CURE-07, due 3 days after the demo date (page 11);
+- #A-311 (small, dataset S-033) is the next mold on CURE-07, due 3 days after the demo date (page 11);
 - the 胎體／胎面膠組 night shift on the demo date has 2 of 3 people (one on leave), which yields
   the gap text "10/03 夜班缺 1 人" (page 11);
 - 大胎 #07 parts A 預熱中 / B 成形中 / C 包布中 / D 已完成 and goes into CURE-10 at 17:00 (page 2);
@@ -202,11 +202,11 @@ class OrdersDB:
             # small 38/100
             ("#S-101", "S", 40, 30, ref + timedelta(days=4), "南亞堆高機", "S-24A", 1),
             ("#S-102", "S", 30, 8, ref + timedelta(days=9), "台灣搬運車", "S-24B", 0),
-            ("#S-103", "S", 30, 0, ref + timedelta(days=16), "中部物流設備", "S-24A", 0),
-            # medium 12/100: #A-311 is the next mold on CURE-07, due in 3 days (page 11)
+            ("#S-103", "S", 26, 0, ref + timedelta(days=16), "中部物流設備", "S-24A", 0),
+            ("#A-311", "S", 4, 0, ref + timedelta(days=3), "台塑工業車輛", "S-24A", 3),   # next mold on CURE-07, due in 3 days (page 11)
+            # medium 12/100
             ("#A-309", "M", 20, 12, ref + timedelta(days=12), "高雄港機具", "M-28A", 1),
-            ("#A-311", "M", 4, 0, ref + timedelta(days=3), "台塑工業車輛", "M-28A", 3),
-            ("#A-315", "M", 36, 0, ref + timedelta(days=40), "東元物流", "M-28B", 0),
+            ("#A-315", "M", 40, 0, ref + timedelta(days=40), "東元物流", "M-28B", 0),
             ("#A-318", "M", 40, 0, ref + timedelta(days=60), "長榮貨櫃場", "M-28B", 0),
             # large 8/100: 大胎 #07 belongs to #B-207 (page 2)
             ("#B-207", "L", 50, 8, ref + timedelta(days=45), "台中港務", "L-34A", 2),
@@ -244,9 +244,12 @@ class OrdersDB:
 
         P = F.press_id
         jobs = [
-            # CURE-07: medium #A-309 at 128 °C, mold-in 16:14 the day before -> 10 h in at 02:14 (page 11)
-            ("J-07-01", "#A-309", "M", P(7), "M-28A", D(-1, 16, 14), 28.0, 1),
-            ("J-07-02", "#A-311", "M", P(7), "M-28A", D(0, 20, 44), 28.0, 0),
+            # CURE-07 (small-only, dataset EV-2 S-027): small #S-101 at 128 °C, mold-in 11:50 the day before
+            # -> 14.4 h of 24 h in at 02:14 (page 11); #A-311 is its next mold
+            ("J-07-01", "#S-101", "S", P(7), "S-24A", D(-1, 11, 50), 24.0, 1),
+            ("J-07-02", "#A-311", "S", P(7), "S-24A", D(0, 20, 44), 24.0, 0),
+            ("J-11-01", "#A-309", "M", P(11), "M-28A", D(-1, 16, 14), 28.0, 1),
+            ("J-11-02", "#A-315", "M", P(11), "M-28B", D(0, 20, 44), 28.0, 0),
             ("J-08-01", "#A-309", "M", P(8), "M-28A", D(-1, 8, 30), 28.0, 1),
             ("J-08-02", "#A-315", "M", P(8), "M-28B", D(0, 13, 0), 28.0, 0),
             ("J-09-01", "#B-207", "L", P(9), "L-34A", D(-1, 14, 0), 34.0, 1),
@@ -255,7 +258,7 @@ class OrdersDB:
             ("J-10-01", "#B-207", "L", P(10), "L-34A", D(-1, 6, 30), 34.0, 1),
             ("J-10-07", "#B-207", "L", P(10), "L-34A", D(0, 17, 0), 34.0, 0),
         ]
-        for i, n in enumerate((1, 2, 3, 4, 5, 6, 11)):
+        for i, n in enumerate((1, 2, 3, 4, 5, 6)):
             order = "#S-101" if i < 4 else "#S-102"
             start = D(-1, 7 + i, 0)
             jobs.append((f"J-{n:02d}-01", order, "S", P(n), "S-24A" if i < 4 else "S-24B", start, 24.0, 1))
@@ -279,7 +282,7 @@ class OrdersDB:
             (D(-1, 10, 5), "A-BIGOPEN", "巡檢", "bigopen", "BIGO-早1", None, "膠溫 96°C，水流正常"),
             (D(-1, 14, 0), P(9), "入模", "curing", "CURI-中1", "#B-207", "大胎入模"),
             (D(-1, 15, 40), "A-MIX", "QC 取樣", "qc", None, "#B-207", "門尼黏度 62，合格"),
-            (D(-1, 16, 14), P(7), "入模", "curing", "CURI-中2", "#A-309", "中胎入模，128°C，預計 28 h"),
+            (D(-1, 11, 50), P(7), "入模", "curing", "CURI-中2", "#S-101", "小胎入模，128°C，預計 24 h"),
             (D(-1, 18, 0), P(3), "保養", "maintenance", None, None, "更換疏水閥墊片"),
             (D(-1, 21, 30), P(6), "巡檢", "body", "BODY-夜1", None, "6 號機 128°C，蒸汽壓正常"),
             (D(0, 0, 10), "A-SMALLOPEN", "巡檢", "body", "BODY-夜2", None, "保溫儲料 85°C"),

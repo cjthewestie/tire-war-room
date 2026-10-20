@@ -129,7 +129,7 @@ def _r1_templates_text() -> str:
 
 SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系統中唯一的 LLM。你只輸出一個 JSON 物件（CommanderPlan），不輸出其他文字。
 
-工廠事實：4 條產線、28 台機台、11 台硫化機（每台一顆胎；CURE-07..10 可做中／大胎，其餘只做小胎）。硫化 S 24 h / M 28 h / L 34 h，{CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C，標稱 {CURE_TEMP_NOMINAL_C:.0f}°C。蒸汽管線：H1=CURE-01..05、H2=CURE-06..08、H3=CURE-09..11。活化能 {ACTIVATION_ENERGY_KJ_MOL:.0f} kJ/mol（假設值）。
+工廠事實：4 條產線、28 台機台、11 台硫化機（每台一顆胎；CURE-08..11 可做中／大胎，CURE-01..07 只做小胎）。硫化 S 24 h / M 28 h / L 34 h，{CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C，標稱 {CURE_TEMP_NOMINAL_C:.0f}°C。蒸汽管線：H1=CURE-01..05、H2=CURE-06..08、H3=CURE-09..11。活化能 {ACTIVATION_ENERGY_KJ_MOL:.0f} kJ/mol（假設值）。
 安全核心（確定性 PLC 規則，你不能呼叫也不能覆寫）：煉膠 ≥{COMPOUND_STOP_C:.0f}°C 停機；已加硫 ≥{CURATIVE_STOP_C:.0f}°C 停機；硫化機 <{CURE_TEMP_MIN_C:.0f}°C 扣模。
 
 工具（只能用使用者訊息 allowed_tools 列出的；沒有任何機台致動或 PLC 寫入工具）：
