@@ -76,6 +76,10 @@ SYSTEM = """你是實心胎工廠戰情室的「主 agent」（調度員），�
 2. 數字只能來自工具結果或 context，不要自己估。
 3. 打招呼、問你是誰、閒聊：直接 reply，不呼叫工具。看不懂的字：請主管再說一次，不要派工作。
 4. 回覆要短：2–3 句，不要長篇解釋。
+5. 主管用「請／幫我／安排／重排／通知／調人／補料」要你做事，而且說得出對象時，一定要呼叫對應的 dispatch 工具（可先查資料），
+   然後回覆「已請 X 子 agent 擬計劃，擬好會送你核准」。例：
+   「#M-201 可能晚交，請重排保交期」→ dispatch_order_task；「9 號機明天保養，幫我安排」→ dispatch_machine_task；
+   「碳黑快沒了，請補料」→ dispatch_material_task；「夜班缺一人，請調人」→ dispatch_staff_task。
 機台代號：CURE-01..CURE-11 = 1..11 號硫化機；A-BIGOPEN = A 線大開煉機；其他依 context。"""
 
 
@@ -102,6 +106,12 @@ def is_gibberish(text: str) -> bool:
 def has_object(text: str) -> bool:
     return bool(machines_in(text) or _ORDER_RX.search(text) or _MATERIAL_RX.search(text) or _PEOPLE_RX.search(text)
                 or re.search(r"\d{1,2}\s*號", text))
+
+
+def wants_task(text: str) -> bool:
+    """「請／幫我…」 with a concrete object, and not a question."""
+    t = text.strip()
+    return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t)) and has_object(t) and not re.search(r"[?？]\s*$", t)
 
 
 def ungrounded(reply: str, source: str) -> list[str]:
@@ -214,6 +224,7 @@ class MainAgent:
         from warroom.agent.commander import thinking_off
         extra = thinking_off(self.server_kind)
         source = text + " " + json.dumps(context, ensure_ascii=False, default=str) + " " + (waiting_plan or "")
+        nudged = waiting_plan is not None             # a message about the selected plan is a discussion, not a new task
         for i in range(MAX_STEPS + 1):
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
             async with (slot() if slot else contextlib.nullcontext()):
@@ -232,6 +243,19 @@ class MainAgent:
             reply = str(d.get("reply") or "").strip()
             if not reply:
                 raise ValueError("empty reply")
+            if not nudged and not out["event_id"] and wants_task(text) and i < MAX_STEPS:
+                # the supervisor asked for something to be done: remind the model once that a dispatch does that
+                nudged = True
+                msgs += [{"role": "assistant", "content": raw},
+                         {"role": "user", "content": "主管是要你「做」這件事，不只是查。請呼叫對應的 dispatch_* 工具派子 agent 擬計劃，再回覆。"}]
+                continue
+            if not out["event_id"] and wants_task(text) and waiting_plan is None:
+                # asked twice, still no dispatch call: code dispatches by the rules (never claim one that did not happen)
+                name, _why = rule_dispatch(text)
+                await self._tool(name, {"task": text}, text, out, tid, run_tool, dispatch, discuss)
+                out.update(reply=self._dispatch_reply(out["steps"]), fell_back=True,
+                           error="model did not call a dispatch tool; dispatched by rules")
+                return
             bad = ungrounded(reply, source)
             if bad:                                   # a number the tools did not give: the results speak instead
                 out["error"] = f"ungrounded numbers {bad}"

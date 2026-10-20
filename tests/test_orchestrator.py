@@ -459,3 +459,10 @@ async def test_main_message_api(tmp_path):
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent" and e.payload.get("orch") == "dispatch"]
         assert any(x.get("phase") == "execute" for x in rows)
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
+
+
+async def test_main_agent_never_claims_a_dispatch_it_did_not_make():
+    llm = _SeqLLM([_step(reply="已請機台處理子 agent 擬計劃。"), _step(reply="已請機台處理子 agent 擬計劃。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "9 號機明天保養，幫我安排")
+    assert h.dispatched == [("machine", "9 號機明天保養，幫我安排")] and out["event_id"] and out["fell_back"]
