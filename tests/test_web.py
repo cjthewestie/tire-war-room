@@ -71,6 +71,11 @@ def test_mock_page11_numbers():
         assert off in SCRIPTS_TS, off
 
 
+def test_mock_order_panel_follows_the_dataset():
+    """The mock's 訂單進度 shows the dataset's de-molded tyres at 02:12 (S 21 / M 9 / L 7), same as Factory."""
+    assert "{ S: 21, M: 9, L: 7 }" in ENGINE_TS
+
+
 def test_mock_page2_text():
     for s in ("異常：A 線大開煉機　溫度過高", "未加硫上限 120°C；已加硫另設 110°C 防焦燒", "原因：冷卻能力不足",
               "通知維修冷卻水路", "放慢生料投入", "無，大胎 #07 仍 17:00 入硫化機"):
