@@ -43,7 +43,7 @@ await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode', { timeout: 10000 })
 const mode = await d.locator('.mode').innerText()
-check('dashboard is on the live backend (not mock)', mode.includes('即時') && !(await d.locator('.mode').getAttribute('class')).includes('mock'), mode)
+check('dashboard is on the live backend (not mock)', /連線中|模型未連線/.test(mode) && !(await d.locator('.mode').getAttribute('class')).includes('mock'), mode)
 
 const r1 = await until(async () => (await pendingOf())[0], 120, 'round-1 approval')
 check('round 1 approval request (page 11 02:14)', !!r1, r1 ? `${r1.title} | ${r1.options.map((o) => o.id + ' ' + o.label).join(' / ')}` : '')

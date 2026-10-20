@@ -16,6 +16,7 @@ import { useWarRoom } from '../useWarRoom'
 import { ToolIcon } from './ToolIcon'
 import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
+import { ChatBar } from './ChatBar'
 import { useTranscript } from './useTranscript'
 import './agent.css'
 
@@ -47,7 +48,9 @@ function inKind(i: Item, k: Kind): boolean {
 
 const ASKS = '__asks'
 
-export function AgentConsolePage({ asks, initial }: { asks: LocalItem[]; initial: string | null }) {
+export function AgentConsolePage({ asks, setAsks, initial }: {
+  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; initial: string | null
+}) {
   const { state } = useWarRoom()
   const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
   const [picked, setPicked] = useState<string | null>(initial)
@@ -93,7 +96,7 @@ export function AgentConsolePage({ asks, initial }: { asks: LocalItem[]; initial
           {!listed.length && <li className="muted small">沒有事件。</li>}
         </ul>
       </aside>
-      {askOnly ? <Trace ev={null} asks={asks} /> : ev ? <Trace ev={ev} asks={[]} /> : (
+      {askOnly ? <Trace ev={null} asks={asks} setAsks={setAsks} onPick={pick} /> : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
         <section className="panel trace-main"><p className="muted">目前沒有事件。AI 指揮官只在事件偵測喚醒、或主管下任務時才動；喚醒後每一步都會出現在這裡。</p></section>
       )}
     </div>
@@ -104,9 +107,14 @@ function evName(e: Event): string {
   return e.source === 'supervisor' ? '主管指令' : e.source === 'plant' ? '工廠事件' : machineLabel(e.machine_id)
 }
 
-function Trace({ ev, asks }: { ev: Event | null; asks: LocalItem[] }) {
+function Trace({ ev, asks, setAsks, onPick }: {
+  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+}) {
+  const { state } = useWarRoom()
   const { items: evItems, source } = useTranscript(ev)
-  const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])
+  // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
+  const items = useMemo(() => withAsks(ev ? evItems : [], asks), [ev, evItems, asks])
+  const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState(false)
   const [pick, setPick] = useState<EventState | null>(null)
@@ -153,6 +161,7 @@ function Trace({ ev, asks }: { ev: Event | null; asks: LocalItem[] }) {
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
         {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
       </div>
+      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} onPick={onPick} focus={null} /></div>
     </section>
   )
 }

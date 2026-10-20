@@ -1,6 +1,7 @@
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { QUALITY_LABEL } from './common'
+import { useLinkStatus } from '../linkStatus'
 import { useWarRoom } from '../useWarRoom'
 
 export type Tab = 'monitor' | 'schedule' | 'orders' | 'console' | 'sm' | 'admin' | 'agent'
@@ -9,6 +10,7 @@ const NET_LABEL = { online: '網路正常', weak: '弱網・延後推播（Agent
 
 export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   const { state, transport, connected } = useWarRoom()
+  const link = useLinkStatus()
   const h = state.snapshot?.header
   const ft = state.clock?.factory_time ?? h?.factory_time
   const net = h?.network ?? 'online'
@@ -40,8 +42,9 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
         <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'muted'}`} data-testid="chip-abnormal"><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
         {state.clock?.day_loop && <span className="chip loop" data-testid="chip-loop" title={`團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>一日循環・第 {state.clock.day_loop.loop} 輪</span>}
         <span className="clock">{ft ? <><span>{fmtMD(ft)}</span><span>{fmtHM(ft)}</span></> : '—'}</span>
-        <span className={`mode ${transport?.mode ?? ''} ${connected ? '' : 'down'}`} title={transport?.mode === 'mock' ? '瀏覽器內模擬資料（無後端）' : '連線 FastAPI /ws'}>
-          {transport ? (transport.mode === 'mock' ? '模擬資料' : connected ? `即時・${h?.llm_mode === 'llm' ? 'LLM 指揮官' : '規則模式指揮官'}` : '重新連線中…') : '連線中…'}
+        {/* .live = connected to the backend (e2e waits on it); tone: ok | warn | mock | down */}
+        <span className={`mode t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''} ${transport?.mode === 'mock' ? 'mock' : ''}`} title={link.title} data-testid="link-chip" role="status">
+          {link.text}
         </span>
       </div>
     </header>
