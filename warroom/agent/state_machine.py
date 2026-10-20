@@ -1183,6 +1183,7 @@ class StateMachine:
                             "fallback_steps": [s.id for s in plan.steps],
                             "fallback_hypothesis": plan.hypothesis.id,
                             "error": getattr(self.commander, "last_error", None),
+                            "cause": getattr(self.commander, "last_cause", None),
                             "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                             "raw_chars": len(raw), "raw_excerpt": raw[:600]})
         else:

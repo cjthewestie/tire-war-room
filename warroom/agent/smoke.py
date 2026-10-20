@@ -51,7 +51,7 @@ def page11_request(phase: str) -> CommanderRequest:
 async def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--phase", choices=["plan", "replan"], default="plan")
-    ap.add_argument("--max-tokens", type=int, default=1200)
+    ap.add_argument("--max-tokens", type=int, default=None, help="default: Settings.commander_max_tokens")
     args = ap.parse_args()
     s = Settings(llm_mode=LLMMode.LLM)
     cmd = OpenAICommander(s, max_tokens=args.max_tokens)
@@ -65,7 +65,7 @@ async def main() -> int:
           f"completion_tokens={info.completion_tokens} valid_json={info.valid_json} "
           f"fell_back_to_mock={info.fell_back_to_mock}")
     if info.fell_back_to_mock:
-        print("fallback reason:", getattr(cmd, "last_error", "?"))
+        print("fallback reason:", getattr(cmd, "last_cause", "?"), getattr(cmd, "last_error", "?"))
         print("raw:", cmd.last_raw[:800])
     if cmd.last_intercepted:
         print("intercepted steps:", cmd.last_intercepted)
