@@ -909,47 +909,58 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         return out
 
     # ------------------------------------------------------------------ issue #54: one input, one 主 agent
-    def _main_chat(r: Runtime):
+    def _main_agent(r: Runtime):
         if "main" not in holder:
-            from warroom.agent.main_chat import MainChat
-            holder["main"] = MainChat(r.settings)
+            from warroom.agent.main_agent import MainAgent
+            holder["main"] = MainAgent(r.settings)
         return holder["main"]
 
     @app.post("/api/main/message")
     async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
-        """The supervisor talks to the 主 agent; it classifies the message itself: chitchat (direct reply, no tool),
-        question (read-only 查詢), change (discuss the selected waiting plan), task (a plan proposal by a subagent,
-        approved before it runs), unclear (one clarifying question). Same session rule as approvals."""
+        """The supervisor talks to the 主 agent: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
+        chat, read (knowledge base, sensors, orders), dispatch a subagent to draft a plan, or discuss the selected
+        waiting plan. It has no write tool; a dispatched plan still needs 核准並派發. Same session rule as approvals."""
         r = rt()
         if r.network == "lan_down" and not session.local:
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
         text = body.text.strip()
+        sm = r.state_machine
         waiting = None
         if body.event_id:
-            sm = r.state_machine
             card = getattr(sm, "waiting_card", lambda _e: None)(body.event_id)
             waiting = card.title if card is not None else None
+        from warroom.agent.ask import AskAgent
+        from warroom.agent.main_agent import DISPATCHES
         from warroom.agent.orchestrator import ACTOR, PRIORITY
-        async with r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "主 agent 判讀"):
-            c = await _main_chat(r).classify(text, waiting is not None, waiting)
-        r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "intent": c["intent"], "by": c["by"],
-                                                  "fell_back": c["fell_back"], "error": c["error"], "reply": c["reply"],
-                                                  "selected": body.event_id})
-        out: dict[str, Any] = {**c, "event_id": None, "ask": None, "discuss": None}
-        if c["intent"] == "question":
-            out["ask"] = (await ask(AskRequest(question=text), session)).model_dump(mode="json")
-            from warroom.agent.ask import UNCLEAR_REPLY
-            if str(out["ask"].get("answer", "")).startswith(UNCLEAR_REPLY[:8]):
-                # the read tools have nothing for it: the 主 agent asks one clarifying question instead
-                from warroom.agent.main_chat import NO_DATA_MAIN
-                out["ask"]["answer"], out["reply"] = NO_DATA_MAIN, NO_DATA_MAIN
-        elif c["intent"] == "change" and body.event_id:
-            out["discuss"] = (await discuss(body.event_id, DiscussRequest(text=text), session)).model_dump(mode="json")
-            out["event_id"] = body.event_id
-        elif c["intent"] == "task":
-            rep = await command(CommandRequest(text=text), session)
-            out["event_id"], out["reply"] = rep.event_id or None, rep.reply
-        return out
+        from warroom.contracts import ToolName, ToolResult
+
+        async def run_tool(name: str, args: dict[str, Any], call_id: str) -> ToolResult:
+            if r.c.tools is None:
+                return ToolResult(call_id=call_id, tool=ToolName(name), ok=False, error="tools unavailable")
+            eid, step = call_id.split(":")[0], call_id.split(":")[-1]
+            return await AskAgent._run(r.c.tools, r.audit, eid, int(step[1:] or 1), ToolName(name), args)
+
+        async def dispatch(t: str, task: str) -> dict[str, Any]:
+            name = next(k for k, v in DISPATCHES.items() if v == t)
+            d = {"dispatch": name, "type": t, "reason": "主 agent 對話中派發", "by": "model" if _main_agent(r).llm else "rules",
+                 "fell_back": False, "error": None, "ms": None, "model": r.settings.model}
+            ev = r.orch.start_task(task, session.actor, r.start_command, d)
+            return {"event_id": ev.id}
+
+        async def talk(t: str) -> dict[str, Any]:
+            out = await discuss(body.event_id, DiscussRequest(text=t), session)
+            return out.model_dump(mode="json")
+
+        def slot():
+            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "主 agent 對話")
+
+        res = await _main_agent(r).turn(text, context=r.ask_context(), waiting_plan=waiting, run_tool=run_tool,
+                                        dispatch=dispatch, discuss=talk if waiting else None, slot=slot)
+        r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
+                                                  "fell_back": res["fell_back"], "error": res["error"],
+                                                  "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
+                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
+        return res
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")

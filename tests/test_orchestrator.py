@@ -312,74 +312,150 @@ async def test_detector_preclass_fields():
     assert pc["kind"] == found[0].kind.value
 
 
-# ---------------------------------------------------------------- one input, one 主 agent (PR #58 review)
-from warroom.agent.main_chat import IDENTITY_REPLY, UNCLEAR_MAIN, MainChat, rule_intent  # noqa: E402
+# ---------------------------------------------------------------- the 主 agent conversation (PR #58 review)
+from warroom.agent.main_agent import (GIBBERISH_REPLY, IDENTITY_REPLY, MainAgent, is_gibberish)  # noqa: E402
+from warroom.contracts import ToolResult as _TR  # noqa: E402
 
 
-@pytest.mark.parametrize("text,waiting,want", [
-    ("妳是誰", False, "chitchat"), ("你是誰？", True, "chitchat"), ("你好", False, "chitchat"), ("謝謝", False, "chitchat"),
-    ("7 號機現在怎樣？", False, "question"), ("今晚夜班缺誰？", False, "question"),
-    ("#M-201 可能晚交，請重排保交期", False, "task"), ("通知維修組明早檢查 3 號機", False, "task"),
-    ("9 號機今晚要保養", True, "change"), ("不要跨組調人", True, "change"), ("9 號機今晚要保養", False, "task"),
-    ("嗯嗯", False, "unclear"),
+class _Harness:
+    def __init__(self):
+        self.tools, self.dispatched, self.discussed = [], [], []
+
+    async def run_tool(self, name, args, call_id):
+        self.tools.append(name)
+        data = {"hits": [{"sop_id": "SOP-OM-01", "title": "開煉機過熱處置", "text": "降速、檢查冷卻水"}]} if name == "sop_search" \
+            else {"summary": {"CURE-07": {"temp_c_now": 122.3}}} if name == "read_sensors" else {}
+        return _TR(call_id=call_id, tool=ToolName(name), ok=True, data=data)
+
+    async def dispatch(self, t, task):
+        self.dispatched.append((t, task))
+        return {"event_id": f"EV-{len(self.dispatched)}"}
+
+    async def discuss(self, text):
+        self.discussed.append(text)
+        return {"reply": "好，已把條件加進計劃"}
+
+    async def turn(self, agent, text, waiting=None):
+        return await agent.turn(text, context={"abnormal": []}, waiting_plan=waiting, run_tool=self.run_tool,
+                                dispatch=self.dispatch, discuss=self.discuss if waiting else None)
+
+
+def test_gibberish_detector():
+    assert is_gibberish("vu04y94u.3s83uv,") and is_gibberish("asdkj qwe") and is_gibberish("   ")
+    assert not any(is_gibberish(t) for t in ("你好", "CURE-07 怎樣", "#M-201", "ok", "who are you", "7 號機"))
+
+
+@pytest.mark.parametrize("text,tools,dispatch,want", [
+    ("vu04y94u.3s83uv,", [], [], GIBBERISH_REPLY),
+    ("妳是誰", [], [], IDENTITY_REPLY),
+    ("你好", [], [], None), ("謝謝", [], [], None),
+    ("大開煉機過熱怎麼處理", ["read_sensors", "sop_search"], [], "SOP-OM-01"),
+    ("7 號機現在怎樣", ["read_sensors"], [], "122.3"),
+    ("#M-201 可能晚交，請重排保交期", [], [("order", "#M-201 可能晚交，請重排保交期")], "訂單處理"),
+    ("幫我處理一下", [], [], None),
 ])
-def test_main_rule_intent(text, waiting, want):
-    intent, reply = rule_intent(text, waiting)
-    assert intent == want, (text, intent)
-    if text in ("妳是誰", "你是誰？"):
-        assert reply == IDENTITY_REPLY
-    if want == "unclear":
-        assert reply == UNCLEAR_MAIN and "我不確定要查什麼" not in reply
+async def test_main_agent_rules(text, tools, dispatch, want):
+    h = _Harness()
+    out = await h.turn(MainAgent(), text)
+    assert h.tools == tools and h.dispatched == dispatch, (text, h.tools, h.dispatched)
+    assert out["reply"] and "我不確定要查什麼" not in out["reply"]
+    if want:
+        assert want in out["reply"], out["reply"]
 
 
-async def test_main_identity_never_goes_to_the_model():
-    llm = _FakeLLM(json.dumps({"intent": "question", "reply": ""}))
-    c = await MainChat(_settings(), client=llm).classify("妳是誰", False)
-    assert c["intent"] == "chitchat" and c["reply"] == IDENTITY_REPLY and not llm.calls
+async def test_main_agent_discusses_the_selected_plan():
+    h = _Harness()
+    out = await h.turn(MainAgent(), "不要跨組調人", waiting="7 號機溫度下降")
+    assert h.discussed == ["不要跨組調人"] and not h.dispatched and "加進計劃" in out["reply"]
 
 
-async def test_main_model_intent_and_fallback():
-    c = await MainChat(_settings(), client=_FakeLLM(json.dumps({"intent": "change", "reply": ""}))).classify("改成明天", False)
-    assert c["intent"] == "task" and c["by"] == "model"          # no waiting plan: a change is a new task
-    c = await MainChat(_settings(), client=_FakeLLM(raise_=TimeoutError())).classify("7 號機現在怎樣？", False)
-    assert c["intent"] == "question" and c["by"] == "rules" and c["fell_back"]
+class _SeqLLM:
+    """A fake model that answers each step from a list."""
+    def __init__(self, steps):
+        self.steps, self.calls = list(steps), []
+        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
+
+    async def _create(self, **kw):
+        self.calls.append(kw)
+        s = self.steps.pop(0)
+        if isinstance(s, Exception):
+            raise s
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(s, ensure_ascii=False)))])
+
+
+def _step(tool="", args=None, reply=""):
+    return {"action": "tool" if tool else "reply", "tool": tool, "args": args or {}, "reply": reply}
+
+
+async def test_main_agent_model_loop_calls_the_knowledge_base_then_replies():
+    llm = _SeqLLM([_step("sop_search", {"query": "大開煉機過熱", "k": 2}), _step(reply="依 SOP-OM-01：先降速、檢查冷卻水。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
+    assert h.tools == ["sop_search"] and out["by"] == "model" and "SOP-OM-01" in out["reply"]
+    assert out["steps"][0]["label"] == "查了 SOP-OM-01"
+
+
+async def test_main_agent_has_no_write_tools():
+    from warroom.agent.main_agent import ALL_TOOLS
+    assert not {"set_cure_time", "confirm_schedule", "notify_teams", "solve_schedule"} & set(ALL_TOOLS)
+    llm = _SeqLLM([_step("set_cure_time", {"press_id": "CURE-07"}), _step(reply="不能直接改，我可以派子 agent 擬計劃。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "把 7 號機硫化時間改 36 小時")
+    assert h.tools == [] and not h.dispatched and out["steps"][0]["ok"] is False
+
+
+async def test_main_agent_dispatch_needs_an_object_and_happens_once():
+    llm = _SeqLLM([_step("dispatch_order_task", {"task": "處理一下"}), _step(reply="要派人做事，請告訴我是哪張訂單。")])
+    h = _Harness()
+    await h.turn(MainAgent(_settings(), client=llm), "處理一下")
+    assert not h.dispatched
+    llm = _SeqLLM([_step("dispatch_order_task", {"task": "#M-201 重排保交期"}), _step("dispatch_order_task", {"task": "#M-201"}),
+                   _step(reply="好，已請訂單處理子 agent 擬計劃，擬好會送你核准。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "#M-201 可能晚交，請重排保交期")
+    assert len(h.dispatched) == 1 and out["event_id"] == "EV-1"
+
+
+async def test_main_agent_numbers_only_from_tools_and_fallback():
+    llm = _SeqLLM([_step("read_sensors", {"machine_ids": ["CURE-07"]}), _step(reply="7 號機現在 118°C，很危險。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
+    assert "118" not in out["reply"] and "122.3" in out["reply"]          # an invented number is replaced by the results
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=_SeqLLM([TimeoutError("slow")])), "妳是誰")
+    assert out["fell_back"] and out["reply"] == IDENTITY_REPLY and out["by"] == "rules"
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=_SeqLLM([])), "vu04y94u.3s83uv,")
+    assert out["reply"] == GIBBERISH_REPLY and not h.tools and not h.dispatched     # never reaches the model
 
 
 async def test_main_message_api(tmp_path):
     from tests.test_plan_talk import Plant, _rt
     async with Plant(_rt(tmp_path, "normal")) as p:
-        n0 = len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL])
+        def tool_calls():
+            return len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL])
+        n0, subs0 = tool_calls(), len(p.rt.orch.subagents())
         r = (await p.http.post("/api/main/message", json={"text": "妳是誰"})).json()
-        assert r["intent"] == "chitchat" and r["reply"] == IDENTITY_REPLY and r["ask"] is None and r["event_id"] is None
-        assert len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL]) == n0     # zero tools
-        q = (await p.http.post("/api/main/message", json={"text": "7 號機現在怎樣？"})).json()
-        assert q["intent"] == "question" and q["ask"] and q["ask"]["answer"] and "我不確定要查什麼" not in q["ask"]["answer"]
+        assert r["reply"] == IDENTITY_REPLY and not r["steps"] and tool_calls() == n0
+        g = (await p.http.post("/api/main/message", json={"text": "vu04y94u.3s83uv,"})).json()
+        assert g["reply"] == GIBBERISH_REPLY and g["event_id"] is None and len(p.rt.orch.subagents()) == subs0
+        for t in ("你好", "謝謝"):
+            c = (await p.http.post("/api/main/message", json={"text": t})).json()
+            assert c["reply"] and not c["steps"]
+        assert tool_calls() == n0
+        q = (await p.http.post("/api/main/message", json={"text": "大開煉機過熱怎麼處理"})).json()
+        assert "sop_search" in [s["tool"] for s in q["steps"]] and not q["event_id"]
         t = (await p.http.post("/api/main/message", json={"text": "#M-201 可能晚交，請重排保交期"})).json()
-        assert t["intent"] == "task" and t["event_id"] and "已請子 agent 規劃" in t["reply"]
         eid = t["event_id"]
+        assert eid and t["steps"][0]["tool"] == "dispatch_order_task"
         await p.until(lambda: p.pending(eid))
         ch = (await p.http.post("/api/main/message", json={"text": "不要跨組調人", "event_id": eid})).json()
-        assert ch["intent"] == "change" and ch["discuss"] and ch["event_id"] == eid
+        assert ch["steps"] and ch["steps"][0]["tool"] == "discuss_waiting_plan"
         await p.until(lambda: p.pending(eid))
         card = p.pending(eid)[0]
-        d = await p.http.post(f"/api/approvals/{card.id}/decision", json={"request_id": card.id, "decision": "approve", "option_id": card.options[0].id if card.options else None})
+        d = await p.http.post(f"/api/approvals/{card.id}/decision", json={"request_id": card.id, "decision": "approve",
+                                                                           "option_id": card.options[0].id if card.options else None})
         assert d.status_code == 200, d.text
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent" and e.payload.get("orch") == "dispatch"]
-        assert [x.get("phase") for x in rows][:1] == ["plan"] and any(x.get("phase") == "execute" and "核准，派發子 agent 執行" in x["text"] for x in rows)
+        assert any(x.get("phase") == "execute" for x in rows)
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
-
-
-def test_main_question_about_the_plant_while_a_plan_waits():
-    assert rule_intent("今晚夜班缺誰？", True)[0] == "question"
-    assert rule_intent("為什麼用 9 號機？", True)[0] == "change"
-
-
-async def test_main_question_without_data_gets_a_clarifying_question(tmp_path):
-    from tests.test_plan_talk import Plant, _rt
-    from warroom.agent.main_chat import NO_DATA_MAIN
-    async with Plant(_rt(tmp_path, "normal")) as p:
-        r = (await p.http.post("/api/main/message", json={"text": "今天天氣好嗎？"})).json()
-        assert "我不確定要查什麼" not in json.dumps(r, ensure_ascii=False)
-        assert r["intent"] in ("question", "unclear")
-        # whatever the read tools find (or not), the reply is the 主 agent's, never 「我不確定要查什麼」
-        assert NO_DATA_MAIN or True

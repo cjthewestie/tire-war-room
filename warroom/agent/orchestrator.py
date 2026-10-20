@@ -342,6 +342,14 @@ class Orchestrator:
             self._opened(ev)
         return ev, d
 
+    def start_task(self, text: str, actor: str, start: Callable[[str, str], Event], decision: dict[str, Any]) -> Event:
+        """The 主 agent's conversation already chose the subagent type (its dispatch tool): start that run."""
+        self._pending_dispatch.append(decision)
+        ev = start(text, actor)
+        if ev.id not in self.subs:
+            self._opened(ev)
+        return ev
+
     @staticmethod
     def _what(ev: Event) -> str:
         if ev.source == "supervisor":
