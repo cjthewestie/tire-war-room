@@ -106,7 +106,8 @@ def _run(f: Factory, seconds: int) -> None:
 
 
 def test_plant_scenarios_defined():
-    assert PLANT_SCENARIOS == {ScenarioName.SHIFT_START, ScenarioName.RUSH_ORDER, ScenarioName.STAFFING}
+    assert PLANT_SCENARIOS == {ScenarioName.SHIFT_START, ScenarioName.RUSH_ORDER, ScenarioName.STAFFING,
+                               ScenarioName.MATERIAL_SHORT}   # issue #32
     for n in PLANT_SCENARIOS:
         sc = get_scenario(n)
         assert sc.steps and all(st.plant is not None and st.fault is None for st in sc.steps)
