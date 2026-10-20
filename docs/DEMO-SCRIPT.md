@@ -36,7 +36,7 @@ Follows proposal page 11 (7 號硫化機溫降) and page 9 (unplug). Times on th
 ## If something goes wrong
 
 - No approval card after 30 s at 10x: click 7 號硫化機溫降 again. Loading a scenario starts it fresh with a new schedule store.
-- Real model slow or down: with `LLM_FALLBACK_TO_MOCK` on (the default) the commander falls back to the rule-based plan and the audit log records it. The demo still runs end to end; say so honestly. For a guaranteed run, start in mock mode (`./start.sh`).
+- Real model slow or down: with `LLM_FALLBACK_TO_MOCK` on (the default) the commander falls back to the rule-based plan and the audit log records it. The demo still runs end to end; say so honestly. For a guaranteed run, start in mock mode (`./start.sh`). Each model call waits up to `LLM_TIMEOUT_S` (default 60 s). With `--strict` there is no rule fallback: a model timeout or failure ends the event in 安全中止 with the reason 「模型逾時，未產生計劃（strict 模式不使用規則備援）」, and `/api/health` shows `strict: true`.
 - Real model, different order: in 1 of 3 rehearsal runs (2026-10-04) the model set its H1 expectation to ≥123°C instead of ≥121°C. The reading of 122°C misses it at once, so H1 fails at about 02:19, the second phone card comes before the 02:28:50 扣模, and S3 moved #A-311 to 8 號 instead of 9. Everything still runs; tell it in the order the screen shows. For the exact page-11 order every time, use mock mode.
 - Times above are from rehearsals against the real model on the Mac at 10× then 60×. Factory time keeps running while you talk, so at 1:20 the header shows about 02:18 and at 2:15 about 02:51.
 - Phone says PIN wrong: use the on-box screen (127.0.0.1) to approve; it needs no PIN.

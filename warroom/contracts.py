@@ -1081,6 +1081,7 @@ class HealthStatus(_M):
     model: str
     llm_reachable: bool
     qdrant_ok: bool
+    strict: bool = False              # --strict: model failures are surfaced, no rule-based fallback
     sim_running: bool
     factory_time: datetime
     uptime_s: float

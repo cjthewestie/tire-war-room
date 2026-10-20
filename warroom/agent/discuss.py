@@ -23,6 +23,7 @@ import time
 from typing import Any
 
 from warroom.agent.commander import detect_server_kind, thinking_off
+from warroom.agent.strict import failure_cause, strict_reason
 from warroom.agent.talk import CAN_DO, rule_constraints, rule_intent, same_constraint, validate_constraint
 from warroom.config import Settings
 from warroom.contracts import (
@@ -162,7 +163,17 @@ class PlanTalk:
         audit.append(AuditKind.SYSTEM, actor, {"discuss": {"id": did, "text": text}}, event_id=event_id)
         card = sm.waiting_card(event_id)
         t0 = time.perf_counter()
-        cls = await self.classify(text, card, now)
+        try:
+            cls = await self.classify(text, card, now)
+        except Exception as e:  # noqa: BLE001 - only with llm_fallback_to_mock=False (--strict): no rules
+            reason = strict_reason(e, "回覆，計劃未變更")
+            audit.append(AuditKind.LLM_CALL, "discuss", {
+                "phase": "classify", "id": did, "mode": self.mode.value, "model": self.settings.model,
+                "total_ms": round((time.perf_counter() - t0) * 1000, 1), "fell_back_to_mock": False,
+                "error": f"{type(e).__name__}: {e}"[:300], "cause": failure_cause(e), "strict": True,
+                "reason": reason}, event_id=event_id)
+            return DiscussReply(id=did, event_id=event_id, text=text, intent="unclear", reply=reason,
+                                classified_by="model", factory_time=now)
         audit.append(AuditKind.LLM_CALL, "discuss", {
             "phase": "classify", "id": did, "mode": self.mode.value,
             "model": self.settings.model if self.mode is LLMMode.LLM else None,

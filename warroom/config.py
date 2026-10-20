@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     model: str = "nemotron"
     api_key: str = "none"                 # NVIDIA_API_KEY also accepted, see api_key_effective
     nvidia_api_key: str | None = None
-    llm_timeout_s: float = 30.0
+    llm_timeout_s: float = 60.0           # LLM_TIMEOUT_S; 30 s timed out plan and replan on a live p.11 run
     llm_fallback_to_mock: bool = True     # invalid JSON / unreachable -> mock plan, logged
     guided_json: bool = True              # vLLM extra_body guided_json; else response_format json_schema
 
