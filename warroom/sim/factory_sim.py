@@ -154,6 +154,8 @@ class Factory:
             stagger_min = 6.0 if d.id == "A-BIGOPEN" else (i * 7.0) % max(nom.cycle_min, 1.0)
             m.batch_epoch = t0 - timedelta(minutes=stagger_min)
             self._m[d.id] = m
+        self._plan_at = self._plan_anchor(sc)
+        self._plan_state = self._load_plan(self._plan_at)
         self._init_orders(t0)
         self._init_presses(t0)
         # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
@@ -168,7 +170,56 @@ class Factory:
         self.world = World(self, t0, self.seed)
         return sc
 
+    # issue #20 Q1: orders and what every press holds come from the team dataset (orders.csv, tire_unit.csv) as of
+    # one dataset moment, shifted onto the scenario's clock. Page 11 plays the EV-2 night (10/28 02:12 -> 10/03),
+    # page 2 the EV-1 afternoon (10/22), every other scenario the same night at its own time of day.
+    _PLAN_DAY = {ScenarioName.OPEN_MILL_OVERHEAT: date(2026, 10, 22), ScenarioName.DAY_LOOP: date(2026, 10, 21)}
+    _PLAN_DAY_DEFAULT = date(2026, 10, 28)
+
+    def _plan_anchor(self, sc: Scenario) -> datetime:
+        day = self._PLAN_DAY.get(sc.name, self._PLAN_DAY_DEFAULT)
+        t = sc.start_at
+        return datetime(day.year, day.month, day.day, t.hour, t.minute, t.second, tzinfo=t.tzinfo)
+
+    def _load_plan(self, at: datetime):
+        try:
+            from warroom.data.team_plan import plan_state
+            st = plan_state(at, getattr(self, "_dataset_path", None))
+            return st if st.orders else None
+        except (OSError, KeyError, ValueError):       # dataset missing / unreadable: the built-in demo book
+            return None
+
     def _init_orders(self, t0: datetime) -> None:
+        st = self._plan_state
+        if st is None:
+            return self._init_orders_demo(t0)
+        shift = t0 - self._plan_at
+        self._orders = {o.id: o.model_copy(update={"due": (datetime.combine(due, datetime.min.time()) + shift).date()})
+                        for o, due in st.orders}
+        self._remaining0 = {z: sum(o.qty - o.done for o in self._orders.values() if o.size is z) for z in TireSize}
+
+    def _init_presses(self, t0: datetime) -> None:
+        st = self._plan_state
+        if st is None:
+            return self._init_presses_demo(t0)
+        shift = t0 - self._plan_at
+        self._press = {}
+        self._in_press = {oid: 0 for oid in self._orders}
+        self._plan_started = set()
+        for pid in (m for m in self._m if m.startswith("CURE-")):
+            u = st.running.get(pid)
+            ps = _Press(queue=list(st.queues.get(pid, [])))
+            if u is not None:
+                job = self._make_job(pid, self._orders[u.order_id], u.cure_start + shift)
+                ps.job = job
+                self._in_press[u.order_id] += 1
+                self._plan_started.add(job.job_id)
+            else:
+                ps.idle_until = t0
+                self._m[pid].status = MachineStatus.IDLE
+            self._press[pid] = ps
+
+    def _init_orders_demo(self, t0: datetime) -> None:
         d0 = t0.date()
         s_done, _, _ = DEMO_ORDER_PROGRESS[TireSize.S]
         m_done, _, _ = DEMO_ORDER_PROGRESS[TireSize.M]
@@ -193,7 +244,7 @@ class Factory:
         self._orders: dict[str, Order] = {o.id: o for o in orders}
         self._remaining0 = {s: DEMO_ORDER_PROGRESS[s][1] - DEMO_ORDER_PROGRESS[s][0] for s in TireSize}
 
-    def _init_presses(self, t0: datetime) -> None:
+    def _init_presses_demo(self, t0: datetime) -> None:
         # press -> (order, elapsed h at start). CURE-07 (small-only, dataset EV-2 tire S-027) reaches exactly
         # 14.4 h of a 24 h small cure at 02:14:00 in the page-11 scenario (start 02:12:00).
         plan: dict[str, tuple[str, float]] = {

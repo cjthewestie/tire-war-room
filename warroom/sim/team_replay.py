@@ -31,8 +31,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from warroom.clock import SimClock
-from warroom.contracts import MachineStatus, Scenario, ScenarioName, SensorReading, TireSize
-from warroom.sim.factory_sim import Factory, _Press
+from warroom.contracts import Scenario, ScenarioName, SensorReading
+from warroom.sim.factory_sim import Factory
 from warroom.sim.replay import ReplaySource
 from warroom.sim.scenarios import get_scenario
 
@@ -77,49 +77,18 @@ class TeamReplayFactory(Factory):
         armed = name is ScenarioName.NORMAL
         if armed and start_at is None:
             start_at = replay_start(self.replay_mode, name)
-        # issue #20 Q1: armed replay plays the team plan (orders.csv / tire_unit.csv), shifted onto the scenario day
-        self._plan_state = None
-        if armed:
-            from warroom.data.team_dataset import WINDOWS
-            from warroom.data.team_plan import plan_state
-            self._plan_shift_from = WINDOWS[self.replay_windows[0]].start
-            self._plan_state = plan_state(self._plan_shift_from, self._dataset_path)
         sc = super().load_scenario(name, start_at=start_at)
         self._replay, self._replay_times, self._replay_pos = {}, [], 0
         if armed:
             self._arm(sc.start_at)
         return sc
 
-    def _init_orders(self, t0: datetime) -> None:
-        st = getattr(self, "_plan_state", None)
-        if st is None:
-            return super()._init_orders(t0)
-        shift = t0 - self._plan_shift_from
-        self._orders = {}
-        for o, due in st.orders:
-            self._orders[o.id] = o.model_copy(update={"due": (datetime.combine(due, datetime.min.time()) + shift).date()})
-        self._remaining0 = {z: sum(o.qty - o.done for o in self._orders.values() if o.size is z) for z in TireSize}
-
-    def _init_presses(self, t0: datetime) -> None:
-        st = getattr(self, "_plan_state", None)
-        if st is None:
-            return super()._init_presses(t0)
-        shift = t0 - self._plan_shift_from
-        self._press = {}
-        self._in_press = {oid: 0 for oid in self._orders}
-        self._plan_started = set()
-        for pid in (m for m in self._m if m.startswith("CURE-")):
-            u = st.running.get(pid)
-            ps = _Press(queue=list(st.queues.get(pid, [])))
-            if u is not None:
-                job = self._make_job(pid, self._orders[u.order_id], u.cure_start + shift)
-                ps.job = job
-                self._in_press[u.order_id] += 1
-                self._plan_started.add(job.job_id)
-            else:
-                ps.idle_until = t0
-                self._m[pid].status = MachineStatus.IDLE
-            self._press[pid] = ps
+    def _plan_anchor(self, sc: Scenario) -> datetime:
+        """Armed replay plays the plan as of the (first) window's start; other scenarios use the plain mapping."""
+        if sc.name is ScenarioName.NORMAL:
+            from warroom.data.team_dataset import WINDOWS
+            return WINDOWS[self.replay_windows[0]].start
+        return super()._plan_anchor(sc)
 
     def _arm(self, t0: datetime) -> None:
         import tempfile
