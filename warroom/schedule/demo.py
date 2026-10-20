@@ -88,7 +88,7 @@ def demo_inputs(now: datetime) -> tuple[list[Order], list[Shift], Schedule]:
         jobs.append(back_propagate(jid, oid, size, p, mi, mold_id=mold[oid], shifts=shifts, frozen=True))
     # next jobs, provisional times (the solver places them on staffed slots)
     nxt = [("CURE-07", "#A-311", TireSize.S, "J-A311-01"), ("CURE-08", "#L-07", TireSize.L, "J-L07-C"),
-           ("CURE-10", "#A-307", TireSize.M, "J-0307-C")]
+           ("CURE-11", "#A-307", TireSize.M, "J-0307-C")]
     nxt += [(p, "#S-38", TireSize.S, f"J-S38-{i + 8:02d}")
             for i, p in enumerate(F.SMALL_ONLY_PRESSES) if p != "CURE-07"]
     ends = {j.press_id: j.demold for j in jobs}

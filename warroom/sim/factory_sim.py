@@ -517,6 +517,10 @@ class Factory:
                 elif now >= ps.idle_until:
                     self._start_next(pid, ps, ps.idle_until)
 
+    # #A-311 (small, dataset S-033) is pinned as the next mold of press 7 (page 11); the other small presses
+    # must not pick it up first just because it has the highest priority.
+    RESERVED_NEXT: dict[str, str] = {"#A-311": "CURE-07"}
+
     def _start_next(self, pid: str, ps: _Press, at: datetime) -> None:
         """No plan attached: the sim's own queue, then order priority / due date."""
         sizes = (TireSize.M, TireSize.L) if pid in ML_PRESSES else (TireSize.S,)
@@ -525,6 +529,8 @@ class Factory:
         for oid in candidates:
             o = self._orders.get(oid)
             if o is None or o.size not in sizes:
+                continue
+            if self.RESERVED_NEXT.get(oid, pid) != pid:     # a pinned next mold stays on its own press
                 continue
             if o.done + self._in_press[oid] >= o.qty:
                 continue
