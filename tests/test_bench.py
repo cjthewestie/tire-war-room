@@ -434,10 +434,13 @@ def test_report_builds_table(env_fake, tmp_path):
 # ---------------------------------------------------------------- cold vs warm, batching vs queuing
 def test_live_anomaly_makes_every_alert_prompt_unique_but_keeps_system_prefix():
     from bench.prompts import ANOMALIES, commander_messages, live_anomaly
+    from warroom.agent import plant
     from warroom.agent.commander import SYSTEM_PROMPT
     msgs = [commander_messages(live_anomaly(ANOMALIES[0])) for _ in range(5)]
     assert len({m[1]["content"] for m in msgs}) == 5                 # request differs every call
-    assert {m[0]["content"] for m in msgs} == {SYSTEM_PROMPT}        # commander's own, cacheable prefix
+    # commander's own system text: the fixed core (cacheable prefix) + the active PLANT.md section (issue #37)
+    assert {m[0]["content"] for m in msgs} == {SYSTEM_PROMPT + plant.section()}
+    assert all(m[0]["content"].startswith(SYSTEM_PROMPT) for m in msgs)
     assert all(json.loads(m[1]["content"])["event_id"].startswith("EVT-") for m in msgs)
     a = live_anomaly(ANOMALIES[0], nonce="x")
     assert a == live_anomaly(ANOMALIES[0], nonce="x")                 # deterministic per nonce
@@ -461,7 +464,8 @@ def test_bench_and_preload_send_the_commanders_exact_call():
         assert {"machine", "sensors", "sop"} <= set(ctx) and ctx["sop"] and ctx["machine"]["id"] == a["machine_id"]
     assert COMMANDER_ALLOWED_TOOLS == sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
     pre = preload.preload_messages()
-    assert pre and all(m[0]["content"] == SYSTEM_PROMPT for m in pre)
+    from warroom.agent import plant
+    assert pre and all(m[0]["content"] == SYSTEM_PROMPT + plant.section() for m in pre)
     import httpx
     cmd = OpenAICommander(Settings(base_url="http://127.0.0.1:9/v1", model="m"), http_client=httpx.AsyncClient())
     kw = cmd.request_kwargs(commander_request(live_anomaly(ANOMALIES[0], nonce="t")))
@@ -492,7 +496,7 @@ def test_ttft_alert_card_judged_on_cold_unique_prompts(env_fake, tmp_path):
     assert len(set(ids)) == 3
     bodies = state["bodies"][before:]
     users = [b["messages"][1]["content"] for b in bodies
-             if len(b["messages"]) == 2 and b["messages"][0]["content"] == SYSTEM_PROMPT
+             if len(b["messages"]) == 2 and b["messages"][0]["content"].startswith(SYSTEM_PROMPT)
              and b.get("response_format", {}).get("json_schema", {}).get("name") == "CommanderPlan"]
     for i in ids:                                                   # each cold call was the commander's, own event id
         assert sum(i in u for u in users) == 1

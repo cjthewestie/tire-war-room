@@ -22,6 +22,7 @@ import re
 import time
 from typing import Any
 
+from warroom.agent import plant
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.strict import failure_cause, strict_reason
 from warroom.agent.talk import CAN_DO, rule_constraints, rule_intent, same_constraint, validate_constraint
@@ -91,7 +92,7 @@ class PlanTalk:
         extra = thinking_off(self.server_kind)
         r = await self.client.chat.completions.create(
             model=self.settings.model, temperature=0.0, max_tokens=300,
-            messages=[{"role": "system", "content": CLASSIFY_SYSTEM}, {"role": "user", "content": user}],
+            messages=[{"role": "system", "content": CLASSIFY_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "PlanTalk", "schema": classify_schema()}},
             **({"extra_body": extra} if extra else {}))
         raw = (r.choices[0].message.content or "").strip()
@@ -180,7 +181,8 @@ class PlanTalk:
             "total_ms": round((time.perf_counter() - t0) * 1000, 1), "intent": cls["intent"],
             "classified_by": cls["by"], "fell_back_to_mock": cls["fell_back"], "error": cls["error"],
             "constraints": [c.model_dump(mode="json", exclude={"text"}) for c in cls["constraints"]],
-            "dropped": cls["dropped"], "model_output": cls["model_output"]}, event_id=event_id)
+            "dropped": cls["dropped"], "model_output": cls["model_output"], "plant_sha256": plant.active_sha()},
+            event_id=event_id)
         out = DiscussReply(id=did, event_id=event_id, text=text, intent="question", reply="",
                            classified_by=cls["by"], fell_back=cls["fell_back"], factory_time=now)
         intent = cls["intent"]

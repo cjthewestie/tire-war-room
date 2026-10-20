@@ -5,6 +5,7 @@
 import type { Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { OrderCard } from '../components/OrderCard'
+import { warningsFor } from '../components/orderModel'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
@@ -14,6 +15,7 @@ import { useWarRoom } from '../useWarRoom'
 import { ApprovalVisual, PlanFlow } from './ApprovalVisual'
 import type { HomeItem } from './homeItems'
 import { expectationText, type Item } from './transcript'
+import { REPLAN_HINT, setReplan, useReplans, type Replan } from './replanStore'
 
 const STEP_STATE: Record<string, string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '未執行' }
 
@@ -21,7 +23,8 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
   sel: HomeItem | null; ev: Event | null; items: Item[]
   onDiscuss: () => void; onAsk: () => void; onCommand: (text: string) => void
 }) {
-  const { state } = useWarRoom()
+  const { state, transport } = useWarRoom()
+  const replans = useReplans()
   if (!sel) return null
   if (sel.req && ev) {
     return (
@@ -31,6 +34,19 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
     )
   }
   if (sel.orderId) {
+    const orderId = sel.orderId
+    const rp = replans[orderId]
+    const busy = rp?.state === 'sending' || rp?.state === 'planning'
+    const text = `${orderId} 可能晚交，請重排保交期`
+    // send the task at once (no second step in the chat bar); the item then shows AI 規劃中… until the card arrives
+    const replan = async () => {
+      if (!transport?.command) { onCommand(text); return }
+      setReplan(orderId, { state: 'sending', eventId: null, error: null, since: Date.now() })
+      try {
+        const r = await transport.command(text)
+        setReplan(orderId, r.event_id ? { state: 'planning', eventId: r.event_id } : { state: 'failed', error: r.reply })
+      } catch (e) { setReplan(orderId, { state: 'failed', error: String(e).replace(/^Error: /, '') }) }
+    }
     const o = state.world?.orders.items.find((x) => x.id === sel.orderId)
     const jobs = (state.schedule?.schedule.jobs ?? []).filter((j) => j.order_id === sel.orderId)
     const now = Date.parse(state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? '')
@@ -40,14 +56,16 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
           <span className="hl-pill tone-risk">交期預警</span>
           <h3 className="apv-title">{sel.title}</h3>
           <p className="apv-reason">{sel.sub}</p>
-          {o ? <OrderCard o={o} jobs={jobs} now={now} warnings={(state.schedule?.schedule.warnings ?? []).filter((w) => w.includes(o.id))} />
+          {o ? <OrderCard o={o} jobs={jobs} now={now} warnings={warningsFor(o.id, state.schedule?.schedule.warnings ?? [])} />
             : <p className="muted">工廠紀錄裡找不到 {sel.orderId} 的明細。</p>}
-          <p className="muted small">這是排程與交期比對出的預警，還沒有 AI 計劃。要處理，請 AI 重排；結果會變成一張待核准的計劃。</p>
         </div>
-        <footer className="apv-act"><div className="apv-btns">
-          <button className="btn-approve" onClick={() => onCommand(`${sel.orderId} 可能晚交，請重排保交期`)} data-testid="plan-replan">請 AI 重排</button>
-          <button className="btn-sec" onClick={onAsk}>問 AI</button>
-        </div></footer>
+        <footer className="apv-act">
+          <ReplanStatus r={rp} />
+          <div className="apv-btns">
+            <button className="btn-approve" onClick={replan} disabled={busy} data-testid="plan-replan">{busy ? 'AI 規劃中…' : rp?.state === 'failed' || rp?.state === 'closed' ? '再請 AI 重排' : '請 AI 重排'}</button>
+            <button className="btn-sec" onClick={onAsk}>問 AI</button>
+          </div>
+        </footer>
       </section>
     )
   }
@@ -91,7 +109,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，紀錄在左邊對話台' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{closed ? '已結案，紀錄在右邊 Agent 對話' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )
@@ -101,4 +119,13 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
       <div className="po-body"><h3 className="apv-title">{sel.title}</h3><p className="apv-reason">{sel.sub}</p><p className="muted small">安全核心與驗證層直接處理，沒有喚醒 AI，不需要核准。</p></div>
     </section>
   )
+}
+
+/** Where a ② item's replan stands: nothing yet (the one-line hint), planning, or failed. */
+function ReplanStatus({ r }: { r: Replan | undefined }) {
+  if (!r) return <p className="apv-next" data-testid="replan-hint">{REPLAN_HINT}</p>
+  if (r.state === 'failed') return <p className="apv-next err" data-testid="replan-status">AI 沒有開始規劃：{r.error}</p>
+  if (r.state === 'closed') return <p className="apv-next" data-testid="replan-status">AI 已處理，沒有需要核准的方案：{plain(r.outcome ?? '已結案')}（可再請 AI 重排或問 AI）</p>
+  if (r.state === 'ready') return <p className="apv-next" data-testid="replan-status">方案已送出：核准卡在 ③，已自動選取</p>
+  return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />AI 規劃中…{r.eventId ? `（任務 ${r.eventId}）` : ''}完成後會自動跳到它的核准卡</p>
 }

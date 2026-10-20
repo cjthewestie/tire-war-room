@@ -164,8 +164,12 @@ def build_user_message(req: CommanderRequest) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
-def build_messages(req: CommanderRequest) -> list[dict[str, str]]:
-    return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": build_user_message(req)}]
+def build_messages(req: CommanderRequest, plant_text: str | None = None) -> list[dict[str, str]]:
+    """System = the fixed core prompt, then the plant section (PLANT.md, warroom/agent/plant.py) after it, so the
+    core prefix stays cacheable. plant_text overrides the active version (the 後台 test run of a draft)."""
+    from warroom.agent import plant
+    extra = plant.section_of(plant_text) if plant_text is not None else plant.section()
+    return [{"role": "system", "content": SYSTEM_PROMPT + extra}, {"role": "user", "content": build_user_message(req)}]
 
 
 # =====================================================================================
@@ -307,10 +311,14 @@ class OpenAICommander:
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw: str = ""
         self.last_error: str | None = None     # why the latest call fell back (None = it did not)
+        self.plant_override: str | None = None  # 後台 test run: a draft PLANT.md instead of the active one
+        self.last_plant_sha: str | None = None  # sha256 of the PLANT.md text in the latest request
         self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | invalid_output | error
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
-        kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req), temperature=0.0,
+        from warroom.agent import plant
+        self.last_plant_sha = plant.sha256(self.plant_override) if self.plant_override is not None else plant.active_sha()
+        kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req, self.plant_override), temperature=0.0,
                                   max_tokens=self.max_tokens, stream=True,
                                   stream_options={"include_usage": True})
         # response_format json_schema works on vLLM (xgrammar; guided_json was removed in vLLM 0.12),

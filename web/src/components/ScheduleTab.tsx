@@ -34,6 +34,7 @@ export function ScheduleTab() {
   }, [transport, day])
 
   const active = versions.find((v) => v.status === 'active') ?? state.schedule ?? null
+  const orderInfo = useMemo(() => new Map((state.world?.orders.items ?? []).map((o) => [o.id, { customer: o.customer, due: o.due, rush: o.rush }])), [state.world?.orders.items])
   const events = state.snapshot?.events ?? []
   const ev = events.find((e) => e.id === eventId) ?? primaryEvent(events)
   // presses out of service (page 11): their in-mold tire is held for QC, so its bar ends at the stop
@@ -72,10 +73,12 @@ export function ScheduleTab() {
 
   return (
     <div className="schedule">
-      <Panel title="硫化機排程（以出模時刻為中心）" num="⑤" className="gantt-panel"
+      <Panel title="硫化機排程：11 台硫化機，每一條是一張訂單的一條胎" num="⑤" className="gantt-panel"
         right={<VersionBar versions={versions} active={active} onRollback={rollback} />}>
+        <SchedHelp />
         {msg && <p className="note">{msg}</p>}
-        {active ? <Gantt version={active} prev={versions.find((v) => v.version === active.parent_version)} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} /> : <p className="muted">等待排程…</p>}
+        {active ? <Gantt version={active} prev={versions.find((v) => v.version === active.parent_version)} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} orders={orderInfo} /> : <p className="muted">等待排程…</p>}
+        {active && <NextUp jobs={active.schedule.jobs} now={now} orders={orderInfo} outAt={outAt} />}
         {active && (active.schedule.staffing_changes.length > 0 || active.schedule.warnings.length > 0) && (
           <div className="sched-notes">
             {active.schedule.staffing_changes.map((c, i) => <span key={i} className={`pill ${c.kind}`}>{c.kind === 'overtime' ? '加班' : '跨組調人'}：{c.label}</span>)}
@@ -109,11 +112,11 @@ function VersionBar({ versions, active, onRollback }: { versions: ScheduleVersio
 }
 const VSTATUS: Record<ScheduleVersion['status'], string> = { draft: '草稿', proposed: '待核准', active: '生效', superseded: '已取代', rolled_back: '已回復' }
 
-function Gantt({ version, prev, shifts, now, focusPress, outAt = {} }: { version: ScheduleVersion; prev?: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string; outAt?: Record<string, number> }) {
+function Gantt({ version, prev, shifts, now, focusPress, outAt = {}, orders }: { version: ScheduleVersion; prev?: ScheduleVersion; shifts: Shift[]; now: number; focusPress?: string; outAt?: Record<string, number>; orders: OrderInfo }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const t0 = Math.floor((now - 6 * H) / H) * H
   const t1 = t0 + 90 * H
-  const LABEL = 76, ROW = 24, TOP = 22
+  const LABEL = 88, ROW = 26, TOP = 22
   const W = Math.max(320, width)
   const x = (t: number) => LABEL + ((t - t0) / (t1 - t0)) * (W - LABEL - 6)
   const presses: string[] = CURE_PRESS_IDS
@@ -157,7 +160,7 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {} }: { version
         ))}
         {presses.map((p, i) => (
           <g key={p}>
-            <text x={4} y={TOP + i * ROW + 15} className={`g-press ${p === focusPress ? 'focus' : ''}`}>{Number(p.slice(5))} 號{ML_PRESSES.includes(p) && <tspan className="g-ml" dx={4}>中大</tspan>}</text>
+            <text x={4} y={TOP + i * ROW + 15} className={`g-press ${p === focusPress ? 'focus' : ''}`}>{Number(p.slice(5))} 號機{ML_PRESSES.includes(p) && <tspan className="g-ml" dx={4}>中大</tspan>}</text>
             <line x1={LABEL} x2={W} y1={TOP + (i + 1) * ROW - 0.5} y2={TOP + (i + 1) * ROW - 0.5} className="g-row" />
           </g>
         ))}
@@ -174,15 +177,17 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {} }: { version
           const y = TOP + i * ROW + 3
           const hot = j.order_id === '#A-311'
           const from = movedFrom(j)
+          const who = orders.get(j.order_id)?.customer
+          const head = `訂單 ${j.order_id}${who ? `（${who}）` : ''}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}`
           const tip = held
-            ? `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → ${fmtMD(stop)} ${fmtHM(stop)} 停用\n扣模待品管，無出模時間`
-            : `${j.order_id}・${SIZE_LABEL[j.size]}・${machineLabel(j.press_id)}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → 出模 ${fmtMD(j.demold)} ${fmtHM(j.demold)}（${j.cure_h} h）\n貼合 ${fmtHM(j.bond_start)}・A 線投料 ${fmtHM(j.a_feed_start)}`
+            ? `${head}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → ${fmtMD(stop)} ${fmtHM(stop)} 停用\n扣模待品管，無出模時間`
+            : `${head}\n入模 ${fmtMD(j.mold_in)} ${fmtHM(j.mold_in)} → 出模 ${fmtMD(j.demold)} ${fmtHM(j.demold)}（${j.cure_h} h）\n貼合 ${fmtHM(j.bond_start)}・A 線投料 ${fmtHM(j.a_feed_start)}`
           return (
             <g key={j.id}>
               <rect x={x(a)} y={y} width={Math.max(1, x(b) - x(a))} height={ROW - 7} rx={3} className={`g-job sz-${j.size} ${hot ? 'hot' : ''} ${j.frozen ? 'frozen' : ''} ${held ? 'held' : ''} ${from ? 'moved' : ''}`}>
                 <title>{from ? `${tip}\n本版從 ${machineLabel(from)} 移來` : tip}</title>
               </rect>
-              {x(b) - x(a) > 54 && <text x={x(a) + 4} y={y + 12} className="g-job-t">{j.order_id}{from && x(b) - x(a) > 120 ? `・自 ${Number(from.slice(5))} 號` : ''}</text>}
+              {x(b) - x(a) > 54 && <text x={x(a) + 4} y={y + 13} className="g-job-t">{barLabel(j, who, x(b) - x(a))}{from && x(b) - x(a) > 200 ? `・自 ${Number(from.slice(5))} 號` : ''}</text>}
               {held && stop <= t1 && (
                 <g className="g-held">
                   <line x1={x(stop)} x2={x(stop)} y1={y - 2} y2={y + ROW - 5} />
@@ -202,11 +207,59 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {} }: { version
         )}
       </svg>
       <div className="legend">
-        <span><i className="lg sz-S" />#S 小胎 24 h</span><span><i className="lg sz-M" />#M 中胎 28 h</span><span><i className="lg sz-L" />#L 大胎 34 h</span>
-        <span><i className="lg demold" />出模</span><span><i className="lg staffed" />有人時段（硫化機組 6–15・14–23／胎體夜班 20–05）</span>
+        <span><i className="lg sz-S" />小胎（硫化 24 h）</span><span><i className="lg sz-M" />中胎（28 h）</span><span><i className="lg sz-L" />大胎（34 h）</span>
+        <span><i className="lg demold" />▼ 出模時刻</span><span><i className="lg now" />現在</span><span><i className="lg staffed" />有人時段（硫化機組 6–15・14–23／胎體夜班 20–05）</span>
         {prev && <span><i className="lg moved" />本版移動（虛線框，對照第 {prev.version} 版）</span>}
         <span className="muted">第 {version.version} 版・{plain(version.reason)}</span>
       </div>
+    </div>
+  )
+}
+
+type OrderInfo = Map<string, { customer: string; due: string; rush: boolean }>
+
+/** What a bar says, longest first that fits: 「#A-311 台塑工業車輛・中胎」→「#A-311・中胎」→「#A-311」. */
+function barLabel(j: ScheduleJob, who: string | undefined, px: number): string {
+  const full = `${j.order_id} ${who ?? ''}・${SIZE_LABEL[j.size]}`
+  if (who && px > full.length * 11 + 12) return full
+  if (px > 110) return `${j.order_id}・${SIZE_LABEL[j.size]}`
+  return j.order_id
+}
+
+/** CJ, 2026-10-20: 「人力排程這個就不知道 S101 A311 這些是什麼意思…是指我們現在是只有做硫化機的排程因為它是速率決定步驟」. */
+function SchedHelp() {
+  return (
+    <details className="sched-help" open>
+      <summary>怎麼看這張圖</summary>
+      <ul>
+        <li><b>#S-101、#A-311、#W-0397 是訂單編號</b>，不是機台。長條上寫訂單號、客戶和胎型；把滑鼠移到長條上看入模、出模、貼合與投料時間。</li>
+        <li><b>只排 11 台硫化機</b>：硫化一條胎要 24–34 小時，是全廠最慢、決定產量的一站（瓶頸、速率決定步驟）。硫化機排好了，前面的投料、貼合時間就跟著往回推，所以不另外排。</li>
+        <li>每一列是一台硫化機（7–10 號可做中、大胎）；顏色是胎型；<b>▼ 是出模時刻</b>，要有人在場出模、入下一模，所以底色標出有人上班的時段。</li>
+      </ul>
+    </details>
+  )
+}
+
+/** The next mold-ins in words, for a phone where the bars are too small to read. */
+function NextUp({ jobs, now, orders, outAt }: { jobs: ScheduleJob[]; now: number; orders: OrderInfo; outAt: Record<string, number> }) {
+  const next = jobs.filter((j) => ms(j.mold_in) >= now && outAt[j.press_id] == null).sort((a, b) => ms(a.mold_in) - ms(b.mold_in)).slice(0, 6)
+  if (!next.length) return null
+  return (
+    <div className="sched-next">
+      <h3 className="sub">接下來入模</h3>
+      <table className="impact-t">
+        <thead><tr><th>入模</th><th>硫化機</th><th>訂單</th><th>胎型</th><th>出模</th><th>交期</th></tr></thead>
+        <tbody>{next.map((j) => {
+          const o = orders.get(j.order_id)
+          return (
+            <tr key={j.id}>
+              <td>{fmtMD(j.mold_in)} {fmtHM(j.mold_in)}</td><td>{Number(j.press_id.slice(5))} 號</td>
+              <td><b>{j.order_id}</b>{o?.rush && <em className="tag rush">急單</em>}<small className="muted"> {o?.customer ?? ''}</small></td>
+              <td>{SIZE_LABEL[j.size]}</td><td>{fmtMD(j.demold)} {fmtHM(j.demold)}</td><td>{o ? fmtMD(o.due) : '—'}</td>
+            </tr>
+          )
+        })}</tbody>
+      </table>
     </div>
   )
 }
