@@ -1,14 +1,19 @@
 import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress } from '../contracts'
-import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, machineLabel } from '../factory'
-import { fmtHM, fmtNum } from '../format'
+import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, SIZE_LABEL, machineLabel } from '../factory'
+import { fmtHM, fmtMD, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
 import { isAbnormal, primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, StageChain, TimelineTable } from './common'
 import { TemperatureTrend } from './Trend'
 import { PendingApproval } from '../agent/ApprovalVisual'
+import { OrderGoodsLine, OrderRing, PlantPanels } from './PlantPanels'
+import { ORDER_STAGES } from './orderModel'
 
-export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void }) {
+/** 產線監控 (proposal page 2) with the whole plant below it — issue #37 merged the 工廠全貌 tab in here, so the
+ *  page reads top-down: 預警 (rendered by App), the KPI strip, the approval card, ③ event / ④ 28 machines /
+ *  ①② orders and semi-finished goods, then people, materials, dock, goods rings and the rest of the plant. */
+export function MonitorTab({ onMachine, onAgent, onOrders }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void; onOrders?: () => void }) {
   const { state } = useWarRoom()
   const s = state.snapshot
   if (!s) return <div className="loading">等待工廠資料…</div>
@@ -19,11 +24,12 @@ export function MonitorTab({ onMachine, onAgent }: { onMachine: (id: string) => 
       <div className="monitor">
         <FocusPanelView focus={s.focus} pending={state.pending} />
         <div className="col-left">
-          <OrdersPanel orders={s.orders} />
+          <OrdersPanel orders={s.orders} onOrders={onOrders} />
           <SemiPanel semi={s.semi_finished} />
         </div>
         <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
       </div>
+      <PlantPanels />
     </div>
   )
 }
@@ -62,6 +68,8 @@ function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalReque
 
 /** Four numbers a judge reads first: machines running, what needs attention, what waits for the supervisor, where the AI is. */
 function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalRequest[] }) {
+  const w = useWarRoom().state.world
+  const low = (w?.materials ?? []).filter((m) => m.status === 'low' || m.status === 'out')
   const h = s.header
   const total = h.normal_count + h.abnormal_count
   const bad = s.machines.filter((m) => isAbnormal(m.status))
@@ -90,13 +98,33 @@ function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalReque
         <span className="kpi-v kpi-word">{open ? STATE_LABEL[ev.state] : '待命'}</span>
         <span className="kpi-s">{open ? `${plain(ev.machine_id)}${ev.replans ? `・重新規劃 ${ev.replans} 次` : '・處理中'}` : ev ? `上一事件：${machineLabel(ev.machine_id)}已結案` : '有異常才喚醒'}</span>
       </div>
+      {w && (
+        <div className="kpi">
+          <span className="kpi-l">在廠人員</span>
+          <span className="kpi-v" data-testid="kpi-people">{w.people.on_duty}<small> / {w.people.total} 人</small></span>
+          <span className="kpi-s">在機台 {w.people.by_state['在機台'] ?? 0}・請假 {w.people.by_state['請假'] ?? 0}</span>
+        </div>
+      )}
+      {w && (
+        <div className={`kpi ${low.length ? 'is-alarm' : ''}`}>
+          <span className="kpi-l">原料</span>
+          <span className={`kpi-v ${low.length ? 'kpi-word' : ''}`}>{low.length ? `${low.map((m) => m.name).join('、')} 偏低` : <>正常<small> {w.materials.length} 項</small></>}</span>
+          <span className="kpi-s">在途採購 {w.purchase_orders.filter((p) => p.status !== '已收貨').length} 筆</span>
+        </div>
+      )}
     </section>
   )
 }
 
-function OrdersPanel({ orders }: { orders: OrderProgress[] }) {
+/** ① 訂單: the proposal's per-size progress (page 2), then the order pipeline and the open orders with their goods
+ *  rings (was 工廠全貌's 訂單流程). Search, ETA vs due and risk are on the 訂單 tab. */
+function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?: () => void }) {
+  const w = useWarRoom().state.world
+  const open = (w?.orders.items ?? []).filter((o) => o.status === '待排程' || o.status === '生產中')
+    .sort((a, b) => Number(b.rush) - Number(a.rush) || (a.due < b.due ? -1 : 1)).slice(0, 4)
   return (
-    <Panel num="①" title="訂單進度（完成／預計）" className="orders">
+    <Panel num="①" title="訂單進度" className="orders"
+      right={onOrders && <a className="panel-link" href="#orders" onClick={(e) => { e.preventDefault(); onOrders() }}>全部訂單 →</a>}>
       {orders.map((o) => (
         <div className="order" key={o.size}>
           <div className="order-row">
@@ -109,6 +137,25 @@ function OrdersPanel({ orders }: { orders: OrderProgress[] }) {
           </div>
         </div>
       ))}
+      {w && (
+        <>
+          <ol className="pipe" data-testid="order-pipeline" aria-label="訂單流程">
+            {ORDER_STAGES.map((st) => <li key={st} className={w.orders.pipeline[st] ? 'has' : ''}><b>{w.orders.pipeline[st] ?? 0}</b><span>{st}</span></li>)}
+          </ol>
+          <ul className="w-list">
+            {open.map((o) => (
+              <li key={o.id}>
+                <div className="w-row">
+                  <span><OrderRing w={w} id={o.id} /><b>{o.id}</b>{o.rush && <i className="tag rush">急單</i>}<span className="muted"> {o.customer}・{SIZE_LABEL[o.size]}</span></span>
+                  <span className="muted small">{o.done}/{o.qty}・交期 {fmtMD(o.due)}</span>
+                </div>
+                <OrderGoodsLine w={w} id={o.id} />
+              </li>
+            ))}
+          </ul>
+          <p className="muted small w-note">今日新單 {w.orders.new_today}{w.orders.rush_open ? `・急單 ${w.orders.rush_open}` : ''}・庫存成品 {w.finished_goods.total}/{w.finished_goods.capacity} 條・待出貨 {w.finished_goods.waiting_ship} 條</p>
+        </>
+      )}
     </Panel>
   )
 }

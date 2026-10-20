@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from warroom import factory as F
@@ -103,8 +103,9 @@ class ReindexJob:
         return True
 
 
-def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) -> APIRouter:
-    """`rt` returns the Runtime, `supervisor(request, response)` is app.py's write-access rule."""
+def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[..., Any]) -> None:
+    """Add the /api/admin routes to app. `rt` returns the Runtime, `supervisor(request, response)` is app.py's
+    write-access rule."""
     job = ReindexJob()
     notes_holder: dict[str, Any] = {}
 
@@ -130,11 +131,12 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
     def audit(session, payload: dict[str, Any]) -> None:
         rt().audit.append(AuditKind.SYSTEM, f"admin:{session.actor}", {"admin": payload.pop("action"), **payload})
 
-    router = APIRouter(prefix="/api/admin")
+    P = "/api/admin"
+    ADMIN = Depends(admin)
 
     # ------------------------------------------------------------------ status, runs
-    @router.get("/status")
-    async def status(_: Any = Depends(admin)) -> dict[str, Any]:
+    @app.get(P + "/status")
+    async def status(_: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         kb = r.c.kb
         llm_host = urlparse(r.settings.base_url).netloc if r.llm_mode.value != "mock" else None
@@ -149,19 +151,19 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
                 "uptime_s": round(r.uptime_s()), "network": r.network, "memory_notes": len(notes().all()),
                 "reindex": job.as_dict()}
 
-    @router.get("/runs")
-    async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = Depends(admin)) -> dict[str, Any]:
+    @app.get(P + "/runs")
+    async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         return await asyncio.to_thread(_runs, r, limit)
 
     # ------------------------------------------------------------------ RAG
-    @router.get("/rag")
-    async def rag(_: Any = Depends(admin)) -> dict[str, Any]:
+    @app.get(P + "/rag")
+    async def rag(_: Any = ADMIN) -> dict[str, Any]:
         return await asyncio.to_thread(_rag_overview, rt().c.kb, sop_dir(), job)
 
-    @router.get("/rag/search")
+    @app.get(P + "/rag/search")
     async def rag_search(q: str = Query(..., min_length=1, max_length=200), k: int = Query(5, ge=1, le=20),
-                         _: Any = Depends(admin)) -> dict[str, Any]:
+                         _: Any = ADMIN) -> dict[str, Any]:
         kb = rt().c.kb
         if kb is None:
             raise HTTPException(status_code=503, detail="SOP 知識庫不可用")
@@ -175,8 +177,8 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
                     "mode": getattr(kb, "mode", "keyword"), "ms": round((time.perf_counter() - t) * 1000, 1)}
         return await asyncio.to_thread(run)
 
-    @router.post("/rag/docs")
-    async def upload(body: UploadBody, session: Any = Depends(admin)) -> dict[str, Any]:
+    @app.post(P + "/rag/docs")
+    async def upload(body: UploadBody, session: Any = ADMIN) -> dict[str, Any]:
         name = safe_doc_name(body.name)
         try:
             data = base64.b64decode(body.content_b64, validate=True)
@@ -210,9 +212,9 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
         audit(session, {"action": "sop_upload", "file": name, "bytes": len(data), "overwrite": body.overwrite})
         return {"ok": True, "file": name, "bytes": len(data), "note": "要讓 Agent 查得到，請按重新索引"}
 
-    @router.delete("/rag/docs/{name}")
+    @app.delete(P + "/rag/docs/{name}")
     async def delete_doc(name: str, confirm: str = Query("", max_length=90),
-                         session: Any = Depends(admin)) -> dict[str, Any]:
+                         session: Any = ADMIN) -> dict[str, Any]:
         name = safe_doc_name(name)
         if confirm != name:
             raise HTTPException(status_code=400, detail="刪除要確認：confirm 參數必須等於檔名")
@@ -223,8 +225,8 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
         audit(session, {"action": "sop_delete", "file": name})
         return {"ok": True, "file": name, "note": "已從資料夾刪除；重新索引後 Agent 就查不到"}
 
-    @router.post("/rag/reindex")
-    async def reindex(session: Any = Depends(admin)) -> dict[str, Any]:
+    @app.post(P + "/rag/reindex")
+    async def reindex(session: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         kb = r.c.kb
         if kb is None:
@@ -254,18 +256,18 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
         audit(session, {"action": "sop_reindex_start"})
         return job.as_dict()
 
-    @router.get("/rag/reindex")
-    async def reindex_status(_: Any = Depends(admin)) -> dict[str, Any]:
+    @app.get(P + "/rag/reindex")
+    async def reindex_status(_: Any = ADMIN) -> dict[str, Any]:
         return job.as_dict()
 
     # ------------------------------------------------------------------ memory
-    @router.get("/memory")
-    async def memory(_: Any = Depends(admin)) -> dict[str, Any]:
+    @app.get(P + "/memory")
+    async def memory(_: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         return await asyncio.to_thread(_memory, r, notes())
 
-    @router.post("/memory/notes")
-    async def add_note(body: NoteBody, session: Any = Depends(admin)) -> dict[str, Any]:
+    @app.post(P + "/memory/notes")
+    async def add_note(body: NoteBody, session: Any = ADMIN) -> dict[str, Any]:
         if body.machine_id not in F.MACHINE_IDS:
             raise HTTPException(status_code=400, detail=f"沒有這台機台：{body.machine_id}")
         now: datetime = rt().now()
@@ -276,7 +278,6 @@ def build_admin_router(rt: Callable[[], Any], supervisor: Callable[..., Any]) ->
         audit(session, {"action": "memory_note_add", "note_id": note.id, "machine_id": note.machine_id, "text": note.text})
         return {"ok": True, "note": note.__dict__}
 
-    return router
 
 
 def _safe(fn, default):
@@ -300,7 +301,7 @@ def _rag_overview(kb: Any, folder: Path, job: ReindexJob) -> dict[str, Any]:
         st = p.stat()
         docs.append({"file": p.name, "sop_id": chunks[0].sop_id if chunks else p.stem.upper(),
                      "title": chunks[0].title if chunks else p.stem, "chunks": len(chunks), "bytes": st.st_size,
-                     "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                     "modified": datetime.fromtimestamp(st.st_mtime, tz=F.TZ).isoformat(timespec="seconds"),
                      "sections": sorted({c.section for c in chunks}), "error": err})
     team: dict[str, dict[str, Any]] = {}
     for c in _safe(lambda: load_team_chunks(getattr(kb, "team_dataset_dir", None)), []):

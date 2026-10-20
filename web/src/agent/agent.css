@@ -418,3 +418,55 @@
   .hl-s { display: block; }
 }
 .hl-pill-row { display: flex; align-items: center; gap: 6px; }
+
+/* ---------- issue #37: home panel = final dialogue only; the Agent page (#console) = every step ---------- */
+.con-full { margin-left: auto; font-size: 13px; color: var(--accent); text-decoration: none; white-space: nowrap; font-weight: 600; }
+.con-full:hover { text-decoration: underline; }
+.con-steps { margin: 0 0 4px; padding: 6px 8px; background: var(--panel-2); border-radius: 8px; }
+.con-steps a { color: var(--accent); margin-left: 4px; }
+
+.trace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--gap); align-items: start; }
+.trace-side { position: sticky; top: 72px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.trace-side .panel-h { margin-bottom: 0; }
+.trace-pick { display: none; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px; font: inherit; font-size: 14px; }
+.trace-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 4px; }
+.trace-list button { width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 8px 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; color: var(--ink); }
+.trace-list button:hover { background: var(--panel-2); }
+.trace-list button.on { background: var(--panel-2); border-color: var(--accent); }
+.trace-list button small { flex-basis: 100%; font-size: 12px; }
+.trace-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trace-main { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.trace-h { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+.trace-h h2 { margin: 0; font-size: 17px; }
+.trace-id { margin: 2px 0 0; word-break: break-all; }
+.trace-stats { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin: 0; }
+.trace-stats div { background: var(--panel-2); border-radius: 8px; padding: 8px 10px; }
+.trace-stats dt { font-size: 12px; color: var(--ink-faint); }
+.trace-stats dd { margin: 0; font-size: 20px; font-weight: 700; }
+.trace-stats dd small { font-size: 12px; font-weight: 400; color: var(--ink-dim); }
+.trace-data { border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; }
+.trace-data .sub { margin: 2px 0 6px; font-size: 14px; }
+.trace-data ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 13.5px; }
+.trace-data li { display: inline-flex; align-items: center; gap: 5px; }
+.trace-data .ticon { color: var(--accent); }
+.trace-sop { margin-top: 6px !important; border-top: 1px dashed var(--border); padding-top: 6px !important; }
+.trace-sop small { color: var(--ink-faint); margin-left: 6px; }
+.trace-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.trace-filters button { background: var(--panel-2); border: 1px solid var(--panel-3); border-radius: 999px; padding: 4px 12px; font-size: 13px; color: var(--ink-dim); display: inline-flex; gap: 5px; align-items: baseline; }
+.trace-filters button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.trace-filters button small { font-size: 11px; opacity: .8; }
+.trace-open { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; font-size: 13px; color: var(--ink-dim); }
+.trace-note { margin: 0; }
+.trace-body { padding: 0; overflow: visible; }
+.r-data { list-style: none; margin: 4px 0 6px; padding: 6px 10px; background: var(--panel-2); border-radius: 6px; font-size: 13px; }
+.r-data li { padding: 2px 0; }
+.r-data small { color: var(--ink-faint); margin-left: 6px; }
+@media (max-width: 1023px) {
+  .trace { grid-template-columns: minmax(0, 1fr); }
+  .trace-side { position: static; max-height: none; }
+  .trace-list { display: none; }
+  .trace-pick { display: block; }
+  .trace-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .trace-open { margin-left: 0; }
+}
+.trace-sop li { display: block; }

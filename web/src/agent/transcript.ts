@@ -56,6 +56,9 @@ export type LocalItem = AskItem | ChatItem
 export type Item = StateItem | ThinkItem | ToolItem | GateItem | BlockedItem | ApprovalItem | SafetyItem | AnomalyItem | NoteItem | AskItem
   | ChatItem | ChipsItem | VersionItem
 
+/** The final dialogue of a transcript: messages and answers, no steps (the home 對話台 panel). */
+export const isDialogue = (i: Item) => i.k === 'chat' || i.k === 'ask'
+
 export function inFilter(it: Item, f: Filter): boolean {
   if (f === 'all') return true
   if (f === 'tool') return it.k === 'tool' || it.k === 'ask'

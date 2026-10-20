@@ -723,8 +723,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         return await asyncio.to_thread(kb.search, q, k)
 
     # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
-    from warroom.api.admin import build_admin_router
-    app.include_router(build_admin_router(rt, supervisor))
+    from warroom.api.admin import install_admin
+    install_admin(app, rt, supervisor)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)

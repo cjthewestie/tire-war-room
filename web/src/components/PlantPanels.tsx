@@ -1,5 +1,6 @@
-// 工廠全貌 (issue #11): the whole plant around the 28 machines — order pipeline, raw materials against their
-// reorder points, the loading dock, people by zone, energy, quality and maintenance. Read only; data comes from
+// The whole plant around the 28 machines (issue #11; was the 工廠全貌 tab, merged into 產線監控 by issue #37):
+// goods, people by zone, worker tasks, raw materials against their reorder points, the loading dock, quality,
+// energy and maintenance. Orders live in 產線監控's 訂單 panel and the 訂單 tab. Read only; data comes from
 // GET /api/world and the WS "world" deltas (warroom/sim/world.py).
 import type { WorldSnapshot, WorldZone, WorkerState } from '../contracts'
 import { LINE_LABELS } from '../contracts'
@@ -12,8 +13,6 @@ import { movedText } from './goods'
 import { ProgressRing } from './ProgressRing'
 import { TaskList } from './TaskList'
 
-const STAGES = ['待排程', '生產中', '完成', '待出貨', '已出貨'] as const
-const SIZE_LABEL = { S: '小胎', M: '中胎', L: '大胎' } as const
 const ZONE_LABEL: Record<WorldZone, string> = {
   war_room: '戰情室', staff: '員工待命區', line_A: 'A 胎體／胎面膠', line_B: 'B 胎側膠', line_C: 'C 鋼絲圈', line_D: 'D 尼龍布',
   line_BOND: '貼合', line_CURE: '硫化區', break: '休息區', toilet: '廁所', dock: '碼頭', off_site: '廠外',
@@ -22,96 +21,39 @@ const ZONE_ORDER: WorldZone[] = ['war_room', 'line_A', 'line_B', 'line_C', 'line
 const STATE_ORDER: WorkerState[] = ['在機台', '搬運', '待命', '休息', '如廁', '請假', '下班']
 const MAT_STATUS = { ok: '充足', reorder: '已達再訂購點', low: '偏低', out: '缺料' } as const
 
-export function WorldTab() {
+export function PlantPanels() {
   const { state, transport } = useWarRoom()
   const w = state.world
   if (!w) {
-    return <div className="loading">{transport?.mode === 'mock' ? '工廠全貌需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待工廠全貌資料…'}</div>
+    return <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>
   }
   return (
-    <div className="world-wrap" data-testid="world-tab" data-rev={w.rev}>
-      <WorldKpis w={w} />
+    <section className="world-wrap" data-testid="plant-panels" data-rev={w.rev} aria-label="全廠：人、料、貨、車">
+      <h2 className="section-h">全廠：人、料、貨、車</h2>
       <div className="world">
-        <OrdersPanel w={w} />
-        <TasksPanel w={w} />
         <GoodsPanel w={w} />
+        <PeoplePanel w={w} />
+        <TasksPanel w={w} />
         <MaterialsPanel w={w} />
         <DockPanel w={w} />
-        <PeoplePanel w={w} />
-        <EnergyPanel w={w} />
         <QualityPanel w={w} />
+        <EnergyPanel w={w} />
         <MaintenancePanel w={w} />
         <FeedPanel w={w} />
       </div>
       <p className="foot-note" data-testid="world-sources">資料來源：人員與班表（含加班、病假）、換模、異常紀錄、每日產出＝<b>團隊資料集</b>（日期依情境對齊）；訂單到達、原料採購、出貨、用電、檢驗、計畫保養、維修／品管／主管人員＝<b>模擬生成</b>（假設值）</p>
-    </div>
-  )
-}
-
-function WorldKpis({ w }: { w: WorldSnapshot }) {
-  const low = w.materials.filter((m) => m.status === 'low' || m.status === 'out')
-  const e = w.energy
-  const q = w.quality
-  return (
-    <section className="kpis" aria-label="工廠全貌重點">
-      <div className="kpi">
-        <span className="kpi-l">在廠人員</span>
-        <span className="kpi-v" data-testid="kpi-people">{w.people.on_duty}<small> / {w.people.total} 人</small></span>
-        <span className="kpi-s">在機台 {w.people.by_state['在機台'] ?? 0}・休息 {w.people.by_state['休息'] ?? 0}</span>
-      </div>
-      <div className={`kpi ${e.peak ? 'is-warn' : 'is-live'}`}>
-        <span className="kpi-l">用電{e.peak ? '・尖峰時段' : ''}</span>
-        <span className="kpi-v" data-testid="kpi-power">{fmtNum(e.total_kw, 0)}<small> kW</small></span>
-        <span className="kpi-s">契約 {fmtNum(e.contract_kw, 0)} kW・今日 {fmtNum(e.kwh_today, 0)} kWh</span>
-      </div>
-      <div className={`kpi ${low.length ? 'is-alarm' : ''}`}>
-        <span className="kpi-l">原料</span>
-        <span className={`kpi-v ${low.length ? 'kpi-word' : ''}`}>{low.length ? `${low.map((m) => m.name).join('、')} 偏低` : <>正常<small> {w.materials.length} 項</small></>}</span>
-        <span className="kpi-s">在途採購 {w.purchase_orders.filter((p) => p.status !== '已收貨').length} 筆</span>
-      </div>
-      <div className={`kpi ${q.defects_today ? 'is-warn' : ''}`}>
-        <span className="kpi-l">今日良率</span>
-        <span className="kpi-v">{q.yield_pct == null ? '—' : fmtNum(q.yield_pct, 1)}<small>{q.yield_pct == null ? '' : ' %'}</small></span>
-        <span className="kpi-s">檢驗 {q.inspected_today} 批・不良 {q.defects_today}</span>
-      </div>
     </section>
   )
 }
 
-function OrdersPanel({ w }: { w: WorldSnapshot }) {
-  const open = w.orders.items.filter((o) => o.status === '待排程' || o.status === '生產中').slice(0, 6)
-  return (
-    <Panel title="訂單流程" className="w-orders" right={<span className="muted small">今日新單 {w.orders.new_today}{w.orders.rush_open ? `・急單 ${w.orders.rush_open}` : ''}</span>}>
-      <ol className="pipe" data-testid="order-pipeline">
-        {STAGES.map((s) => (
-          <li key={s} className={w.orders.pipeline[s] ? 'has' : ''}><b>{w.orders.pipeline[s] ?? 0}</b><span>{s}</span></li>
-        ))}
-      </ol>
-      <ul className="w-list">
-        {open.map((o) => (
-          <li key={o.id}>
-            <div className="w-row">
-              <span><OrderRing w={w} id={o.id} /><b>{o.id}</b>{o.rush && <i className="tag rush">急單</i>}<span className="muted"> {o.customer}・{SIZE_LABEL[o.size]}</span></span>
-              <span className="muted small">{o.done}/{o.qty}・交期 {fmtMD(o.due)}</span>
-            </div>
-            <OrderGoodsLine w={w} id={o.id} />
-            <div className="bar"><i style={{ width: `${Math.min(100, (100 * o.done) / Math.max(1, o.qty))}%` }} /></div>
-          </li>
-        ))}
-      </ul>
-      <p className="muted small w-note">庫存成品 {w.finished_goods.total}/{w.finished_goods.capacity} 條（小 {w.finished_goods.by_size.S}・中 {w.finished_goods.by_size.M}・大 {w.finished_goods.by_size.L}）・待出貨 {w.finished_goods.waiting_ship} 條</p>
-    </Panel>
-  )
-}
-
 // issue #17: per-order ring (done / qty) and where its tyres are; moved_h = how far the last schedule change moved it
-function OrderRing({ w, id }: { w: WorldSnapshot; id: string }) {
+export function OrderRing({ w, id }: { w: WorldSnapshot; id: string }) {
   const g = w.goods?.orders.find((x) => x.order_id === id)
   if (!g) return null
   return <span className="order-ring" data-testid="order-ring" data-order={id}><ProgressRing value={g.progress} size={20} tone={g.late ? 'alarm' : 'live'} title={`${g.done}/${g.qty}`} /> </span>
 }
 
-function OrderGoodsLine({ w, id }: { w: WorldSnapshot; id: string }) {
+export function OrderGoodsLine({ w, id }: { w: WorldSnapshot; id: string }) {
   const g = w.goods?.orders.find((x) => x.order_id === id)
   if (!g) return null
   const mv = movedText(g.moved_h)

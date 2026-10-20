@@ -5,6 +5,7 @@
 import type { Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { OrderCard } from '../components/OrderCard'
+import { warningsFor } from '../components/orderModel'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
@@ -40,7 +41,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
           <span className="hl-pill tone-risk">交期預警</span>
           <h3 className="apv-title">{sel.title}</h3>
           <p className="apv-reason">{sel.sub}</p>
-          {o ? <OrderCard o={o} jobs={jobs} now={now} warnings={(state.schedule?.schedule.warnings ?? []).filter((w) => w.includes(o.id))} />
+          {o ? <OrderCard o={o} jobs={jobs} now={now} warnings={warningsFor(o.id, state.schedule?.schedule.warnings ?? [])} />
             : <p className="muted">工廠紀錄裡找不到 {sel.orderId} 的明細。</p>}
           <p className="muted small">這是排程與交期比對出的預警，還沒有 AI 計劃。要處理，請 AI 重排；結果會變成一張待核准的計劃。</p>
         </div>

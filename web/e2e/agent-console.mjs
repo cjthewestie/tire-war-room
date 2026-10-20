@@ -39,7 +39,7 @@ try {
   d.on('pageerror', (e) => errors.push(e.message))
   await d.goto(BASE + '/#agent', { waitUntil: 'networkidle' })
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
-  check('agent tab opens on the live backend', (await d.locator('[aria-label="Agent 對話台"]').count()) === 1)
+  check('agent tab opens on the live backend', (await d.locator('[aria-label="Agent 對話"]').count()) === 1)
 
   const r = [await sim(d, { action: 'scenario', scenario: 'press7_temp_drop' }), await sim(d, { action: 'speed', speed: 30 }), await sim(d, { action: 'play' })]
   check('press-7 scenario started (POST /api/sim/control)', r.every((s) => s === 200), r.join(','))
@@ -49,7 +49,11 @@ try {
   check('approval reached the agent tab', card)
   await d.waitForTimeout(1500)
 
-  const tr = d.locator('[data-testid=transcript]')
+  // issue #37: the home panel keeps only the dialogue; every step is on the Agent page (看完整過程)
+  check('home panel has no step rows', (await d.locator('[data-testid=transcript] [data-kind=tool], [data-testid=transcript] [data-kind=gate]').count()) === 0)
+  await d.locator('[data-testid=see-full]').click()
+  await d.waitForSelector('[data-testid=trace-body] [data-kind=tool]', { timeout: 10000 }).catch(() => {})
+  const tr = d.locator('[data-testid=trace-body]')
   const nSop = await tr.locator('[data-kind=tool][data-tool=sop_search]').count()
   const nSolve = await tr.locator('[data-kind=tool][data-tool=solve_schedule]').count()
   check('console shows ≥1 sop_search tool row', nSop >= 1, `${nSop}`)
@@ -60,6 +64,8 @@ try {
   await tr.locator('[data-kind=tool][data-tool=solve_schedule] > summary').first().click()
   await tr.locator('[data-kind=tool][data-tool=solve_schedule] .r-json > details > summary').first().click()
   check('tool row expands to its args JSON', (await tr.locator('[data-kind=tool][data-tool=solve_schedule] pre').first().innerText()).includes('cure_overrides_h'))
+  await d.locator('[data-testid=tab-agent]').click()
+  await d.waitForSelector('[data-testid=transcript]')
 
   // home (UX brief v12): 核准區 list | 計劃板 | Agent 對話. The plan shows the board, delivery impact, who does what,
   // the option picker and only 核准 / 討論; the evidence (Gantt compare, tools, conclusion) is on 產線監控's card.
@@ -96,7 +102,7 @@ try {
   check('chat question answered', answered.length > 0, answered.slice(0, 80))
   const fit = await askFits(d)
   check('1440: question and answer stay inside the transcript', fit.ok, fit.why)
-  check('answer labelled 只查不改 and shows its read steps', (await d.locator('[data-testid=ask-answer] .ro').count()) > 0 && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) > 0)
+  check('answer labelled 只查不改 (its read steps are on the Agent page)', (await d.locator('[data-testid=ask-answer] .ro').count()) > 0 && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) === 0)
   await d.screenshot({ path: `${OUT}/console-agent-ask-1440.png` })
 
   // dashboard tab carries the same visual card

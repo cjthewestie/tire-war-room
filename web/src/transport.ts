@@ -99,6 +99,26 @@ async function postJSON<T>(path: string, body: unknown, retried = false): Promis
   return (await r.json()) as T
 }
 
+/** 後台 (issue #37): every admin call, reads included, carries the supervisor PIN when this tab has one and
+ *  asks for it on a 401 — same PIN rule as approvals, plus the server's factory-network check. */
+export async function adminFetch<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
+  const pin = supervisorPin()
+  const headers: Record<string, string> = {}
+  if (init.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (pin) headers['X-Supervisor-Pin'] = pin
+  const r = await fetch(path, { method: init.method ?? 'GET', headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('後台需要主管 PIN')
+    if (p) {
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return adminFetch<T>(path, init, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+  return (await r.json()) as T
+}
+
 export class LiveTransport implements Transport {
   mode: Mode = 'live'
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void) {

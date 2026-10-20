@@ -4,31 +4,19 @@ import type { ScheduleJob, WorldOrder } from '../contracts'
 import { SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
+import { orderView } from './orderModel'
 
 const H = 3_600_000
 
-function dueEnd(due: string): number {
-  // due is a date (YYYY-MM-DD) or a timestamp; a date means the end of that factory day
-  return /^\d{4}-\d{2}-\d{2}$/.test(due) ? ms(`${due}T23:59:00+08:00`) : ms(due)
-}
-
 export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: ScheduleJob[]; now: number; warnings: string[] }) {
   const { state } = useWarRoom()
-  const sorted = [...jobs].sort((a, b) => ms(a.mold_in) - ms(b.mold_in))
+  const v = orderView(o, jobs, now, warnings, state.world?.goods?.orders.find((g) => g.order_id === o.id))
+  const sorted = v.jobs
   const passed = (t: string) => isFinite(now) && ms(t) <= now
   const n = sorted.length
   const shipped = o.status === '已出貨'
-  const stages = [
-    { k: '投料', v: sorted.filter((j) => passed(j.a_feed_start)).length, of: n },
-    { k: '貼合', v: sorted.filter((j) => passed(j.bond_start)).length, of: n },
-    { k: '入模硫化', v: sorted.filter((j) => passed(j.mold_in)).length, of: n },
-    { k: '出模', v: sorted.filter((j) => passed(j.demold)).length, of: n },
-    { k: '完成', v: o.done, of: o.qty },
-    { k: '出貨', v: shipped ? o.qty : 0, of: o.qty },
-  ]
-  const eta = n ? Math.max(...sorted.map((j) => ms(j.demold))) : NaN
-  const due = dueEnd(o.due)
-  const late = isFinite(eta) && isFinite(due) && eta > due
+  const { stages, eta, lateH } = v
+  const late = lateH != null
   const inMold = sorted.filter((j) => passed(j.mold_in) && !passed(j.demold))
   const nextUp = sorted.find((j) => !passed(j.mold_in))
   const outOfService = new Set((state.snapshot?.machines ?? []).filter((m) => m.status === 'out_of_service').map((m) => m.machine_id))
@@ -43,7 +31,7 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
       <h2 className="order-title">{o.id}・{o.customer}・{SIZE_LABEL[o.size]} {o.qty} 條{o.rush && <em className="tag rush">急單</em>}</h2>
       <p className="order-eta">
         交期 <b>{fmtMD(o.due)}</b>
-        {isFinite(eta) && <>・已排程 {n} 條最後一條出模 <b>{fmtMD(eta)} {fmtHM(eta)}</b>・<b className={late || warnings.length ? 'late' : 'ontime'}>{late ? `會晚 ${Math.ceil((eta - due) / H)} h` : warnings.length ? (n < o.qty - o.done ? `其餘 ${o.qty - o.done - n} 條預估晚交` : '預估晚交') : '準時'}</b></>}
+        {isFinite(eta) && <>・已排程 {n} 條最後一條出模 <b>{fmtMD(eta)} {fmtHM(eta)}</b>・<b className={late || warnings.length ? 'late' : 'ontime'}>{late ? `會晚 ${lateH} h` : warnings.length ? (n < o.qty - o.done ? `其餘 ${o.qty - o.done - n} 條預估晚交` : '預估晚交') : '準時'}</b></>}
         {!isFinite(eta) && <>・{o.status}</>}
       </p>
       <ol className="order-stages" aria-label="各站進度">
