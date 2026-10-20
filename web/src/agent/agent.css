@@ -551,3 +551,8 @@
 .sm-l { font-size: 13.5px; font-weight: 700; fill: var(--ink); }
 .sm-c { font-size: 9.5px; fill: var(--ink-faint); letter-spacing: .02em; }
 @media (prefers-reduced-motion: reduce) { .sm-e.on.loop path { animation: none; } }
+
+/* Agent page input bar (issue #52): stays in view at the bottom of the transcript */
+.trace-chat { z-index: 5; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; box-shadow: 0 -6px 18px rgb(var(--shade-rgb, 0 0 0) / .12); }
+.trace-chat .askbar { border-top: 0; }
+@media (min-width: 1024px) { .trace-chat { position: sticky; bottom: 8px; } }   /* phones: at the end of the transcript, like a chat */

@@ -56,6 +56,7 @@ function Dashboard() {
   }
   const openConsole = (eventId?: string) => { setConsoleEvent(eventId ?? null); go('console', eventId ? `?event=${encodeURIComponent(eventId)}` : '') }
   const [demoOpen, setDemoOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)   // phones: 狀態機 and 後台 live under 「更多」 (issue #52)
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const pendingN = state.pending.length
   return (
@@ -69,7 +70,7 @@ function Dashboard() {
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，警示燈已亮。AI 與安全核心照常在邊緣主機運作。</div>}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <><TodayPlan /><ScheduleTab /></> : tab === 'orders' ? <OrdersTab />
-        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} initial={consoleEvent} /></Suspense>
+        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
@@ -91,16 +92,28 @@ function Dashboard() {
         <button className={tab === 'console' ? 'on' : ''} aria-current={tab === 'console' ? 'page' : undefined} aria-label="Agent 完整過程" onClick={() => go('console')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v14H4zM7 9l3 3-3 3M12 15h5" /></svg>Agent
         </button>
-        <button className={tab === 'sm' ? 'on' : ''} aria-current={tab === 'sm' ? 'page' : undefined} aria-label="狀態機" onClick={() => go('sm')}>
-          <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="6" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M7.5 6h9M17.6 8.2l-4.4 7.6M10.8 15.8 6.4 8.2" /></svg>狀態機
-        </button>
-        <button className={tab === 'admin' ? 'on' : ''} aria-current={tab === 'admin' ? 'page' : undefined} aria-label="後台" onClick={() => go('admin')}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>後台
+        <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label="更多：狀態機、後台" onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
+          <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>{tab === 'sm' ? '狀態機' : tab === 'admin' ? '後台' : '更多'}
         </button>
         <button className={demoOpen ? 'on' : ''} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
         </button>
       </nav>
+      {moreOpen && (
+        <>
+          <div className="demo-scrim" onClick={() => setMoreOpen(false)} aria-hidden />
+          <div className="more-sheet" role="menu" aria-label="更多" data-testid="more-sheet">
+            <button role="menuitem" className={tab === 'sm' ? 'on' : ''} onClick={() => { setMoreOpen(false); go('sm') }}>
+              <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="6" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M7.5 6h9M17.6 8.2l-4.4 7.6M10.8 15.8 6.4 8.2" /></svg>
+              <span><b>狀態機</b><small>事件偵測、各狀態的即時看板、每日事件紀錄</small></span>
+            </button>
+            <button role="menuitem" className={tab === 'admin' ? 'on' : ''} onClick={() => { setMoreOpen(false); go('admin') }}>
+              <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>
+              <span><b>後台</b><small>RAG 知識庫、工廠指示、記憶、狀態（主管 PIN）</small></span>
+            </button>
+          </div>
+        </>
+      )}
     </div>
   )
 }
