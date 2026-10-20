@@ -3,7 +3,7 @@
 #   ./start.sh            mock mode: no model at all, the whole demo runs on the rule-based commander
 #   ./start.sh ollama     Ollama mode: Nemotron 3.5 Lightning NVFP4 on a project Ollama (deploy/mac/dev.sh)
 # Then open http://localhost:8000 (dashboard), http://localhost:8000/phone (supervisor phone) and http://localhost:8000/factory (3D factory).
-# Env passes through: PORT, SCENARIO (normal|press7_temp_drop|open_mill_overheat|bad_data|concurrent_3), SIM_SPEED.
+# Env passes through: PORT, SCENARIO (day_loop (default)|normal|press7_temp_drop|open_mill_overheat|bad_data|concurrent_3), SIM_SPEED.
 set -euo pipefail
 cd "$(dirname "$0")"
 command -v uv >/dev/null || { echo "uv is required: https://docs.astral.sh/uv/" >&2; exit 1; }

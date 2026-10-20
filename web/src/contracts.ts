@@ -36,6 +36,7 @@ export type SolverName = "cp-sat" | "heuristic"
 export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
+  | "day_loop"  // issue #36 一日循環
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
@@ -521,6 +522,8 @@ export interface MachineTile {
   short_name: string
   status: MachineStatus
   temp_c: number | null
+  /** issue #36: current batch / step progress 0-1 (press: cure elapsed / required); null = no batch */
+  step_progress?: number | null
 }
 
 export interface HeaderStatus {
@@ -559,10 +562,24 @@ export interface MachineDetail {
   prediction: Prediction | null
 }
 
+// ---------------- issue #36 模擬事件 (warroom/sim/events.py) ----------------
+export interface SimEventDef { kind: string; label: string; weight: number; source: "fault" | "plant" | "world" }
+export interface SimEventFired { at: ISODate; kind: string; label: string; text: string; source: "random" | "manual"; ref: string | null }
+export interface SimEventsView {
+  enabled: boolean; every_min: number; seed: number; next_at: ISODate | null; fired: SimEventFired[]; catalog: SimEventDef[]
+}
+export interface SimEventsBody { enabled?: boolean; every_min?: number; seed?: number }
+/** In every WS "clock" message: the generator's state, so every page shows the same switch. */
+export interface RandomEventsClock { enabled: boolean; every_min: number; seed: number; fired: number; last: string | null }
+
 export interface SimControl {
-  action: "play" | "pause" | "speed" | "reset" | "scenario"
+  action: "play" | "pause" | "speed" | "reset" | "scenario" | "jump"
   speed?: number | null
   scenario?: ScenarioName | null
+  /** issue #36: run headless to ~15 factory s before the scenario's first scripted step */
+  preroll?: boolean
+  /** issue #36 jump (一日循環 only): run the plant forward to this time of day, "HH:MM" (through 24:00 if earlier) */
+  at?: string | null
 }
 
 export interface HealthStatus {
@@ -583,7 +600,11 @@ export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁
 export type WorldZone =
   | "war_room" | "staff" | "line_A" | "line_B" | "line_C" | "line_D" | "line_BOND" | "line_CURE"
   | "break" | "toilet" | "dock" | "off_site"
-export interface WorldEvent { ts: ISODate; kind: string; text: string; ref: string | null }
+export interface WorldEvent {
+  ts: ISODate; kind: string; text: string; ref: string | null
+  /** issue #36 order_completed / shipment_departed */
+  order_ids?: string[]; qty?: number | null; on_time?: boolean | null
+}
 export interface WorldOrder {
   id: string; size: TireSize; qty: number; done: number; due: string; customer: string; status: WorldOrderStatus
   rush: boolean; source: "seed" | "world"; created_at: ISODate | null; shipped_at: ISODate | null
@@ -669,7 +690,7 @@ export type WsMessage =
   | { type: "approval_resolved"; ts: ISODate; data: ApprovalRequest }
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }
   | { type: "audit"; ts: ISODate; data: AuditEntry }
-  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean } }
+  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
 
 // ---------------- REST ----------------
@@ -691,6 +712,8 @@ export const API = {
   audit: "/api/audit", // ?since_seq=N&limit=200
   sopSearch: "/api/sop/search", // ?q=...&k=3
   simControl: "/api/sim/control", // POST SimControl
+  simEvents: "/api/sim/events", // GET SimEventsView; POST SimEventsBody (issue #36 模擬事件)
+  simEventsFire: "/api/sim/events/fire", // POST {kind} -> {ok, fired}
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
