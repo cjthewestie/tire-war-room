@@ -2,15 +2,19 @@
 // factory building: walk the rows (F at a machine for its live readings), sit at the war-room computer (F at the desk)
 // to use the real dashboard, watch it live on the big wall screen, go through the doors to the 休息區 and 廁所
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
+// Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo
+// never has to leave the 3D view; ?demo=1 also lists them in the key strip.
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { STATE_LABEL } from '../components/common'
+import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { alertText, diffPending, type PushState } from '../phone/alert'
+import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { DeskMonitor } from './DeskMonitor'
@@ -26,6 +30,15 @@ import { DRAWN_LIGHT, Lights, World } from './World'
 
 type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
+const PRESS7 = (SCENARIOS.find((s) => s.name === 'press7_temp_drop')?.label ?? '7 號硫化機溫降').replace(/（.*?）/, '')
+/** Presenter keys → the same /api/sim/control calls as the dashboard's demo strip. Digit0 toggles, so it is built per press. */
+const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: string }> = {
+  Digit1: () => ({ c: { action: 'scenario', scenario: 'press7_temp_drop' }, label: `載入情境：${PRESS7}` }),
+  Digit2: () => ({ c: { action: 'speed', speed: 10 }, label: '10 倍速' }),
+  Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
+  Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
+}
+const SHOW_DEMO_KEYS = new URLSearchParams(location.search).get('demo') === '1'
 
 let audio: AudioContext | null = null
 function unlockAudio() {
@@ -84,6 +97,7 @@ export function FactoryApp() {
   const [toast, setToast] = useState<{ title: string; body: string; at: number } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
+  const [demoNote, setDemoNote] = useState<{ text: string; at: number } | null>(null)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
   const nearRef = useRef<Near>(null)
@@ -98,6 +112,7 @@ export function FactoryApp() {
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
+  const paused = !!state.clock?.paused
 
   // New approval → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
@@ -120,6 +135,12 @@ export function FactoryApp() {
     const t = setTimeout(() => setToast(null), 6000)
     return () => clearTimeout(t)
   }, [toast])
+
+  useEffect(() => {
+    if (!demoNote) return
+    const t = setTimeout(() => setDemoNote(null), 2500)
+    return () => clearTimeout(t)
+  }, [demoNote])
 
   useEffect(() => {
     const f = () => setLocked(!!document.pointerLockElement)
@@ -162,6 +183,13 @@ export function FactoryApp() {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       if (!started && (e.code === 'Enter' || e.code === 'Space')) { start(); return }
       unlockAudio()
+      const demo = DEMO_KEYS[e.code]
+      if (demo) {
+        if (!transport || e.repeat) return
+        const { c, label } = demo(paused)
+        transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
+        return
+      }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
       if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
@@ -177,7 +205,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -255,7 +283,9 @@ export function FactoryApp() {
       <div className="f3-keys">
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
+        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>
+      {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
           <b>📱 {toast.title}</b><span>{toast.body}</span><i>按 P 拿起手機核准</i>

@@ -100,3 +100,7 @@ html, body, #root { height: 100%; overflow: hidden; }
   .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
 }
 @keyframes f3-rise { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+/* presenter keys (#25): the hint in the key strip (?demo=1) and a short note when one is pressed */
+.f3-demo-keys { color: var(--c-ink); }
+.f3-demo-note { position: absolute; z-index: 16; left: 50%; bottom: 100px; transform: translateX(-50%); background: var(--c-ink); color: var(--c-paper-solid); border-radius: 999px; padding: 6px 16px; font-size: 14px; font-weight: 700; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .2s ease-out; }
