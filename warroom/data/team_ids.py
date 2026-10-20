@@ -30,7 +30,7 @@ WORK_GROUP_TEAM: dict[str, TeamId] = {
     "尼龍布組": TeamId.BEAD_NYLON,  # D01
     "貼合組": TeamId.BOND,         # L01 貼合 + 入模 on the presses
     "加硫組": TeamId.CURING,       # 出模 on the presses
-    "修邊組": TeamId.QC,           # 整修 (manual finishing): sits with final inspection in our team set
+    "修邊組": TeamId.TRIM,         # 整修 (manual finishing by the presses): its own team, as in the dataset (issue #20)
 }
 WORK_GROUP_MACHINES: dict[str, tuple[str, ...]] = {
     "打膠組": ("A-MIX", "B-MIX"),
