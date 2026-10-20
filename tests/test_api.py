@@ -487,6 +487,6 @@ async def test_real_press7_schedule_impact_not_page2_text(tmp_path):
         assert seen, "no CURE-07 focus panel"
         assert not any("大胎 #07" in s for s in seen), seen
         assert seen[0] == "計算中…", seen
-        assert any("9 號" in s for s in seen), seen     # #A-311 moved to press 9 once solved
+        assert any("機台不變" in s for s in seen), seen   # round 1: #A-311 stays on press 7 (dataset EV-2)
     finally:
         await rt.stop()
