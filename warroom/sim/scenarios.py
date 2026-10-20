@@ -42,7 +42,10 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
     ScenarioName.STAFFING: datetime(2026, 10, 6, 7, 20, 0, tzinfo=TZ),
     ScenarioName.RUSH_ORDER: datetime(2026, 10, 7, 9, 50, 0, tzinfo=TZ),
     ScenarioName.MATERIAL_SHORT: datetime(2026, 10, 8, 13, 50, 0, tzinfo=TZ),   # issue #32 (Thu)
+    # issue #36 一日循環: the team dataset's one full quiet day (10/21, a Wednesday), from midnight
+    ScenarioName.DAY_LOOP: datetime(2026, 10, 21, 0, 0, 0, tzinfo=TZ),
 }
+DAY_LOOP_SHIFT_START_S = 8 * 3600.0     # 08:00 開工 every loop
 PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER,
                              ScenarioName.MATERIAL_SHORT})
 
@@ -184,6 +187,13 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
                                                  text=f"14:00 盤點：碳黑一批受潮隔離，可用庫存剩 {STOCK_CHECK_LEFT:g} kg"))],
             expected=["盤點只改庫存，不開事件", "巡檢（程式）算出碳黑約 6 小時後用完、補貨要明天才到 → 開缺料事件",
                       "派工卡（盤點、催貨、調整投料）待核准；核准後人員執行，全部完成才結案"])
+    if name is ScenarioName.DAY_LOOP:
+        return Scenario(
+            name=name, title="一日循環：團隊資料集 10/21 一整天，24:00 回到 00:00 重跑", start_at=start,
+            steps=[ScenarioStep(at_offset_s=DAY_LOOP_SHIFT_START_S, note="08:00 早班開工",
+                                plant=PlantInput(kind="shift_start", text="08:00 早班開工：排今日計畫"))],
+            expected=["A03/A04/A06、V06–V08 播放團隊資料集 10/21 的實際曲線，其餘機台由模擬器在同一天運轉",
+                      "08:00 開工核准卡；10:00、16:00 出貨車", "24:00 回到 00:00：無誤報，訂單／貨品／人員回到當天起點"])
     raise ValueError(f"unknown scenario {name}")
 
 

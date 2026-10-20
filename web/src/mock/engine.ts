@@ -44,11 +44,12 @@ function baseNoise(id: string, t: number, amp: number): number {
 }
 
 export const SCENARIOS: { name: ScenarioName; label: string; start: string; speed: number }[] = [
+  { name: 'day_loop', label: '一日循環', start: '2026-10-21T00:00:00+08:00', speed: 60 },
   { name: 'normal', label: '正常運轉', start: '2026-10-22T14:20:00+08:00', speed: 1 },
-  { name: 'open_mill_overheat', label: '大開煉機過熱（p.2）', start: '2026-10-22T14:25:30+08:00', speed: 1 },
+  { name: 'open_mill_overheat', label: '大開煉機過熱（p.2）', start: '2026-10-22T14:25:30+08:00', speed: 10 },
   { name: 'press7_temp_drop', label: '7 號硫化機溫降（p.11）', start: '2026-10-03T02:12:00+08:00', speed: 10 },
   { name: 'concurrent_3', label: '3 件同時異常', start: '2026-10-03T02:12:00+08:00', speed: 5 },
-  { name: 'bad_data', label: '壞資料（不喚醒 AI）', start: '2026-10-22T09:00:00+08:00', speed: 1 },
+  { name: 'bad_data', label: '壞資料（不喚醒 AI）', start: '2026-10-22T09:00:00+08:00', speed: 10 },
   // issue #17 plant events (backend only; mock mode plays them as normal running)
   { name: 'shift_start', label: '早班開工', start: '2026-10-05T07:50:00+08:00', speed: 10 },
   { name: 'rush_order', label: '插單', start: '2026-10-07T09:50:00+08:00', speed: 10 },

@@ -161,7 +161,8 @@ class Factory:
         # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
         # staffing gap, if any, is the scripted sick call)
         from warroom.sim.scenarios import PLANT_SCENARIOS
-        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS else t0.date()
+        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS or sc.name is ScenarioName.DAY_LOOP \
+            else t0.date()
         if self.backfill_min > 0:
             self._backfill(t0, self.backfill_min)
         # the rest of the plant (orders over time, materials, dock, people, energy, quality, maintenance):

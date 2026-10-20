@@ -15,43 +15,45 @@
 # The :30b-a3b-mxfp8 tag (34 GB) is the 8-bit comparison for the NVFP4-vs-FP8 accuracy runner.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
-PORT="${WARROOM_OLLAMA_PORT:-11435}"
+# OLLAMA_PORT, not PORT: PORT is the app's own port (warroom.config) and `PORT=8000 ./start.sh ollama`
+# would otherwise hand the app the Ollama port.
+OLLAMA_PORT="${WARROOM_OLLAMA_PORT:-11435}"
 MODEL="${MODEL:-nemotron-3.5-lightning:30b-a3b-nvfp4}"
 MODEL_FP8="${MODEL_FP8:-nemotron-3.5-lightning:30b-a3b-mxfp8}"
 RUN_DIR="${RUN_DIR:-$REPO/data/runtime/ollama}"
-export OLLAMA_HOST="127.0.0.1:$PORT"
+export OLLAMA_HOST="127.0.0.1:$OLLAMA_PORT"
 
-up() { curl -fsS "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; }
+up() { curl -fsS "http://127.0.0.1:$OLLAMA_PORT/api/version" >/dev/null 2>&1; }
 
 cmd_ollama() {
-  if up; then echo "project ollama already on :$PORT"; return; fi
+  if up; then echo "project ollama already on :$OLLAMA_PORT"; return; fi
   mkdir -p "$RUN_DIR"
   OLLAMA_CONTEXT_LENGTH="${OLLAMA_CONTEXT_LENGTH:-40960}" OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-3}" \
   OLLAMA_FLASH_ATTENTION=1 OLLAMA_KV_CACHE_TYPE="${OLLAMA_KV_CACHE_TYPE:-q8_0}" OLLAMA_KEEP_ALIVE="${OLLAMA_KEEP_ALIVE:-24h}" \
   OLLAMA_MAX_LOADED_MODELS=1 nohup ollama serve >"$RUN_DIR/ollama.log" 2>&1 &
   echo $! >"$RUN_DIR/ollama.pid"
   for _ in $(seq 1 50); do up && break; sleep 0.2; done
-  up && echo "project ollama on :$PORT (pid $(cat "$RUN_DIR/ollama.pid"), log $RUN_DIR/ollama.log)" \
+  up && echo "project ollama on :$OLLAMA_PORT (pid $(cat "$RUN_DIR/ollama.pid"), log $RUN_DIR/ollama.log)" \
      || { echo "ollama failed to start, see $RUN_DIR/ollama.log" >&2; exit 1; }
 }
 
 cmd_pull() { cmd_ollama; ollama pull "$MODEL"; [[ "${WITH_FP8:-1}" == 1 ]] && ollama pull "$MODEL_FP8" || true; }
 
 cmd_env() {
-  echo "export LLM_MODE=llm BASE_URL=http://127.0.0.1:$PORT/v1 MODEL=$MODEL"
+  echo "export LLM_MODE=llm BASE_URL=http://127.0.0.1:$OLLAMA_PORT/v1 MODEL=$MODEL"
 }
 
 cmd_app() {
   cd "$REPO"
   if [[ "${1:-}" == "--mock" ]]; then LLM_MODE=mock exec uv run python -m warroom.api; fi
   cmd_ollama
-  LLM_MODE=llm BASE_URL="http://127.0.0.1:$PORT/v1" MODEL="$MODEL" exec uv run python -m warroom.api
+  LLM_MODE=llm BASE_URL="http://127.0.0.1:$OLLAMA_PORT/v1" MODEL="$MODEL" exec uv run python -m warroom.api
 }
 
 cmd_bench() {
   cmd_ollama
   cd "$REPO"
-  export BASE_URL="http://127.0.0.1:$PORT/v1" MODEL="$MODEL"
+  export BASE_URL="http://127.0.0.1:$OLLAMA_PORT/v1" MODEL="$MODEL"
   uv run python -m bench.ttft --runs "${RUNS:-5}"
   uv run python -m bench.concurrent --runs 3
   uv run python -m bench.full_event --runs 3

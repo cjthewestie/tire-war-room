@@ -74,11 +74,25 @@ function currentPermission(): AlertPermission {
 }
 
 export interface ApprovalAlerts {
+  /** the supervisor's choice: on by default (CJ, 2026-10-20), remembered on this phone */
+  enabled: boolean
+  /** sound unlocked by a tap (browsers allow audio and the permission prompt only from a user gesture) */
   armed: boolean
   permission: AlertPermission
+  /** the browser refused: notifications denied, or no sound after the tap */
+  blocked: string | null
   held: number
   lastAlert: string | null
   arm(): Promise<void>
+  setEnabled(on: boolean): void
+}
+
+const PREF_KEY = 'warroom.phone.alerts'
+export function readAlertPref(): boolean {
+  try { return localStorage.getItem(PREF_KEY) !== 'off' } catch { return true }
+}
+function writeAlertPref(on: boolean): void {
+  try { localStorage.setItem(PREF_KEY, on ? 'on' : 'off') } catch { /* private mode: the choice lasts this visit */ }
 }
 
 /** Watches the pending list; fires push alerts on new requests, holds them while offline. */
@@ -87,8 +101,13 @@ export function useApprovalAlerts(pending: ApprovalRequest[], online: boolean, e
   const envRef = useRef(env)
   useEffect(() => { envRef.current = env })
   const baseTitle = useRef(typeof document !== 'undefined' ? document.title : '')
+  const [enabled, setEnabledState] = useState(readAlertPref)
   const [armed, setArmed] = useState(false)
+  const [blocked, setBlocked] = useState<string | null>(null)
+  const [tries, setTries] = useState(0)          // a tap that did not unlock sound listens for the next tap
   const [permission, setPermission] = useState<AlertPermission>(currentPermission)
+  const enabledRef = useRef(enabled)
+  useEffect(() => { enabledRef.current = enabled }, [enabled])
   const [held, setHeld] = useState(0)
   const [lastAlert, setLastAlert] = useState<string | null>(null)
 
@@ -97,7 +116,7 @@ export function useApprovalAlerts(pending: ApprovalRequest[], online: boolean, e
     setHeld(st.current.held.length)
     const e = envRef.current
     e.setTitle(pending.length ? `(${pending.length}) 待核准・${baseTitle.current}` : baseTitle.current)
-    if (!fire.length) return
+    if (!fire.length || !enabledRef.current) return
     const { title, body } = alertText(fire, flushed)
     e.notify(title, body, `approval-${fire[0].id}`)
     e.vibrate([300, 120, 300, 120, 600])
@@ -107,23 +126,43 @@ export function useApprovalAlerts(pending: ApprovalRequest[], online: boolean, e
 
   // Re-ring every 60 s while something is still waiting, so a missed first alert is not the only one.
   useEffect(() => {
-    if (!pending.length || !online) return
+    if (!pending.length || !online || !enabled) return
     const t = window.setInterval(() => { envRef.current.vibrate([300]); envRef.current.beep() }, 60_000)
     return () => window.clearInterval(t)
-  }, [pending.length, online])
+  }, [pending.length, online, enabled])
 
   const arm = useCallback(async () => {
     // Browsers only allow sound after a tap, and permission prompts only from a tap.
+    let sound = false
     try {
       const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
-      if (AC) { audio = audio ?? new AC(); await audio.resume() }
+      if (AC) { audio = audio ?? new AC(); await audio.resume(); sound = audio.state === 'running' }
     } catch { /* no audio on this device */ }
-    if (currentPermission() === 'default') {
-      try { setPermission((await Notification.requestPermission()) as AlertPermission) } catch { /* ignore */ }
+    let perm = currentPermission()
+    if (perm === 'default') {
+      try { perm = (await Notification.requestPermission()) as AlertPermission } catch { /* ignore */ }
     }
-    setArmed(true)
+    setPermission(perm)
+    setBlocked(perm === 'denied' ? '瀏覽器已封鎖通知：請到瀏覽器的網站設定允許通知（聲音與震動仍會提醒）'
+      : !sound ? '瀏覽器未允許播放聲音：再點一下畫面試試，或檢查手機靜音' : null)
+    setArmed(sound)
+    setTries((n) => n + 1)
     envRef.current.beep()
   }, [])
 
-  return { armed, permission, held, lastAlert, arm }
+  // On by default: the first tap anywhere on the page unlocks sound and asks for notification permission.
+  useEffect(() => {
+    if (!enabled || armed || typeof document === 'undefined') return
+    const onTap = () => { void arm() }
+    document.addEventListener('pointerdown', onTap, { capture: true, once: true })
+    return () => document.removeEventListener('pointerdown', onTap, { capture: true })
+  }, [enabled, armed, arm, tries])
+
+  const setEnabled = useCallback((on: boolean) => {
+    writeAlertPref(on)
+    setEnabledState(on)
+    if (!on) setBlocked(null)
+  }, [])
+
+  return { enabled, armed, permission, blocked, held, lastAlert, arm, setEnabled }
 }

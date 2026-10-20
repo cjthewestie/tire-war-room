@@ -287,6 +287,7 @@ class ScenarioName(StrEnum):
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
     MATERIAL_SHORT = "material_short"          # issue #32: a stock count drops 碳黑, the patrol finds the shortfall
+    DAY_LOOP = "day_loop"                      # issue #36 一日循環: one dataset day 00:00 -> 24:00, repeated
 
 
 class AuditKind(StrEnum):
@@ -1014,6 +1015,9 @@ class MachineTile(_M):
     short_name: str
     status: MachineStatus
     temp_c: float | None = None
+    # issue #36: how far the current batch / step is (0-1): a press's cure (elapsed / required), any other
+    # machine's batch (MachineState.step_elapsed_min / its cycle). None = no batch (an empty press).
+    step_progress: float | None = None
 
 
 class BadDataMark(_M):
@@ -1076,9 +1080,11 @@ class WsMessage(_M):
 
 
 class SimControl(_M):
-    action: Literal["play", "pause", "speed", "reset", "scenario"]
+    action: Literal["play", "pause", "speed", "reset", "scenario", "jump"]
     speed: float | None = None          # sim seconds per wall second
     scenario: ScenarioName | None = None
+    preroll: bool = False               # issue #36 scenario: run headless to ~15 s before the first scripted step
+    at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")   # issue #36 jump (一日循環): "HH:MM"
 
 
 class HealthStatus(_M):
@@ -1112,6 +1118,9 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/audit", None, "AuditEntry[]"),                  # ?since_seq=N&limit=200
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
     ("POST", "/api/sim/control", "SimControl", "{ok: bool}"),
+    ("GET", "/api/sim/events", None, "SimEventsView"),                  # issue #36 模擬事件
+    ("POST", "/api/sim/events", "SimEventsBody", "SimEventsView"),
+    ("POST", "/api/sim/events/fire", "{kind}", "{ok: bool, fired}"),
     ("POST", "/api/ask", "AskRequest", "AskAnswer"),               # 問戰情室: read-only Q&A
     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)

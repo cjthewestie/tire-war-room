@@ -45,7 +45,7 @@ class Settings(BaseSettings):
     host: str = "0.0.0.0"
     port: int = 8000
     sim_speed: float = 1.0
-    scenario: str = "normal"
+    scenario: str = "day_loop"             # issue #36: 一日循環 is the normal running state
     # Team dataset replay (data/team_dataset): "" off | team_ev1 | team_ev2 | team_both.
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))

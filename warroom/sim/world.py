@@ -209,11 +209,16 @@ class _W(BaseModel):
 
 class WorldEvent(_W):
     ts: datetime
-    kind: str            # order_new | order_rush | order_change | order_done | shipment | po_created | delivery
+    kind: str            # order_new | order_rush | order_change | order_completed | shipment | shipment_departed
+    #                      | po_created | delivery
     #                      | delivery_late | delivery_short | stockout | defect | maint_start | maint_end
     #                      | repair_open | repair_close | truck_arrive | stock_check | patrol (issue #32)
     text: str
     ref: str | None = None
+    # issue #36 order_completed / shipment_departed: for the 訂單 tab, the ticker and the 3D success moment
+    order_ids: list[str] = []
+    qty: int | None = None
+    on_time: bool | None = None
 
 
 class WorldOrder(_W):
@@ -595,8 +600,8 @@ class World:
         self._update_people(t, dt)
         self._update_energy(t, dt)
 
-    def _emit(self, t: datetime, kind: str, text: str, ref: str | None = None) -> None:
-        ev = WorldEvent(ts=t, kind=kind, text=text, ref=ref)
+    def _emit(self, t: datetime, kind: str, text: str, ref: str | None = None, **extra: Any) -> None:
+        ev = WorldEvent(ts=t, kind=kind, text=text, ref=ref, **extra)
         self.events.append(ev)
         for fn in list(self._listeners):
             try:
@@ -632,7 +637,8 @@ class World:
             if o.done >= o.qty and o.id not in self._seed_completed:
                 self._seed_completed[o.id] = t
                 if prev_done is not None and prev_done < o.qty:
-                    self._emit(t, "order_done", f"{o.id} {SIZE_LABEL[o.size]} {o.qty} 條全數完成", o.id)
+                    self._emit(t, "order_completed", f"訂單 {o.id} 完成：{SIZE_LABEL[o.size]} {o.qty} 條", o.id,
+                               order_ids=[o.id], qty=o.qty, on_time=t.date() <= o.due)
 
     # ------------------------------------------------------------------ orders
     def _init_orders(self, t0: datetime) -> None:
@@ -659,12 +665,37 @@ class World:
             self._orders[oid] = o
         self._seq["order"] = 398
         self._new_today = (d0, 0)
+        self._scripted: list[tuple[datetime, TireSize, int, bool, str]] = []
+        if getattr(getattr(self.f, "scenario", None), "name", None) is ScenarioName.DAY_LOOP:
+            self._day_loop_orders(t0)
+
+    def _day_loop_orders(self, t0: datetime) -> None:
+        """Issue #36 一日循環: the day carries the whole order -> shipment chain. Work in progress is shaped so two
+        orders finish and ship inside the loop (#W-0397 finishes 06:30, packed 07:30, leaves on the 10:00 truck;
+        #W-0396 finishes 13:30, leaves 16:00), and two new orders come in during the morning (one rush), which
+        the plan then schedules. CJ, 2026-10-20: 「設計今天這個從訂單進來一直到東西出貨的一個流程」."""
+        d0 = t0.date()
+
+        def near_done(o: _WOrder, finish: datetime) -> None:
+            left_h = (finish - t0).total_seconds() / 3600.0
+            o.status, o.done, o.start_at = "生產中", o.qty - 1, t0 - timedelta(hours=30)
+            o.progress = max(0.0, 1.0 - left_h * WORLD_PRESS_EQ / CURE_HOURS[o.size])
+        near_done(self._orders["#W-0397"], t0 + timedelta(hours=6, minutes=30))
+        o = _WOrder(id="#W-0396", size=TireSize.S, qty=10, due=d0 + timedelta(days=2), customer="客戶丁",
+                    created_at=t0 - timedelta(days=4))
+        near_done(o, t0 + timedelta(hours=13, minutes=30))
+        self._orders[o.id] = o
+        self._scripted = [(t0 + timedelta(hours=9, minutes=10), TireSize.M, 8, False, "客戶戊"),
+                          (t0 + timedelta(hours=10, minutes=40), TireSize.S, 4, True, "客戶己")]
 
     def _update_orders(self, t: datetime, dt: float) -> None:
         rng = self.rng
         office = t.weekday() <= 5 and OFFICE_HOURS[0] <= t.hour < OFFICE_HOURS[1]
         if self._new_today[0] != t.date():
             self._new_today = (t.date(), 0)
+        while self._scripted and self._scripted[0][0] <= t:      # issue #36 一日循環
+            _, *fixed = self._scripted.pop(0)
+            self._new_order(t, tuple(fixed))                    # type: ignore[arg-type]
         if office and rng.random() < _p(ORDER_ARRIVAL_PER_H, dt):
             self._new_order(t)
         if office and rng.random() < _p(ORDER_CHANGE_PER_H, dt):
@@ -680,7 +711,8 @@ class World:
                     o.done += 1
                 if o.done >= o.qty:
                     o.status, o.completed_at = "完成", t
-                    self._emit(t, "order_done", f"{o.id} {SIZE_LABEL[o.size]} {o.qty} 條全數完成", o.id)
+                    self._emit(t, "order_completed", f"訂單 {o.id} 完成：{SIZE_LABEL[o.size]} {o.qty} 條", o.id,
+                               order_ids=[o.id], qty=o.qty, on_time=t.date() <= o.due)
             elif o.status == "完成" and o.completed_at is not None and t >= o.completed_at + timedelta(hours=PACK_H):
                 o.status = "待出貨"
         # prune: keep shipped world orders 3 days
@@ -688,16 +720,22 @@ class World:
         for k in old:
             del self._orders[k]
 
-    def _new_order(self, t: datetime) -> None:
+    def _new_order(self, t: datetime, fixed: tuple[TireSize, int, bool, str] | None = None) -> None:
         rng = self.rng
-        size = rng.choices((TireSize.S, TireSize.M, TireSize.L), weights=(5, 3, 2))[0]
-        lo, hi = NEW_QTY[size]
-        qty = rng.randint(lo, hi)
-        rush = rng.random() < RUSH_SHARE
-        due = t.date() + timedelta(days=rng.randint(3, 5) if rush else rng.randint(10, 45))
-        delay = rng.uniform(*(RUSH_SCHED_DELAY_H if rush else SCHED_DELAY_H))
+        if fixed is None:
+            size = rng.choices((TireSize.S, TireSize.M, TireSize.L), weights=(5, 3, 2))[0]
+            lo, hi = NEW_QTY[size]
+            qty = rng.randint(lo, hi)
+            rush = rng.random() < RUSH_SHARE
+            due = t.date() + timedelta(days=rng.randint(3, 5) if rush else rng.randint(10, 45))
+            delay = rng.uniform(*(RUSH_SCHED_DELAY_H if rush else SCHED_DELAY_H))
+            cust = rng.choice(CUSTOMERS)
+        else:                                   # issue #36 一日循環: a scripted arrival, no RNG drawn
+            size, qty, rush, cust = fixed
+            due = t.date() + timedelta(days=4 if rush else 21)
+            delay = RUSH_SCHED_DELAY_H[0] if rush else SCHED_DELAY_H[0]
         oid = f"#W-{self._next_id('order'):04d}"
-        o = _WOrder(id=oid, size=size, qty=qty, due=due, customer=rng.choice(CUSTOMERS), created_at=t, rush=rush,
+        o = _WOrder(id=oid, size=size, qty=qty, due=due, customer=cust, created_at=t, rush=rush,
                     start_at=t + timedelta(hours=delay))
         self._orders[oid] = o
         self._new_today = (t.date(), self._new_today[1] + 1)
@@ -880,17 +918,23 @@ class World:
                     self._emit(t, "delivery", f"{p.id} {m.name} {got:g} {m.unit} 收貨入庫", p.id)
             else:
                 n = 0
+                shipped: list[tuple[str, int, bool]] = []
                 for oid in tr.order_ids:
                     if oid in self._orders:
                         o = self._orders[oid]
                         o.status, o.shipped_at = "已出貨", t
                         n += o.qty
+                        shipped.append((oid, o.qty, t.date() <= o.due))
                     elif oid in self.f._orders:
                         self._seed_shipped[oid] = t
                         n += self.f._orders[oid].qty
+                        shipped.append((oid, self.f._orders[oid].qty, t.date() <= self.f._orders[oid].due))
                 self._dock_log.append(DockEntry(ts=t, kind="depart", direction="outbound",
                                                 text=f"{tr.plate} 出車：{len(tr.order_ids)} 筆訂單 {n} 條"))
                 self._emit(t, "shipment", f"出車 {tr.plate}：{'、'.join(tr.order_ids)}（{n} 條）", tr.id)
+                for oid, q, on_time in shipped:          # issue #36: one success moment per order
+                    self._emit(t, "shipment_departed", f"出貨 {oid} 已出廠（{q} 條）{'' if on_time else '・逾期'}", tr.id,
+                               order_ids=[oid], qty=q, on_time=on_time)
         # inbound arrivals
         for p in self._pos:
             if p.status in ("在途", "延遲") and t >= p.arrive_at:
@@ -1316,6 +1360,26 @@ class World:
             self._emit(at, "stock_check", pin.text, m.key)
         elif pin.kind == "material_short":
             self._emit(at, "patrol", pin.text, pin.material_key)
+
+    # ------------------------------------------------------------------ issue #36 模擬事件 (world only)
+    # Material events stay in the world: the feed shows them and the stock moves. Raising a card for a shortfall is
+    # the patrol's job (#38, material_short owned there), so nothing here opens a plant event.
+    def in_transit(self) -> list[tuple[str, str]]:
+        """(PO id, material key) of the deliveries still on the way, for the random-event generator."""
+        return [(p.id, p.key) for p in self._pos if p.status in ("在途", "延遲")]
+
+    def delay_delivery(self, at: datetime, po_id: str, late_h: float, text: str) -> None:
+        """The supplier calls: an in-transit delivery comes `late_h` hours later."""
+        p = next((p for p in self._pos if p.id == po_id), None)
+        if p is not None:
+            p.arrive_at = self._receiving_slot(max(p.arrive_at, p.eta) + timedelta(hours=late_h))
+        self._emit(at, "delivery_late", text, po_id)
+
+    def empty_stock(self, at: datetime, key: str) -> None:
+        """A lot fails inspection: the material's stock is gone. The next world step emits `stockout` and reorders,
+        as for any stock that runs out."""
+        if key in self._stock:
+            self._stock[key] = 0.0
 
     def leave_now(self) -> list[dict[str, Any]]:
         """People on leave today, any shift (the team dataset roster's sick days, scripted sick calls, and anyone

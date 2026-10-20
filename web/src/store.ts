@@ -1,9 +1,13 @@
 // Client state: one reducer fed by WsMessages (from the live /ws or from the mock engine).
 import type {
-  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
+  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
 
-export interface ClockState { factory_time: string; speed: number; paused: boolean }
+export interface ClockState {
+  factory_time: string; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock
+  /** issue #36 一日循環: which loop of the day is playing (null outside the loop) */
+  day_loop?: { loop: number; day: string; source_day: string } | null
+}
 
 export interface WarRoomState {
   snapshot: DashboardSnapshot | null

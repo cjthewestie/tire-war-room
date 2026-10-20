@@ -19,6 +19,7 @@ import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { DeskMonitor } from './DeskMonitor'
+import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
@@ -35,7 +36,7 @@ const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息
 const PRESS7 = (SCENARIOS.find((s) => s.name === 'press7_temp_drop')?.label ?? '7 號硫化機溫降').replace(/（.*?）/, '')
 /** Presenter keys → the same /api/sim/control calls as the dashboard's demo strip. Digit0 toggles, so it is built per press. */
 const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: string }> = {
-  Digit1: () => ({ c: { action: 'scenario', scenario: 'press7_temp_drop' }, label: `載入情境：${PRESS7}` }),
+  Digit1: () => ({ c: { action: 'scenario', scenario: 'press7_temp_drop', speed: 10, preroll: true }, label: `載入情境：${PRESS7}` }),
   Digit2: () => ({ c: { action: 'speed', speed: 10 }, label: '10 倍速' }),
   Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
@@ -100,6 +101,8 @@ export function FactoryApp() {
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number } | null>(null)
+  const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
+  const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
   const nearRef = useRef<Near>(null)
@@ -137,6 +140,20 @@ export function FactoryApp() {
     const t = setTimeout(() => setToast(null), 6000)
     return () => clearTimeout(t)
   }, [toast])
+
+  useEffect(() => {
+    const m = success.latest
+    if (!m) return
+    const t = setTimeout(() => setShown(m.key), 5000)
+    return () => clearTimeout(t)
+  }, [success.latest])
+  // test hook (headless e2e only: dev build or ?test=1)
+  useEffect(() => {
+    if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
+    const w = window as unknown as Record<string, unknown>
+    w.__success3d = () => success.all.map((m) => ({ kind: m.kind, title: successTitle(m) }))
+    return () => { delete w.__success3d }
+  }, [success.all])
 
   useEffect(() => {
     if (!demoNote) return
@@ -192,6 +209,14 @@ export function FactoryApp() {
         transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
+      if (e.code === 'Digit4') {          // issue #36: 隨機事件 on / off (the same switch as the demo strip)
+        if (!transport?.setSimEvents || e.repeat) return
+        const on = !state.clock?.random_events?.enabled
+        transport.setSimEvents({ enabled: on }).then(
+          (v) => setDemoNote({ text: v.enabled ? `隨機事件：開（每 ${v.every_min} 分）` : '隨機事件：關', at: Date.now() }),
+          (err) => { console.warn(err); setDemoNote({ text: '隨機事件：沒有成功', at: Date.now() }) })
+        return
+      }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
       if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
@@ -207,7 +232,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -253,7 +278,7 @@ export function FactoryApp() {
         <color attach="background" args={['#e9dfcf']} />
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
-        <World state={state} active={scene === 'factory'} fp={fp} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
@@ -277,6 +302,7 @@ export function FactoryApp() {
           <b>戰情室負責人</b>
           <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}</span>
+          {state.clock?.day_loop && <span className="f3-loop" data-testid="f3-loop">一日循環・第 {state.clock.day_loop.loop} 輪</span>}
           <span className={`f3-conn ${connected ? 'ok' : 'bad'}`}>{connected ? (transport?.mode === 'mock' ? '模擬資料' : '即時連線') : '連線中'}</span>
         </div>
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
@@ -288,8 +314,11 @@ export function FactoryApp() {
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
-        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
+        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>4</kbd> 隨機事件 <kbd>0</kbd> 暫停／播放</span>}
       </div>
+      {success.latest && shown !== success.latest.key && (
+        <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
+      )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>

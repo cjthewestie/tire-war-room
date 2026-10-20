@@ -46,6 +46,18 @@
 
 核准後，**程式**（不是模型）把每個核准步驟轉成人員任務（誰、去哪、做什麼、預計幾點完成）：工人在 3D 走過去做，任務狀態 待派 → 前往中 → 執行中 → 完成 即時更新並寫入稽核（`task`）。工廠事件的驗證等所有任務完成才結案；機台事件（p.11、p.2）的任務照樣派、照樣追蹤，但驗證仍以讀值為準。每條胎有狀態與進度圈：待補料 → 備料中 → 生產中 → 硫化中 → 完成 → 待出貨 → 已出貨；訂單的補料任務沒完成前，它的胎停在「待補料」。程式：`warroom/sim/work.py`、`StateMachine.open_plant_event`；測試 `tests/test_plant_events.py`。
 
+### 一日循環：預設的正常運轉（issue #36）
+
+不選情境時，工廠跑「一日循環」：團隊資料集 2026-10-21 一整天（資料集裡唯一沒有腳本事件的完整一天；10/22 有 EV-1、10/28 有 EV-2，10/23–10/27 沒有資料）。A03 大開煉機、A04 小開煉機、A06 冷卻機、V06–V08 硫化機播放當天實際曲線（10 秒一筆，中間線性內插、70 秒移動平均；A03 當天 ±3.7°C 的慢擺幅縮成 ±2°C，否則偵測器會把最慢的爬升當成過熱），其餘 22 台由模擬器在同一天運轉、用當天班表。24:00 回到 00:00：開著的事件取消、排程回到當天第一版、機台／訂單／貨品／人員／卡車回到當天起點、偵測器重新學基準，稽核日誌記一筆「新的一天（循環 n）」。畫面時間旁顯示「一日循環・第 n 輪」；展示列可跳到 08:00 開工、10:00 出貨、16:00 出貨、24:00 換日（照常快轉過中間的時間）。
+
+當天有完整的訂單到出貨：#W-0397 06:30 完成、10:00 出車，#W-0396 13:30 完成、16:00 出車；09:10、10:40 各進一張新單（後者是急單）。訂單完成與出貨出廠是世界事件 `order_completed`、`shipment_departed`（訂單號、條數、是否準時），寫入稽核、經 `/ws` 送出；3D 工廠跳出「訂單 #X 完成」「出貨 #X 已出廠（n 條）」並在碼頭放彩帶。程式：`warroom/sim/day_loop.py`、`Runtime._wrap_day`；測試 `tests/test_day_loop.py`。
+
+展示列的情境按鈕現在帶情境自己的速度，並先在背景快轉到故障前 15 秒；情境切換在背景執行緒建廠，畫面不再卡住。7 號機溫降從按下到核准卡：152.6 秒 → 16.6 秒（Mac、規則模式，量測於 2026-10-20）。
+
+### 模擬事件：展示時讓工廠自己出狀況（issue #36）
+
+展示列多了 **隨機事件** 開關（3D 工廠按 `4` 也一樣）：打開後每 10／30／60 個模擬分鐘，從加權清單抽一件事件——硫化機蒸汽壓不足、蒸汽洩漏、開煉機冷卻水不足、感測器壞資料（不叫醒 AI）、急單插單、人員請病假、原料到貨延遲、原料缺料（一批驗退）。**觸發事件 ▾** 可以立刻觸發指定的一件。事件不走捷徑：機台故障注入模擬器（和 `/api/sim/fault` 同一條路），要被事件偵測從讀值看出來；插單、病假是工廠事件，由狀態機開事件、寫入一律經閘門（Action Gate）；原料延遲與缺料只改變工廠全貌的庫存與到貨並寫入動態，缺料核准卡由 #38 的巡檢負責。預設關閉；同一個種子（seed，預設 36）抽出同一串事件；關閉時 p.11 腳本結果不變（`tests/test_sim_events.py`）。程式：`warroom/sim/events.py`、`Runtime.fire_sim_event`；API：`GET/POST /api/sim/events`、`POST /api/sim/events/fire`。
+
 ### 3D 工廠（戰情室負責人視角）
 
 打開 `http://localhost:8000/factory`。你是戰情室負責人，以第一人稱站在一座迷你工廠廠房裡（產線、戰情室、員工待命區、卸貨碼頭），從戰情室門口出發，面向產線。畫面全部接即時資料（同一條 `/ws`），28 台機台的燈號：綠＝正常、黃＝注意、紅＝異常／停用；靠近機台會浮出簡稱＋溫度。
@@ -54,6 +66,7 @@
 - 戰情室牆上的大螢幕就是真的儀表板（`/`），即時更新。走到戰情室桌前按 `F` 坐下：真的儀表板全畫面打開，可切分頁、用上方展示列啟動 p.11「7 號硫化機溫降」、核准；`Esc` 或 `F` 起身。走到機台前按 `F`：開即時讀數。
 - 廠房牆上有兩扇門：**休息區**（半場籃球場）和**廁所**是另外的空間，走進門或按 `F` 傳送過去，再從門口走回工廠。在哪裡都收得到核准通知。
 - `P` 拿起主管手機：手上的就是真的 `/phone` 頁，可直接核准／駁回、打字問戰情室；`P` 或 `Esc` 放下。有新的待核准時手機會震動、響鈴，畫面上方跳通知。
+- 每台機台頭上都有進度圈（issue #36）：人員任務（暖機、檢修、補料…）優先，其次是維修、異常（紅色全圈）、目前這一批／這一模硫化的進度；閒置只留一個淡色小點。正在硫化或備料的機台，任務圈疊在貨品圈上方。
 - 低多邊形、全部程式產生，不下載模型。程式：`web/src/factory3d/`；無頭測試：`node web/e2e/factory3d.mjs http://localhost:8000`（截圖在 `web/e2e/screenshots/factory-*.png`）。
 
 ### 一行啟動（Mac，Apple Silicon）
@@ -149,6 +162,14 @@ Step by step, with what to click and what to say: [`docs/DEMO-SCRIPT.md`](docs/D
 
 The phone page has a 問戰情室 box. It is not a second agent: the same Nemotron picks up to 4 read steps (JSON, schema-constrained), code runs only `ASK_TOOLS` (read sensors, predict, cure formula, orders/shifts, SOP) through the same registry, and the model then answers from those results only (numbers copied, never estimated). Write tools, `solve_schedule` (it stores a PROPOSED version) and names off the allow-list are refused and logged `INTERCEPTED`; every question, call and answer goes into the same hash-chained audit log under an `ASK-nnnn` id. Same session rule as approvals (PIN on the LAN, on-site only when the LAN is down). Code also checks the answer: a number that is not in the tool results replaces the model's answer with the results, and a change request (停掉, 重排, 調人...) never gets a model-written answer. The check covers numbers only, not wording (a real-model run once called press 7 「正常運作」). Mock mode uses keyword rules and a template answer; an invalid plan or a model failure falls back to them. Real Nemotron on the Mac (Ollama, 2026-10-18): 5 questions, 0 fallbacks, 0.5–3.2 s each once loaded. Code: `warroom/agent/ask.py`, `POST /api/ask`; tests: `tests/test_ask.py`.
 
+### Day loop: the default running state (issue #36)
+
+With no scenario chosen, the plant plays one day of the team dataset (2026-10-21, the only full day without a scripted event) from 00:00 to 24:00 and wraps back to 00:00 with no freeze and no false alarm: open events are cancelled, the schedule, machines, orders, goods, people and trucks return to their start-of-day state, the detector relearns, and the audit log records 「新的一天（循環 n）」. The six dataset machines replay that day's curves (A03's ±3.7 °C swing scaled to ±2 °C); the other 22 run the simulator on the same date and roster. The day carries a full order-to-shipment chain, with `order_completed` and `shipment_departed` world events (order id, qty, on time) shown as a success moment in the 3D factory. Demo buttons now send their scenario speed and pre-roll to 15 s before the fault; the scenario build runs off the event loop (press-7 button to approval card: 152.6 s → 16.6 s, Mac, rule mode).
+
+### Simulated events (issue #36)
+
+The demo strip has a **隨機事件** (random events) switch, also key `4` in the 3D factory: every 10 / 30 / 60 factory minutes it draws one event from a weighted list (steam pressure drop, steam leak, cooling-water drop, a bad sensor sample that must not wake the AI, rush order, sick call, late delivery, a stock-out). **觸發事件 ▾** fires a chosen one now. Machine events are sim faults the detector has to find in the readings; order and people events are plant events the state machine opens, with every write through the Action Gate; material events only move the world's stock and deliveries (the shortfall card is #38's patrol). Off by default; one seed gives one sequence; page 11 is unchanged while it is off (`tests/test_sim_events.py`). Code: `warroom/sim/events.py`; API `GET/POST /api/sim/events`, `POST /api/sim/events/fire`.
+
 ### 3D factory (the war-room lead's view)
 
 Open `http://localhost:8000/factory`. You are the war-room lead, in first person, inside a miniature factory building (production lines, war room, staff corner, loading dock), starting at the war-room door facing the lines. Everything is live data from the same `/ws`: each of the 28 machines has a status light (green normal, amber warning, red alarm / out of service) and shows its short name and temperature when you walk near.
@@ -157,6 +178,7 @@ Open `http://localhost:8000/factory`. You are the war-room lead, in first person
 - The big screen on the war-room wall is the real dashboard (`/`), live. `F` at the war-room desk sits you down at the computer: the real dashboard opens full-size (tabs, the demo strip to start the p.11 press-7 temperature drop, approvals); `Esc` or `F` stands up. `F` at a machine opens its live readings.
 - Two doors on the hall walls lead to the **break area** (half court) and the **restroom**, which are separate spaces: walk into the door or press `F` to go there, and back the same way. Approval alerts reach you anywhere.
 - `P` raises the supervisor phone: it is the real `/phone` page, so you can approve / reject and type into 問戰情室; `P` or `Esc` lowers it. A new pending approval buzzes the phone, rings and shows a toast.
+- Every machine has a progress ring overhead (issue #36): a worker task there first (warm-up, repair, feeding), then maintenance, an alarm (full red), then the current batch or cure; idle machines show a small dim dot.
 - Low-poly and fully procedural, no model downloads. Code: `web/src/factory3d/`; headless check: `node web/e2e/factory3d.mjs http://localhost:8000` (screenshots in `web/e2e/screenshots/factory-*.png`).
 
 ### Measured numbers vs targets
