@@ -173,7 +173,9 @@ class Factory:
     # issue #20 Q1: orders and what every press holds come from the team dataset (orders.csv, tire_unit.csv) as of
     # one dataset moment, shifted onto the scenario's clock. Page 11 plays the EV-2 night (10/28 02:12 -> 10/03),
     # page 2 the EV-1 afternoon (10/22), every other scenario the same night at its own time of day.
-    _PLAN_DAY = {ScenarioName.OPEN_MILL_OVERHEAT: date(2026, 10, 22), ScenarioName.DAY_LOOP: date(2026, 10, 21)}
+    # (concurrent_3 injects faults on presses 3 and 10 at 10:00: the dataset day on which both are curing then)
+    _PLAN_DAY = {ScenarioName.OPEN_MILL_OVERHEAT: date(2026, 10, 22), ScenarioName.DAY_LOOP: date(2026, 10, 21),
+                 ScenarioName.CONCURRENT_3: date(2026, 10, 27)}
     _PLAN_DAY_DEFAULT = date(2026, 10, 28)
 
     def _plan_anchor(self, sc: Scenario) -> datetime:
