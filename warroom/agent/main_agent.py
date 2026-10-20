@@ -72,9 +72,10 @@ SYSTEM = """你是實心胎工廠戰情室的「主 agent」（調度員），�
   派一個子 agent 擬計劃（它擬好會送主管核准，核准後才執行）。只有主管要「做一件事」且說得出對象（機台、訂單、原料、人）時才派。
 - discuss_waiting_plan {text}：主管在談「目前選的待核准計劃」（加條件、問為什麼）時用。
 規則：
+0. 只回應 message 這一句；earlier_messages 是主管前面說過的話，只在 message 接著前文時參考（例如「那 8 號呢？」）。
 1. 你不能直接改任何東西；要動到現場只能派子 agent，計劃要主管按「核准並派發」。
 2. 數字只能來自工具結果或 context，不要自己估。
-3. 打招呼、問你是誰、閒聊：直接 reply，不呼叫工具。看不懂的字：請主管再說一次，不要派工作。
+3. 打招呼、問你是誰、閒聊：直接 reply，不呼叫工具；問你是誰就說「我是主 agent」＋你能做什麼（查狀況、查 SOP、派子 agent 擬計劃）；「你好」就打招呼回去，問主管要查什麼或安排什麼。看不懂的字：請主管再說一次，不要派工作。
 4. 回覆要短：2–3 句，不要長篇解釋。
 5. 主管用「請／幫我／安排／重排／通知／調人／補料」要你做事，而且說得出對象時，一定要呼叫對應的 dispatch 工具（可先查資料），
    然後回覆「已請 X 子 agent 擬計劃，擬好會送你核准」。例：
@@ -112,6 +113,14 @@ def wants_task(text: str) -> bool:
     """「請／幫我…」 with a concrete object, and not a question."""
     t = text.strip()
     return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t)) and has_object(t) and not re.search(r"[?？]\s*$", t)
+
+
+def wants_lookup(text: str) -> bool:
+    """A question about the plant (「大開煉機過熱怎麼處理」「7 號機現在怎樣」): answered from a read tool, never from memory."""
+    t = text.strip()
+    if _IDENTITY_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t) or wants_task(t):
+        return False
+    return bool(re.search(r"SOP|怎麼處理|處置", t) or (_QUESTION_RX.search(t) and has_object(t)))
 
 
 def ungrounded(reply: str, source: str) -> list[str]:
@@ -217,14 +226,17 @@ class MainAgent:
     # ---------------------------------------------------------------- the model loop
     async def _model_loop(self, text, context, waiting_plan, out, run_tool, dispatch, discuss, tid, slot=None) -> None:
         msgs: list[dict[str, str]] = [{"role": "system", "content": SYSTEM + plant.section()}]
-        for q, a in self.memory:
-            msgs += [{"role": "user", "content": q}, {"role": "assistant", "content": json.dumps({"action": "reply", "reply": a}, ensure_ascii=False)}]
-        ctx = {"message": text, "context": context, "waiting_plan": waiting_plan}
+        # earlier turns ride along as reference inside the one user message, the supervisor's words only. Real runs
+        # (2026-10-21): replayed as chat turns, Nemotron answered the previous topic (「你好」 → 7 號機讀值); with its own
+        # answers alongside, it copied them (「大開煉機過熱怎麼處理」 → the greeting again).
+        ctx = {"message": text, "earlier_messages": [q for q, _a in self.memory], "context": context, "waiting_plan": waiting_plan}
         msgs.append({"role": "user", "content": json.dumps(ctx, ensure_ascii=False, default=str)})
         from warroom.agent.commander import thinking_off
         extra = thinking_off(self.server_kind)
         source = text + " " + json.dumps(context, ensure_ascii=False, default=str) + " " + (waiting_plan or "")
         nudged = waiting_plan is not None             # a message about the selected plan is a discussion, not a new task
+        called: set[tuple[Any, str]] = set()
+        looked = waiting_plan is not None
         for i in range(MAX_STEPS + 1):
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
             async with (slot() if slot else contextlib.nullcontext()):
@@ -235,6 +247,13 @@ class MainAgent:
             raw = (r.choices[0].message.content or "").strip()
             d = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw))
             # Nemotron sometimes writes {"action": "reply", "tool": "read_sensors", "reply": ""}: that is a tool call
+            call = (d.get("tool"), json.dumps(d.get("args") or {}, sort_keys=True, ensure_ascii=False))
+            if d.get("tool") and call in called and i < MAX_STEPS:
+                # the same call again: the result is already above, so ask for the reply instead of looping
+                msgs += [{"role": "assistant", "content": raw},
+                         {"role": "user", "content": f"{d['tool']} 剛查過了，結果在上面。現在用 2–3 句回覆主管（action=reply）。"}]
+                continue
+            called.add(call)
             if (d.get("action") == "tool" or not str(d.get("reply") or "").strip()) and d.get("tool") and i < MAX_STEPS and not (out["event_id"] and d["tool"] in DISPATCHES):
                 result = await self._tool(d["tool"], d.get("args") or {}, text, out, tid, run_tool, dispatch, discuss)
                 source += " " + result
@@ -242,8 +261,24 @@ class MainAgent:
                          {"role": "user", "content": f"工具 {d['tool']} 結果：{result}\n接著：再查一個工具，或用 2–3 句回覆主管。"}]
                 continue
             reply = str(d.get("reply") or "").strip()
+            if not reply and out["steps"]:            # out of steps with results in hand: the results speak
+                reply, out["error"] = self._results_reply(out["steps"]) or self._dispatch_reply(out["steps"]), f"no reply after tools: {raw[:120]}"
             if not reply:
                 raise ValueError(f"empty reply: {raw[:160]}")
+            if not out["steps"] and wants_lookup(text) and waiting_plan is None:
+                read = [st for st in mock_plan(text, context).steps if st.tool in READ_TOOLS]
+                if not looked and read and i < MAX_STEPS:
+                    # a plant question answered without looking: remind the model once which tool answers it
+                    looked = True
+                    msgs += [{"role": "assistant", "content": raw},
+                             {"role": "user", "content": f"主管在問工廠的事，不是閒聊。先呼叫 {read[0].tool} 查資料，再用 2–3 句回覆。"}]
+                    continue
+                if read:                              # still nothing read: code reads by the rules, the results speak
+                    for st in read[:MAX_STEPS]:
+                        await self._tool(st.tool, st.args, text, out, tid, run_tool, dispatch, discuss)
+                    out.update(reply=self._results_reply(out["steps"]) or reply, fell_back=True,
+                               error="model answered a plant question without a tool; read by rules")
+                    return
             if not nudged and not out["event_id"] and wants_task(text) and i < MAX_STEPS:
                 # the supervisor asked for something to be done: remind the model once that a dispatch does that
                 nudged = True

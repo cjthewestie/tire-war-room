@@ -185,7 +185,7 @@ check('admin runs lists events and asks', (await p.locator('[data-testid="runs"]
 await p.click('[data-testid="admin-plant"]')
 await p.waitForSelector('[data-testid="plant-text"]')
 const sha0 = await p.locator('[data-testid="plant-active-sha"]').innerText()
-await p.locator('[data-testid="plant-text"]').fill((await p.locator('[data-testid="plant-text"]').inputValue()) + '\n- 測試用語：e2e。')
+await p.locator('[data-testid="plant-text"]').fill((await p.locator('[data-testid="plant-text"]').inputValue()) + `\n- 測試用語：e2e ${Date.now()}。`)
 await p.click('[data-testid="plant-save"]')
 await p.waitForFunction(() => !document.querySelector('[data-testid="plant-test"]')?.hasAttribute('disabled'), null, { timeout: 5000 })
 check('PLANT.md: activate is locked before a test run', await p.locator('[data-testid="plant-activate"]').isDisabled())

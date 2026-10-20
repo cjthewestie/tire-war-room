@@ -488,3 +488,30 @@ async def test_rule_reply_names_the_sop_without_pasting_it():
     h = _Harness()
     out = await h.turn(MainAgent(), "大開煉機過熱怎麼處理")
     assert "SOP-OM-01" in out["reply"] and len(out["reply"]) < 160, out["reply"]
+
+
+async def test_main_agent_does_not_repeat_a_call_and_keeps_memory_as_reference():
+    rs = _step("read_sensors", {"machine_ids": ["CURE-07"]})
+    llm = _SeqLLM([rs, rs, _step(reply="7 號機讀值正常。")])
+    h = _Harness()
+    agent = MainAgent(_settings(), client=llm)
+    out = await h.turn(agent, "7 號機現在怎樣")
+    assert h.tools == ["read_sensors"] and out["reply"] == "7 號機讀值正常。"
+    llm.steps = [_step(reply="你好，我是主 agent。")]
+    await h.turn(agent, "你好")
+    sent = llm.calls[-1]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user"] and "earlier_messages" in sent[1]["content"]
+    assert "7 號機讀值正常" not in sent[1]["content"]          # its own answers are not replayed (the model copied them)
+
+
+async def test_main_agent_looks_up_a_plant_question_before_answering():
+    # real run 2026-10-21: 「大開煉機過熱怎麼處理」 answered with the greeting, no tool
+    llm = _SeqLLM([_step(reply="我是主 agent，可以幫你查 SOP。"), _step("sop_search", {"query": "大開煉機過熱", "k": 2}),
+                   _step(reply="依 SOP-OM-01 處理。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
+    assert h.tools == ["sop_search"] and out["reply"] == "依 SOP-OM-01 處理。" and not out["fell_back"]
+    llm = _SeqLLM([_step(reply="我是主 agent。"), _step(reply="我是主 agent。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
+    assert "sop_search" in h.tools and "SOP-OM-01" in out["reply"] and out["fell_back"]
