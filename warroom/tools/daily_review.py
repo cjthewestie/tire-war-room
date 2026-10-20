@@ -15,7 +15,7 @@ LLM client, and does not change the state machine. It does not verify the hash c
 Suspected-misclassification flags (``疑似分錯``):
   repeat_machine   the same machine opened more than one detector event that day
   hypothesis_swap  a hypothesis was overturned, or the commander changed cause_code within one event
-  supervisor_veto  the supervisor rejected a plan or picked a different option than proposed
+  supervisor_veto  the supervisor rejected a plan, or picked a different option than in an earlier round
   discuss_unclear  a discussion message was classified unclear / unsupported
   safe_stop        the event ended in a safe stop (the automatic path gave up)
   llm_fallback     the commander's model output was rejected and the rule fallback ran
@@ -132,6 +132,7 @@ def build_reviews(entries: list[dict[str, Any]], date: str | None = None) -> lis
         r = EventReview(event_id=eid, first_ts=str(first.get("ts", "")))
         if opened:
             r.source = _source_from(str(opened[0]["payload"].get("reason", "")))
+        last_option: str | None = None      # option picked in the previous approval round of this event
         for x in items:
             p = x.get("payload") if isinstance(x.get("payload"), dict) else {}
             kind, actor = x.get("kind"), x.get("actor")
@@ -157,6 +158,13 @@ def build_reviews(entries: list[dict[str, Any]], date: str | None = None) -> lis
                     r.rejects += 1
                 elif p.get("decision") == "modify":
                     r.modifies += 1
+                opt = p.get("option_id")
+                if p.get("decision") in ("approve", "modify") and opt:
+                    # a later round that picks a different option than the earlier round = the supervisor
+                    # changed their mind (p.11: round 1 "B 從 2 線調 1 人", round 2 "A 夜班加班")
+                    if last_option is not None and opt != last_option and p.get("decision") == "approve":
+                        r.modifies += 1
+                    last_option = str(opt)
             elif kind in ("gate", "intercepted") and (p.get("dropped") or kind == "intercepted"):
                 r.gate_blocks += 1
             elif kind == "safety_action":

@@ -40,6 +40,11 @@ def _log(tmp_path: Path) -> Path:
         st("EV-3", None, "detected", "supervisor command"),
         ("system", "agent", "EV-3", {"discuss_reply": {"id": "DIS-1", "intent": "unclear"}}, d1),
         st("EV-3", "detected", "safe_stop", "連續失敗"),
+        # E5: p.11 style: round 1 approve option B, round 2 approve option A (supervisor changed the choice)
+        an("EV-5", "CURE-09", "temp_drop"), st("EV-5", None, "detected", "detector wake-up"),
+        ("approval_decision", "supervisor", "EV-5", {"decision": "approve", "option_id": "B", "round": 1}, d1),
+        ("approval_decision", "supervisor", "EV-5", {"decision": "approve", "option_id": "A", "round": 2}, d1),
+        st("EV-5", "detected", "closed", "verified"),
         # E4: next day, must not show up for --date 2026-10-22
         an("EV-4", "A-MIX", "overheat", d2), st("EV-4", None, "detected", "detector wake-up", d2),
         # an "ask" conversation is not an event
@@ -54,7 +59,7 @@ def test_reviews_flags_and_filters(tmp_path):
     entries, skipped = dr.read_entries(_log(tmp_path))
     assert skipped == 1
     rv = {r.event_id: r for r in dr.build_reviews(entries, "2026-10-22")}
-    assert set(rv) == {"EV-1", "EV-2", "EV-3"}            # next-day event and the ask are out
+    assert set(rv) == {"EV-1", "EV-2", "EV-3", "EV-5"}            # next-day event and the ask are out
 
     e1 = rv["EV-1"]
     assert (e1.machine_id, e1.source, e1.ended) == ("CURE-07", "偵測器", "結案")
@@ -63,6 +68,8 @@ def test_reviews_flags_and_filters(tmp_path):
     assert {"repeat_machine", "hypothesis_swap", "supervisor_veto"} <= set(e1.flags)
 
     assert rv["EV-2"].flags == ["repeat_machine"]
+    e5 = rv["EV-5"]                                   # same option twice would not count; B then A does
+    assert (e5.rejects, e5.modifies) == (0, 1) and e5.flags == ["supervisor_veto"]
     e3 = rv["EV-3"]
     assert e3.source == "主管指令" and e3.ended == "安全中止"
     assert set(e3.flags) == {"discuss_unclear", "safe_stop"}
@@ -71,7 +78,7 @@ def test_reviews_flags_and_filters(tmp_path):
 def test_all_days_and_outputs(tmp_path):
     entries, skipped = dr.read_entries(_log(tmp_path))
     reviews = dr.build_reviews(entries)
-    assert len(reviews) == 4
+    assert len(reviews) == 5
     md = dr.to_markdown(reviews, None, skipped)
     assert "疑似分錯清單" in md and "EV-1" in md and "1 行無法解析" in md
     csv_text = dr.to_csv(reviews)
