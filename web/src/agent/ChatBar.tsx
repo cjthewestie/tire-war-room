@@ -16,9 +16,9 @@ export type BarMode = 'discuss' | 'command' | 'ask'
 let askSeq = 0
 const nowIso = () => new Date().toISOString()
 
-export function ChatBar({ ev, waiting, setAsks, focus }: {
-  ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick?: (id: string) => void
-  focus: BarFocus | null
+export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
+  ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
+  focus: BarFocus | null; onSent?: (about: string | null) => void
 }) {
   const { transport, state } = useWarRoom()
   const [q, setQ] = useState('')
@@ -33,21 +33,23 @@ export function ChatBar({ ev, waiting, setAsks, focus }: {
   const can = !!transport?.message
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? ''
-  const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, key: string, n: number, ts: string, pending: boolean): ChatItem => ({
+  const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, key: string, n: number, ts: string, pending: boolean, about: string | null): ChatItem => ({
     k: 'chat', key, ts, seq: 1e9 + n, role, kind, text, by: role === 'me' ? 'supervisor' : 'main_agent', intent: null, version: null,
-    changes: [], constraints: [], classifiedBy: null, fellBack: false, pending,
+    changes: [], constraints: [], classifiedBy: null, fellBack: false, pending, about,
   })
   const send = async (raw: string) => {
     const text = raw.trim()
     if (!text || busy || !can || !transport?.message) return
     const n = ++askSeq
+    const about = waiting ? ev?.id ?? null : null
+    onSent?.(about)
     const keys = [`me-${n}`, `ag-${n}`]
     const ts = ft || nowIso()
     setQ('')
     setBusy(true)
-    setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true), chat('agent', 'reply', '主 agent 判讀中…', keys[1], n + 0.5, ts, true)])
+    setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true, about), chat('agent', 'reply', '主 agent 思考中…', keys[1], n + 0.5, ts, true, about)])
     try {
-      const r: MainReply = await transport.message(text, waiting ? ev?.id ?? null : null)
+      const r: MainReply = await transport.message(text, about)
       // the reply (with its tool line) stays here until the server's audit row of this turn replaces it
       setAsks((xs) => xs.map((x) => (x.key === keys[0] && x.k === 'chat' ? { ...x, pending: false, turn: r.id }
         : x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply, turn: r.id, steps: r.steps, fellBack: r.fell_back, error: r.error } : x)))

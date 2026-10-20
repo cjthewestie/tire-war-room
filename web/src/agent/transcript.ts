@@ -46,6 +46,8 @@ export interface ChatItem extends Base {
   pending?: boolean
   /** issue #54: a 主 agent turn — its id, the tool calls behind the reply (one grey line), a rule-fallback note */
   turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean }[]; error?: string | null
+  /** the waiting plan (event id) this message was about; null = a new message to the 主 agent */
+  about?: string | null
 }
 /** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }

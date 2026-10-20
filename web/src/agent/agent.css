@@ -593,9 +593,10 @@
 
 /* ---------- plain 主 agent conversation + switcher (issue #54, CJ: 「單純一點好嗎」) ---------- */
 .con-h.sw { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
-.sw-pick { flex: 1 1 200px; min-width: 0; max-width: 100%; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14px; font-weight: 700; }
-.sw-n { margin-left: auto; }
-.con-h.sw .con-full { margin-left: 0; }
+.sw-pick { flex: 1 1 100%; min-width: 0; max-width: 100%; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14px; font-weight: 700; }
+.sw-top { flex: 1 1 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sw-title { margin: 0; font-size: 15px; font-weight: 700; }
+.con-h.sw .con-full { margin-left: auto; }
 .sc { gap: 10px; }
 .sc-row { display: flex; flex-direction: column; align-items: flex-start; max-width: 92%; }
 .sc-row.me { align-self: flex-end; align-items: flex-end; }
@@ -620,3 +621,4 @@
 .tree-row { font-size: 13.5px; line-height: 1.4; }
 .main-thread { min-height: 60vh; }
 .main-thread .con-body { padding: 0; }
+.sp-talk { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-3); padding-top: 8px; margin-top: 4px; }

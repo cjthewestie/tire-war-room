@@ -9,6 +9,8 @@ import type { LocalItem } from './transcript'
 export interface Bubble {
   key: string; ts: string; who: 'me' | 'agent'; text: string; pending?: boolean
   steps?: { label: string; summary: string; ok: boolean }[]; fellBack?: boolean; error?: string | null
+  /** the waiting plan (event id) the message was about */
+  about?: string | null
 }
 
 type D = Record<string, unknown>
@@ -19,8 +21,9 @@ function fromAudit(e: AuditEntry): Bubble[] {
   const o = String(p.orch ?? '')
   if (o === 'chat') {
     const steps = Array.isArray(p.steps) ? (p.steps as D[]).map((s) => ({ label: String(s.label ?? s.tool ?? ''), summary: String(s.summary ?? ''), ok: s.ok !== false })) : []
-    return [{ key: `a${e.seq}-me`, ts: e.ts, who: 'me', text: String(p.text ?? '') },
-      { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null }]
+    const about = (p.selected as string) ?? null
+    return [{ key: `a${e.seq}-me`, ts: e.ts, who: 'me', text: String(p.text ?? ''), about },
+      { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null, about }]
   }
   if (o === 'report' || o === 'interrupt' || (o === 'dispatch' && p.phase === 'execute')) {
     return [{ key: `a${e.seq}`, ts: e.ts, who: 'agent', text: shortText(String(p.text ?? '')) }]
@@ -53,7 +56,7 @@ export function useMainThread(asks: LocalItem[]): Bubble[] {
     for (const it of asks) {
       if (it.k !== 'chat' || (it.turn && turns.has(it.turn))) continue
       out.push({ key: it.key, ts: it.ts, who: it.role === 'me' ? 'me' : 'agent', text: it.text, pending: it.pending, steps: it.steps,
-        fellBack: it.fellBack, error: it.error })
+        fellBack: it.fellBack, error: it.error, about: it.about ?? null })
     }
     return out
   }, [backfill, state.audit, asks])

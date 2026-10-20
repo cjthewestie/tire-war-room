@@ -49,8 +49,9 @@ function BubbleRow({ b }: { b: Bubble }) {
   )
 }
 
-/** One subagent in the 主控台 panel: where it is, what it did (tools with results), the workers, and 中斷. */
-export function SubProgress({ ev }: { ev: Event }) {
+/** One subagent in the 主控台 panel: where it is, what it did (tools with results), the workers, 中斷, and what the
+ *  supervisor said about its waiting plan (`talk`). */
+export function SubProgress({ ev, talk = [] }: { ev: Event; talk?: Bubble[] }) {
   const { state, transport } = useWarRoom()
   const sa = state.subagents?.items.find((x) => x.id === ev.id)
   const { items } = useTranscript(ev)
@@ -79,6 +80,7 @@ export function SubProgress({ ev }: { ev: Event }) {
         {!tools.length && <li className="muted">還沒用工具</li>}
       </ul>
       {tasks.length > 0 && <TaskList tasks={tasks} eventId={ev.id} compact testId="sp-tasks" />}
+      {talk.length > 0 && <div className="sc sp-talk" data-testid="sp-talk">{talk.map((b) => <BubbleRow key={b.key} b={b} />)}</div>}
     </div>
   )
 }

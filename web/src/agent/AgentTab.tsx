@@ -88,6 +88,10 @@ function Console({ view, setView, planEv, events, asks, setAsks, focus, onFull }
   return (
     <section className="console panel" aria-label="主 agent 對話">
       <header className="con-h sw">
+        <div className="sw-top">
+          <h2 className="sw-title">主 agent ▸ 派出的子 agent</h2>
+          <span className="muted small sw-n" data-testid="sw-counts">子 agent {subs.length}・進行中 {subs.filter(isOpen).length}</span>
+        </div>
         <select className="sw-pick" value={ev ? ev.id : 'main'} onChange={(e) => setView(e.target.value)} aria-label="主 agent 或子 agent" data-testid="agent-switch">
           <option value="main">主 agent</option>
           {listed.map((x) => <option key={x.id} value={x.id}>{isOpen(x) ? '● ' : '○ '}{whatOf(x, events.find((e) => e.id === x.id))}：{plainStatus(x)}</option>)}
@@ -98,11 +102,11 @@ function Console({ view, setView, planEv, events, asks, setAsks, focus, onFull }
             <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'open' ? '處理中' : s === 'closed' ? '已結案' : '全部'}</button>
           ))}
         </div>
-        <span className="muted small sw-n" data-testid="sw-counts">子 agent {subs.length}・進行中 {subs.filter(isOpen).length}</span>
         <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
       </header>
-      {ev ? <SubProgress ev={ev} /> : <Bubbles items={thread} empty="跟主 agent 說要做的事，或問工廠現在的狀況。" />}
-      <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
+      {ev ? <SubProgress ev={ev} talk={thread.filter((b) => b.about === ev.id)} /> : <Bubbles items={thread} empty="跟主 agent 說要做的事，或問工廠現在的狀況。" />}
+      {/* a new message shows in the 主 agent conversation; a word about the waiting plan stays with its subagent */}
+      <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} onSent={(about) => { if (!about || (ev && about !== ev.id)) setView(about ?? 'main') }} />
     </section>
   )
 }

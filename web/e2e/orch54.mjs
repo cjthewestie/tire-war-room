@@ -87,8 +87,9 @@ const sw = p.locator('[data-testid="agent-switch"]')
 check('switcher: 主 agent first, then subagents as 「<what>：<status>」', (await sw.locator('option').first().innerText()) === '主 agent' && await sw.locator('option').count() >= 1)
 await p.click('.con-h.sw .seg button:has-text("全部")')
 await sw.selectOption(me.id)
-check('selecting a subagent shows its progress inline (status, tools)', await until(async () => (await p.locator('[data-testid="sub-progress"]').count()) === 1, 10) &&
-  /(完成|等現場完成|執行中)/.test(await p.locator('[data-testid="sub-progress"] .sp-status').innerText()), await p.locator('[data-testid="sub-progress"] .sp-status').innerText().catch(() => ''))
+// the subagent list refreshes every 4 s, so the status may still read 等你核准 for a moment after the approval
+check('selecting a subagent shows its progress inline (status, tools)', await until(async () => (await p.locator('[data-testid="sub-progress"]').count()) === 1 &&
+  /(完成|等現場完成|執行中)/.test(await p.locator('[data-testid="sub-progress"] .sp-status').innerText()), 20), await p.locator('[data-testid="sub-progress"] .sp-status').innerText().catch(() => ''))
 await p.screenshot({ path: `${OUT}/home-switch-sub-1440.png` })
 await sw.selectOption('main')
 check('back to the 主 agent conversation', await p.locator('[data-testid="sc-agent"]').count() >= 2)

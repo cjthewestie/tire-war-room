@@ -416,8 +416,9 @@ class Orchestrator:
                 if r.decision is not None:
                     decided.append(f"{_DECISION.get(r.decision.decision.value, r.decision.decision.value)}"
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
-        head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "安全中止"
-        parts = [f"{TYPES[sub.type]}子 agent {head}：{(ev.outcome or '').strip() or '無需動作'}"]
+        head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "已停止"
+        outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
+        parts = [f"{TYPES[sub.type]}子 agent {head}：{outcome or '無需動作'}"]
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
         parts.append(f"核准：{'、'.join(decided)}" if decided else "沒有核准")
         return "。".join(parts), {"writes": writes, "approvals": decided, "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
