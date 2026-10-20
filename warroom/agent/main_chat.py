@@ -21,6 +21,7 @@ from warroom.agent.ask import THANKS_REPLY, smalltalk_reply
 INTENTS = ("chitchat", "question", "change", "task", "unclear")
 IDENTITY_REPLY = "我是主 agent（戰情室的 orchestrator），負責把計劃派給子 agent 執行並回報。你可以直接說要做的事，或問工廠現在的狀況。"
 HELLO_MAIN_REPLY = "你好，我是主 agent。要我規劃一件事，或查工廠狀況，直接說就好。"
+NO_DATA_MAIN = "這個我手上的資料查不到（我能查機台讀值、訂單與班表、SOP）。你想知道哪一張訂單、哪台機台，還是要我規劃一件事？"
 UNCLEAR_MAIN = "我想確認一下：你是要我查資料，還是要我規劃一件事？例如「7 號機現在怎樣？」或「#M-201 可能晚交，請重排」。"
 
 _IDENTITY_RX = re.compile(r"^\s*(?:請問)?\s*(?:你|妳|您)(?:是誰|是什麼|叫什麼|能做什麼|會做什麼|會什麼|可以做什麼|的工作)|介紹(?:一下)?(?:你|妳|您)自己|who are you", re.IGNORECASE)

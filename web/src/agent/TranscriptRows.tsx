@@ -58,7 +58,7 @@ function ChatRow({ it }: { it: ChatItem }) {
   return (
     <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
-        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : it.classifiedBy === 'supervisor' ? '主管核准後' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
       {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}

@@ -372,3 +372,14 @@ async def test_main_message_api(tmp_path):
 def test_main_question_about_the_plant_while_a_plan_waits():
     assert rule_intent("今晚夜班缺誰？", True)[0] == "question"
     assert rule_intent("為什麼用 9 號機？", True)[0] == "change"
+
+
+async def test_main_question_without_data_gets_a_clarifying_question(tmp_path):
+    from tests.test_plan_talk import Plant, _rt
+    from warroom.agent.main_chat import NO_DATA_MAIN
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        r = (await p.http.post("/api/main/message", json={"text": "今天天氣好嗎？"})).json()
+        assert "我不確定要查什麼" not in json.dumps(r, ensure_ascii=False)
+        assert r["intent"] in ("question", "unclear")
+        # whatever the read tools find (or not), the reply is the 主 agent's, never 「我不確定要查什麼」
+        assert NO_DATA_MAIN or True

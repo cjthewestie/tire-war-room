@@ -938,6 +938,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         out: dict[str, Any] = {**c, "event_id": None, "ask": None, "discuss": None}
         if c["intent"] == "question":
             out["ask"] = (await ask(AskRequest(question=text), session)).model_dump(mode="json")
+            from warroom.agent.ask import UNCLEAR_REPLY
+            if str(out["ask"].get("answer", "")).startswith(UNCLEAR_REPLY[:8]):
+                # the read tools have nothing for it: the 主 agent asks one clarifying question instead
+                from warroom.agent.main_chat import NO_DATA_MAIN
+                out["ask"]["answer"], out["reply"] = NO_DATA_MAIN, NO_DATA_MAIN
         elif c["intent"] == "change" and body.event_id:
             out["discuss"] = (await discuss(body.event_id, DiscussRequest(text=text), session)).model_dump(mode="json")
             out["event_id"] = body.event_id
