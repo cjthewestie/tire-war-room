@@ -62,6 +62,8 @@ async function getJSON<T>(path: string): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${path}${await errDetail(r)}`)
   return (await r.json()) as T
 }
+/** Live read-only GET for pages outside the Transport interface (狀態機, 每日事件紀錄). */
+export const apiGet = getJSON
 
 // Writes from a LAN client (the phone) need the supervisor PIN (server: WARROOM_SUPERVISOR_PIN).
 // It is entered when asked and sent only in the X-Supervisor-Pin header: never read from or put in a

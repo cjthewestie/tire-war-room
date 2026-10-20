@@ -1,6 +1,6 @@
 // War room home 主控台 (was 對話台; CJ, 2026-10-20: 「這個 page 改成主控台名字」): the 核准區 list, the 計劃板 of the selected item and the docked Agent dialogue;
 // 產線監控 (proposal page 2 + the whole plant, which was 工廠全貌), 人力排程 (pages 4, 6, 11), 訂單, Agent (the full
-// transcript) and 後台 are the other tabs (#monitor, #schedule, #orders, #console, #admin); #world still opens 產線監控.
+// transcript), 狀態機 (live board + 每日事件紀錄) and 後台 are the other tabs (#monitor, #schedule, #orders, #console, #sm, #admin); #world still opens 產線監控.
 // CJ, 2026-10-20: 「產線監控跟人力排程是個別頁面」「產線監控跟工廠全貌…重複到了…可以合併一下」.
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Line } from './contracts'
@@ -18,12 +18,13 @@ import { readConsoleEvent } from './agent/consoleHash'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
+const StateMachinePage = lazy(() => import('./statemachine/StateMachinePage').then((m) => ({ default: m.StateMachinePage })))
 const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default: m.AdminPage })))
 
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
   return h === '#schedule' ? 'schedule' : h === '#monitor' || h === '#world' ? 'monitor' : h === '#orders' ? 'orders'
-    : h === '#console' ? 'console' : h === '#admin' ? 'admin' : 'agent'
+    : h === '#console' ? 'console' : h === '#sm' ? 'sm' : h === '#admin' ? 'admin' : 'agent'
 }
 
 function Dashboard() {
@@ -69,6 +70,7 @@ function Dashboard() {
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <><TodayPlan /><ScheduleTab /></> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} initial={consoleEvent} /></Suspense>
+        : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
@@ -88,6 +90,9 @@ function Dashboard() {
         </button>
         <button className={tab === 'console' ? 'on' : ''} aria-current={tab === 'console' ? 'page' : undefined} aria-label="Agent 完整過程" onClick={() => go('console')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v14H4zM7 9l3 3-3 3M12 15h5" /></svg>Agent
+        </button>
+        <button className={tab === 'sm' ? 'on' : ''} aria-current={tab === 'sm' ? 'page' : undefined} aria-label="狀態機" onClick={() => go('sm')}>
+          <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="6" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="12" cy="18" r="2.5" /><path d="M7.5 6h9M17.6 8.2l-4.4 7.6M10.8 15.8 6.4 8.2" /></svg>狀態機
         </button>
         <button className={tab === 'admin' ? 'on' : ''} aria-current={tab === 'admin' ? 'page' : undefined} aria-label="後台" onClick={() => go('admin')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>後台

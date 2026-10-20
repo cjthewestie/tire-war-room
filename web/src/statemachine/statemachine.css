@@ -1,0 +1,53 @@
+/* ---------- 狀態機 page (issue #37) — dashboard tokens from index.css ---------- */
+.smp { display: flex; flex-direction: column; gap: var(--gap); }
+.sm-kpis { grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0; }
+.sm-lines { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+.sm-line { background: var(--panel-2); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 1px; font-size: 13px; border-left: 3px solid var(--accent); }
+.sm-line.bad { border-left-color: var(--warn); }
+.sm-line b { font-size: 14px; }
+.sm-detect .sub { margin-top: 14px; }
+.sm-cats { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sm-cats button { background: var(--panel); border: 1px solid var(--panel-3); border-radius: 999px; padding: 5px 13px; font-size: 13.5px; color: var(--ink-dim); display: inline-flex; gap: 6px; align-items: baseline; }
+.sm-cats button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.sm-cats small { font-size: 11.5px; opacity: .85; }
+.sm-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(150px, 1fr); gap: 8px; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; align-items: start; }
+.sm-col { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 8px; display: flex; flex-direction: column; gap: 6px; min-height: 120px; }
+.sm-col.empty { opacity: .72; }
+.sm-col header { display: flex; align-items: baseline; gap: 6px; padding: 0 2px 4px; border-bottom: 1px solid var(--border); }
+.sm-col header b { font-size: 14px; }
+.sm-col header small { font-size: 10px; color: var(--ink-faint); }
+.sm-col header .sm-n { margin-left: auto; font-weight: 700; font-size: 14px; }
+.sm-col[data-state="await_approval"] header { color: var(--warn); }
+.sm-col[data-state="safe_stop"] header { color: var(--alarm); }
+.sm-col[data-state="replan"] header { color: var(--line-c); }
+.sm-card { display: flex; flex-direction: column; gap: 3px; background: var(--panel-2); border: 1px solid var(--panel-3); border-radius: 10px; padding: 8px 9px; color: var(--ink); text-decoration: none; font-size: 13px; animation: sm-in .3s ease-out; }
+.sm-card:hover { border-color: var(--accent); }
+.sm-card-t { display: flex; justify-content: space-between; gap: 4px; align-items: baseline; }
+.sm-card-t .tag { margin: 0; flex: none; }
+.sm-card-w { color: var(--ink-dim); font-size: 12.5px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.sm-card-m { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; color: var(--ink-dim); }
+.sm-wait { color: var(--info); font-weight: 600; }
+.sm-card.w-主管核准 .sm-wait { color: var(--warn); }
+.sm-id { font-size: 10.5px; word-break: break-all; }
+.sm-more { align-self: flex-start; }
+@keyframes sm-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.sm-asks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sm-asks li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font-size: 14px; }
+.day-path { display: flex; flex-wrap: wrap; gap: 3px; min-width: 220px; }
+.pp { font-size: 11.5px; padding: 0 6px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
+.pp.st-replan { background: var(--c-2b2140, #2b2140); color: var(--line-c); }
+.pp.st-closed { background: var(--accent-soft); color: var(--accent); }
+.pp.st-safe_stop { background: var(--alarm-soft); color: var(--alarm); }
+.pp.st-await_approval { background: var(--warn-soft); color: var(--warn); }
+.o-closed, .o-answered { color: var(--accent); } .o-safe_stop { color: var(--alarm); font-weight: 700; } .o-open { color: var(--info); }
+@media (prefers-reduced-motion: reduce) { .sm-card { animation: none; } }
+@media (max-width: 1279px) { .sm-lines { grid-template-columns: repeat(3, minmax(0, 1fr)); } .sm-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 899px) {
+  .sm-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sm-lines { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* a phone stacks the columns; empty states shrink to one line */
+  .sm-board { grid-auto-flow: row; grid-auto-columns: auto; grid-template-columns: minmax(0, 1fr); overflow: visible; }
+  .sm-col { min-height: 0; }
+  .sm-col.empty { padding: 4px 8px; }
+  .sm-col.empty header { border-bottom: 0; padding: 0; }
+}

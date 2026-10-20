@@ -127,7 +127,7 @@ try {
     const r = document.createRange(); r.selectNodeContents(t[0] ?? b)
     return { label: (t[0]?.textContent ?? '').trim(), lines: new Set([...r.getClientRects()].map((x) => Math.round(x.top))).size }
   }))
-  check('390 px: no bottom-nav label wraps', wraps.length === 7 && // 7 since #37 added Agent and 後台 (工廠全貌 merged into 產線監控)
+  check('390 px: no bottom-nav label wraps', wraps.length === 8 && // 8 since #37 added Agent, 狀態機 and 後台 (工廠全貌 merged into 產線監控)
     wraps.every((w) => w.lines === 1), wraps.map((w) => `${w.label}:${w.lines}`).join(' '))
   await p3.screenshot({ path: `${OUT}/world-390.png`, fullPage: true, scale: 'css' })   // the page grew (tasks + goods panels): CSS scale keeps it under the capture limit
   await p3.screenshot({ path: `${OUT}/world-390-viewport.png` })

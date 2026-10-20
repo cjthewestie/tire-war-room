@@ -4,12 +4,14 @@
 // and an event picker. CJ, 2026-10-20: 「在那個大的單獨的 agent 的 page 那邊才要去有這些步驟讓我們看到她思考的過程
 // 跟調用工具調用資料的過程」. Rows come from the same audit-log transcript as the home panel (useTranscript).
 import { useMemo, useState } from 'react'
-import type { Event, ToolName } from '../contracts'
+import type { Event, EventState, ToolName } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHMS, fmtMD, fmtMs } from '../format'
 import { plain } from '../plain'
 import { TOOL_LABEL } from '../stepText'
-import { STATE_LABEL, StageChain } from '../components/common'
+import { STATE_LABEL } from '../components/common'
+import { StateDiagram } from './StateDiagram'
+import { pathOf, stateAt } from './stateGraph'
 import { useWarRoom } from '../useWarRoom'
 import { ToolIcon } from './ToolIcon'
 import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
@@ -107,7 +109,10 @@ function Trace({ ev, asks }: { ev: Event | null; asks: LocalItem[] }) {
   const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState(false)
-  const shown = items.filter((i) => inKind(i, kind))
+  const [pick, setPick] = useState<EventState | null>(null)
+  const at = useMemo(() => stateAt(items), [items])
+  const path = useMemo(() => pathOf(items), [items])
+  const shown = items.filter((i, n) => inKind(i, kind) && (!pick || at[n] === pick))
   const tools = items.filter((i): i is ToolItem => i.k === 'tool')
   const toolMs = tools.reduce((a, t) => a + (t.durationMs ?? 0), 0)
   const thinkIdx = new Map<string, number>()
@@ -122,7 +127,7 @@ function Trace({ ev, asks }: { ev: Event | null; asks: LocalItem[] }) {
         </div>
         {ev && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
       </header>
-      {ev && <StageChain ev={ev} />}
+      {ev && <StateDiagram ev={ev} path={path} pick={pick} onPick={setPick} />}
       <dl className="trace-stats">
         <div><dt>步驟</dt><dd>{items.length}</dd></div>
         <div><dt>工具呼叫</dt><dd>{tools.length}<small>{tools.length ? `・共 ${fmtMs(toolMs)}` : ''}</small></dd></div>
@@ -144,6 +149,7 @@ function Trace({ ev, asks }: { ev: Event | null; asks: LocalItem[] }) {
       </div>
       <p className="muted small trace-note">指揮官以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
       <div className="con-body trace-body" data-testid="trace-body">
+        {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
         {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
       </div>

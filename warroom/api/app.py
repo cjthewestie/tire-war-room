@@ -722,6 +722,48 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
 
+    # ------------------------------------------------------------------ 每日事件紀錄 (issue #37): read-only, from the audit log
+    def _daylog():
+        from warroom.api import daylog
+        r = rt()
+        sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
+                   for ev in _safe(r.events, [])}
+        return daylog, daylog.build(r.audit.tail(0, 1_000_000), sources)
+
+    @app.get("/api/daylog")
+    async def daylog_days() -> dict[str, Any]:
+        """Days (or demo loops) with their run counts, newest first."""
+        def run() -> dict[str, Any]:
+            dl, days = _daylog()
+            out = [{"key": d["key"], "label": d["label"], "first": d["first"].isoformat(), "last": d["last"].isoformat(),
+                    **dl.summary(d)} for d in days.values()]
+            return {"days": sorted(out, key=lambda d: d["first"], reverse=True)}
+        return await asyncio.to_thread(run)
+
+    @app.get("/api/daylog/{key}")
+    async def daylog_day(key: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            dl, days = _daylog()
+            if key == "current" and days:
+                d = max(days.values(), key=lambda x: x["last"])
+            elif key in days:
+                d = days[key]
+            else:
+                raise _404(key)
+            return {**dl.jsonable(d), "summary": dl.summary(d)}
+        return await asyncio.to_thread(run)
+
+    @app.get("/api/daylog/{key}/csv")
+    async def daylog_csv(key: str) -> Response:
+        def run() -> str:
+            dl, days = _daylog()
+            if key not in days:
+                raise _404(key)
+            return dl.to_csv(days[key])
+        text = await asyncio.to_thread(run)
+        return Response(text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="daylog-{key}.csv"'})
+
     # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
     from warroom.api.admin import install_admin
     install_admin(app, rt, supervisor)
