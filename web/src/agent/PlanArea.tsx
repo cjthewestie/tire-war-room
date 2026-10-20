@@ -62,7 +62,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
         <footer className="apv-act">
           <ReplanStatus r={rp} />
           <div className="apv-btns">
-            <button className="btn-approve" onClick={replan} disabled={busy} data-testid="plan-replan">{busy ? 'AI 規劃中…' : rp?.state === 'failed' ? '再請 AI 重排' : '請 AI 重排'}</button>
+            <button className="btn-approve" onClick={replan} disabled={busy} data-testid="plan-replan">{busy ? 'AI 規劃中…' : rp?.state === 'failed' || rp?.state === 'closed' ? '再請 AI 重排' : '請 AI 重排'}</button>
             <button className="btn-sec" onClick={onAsk}>問 AI</button>
           </div>
         </footer>
@@ -125,5 +125,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
 function ReplanStatus({ r }: { r: Replan | undefined }) {
   if (!r) return <p className="apv-next" data-testid="replan-hint">{REPLAN_HINT}</p>
   if (r.state === 'failed') return <p className="apv-next err" data-testid="replan-status">AI 沒有開始規劃：{r.error}</p>
+  if (r.state === 'closed') return <p className="apv-next" data-testid="replan-status">AI 已處理，沒有需要核准的方案：{plain(r.outcome ?? '已結案')}（可再請 AI 重排或問 AI）</p>
+  if (r.state === 'ready') return <p className="apv-next" data-testid="replan-status">方案已送出：核准卡在 ③，已自動選取</p>
   return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />AI 規劃中…{r.eventId ? `（任務 ${r.eventId}）` : ''}完成後會自動跳到它的核准卡</p>
 }

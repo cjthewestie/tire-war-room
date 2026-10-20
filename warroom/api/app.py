@@ -749,8 +749,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         def run() -> dict[str, Any]:
             dl, days = _daylog()
             out = [{"key": d["key"], "label": d["label"], "first": d["first"].isoformat(), "last": d["last"].isoformat(),
-                    **dl.summary(d)} for d in days.values()]
-            return {"days": sorted(out, key=lambda d: d["first"], reverse=True)}
+                    "last_seq": d["last_seq"], **dl.summary(d)} for d in days.values()]
+            return {"days": sorted(out, key=lambda d: d["last_seq"], reverse=True)}   # newest activity first
         return await asyncio.to_thread(run)
 
     @app.get("/api/daylog/{key}")
@@ -758,7 +758,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         def run() -> dict[str, Any]:
             dl, days = _daylog()
             if key == "current" and days:
-                d = max(days.values(), key=lambda x: x["last"])
+                d = max(days.values(), key=lambda x: x["last_seq"])   # the day of the newest entry (clocks jump)
             elif key in days:
                 d = days[key]
             else:

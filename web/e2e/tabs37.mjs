@@ -46,6 +46,8 @@ check('ticker item opens 產線監控 on that machine', (await p.locator('.drawe
 await p.keyboard.press('Escape')
 
 // (b) ② delivery risk: hint → 請 AI 重排 → AI 規劃中… → its card is selected with 核准
+// (the 'normal' scenario: the day-loop default starts at 00:00, where a replan may have nothing to change)
+await post('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid^="home-item-order:"]')
 const riskItem = p.locator('[data-testid^="home-item-order:"]').first()
@@ -212,6 +214,23 @@ check('PLANT.md: every step audited', ['plant_draft_save', 'plant_test', 'plant_
   check('reduced motion: ticker static, wrapping, no duplicate', st.a === 'none' && st.w === 'wrap' && st.dup === 'none', JSON.stringify(st))
   await c.close()
 }
+
+// (d) success moments (order_completed / shipment_departed from the day loop): toast, ticker, 訂單 tab
+await post('/api/sim/control', { action: 'scenario', scenario: 'day_loop' })
+await p.goto(BASE + '/', { waitUntil: 'networkidle' })
+await p.waitForTimeout(1200)
+let toast = null
+for (let i = 0; i < 48 && !toast; i++) {
+  await post('/api/sim/step', { seconds: 1800 })
+  await p.waitForTimeout(900)
+  if (await p.locator('[data-testid="success-toast"]').count()) toast = await p.locator('[data-testid="success-toast"]').innerText()
+}
+check('主控台 shows a success toast for a new completion / shipment', !!toast && /訂單 .* 完成|已出貨/.test(toast), toast ?? '(none)')
+check('ticker lists the success items', (await p.locator('[data-testid="tk-track"] > .tk-i.t-good').allInnerTexts()).some((t) => /完成|已出貨/.test(t)))
+await p.click('[data-testid="tab-orders"]')
+await p.waitForSelector('[data-testid="order-list"] .ot-row')
+await p.click('.order-tools .seg button:has-text("已出貨")')
+check('訂單 已出貨: time and on time / late', /出貨・(準時|逾期)/.test(await p.locator('[data-testid="order-success"]').first().innerText()))
 
 // ticker contrast (WCAG AA 4.5:1) in both themes, every item and the fixed counts
 for (const theme of ['light', 'dark']) {

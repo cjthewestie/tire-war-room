@@ -3,7 +3,10 @@
 // command opened) → the card arrives and the home screen selects it. Kept outside React so it survives tab switches.
 import { useSyncExternalStore } from 'react'
 
-export interface Replan { orderId: string; state: 'sending' | 'planning' | 'ready' | 'failed'; eventId: string | null; error: string | null; since: number }
+export interface Replan { orderId: string; state: 'sending' | 'planning' | 'ready' | 'closed' | 'failed'; eventId: string | null; error: string | null; since: number
+  /** closed: the task ended without an approval card (e.g. nothing to change); its outcome */
+  outcome?: string | null
+}
 
 /** The one line a ② item shows before anyone asked the AI. */
 export const REPLAN_HINT = 'AI 還沒有提出方案；按『請 AI 重排』讓 AI 規劃，完成後這裡會出現核准'

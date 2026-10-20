@@ -49,6 +49,12 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     setReplan(arrived.orderId, { state: 'ready' })
     setPicked(arrived.eventId)
   }, [arrived?.eventId, arrived?.orderId, setPicked])
+  // the task ended without a card (nothing to change, or a safe stop): say so on the item instead of planning forever
+  const ended = Object.values(replans).map((r) => ({ r, ev: r.state === 'planning' ? events.find((e) => e.id === r.eventId) : undefined }))
+    .find((x) => x.ev && (x.ev.state === 'closed' || x.ev.state === 'safe_stop'))
+  useEffect(() => {
+    if (ended?.ev) setReplan(ended.r.orderId, { state: 'closed', outcome: ended.ev.outcome ?? null })
+  }, [ended?.ev, ended?.r.orderId])
   return (
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />

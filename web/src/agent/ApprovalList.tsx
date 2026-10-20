@@ -53,6 +53,7 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />AI 規劃中…完成後會自動跳到核准卡</span>}
       {rp?.state === 'ready' && <span className="hl-hint">方案已送出，見 ③ 的待核准卡</span>}
       {rp?.state === 'failed' && <span className="hl-hint err">AI 沒有開始規劃：{rp.error}</span>}
+      {rp?.state === 'closed' && <span className="hl-hint" data-testid="item-replan-closed">AI 已處理，沒有需要核准的方案：{rp.outcome ?? '已結案'}</span>}
     </button>
   )
 }

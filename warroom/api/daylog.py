@@ -56,8 +56,8 @@ def build(entries: Iterable[AuditEntry], sources: dict[str, str] | None = None) 
     run_day: dict[str, str] = {}
     requested: dict[str, set[str]] = {}
     for e, k in zip(es, keys):
-        d = days.setdefault(k, {"key": k, "label": None, "first": e.ts, "last": e.ts, "runs": []})
-        d["last"] = e.ts
+        d = days.setdefault(k, {"key": k, "label": None, "first": e.ts, "last": e.ts, "last_seq": e.seq, "runs": []})
+        d["first"], d["last"], d["last_seq"] = min(d["first"], e.ts), max(d["last"], e.ts), e.seq
         if e.actor == "day_loop" and "loop" in (e.payload or {}):
             d["label"] = str(e.payload.get("msg") or f"新的一天（循環 {e.payload['loop']}）")
         eid = e.event_id
