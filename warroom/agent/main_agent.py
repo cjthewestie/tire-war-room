@@ -212,7 +212,7 @@ class MainAgent:
     @staticmethod
     def _dispatch_reply(steps: list[dict[str, Any]]) -> str:
         d = next((s for s in steps if s["tool"] in DISPATCHES and s["ok"]), None)
-        return f"好，{d['summary']}。" if d else UNCLEAR_REPLY
+        return f"好，已請{d['label'].removeprefix('派給')}子 agent 擬計劃，擬好會送你核准，核准後才執行。" if d else UNCLEAR_REPLY
 
     # ---------------------------------------------------------------- the model loop
     async def _model_loop(self, text, context, waiting_plan, out, run_tool, dispatch, discuss, tid, slot=None) -> None:
@@ -234,7 +234,8 @@ class MainAgent:
                     **({"extra_body": extra} if extra else {}))
             raw = (r.choices[0].message.content or "").strip()
             d = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw))
-            if d.get("action") == "tool" and d.get("tool") and i < MAX_STEPS and not (out["event_id"] and d["tool"] in DISPATCHES):
+            # Nemotron sometimes writes {"action": "reply", "tool": "read_sensors", "reply": ""}: that is a tool call
+            if (d.get("action") == "tool" or not str(d.get("reply") or "").strip()) and d.get("tool") and i < MAX_STEPS and not (out["event_id"] and d["tool"] in DISPATCHES):
                 result = await self._tool(d["tool"], d.get("args") or {}, text, out, tid, run_tool, dispatch, discuss)
                 source += " " + result
                 msgs += [{"role": "assistant", "content": raw},
@@ -242,7 +243,7 @@ class MainAgent:
                 continue
             reply = str(d.get("reply") or "").strip()
             if not reply:
-                raise ValueError("empty reply")
+                raise ValueError(f"empty reply: {raw[:160]}")
             if not nudged and not out["event_id"] and wants_task(text) and i < MAX_STEPS:
                 # the supervisor asked for something to be done: remind the model once that a dispatch does that
                 nudged = True
@@ -260,14 +261,22 @@ class MainAgent:
             if bad:                                   # a number the tools did not give: the results speak instead
                 out["error"] = f"ungrounded numbers {bad}"
                 reply = self._results_reply(out["steps"]) or reply
+            if out["event_id"]:                       # the dispatch line is code's (never 「子 agent 已擬好計劃」 before it has)
+                reply = self._dispatch_reply(out["steps"])
             out["reply"] = reply
             return
         raise TimeoutError("too many tool steps")
 
     @staticmethod
     def _results_reply(steps: list[dict[str, Any]]) -> str:
-        ok = [s["summary"] for s in steps if s["ok"] and s["summary"]]
-        return ("查到：" + "；".join(ok)[:240] + "。") if ok else ""
+        """Short: a SOP is named, not pasted (the full lines stay in the reply's tool line)."""
+        ok = []
+        for s in steps:
+            if not (s["ok"] and s["summary"]) or s["tool"] in DISPATCHES:
+                continue
+            sops = re.findall(r"(SOP-[A-Z]+-\d+)〈([^〉]+)〉", s["summary"]) if s["tool"] == "sop_search" else []
+            ok.append("請照 " + "、".join(f"{a}〈{b}〉" for a, b in sops[:2]) + " 處理" if sops else s["summary"][:90].rstrip("；，、 "))
+        return ("查到：" + "；".join(ok)[:220] + "。") if ok else ""
 
     # ---------------------------------------------------------------- rules (rule mode, or the model failed)
     async def _rule_turn(self, text, context, waiting_plan, out, run_tool, dispatch, discuss, tid) -> None:

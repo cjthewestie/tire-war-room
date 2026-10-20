@@ -466,3 +466,25 @@ async def test_main_agent_never_claims_a_dispatch_it_did_not_make():
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "9 號機明天保養，幫我安排")
     assert h.dispatched == [("machine", "9 號機明天保養，幫我安排")] and out["event_id"] and out["fell_back"]
+
+
+async def test_main_agent_reads_a_tool_named_in_a_reply_step_as_a_call():
+    # Nemotron (real run, 2026-10-21): {"action": "reply", "tool": "read_sensors", "args": {...}, "reply": ""}
+    bad = {"action": "reply", "tool": "read_sensors", "args": {"machine_ids": ["CURE-07"]}, "reply": ""}
+    llm = _SeqLLM([bad, _step(reply="7 號機讀值正常。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
+    assert h.tools == ["read_sensors"] and out["by"] == "model" and not out["fell_back"]
+
+
+async def test_main_agent_dispatch_reply_is_written_by_code():
+    llm = _SeqLLM([_step("dispatch_order_task", {"task": "#M-201 重排保交期"}), _step(reply="好的，子 agent 已擬好計劃。")])
+    h = _Harness()
+    out = await h.turn(MainAgent(_settings(), client=llm), "#M-201 可能晚交，請重排保交期")
+    assert out["reply"] == "好，已請訂單處理子 agent 擬計劃，擬好會送你核准，核准後才執行。"
+
+
+async def test_rule_reply_names_the_sop_without_pasting_it():
+    h = _Harness()
+    out = await h.turn(MainAgent(), "大開煉機過熱怎麼處理")
+    assert "SOP-OM-01" in out["reply"] and len(out["reply"]) < 160, out["reply"]
