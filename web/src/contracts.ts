@@ -744,8 +744,8 @@ export interface Subagent {
 export interface QueueTicket { who: string; event_id: string | null; label: string; priority: number; priority_label: string; since: string; state: "running" | "waiting" }
 export interface SubagentsView { items: Subagent[]; queue: { slots: number; running: QueueTicket[]; waiting: QueueTicket[] } }
 
-/** POST /api/main/message: the 主 agent classified the message itself (issue #54). */
+/** POST /api/main/message: one 主 agent turn (issue #54, warroom/agent/main_agent.py). */
 export interface MainReply {
-  intent: "chitchat" | "question" | "change" | "task" | "unclear"; by: "model" | "rules"; fell_back: boolean; error: string | null
-  reply: string | null; event_id: string | null; ask: AskAnswer | null; discuss: DiscussReply | null; ms: number
+  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+  event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
 }

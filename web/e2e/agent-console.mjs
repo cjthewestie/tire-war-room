@@ -23,8 +23,8 @@ const errors = []
 // every chat bubble (question and answer) ends inside the transcript box
 const askFits = (page) => page.evaluate(() => {
   const box = document.querySelector('[data-testid=transcript]')?.getBoundingClientRect()
-  const q = [...document.querySelectorAll('.r-q')].at(-1)?.getBoundingClientRect()
-  const a = [...document.querySelectorAll('[data-testid=ask-answer] .r-answer')].at(-1)?.getBoundingClientRect()
+  const q = [...document.querySelectorAll('[data-testid=sc-me] .sc-b')].at(-1)?.getBoundingClientRect()
+  const a = [...document.querySelectorAll('[data-testid=sc-agent] .sc-b')].at(-1)?.getBoundingClientRect()
   const body = document.querySelector('[data-testid=transcript]')
   if (!box || !q || !a) return { ok: false, why: 'missing' }
   return { ok: q.right <= box.right + 0.5 && a.right <= box.right + 0.5 && body.scrollWidth <= body.clientWidth + 1,
@@ -97,11 +97,11 @@ try {
   await d.locator('.askbar textarea').fill('7 號機現在怎樣？')
   await d.locator('.askbar textarea').press('Enter')
   let answered = ''
-  for (let i = 0; i < 60 && !answered; i++) { await d.waitForTimeout(500); answered = await d.locator('[data-testid=ask-answer] .r-answer').last().innerText().catch(() => '') }
+  for (let i = 0; i < 60 && !answered; i++) { await d.waitForTimeout(500); const t = await d.locator('[data-testid=sc-agent]').last().innerText().catch(() => ''); answered = t.includes('思考中') ? '' : t }
   check('chat question answered', answered.length > 0, answered.slice(0, 80))
   const fit = await askFits(d)
   check('1440: question and answer stay inside the transcript', fit.ok, fit.why)
-  check('answer labelled 查詢 (its read steps are on the Agent page)', (await d.locator('[data-testid=ask-answer] .ro').innerText()) === '查詢' && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) === 0)
+  check('plain answer: the tools collapse to one grey line (no tool rows, no labels)', (await d.locator('[data-testid=transcript] [data-kind=tool]').count()) === 0 && (await d.locator('[data-testid=sc-tools]').count()) >= 1)
   await d.screenshot({ path: `${OUT}/console-agent-ask-1440.png` })
 
   // dashboard tab carries the same visual card
@@ -132,7 +132,7 @@ try {
   await p.locator('.askbar textarea').fill('今晚夜班缺誰？')
   await p.locator('.askbar textarea').press('Enter')
   let ans390 = ''
-  for (let i = 0; i < 60 && !ans390; i++) { await p.waitForTimeout(500); ans390 = await p.locator('[data-testid=ask-answer] .r-answer').last().innerText().catch(() => '') }
+  for (let i = 0; i < 60 && !ans390; i++) { await p.waitForTimeout(500); const t = await p.locator('[data-testid=sc-agent]').last().innerText().catch(() => ''); ans390 = t.includes('思考中') ? '' : t }
   const fit390 = await askFits(p)
   check('390: question and answer stay inside the transcript', !!ans390 && fit390.ok, fit390.why)
   await p.locator('[data-testid=transcript]').scrollIntoViewIfNeeded()

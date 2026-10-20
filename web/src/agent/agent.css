@@ -590,3 +590,33 @@
 .tree-from { color: var(--line-c); font-weight: 700; font-size: 13px; }
 .sub-stop { margin-left: auto; }
 .sub-tasks .sub { margin: 8px 0 4px; font-size: 13.5px; }
+
+/* ---------- plain 主 agent conversation + switcher (issue #54, CJ: 「單純一點好嗎」) ---------- */
+.con-h.sw { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sw-pick { flex: 1 1 200px; min-width: 0; max-width: 100%; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14px; font-weight: 700; }
+.sw-n { margin-left: auto; }
+.con-h.sw .con-full { margin-left: 0; }
+.sc { gap: 10px; }
+.sc-row { display: flex; flex-direction: column; align-items: flex-start; max-width: 92%; }
+.sc-row.me { align-self: flex-end; align-items: flex-end; }
+.sc-b { background: var(--panel-2); border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; }
+.sc-row.me .sc-b { background: var(--accent-soft); border-radius: 14px 14px 4px 14px; }
+.sc-b.pending { color: var(--ink-dim); display: inline-flex; gap: 6px; align-items: center; }
+.sc-tools { background: none; border: 0; padding: 2px 4px; font-size: 12px; color: var(--ink-faint); text-align: left; cursor: pointer; }
+.sc-tools:hover { color: var(--ink-dim); text-decoration: underline; }
+.sc-tool-list { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--ink-dim); }
+.sc-tool-list li.bad { color: var(--alarm); }
+.sc-fb { margin: 2px 4px 0; font-size: 12px; color: var(--warn); }
+.sp { gap: 8px; }
+.sp-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
+.sp-status b { font-size: 16px; }
+.sp-stop { margin-left: auto; }
+.sp-tools { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.sp-tools li.failed { color: var(--alarm); }
+.tree-root { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; width: 100%; background: none; border: 1px solid transparent; border-radius: 10px; padding: 6px 8px; text-align: left; color: var(--ink); }
+.tree-root:hover { background: var(--panel-2); }
+.tree-root.on { border-color: var(--accent); background: var(--panel-2); }
+.tree-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.tree-row { font-size: 13.5px; line-height: 1.4; }
+.main-thread { min-height: 60vh; }
+.main-thread .con-body { padding: 0; }

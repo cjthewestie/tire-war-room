@@ -19,7 +19,7 @@ import './statemachine.css'
 type View = 'live' | 'day'
 const CHANNEL: Record<string, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽' }
 const OUTCOME: Record<string, string> = { closed: '結案', safe_stop: '安全停止', open: '處理中', answered: '已回答' }
-const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室' }
+const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: '主 agent 對話' }
 
 export function StateMachinePage() {
   const { transport } = useWarRoom()

@@ -44,6 +44,8 @@ export interface ChatItem extends Base {
   k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused' | 'dispatch' | 'report' | 'interrupt'; text: string; by: string
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
+  /** issue #54: a 主 agent turn — its id, the tool calls behind the reply (one grey line), a rule-fallback note */
+  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean }[]; error?: string | null
 }
 /** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }

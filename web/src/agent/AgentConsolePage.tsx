@@ -17,7 +17,9 @@ import { ToolIcon } from './ToolIcon'
 import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
 import { ChatBar } from './ChatBar'
-import { SUB_STATUS, SUB_TONE } from './subagents'
+import { SUB_STATUS, SUB_TONE, isOpen, plainStatus, whatOf } from './subagents'
+import { Bubbles } from './SimpleChat'
+import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import './agent.css'
@@ -48,69 +50,71 @@ function inKind(i: Item, k: Kind): boolean {
   }
 }
 
-const ASKS = '__asks'
+
+const MAIN = '__main'
 
 export function AgentConsolePage({ asks, setAsks, initial }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; initial: string | null
 }) {
   const { state } = useWarRoom()
   const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
-  const [picked, setPicked] = useState<string | null>(initial)
+  const [picked, setPicked] = useState<string | null>(initial ?? MAIN)
   const [seen, setSeen] = useState(initial)
   if (initial !== seen) { setSeen(initial); if (initial) setPicked(initial) }
-  const [scope, setScope] = useState<'all' | 'open' | 'closed'>('all')
-  const askOnly = picked === ASKS
-  const ev = askOnly ? null : events.find((e) => e.id === picked) ?? events[0] ?? null
+  // CJ, 2026-10-20: 處理中 first; closed and stopped ones sit under 已結案
+  const [scope, setScope] = useState<'all' | 'open' | 'closed'>('open')
+  const main = picked === MAIN
+  const ev = main ? null : events.find((e) => e.id === picked) ?? null
   const pick = (id: string) => {
     setPicked(id)
-    history.replaceState(null, '', `${location.pathname}${location.search}#console?event=${encodeURIComponent(id)}`)
+    history.replaceState(null, '', `${location.pathname}${location.search}#console${id === MAIN ? '' : `?event=${encodeURIComponent(id)}`}`)
   }
-  const listed = events.filter((e) => scope === 'all' || (scope === 'open') === (e.state !== 'closed' && e.state !== 'safe_stop'))
   const subs = new Map((state.subagents?.items ?? []).map((x) => [x.id, x]))
+  const openOf = (e: Event) => { const sa = subs.get(e.id); return sa ? isOpen(sa) : e.state !== 'closed' && e.state !== 'safe_stop' }
+  const listed = events.filter((e) => scope === 'all' || (scope === 'open') === openOf(e))
+  const thread = useMainThread(asks)
   if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
   return (
     <>
     <ModelQueueBar />
     <div className="trace" data-testid="agent-page">
-      <aside className="trace-side panel" aria-label="主 agent 與子 agent">
-        <header className="panel-h tree-root" data-testid="tree-root"><h2><span className="tree-dot" aria-hidden />主 agent</h2>
-          <span className="muted small">子 agent {events.length}・進行中 {events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').length}</span></header>
-        <div className="seg sm" role="group" aria-label="事件範圍">
-          {(['all', 'open', 'closed'] as const).map((s) => (
+      <aside className="trace-side panel" aria-label="主 agent 與派出的子 agent">
+        <button type="button" className={`tree-root ${main ? 'on' : ''}`} onClick={() => pick(MAIN)} data-testid="tree-root" aria-pressed={main}>
+          <span className="tree-title"><span className="tree-dot" aria-hidden />主 agent ▸ 派出的子 agent</span>
+          <span className="muted small">子 agent {events.length}・進行中 {events.filter(openOf).length}</span>
+        </button>
+        <div className="seg sm" role="group" aria-label="子 agent 範圍">
+          {(['open', 'closed', 'all'] as const).map((s) => (
             <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'all' ? '全部' : s === 'open' ? '處理中' : '已結案'}</button>
           ))}
         </div>
-        <select className="trace-pick" value={askOnly ? ASKS : ev?.id ?? ''} onChange={(e) => pick(e.target.value)} aria-label="選擇事件">
-          {listed.map((e) => <option key={e.id} value={e.id}>{subs.get(e.id)?.type_label ?? evName(e)}・{evName(e)}・{fmtHMS(e.opened_at).slice(0, 5)}・{subs.get(e.id) ? SUB_STATUS[subs.get(e.id)!.status] : STATE_LABEL[e.state]}</option>)}
-          {asks.length > 0 && <option value={ASKS}>查詢（這次開啟）</option>}
+        <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="主 agent 或子 agent">
+          <option value={MAIN}>主 agent</option>
+          {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa)}` : evName(e)}</option> })}
         </select>
-        <ul className="trace-list tree" role="listbox" aria-label="子 agent">
+        <ul className="trace-list tree" role="listbox" aria-label="派出的子 agent">
           {listed.map((e) => {
             const sa = subs.get(e.id)
             return (
               <li key={e.id} role="option" aria-selected={e.id === ev?.id}>
-                <button className={e.id === ev?.id ? 'on' : ''} onClick={() => pick(e.id)} data-testid="trace-event" data-sub={sa?.status}>
-                  <b>{sa?.type_label ?? evName(e)}</b>
-                  {sa ? <span className={`sub-pill t-${SUB_TONE[sa.status]}`} data-testid="sub-status">{SUB_STATUS[sa.status]}</span>
-                    : <span className={`state-pill st-${e.state}`}>{STATE_LABEL[e.state]}</span>}
-                  <small className="muted trace-what">{evName(e)}・{plain(e.command ?? e.alert_card?.title ?? e.anomaly.message)}</small>
-                  <small className="muted">{fmtMD(e.opened_at)} {fmtHMS(e.opened_at).slice(0, 5)}・{STATE_LABEL[e.state]}・第 {sa?.round ?? (e.prior_rounds?.length ?? 0) + 1} 輪
-                    {sa ? `・工具 ${sa.tools_called}${sa.tasks_total ? `・任務 ${sa.tasks_done}/${sa.tasks_total}` : ''}` : ''}</small>
+                <button className={e.id === ev?.id ? 'on' : ''} onClick={() => pick(e.id)} data-testid="trace-event" data-event={e.id} data-sub={sa?.status}>
+                  <span className="tree-row" data-testid="sub-status">{sa ? <><b>{whatOf(sa, e)}</b>：{plainStatus(sa)}</> : <b>{evName(e)}</b>}</span>
                   {sa && sa.tasks_total > 0 && <span className="sub-bar" aria-hidden><i style={{ width: `${(100 * sa.tasks_done) / sa.tasks_total}%` }} /></span>}
                 </button>
               </li>
             )
           })}
-          {asks.length > 0 && (
-            <li role="option" aria-selected={askOnly}>
-              <button className={askOnly ? 'on' : ''} onClick={() => pick(ASKS)}><b>查詢</b><small className="muted">這次開啟問了 {asks.filter((a) => a.k === 'ask').length} 題（只查不改）</small></button>
-            </li>
-          )}
-          {!listed.length && <li className="muted small">沒有事件。</li>}
+          {!listed.length && <li className="muted small">{scope === 'open' ? '目前沒有進行中的子 agent。' : '沒有。'}</li>}
         </ul>
       </aside>
-      {askOnly ? <Trace ev={null} asks={asks} setAsks={setAsks} onPick={pick} /> : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
-        <section className="panel trace-main"><p className="muted">目前沒有子 agent。主 agent 只在事件偵測喚醒、工廠事件或主管下任務時派發；派發後每一步都會出現在這裡。</p></section>
+      {main ? (
+        <section className="panel trace-main main-thread" aria-label="主 agent" data-testid="main-thread">
+          <h2 className="trace-h">主 agent</h2>
+          <Bubbles items={thread} empty="跟主 agent 說要做的事，或問工廠現在的狀況。" />
+          <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={null} /></div>
+        </section>
+      ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
+        <section className="panel trace-main"><p className="muted">找不到這個子 agent。</p></section>
       )}
     </div>
     </>
@@ -174,7 +178,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
   const { state } = useWarRoom()
   const { items: evItems, source } = useTranscript(ev)
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
-  const items = useMemo(() => withAsks(ev ? evItems : [], asks), [ev, evItems, asks])
+  const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])   // a subagent shows its own run only
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState(false)

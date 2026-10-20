@@ -31,7 +31,7 @@ const llm = (await api('/api/health')).j?.llm_mode === 'llm'
 await api('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="chat-input"]')
-check('主控台 conversation is the 主 agent', (await p.locator('.console h2').innerText()).trim() === '主 agent')
+check('主控台 conversation is the 主 agent (switcher starts on 主 agent)', (await p.locator('[data-testid="agent-switch"] option').first().innerText()).trim() === '主 agent' && await p.locator('[data-testid="agent-switch"]').inputValue() === 'main')
 
 // 1a. one input, one 主 agent: 「妳是誰」 gets the identity reply with zero tool calls
 check('no mode switch on 主控台', await p.locator('[data-testid="mode-command"], [data-testid="mode-ask"], [data-testid="mode-discuss"]').count() === 0)
@@ -39,11 +39,18 @@ const tools0 = ((await api('/api/audit?kind=tool_call&limit=5000')).j ?? []).len
 await p.locator('[data-testid="chat-input"]').fill('妳是誰')
 await p.locator('[data-testid="chat-input"]').press('Enter')
 const tr = p.locator('[data-testid="transcript"]')
-const idOk = await until(async () => (await tr.locator('[data-testid="chat-reply"]').last().innerText().catch(() => '')).includes('我是主 agent'), 40)
-check('「妳是誰」 → 主 agent identity reply', idOk, (await tr.locator('[data-testid="chat-reply"]').last().innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 90))
+const lastAgent = () => tr.locator('[data-testid="sc-agent"]').last().innerText().catch(() => '')
+const idOk = await until(async () => /主 agent/.test(await lastAgent()) && !(await lastAgent()).includes('思考中'), 60)
+check('「妳是誰」 → 主 agent identity reply (plain bubble)', idOk, (await lastAgent()).replace(/\n/g, ' ').slice(0, 90))
+check('plain chat: no tags or labels on the bubble', !/(規則判讀|Nemotron 選派|子 agent・|主 agent・)/.test(await tr.innerText()))
 check('…with zero tool calls', ((await api('/api/audit?kind=tool_call&limit=5000')).j ?? []).length === tools0)
 check('never 「我不確定要查什麼」', !(await tr.innerText()).includes('我不確定要查什麼'))
 await p.screenshot({ path: `${OUT}/home-identity-1440.png` })
+const subsBefore = ((await api('/api/subagents')).j?.items ?? []).length
+await p.locator('[data-testid="chat-input"]').fill('vu04y94u.3s83uv,')
+await p.locator('[data-testid="chat-input"]').press('Enter')
+check('gibberish → 「這句我看不懂」, no subagent', await until(async () => (await lastAgent()).includes('看不懂'), 30) &&
+  ((await api('/api/subagents')).j?.items ?? []).length === subsBefore, (await lastAgent()).slice(0, 60))
 
 // 1b. a delivery-risk item: the 主 agent drafts the plan by itself → 核准並派發 → executes → reports back
 const risk = p.locator('[data-testid^="home-item-order:"]').first()
@@ -57,23 +64,34 @@ for (let i = 0; i < 40 && !cardUp; i++) {
 }
 check('the plan arrives and is selected: 主 agent 的計劃 + 核准並派發', cardUp && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1 &&
   (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').innerText()).includes('核准並派發'))
-const disp = await tr.locator('[data-testid="main-dispatch"]').first().innerText().catch(() => '')
-check('主 agent asked a subagent to plan it (訂單處理) and says how it chose', disp.includes('已請子 agent 規劃：訂單處理') && /(Nemotron 選派|關鍵字規則)/.test(disp), disp.replace(/\n/g, ' ').slice(0, 120))
+const disp = String(((await api('/api/audit?kind=system&limit=5000')).j ?? []).filter((e) => e.actor === 'main_agent' && e.payload.orch === 'dispatch' && e.payload.phase === 'plan' && e.payload.type === 'order').map((e) => `${e.payload.text} ${e.payload.by}`).pop() ?? '')
+check('主 agent asked the 訂單處理 subagent to plan it (audit)', disp.includes('已請子 agent 規劃：訂單處理') && /(model|rules)$/.test(disp), disp.slice(0, 120))
 await p.screenshot({ path: `${OUT}/home-plan-1440.png` })
 const subs = async () => (await api('/api/subagents')).j
 const me = (await subs()).items.find((x) => x.type === 'order' && x.source === 'supervisor')
 await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').click()
-check('核准並派發 → 主 agent dispatches the subagent to execute', await until(async () => (await tr.locator('[data-testid="main-dispatch"]', { hasText: '派發子 agent 執行' }).count()) >= 1, 40),
-  (await tr.locator('[data-testid="main-dispatch"]').last().innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 100))
+await p.locator('[data-testid="agent-switch"]').selectOption('main')      // opening the item followed its subagent; back to the 主 agent
+check('核准並派發 → 主 agent dispatches the subagent to execute', await until(async () => (await tr.locator('[data-testid="sc-agent"]', { hasText: '派發子 agent 執行' }).count()) >= 1, 40),
+  (await tr.locator('[data-testid="sc-agent"]').last().innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 100))
 await p.screenshot({ path: `${OUT}/home-dispatched-1440.png` })
 for (let i = 0; i < 60; i++) {
-  if (await tr.locator('[data-testid="main-report"]').count()) break
+  if (await tr.locator('[data-testid="sc-agent"]', { hasText: '訂單處理子 agent' }).count()) break
   await step(60); await p.waitForTimeout(llm ? 1000 : 300)
 }
-const rep = await tr.locator('[data-testid="main-report"]').last().innerText().catch(() => '')
+const rep = await tr.locator('[data-testid="sc-agent"]', { hasText: '訂單處理子 agent' }).last().innerText().catch(() => '')
 check('主 agent reports back in 主控台 when the subagent ends', rep.includes('訂單處理子 agent'), rep.replace(/\n/g, ' ').slice(0, 160))
 check('GET /api/subagents lists it under 主 agent', !!me && me.parent === 'main', me ? `${me.id}` : '')
 await p.screenshot({ path: `${OUT}/home-report-1440.png` })
+// the header switcher: follow one subagent's progress in the same panel, then back to the 主 agent
+const sw = p.locator('[data-testid="agent-switch"]')
+check('switcher: 主 agent first, then subagents as 「<what>：<status>」', (await sw.locator('option').first().innerText()) === '主 agent' && await sw.locator('option').count() >= 1)
+await p.click('.con-h.sw .seg button:has-text("全部")')
+await sw.selectOption(me.id)
+check('selecting a subagent shows its progress inline (status, tools)', await until(async () => (await p.locator('[data-testid="sub-progress"]').count()) === 1, 10) &&
+  /(完成|等現場完成|執行中)/.test(await p.locator('[data-testid="sub-progress"] .sp-status').innerText()), await p.locator('[data-testid="sub-progress"] .sp-status').innerText().catch(() => ''))
+await p.screenshot({ path: `${OUT}/home-switch-sub-1440.png` })
+await sw.selectOption('main')
+check('back to the 主 agent conversation', await p.locator('[data-testid="sc-agent"]').count() >= 2)
 
 // 2. Agent page: tree, progress, model queue, 中斷 on a second task
 await api('/api/command', { text: '夜班缺一人，請調人並重排' })
@@ -82,8 +100,14 @@ await until(async () => { second = (await subs()).items.find((x) => x.type === '
 // interrupt it while it still works (do not wait for its card: a real-model run may end on its own)
 await p.goto(`${BASE}/#console?event=${encodeURIComponent(second.id)}`, { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tree-root"]')
-check('Agent page: 主 agent root with subagents under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('主 agent') && await p.locator('[data-testid="trace-event"]').count() >= 2)
-check('each subagent shows its status', await p.locator('[data-testid="sub-status"]').count() >= 2)
+check('Agent page: 「主 agent ▸ 派出的子 agent」 with subagents under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('主 agent ▸ 派出的子 agent') && await p.locator('[data-testid="trace-event"]').count() >= 1)
+check('each row is 「<what>：<plain status>」', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /：(規劃中|等你核准|執行中|等現場完成|完成|已停止)/.test(t)),
+  (await p.locator('[data-testid="sub-status"]').allInnerTexts()).join(' | '))
+check('no 查詢 row in the tree', (await p.locator('.trace-list').innerText()).indexOf('查詢') < 0)
+await p.click('[data-testid="tree-root"]')
+check('clicking 「主 agent」 shows the 主 agent conversation', await until(async () => (await p.locator('[data-testid="main-thread"] [data-testid="sc-agent"]').count()) >= 1, 10))
+await p.click('.trace-side .seg button:has-text("全部")')
+await p.locator(`[data-testid="trace-event"][data-event="${second.id}"]`).click()
 check('the model queue is shown', await p.locator('[data-testid="model-queue"]').count() === 1)
 check('the selected subagent shows how it was dispatched', (await p.locator('[data-testid="sub-head"]').innerText()).includes('主 agent →'))
 await p.screenshot({ path: `${OUT}/agent-tree-1440.png`, fullPage: false })

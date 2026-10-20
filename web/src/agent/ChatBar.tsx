@@ -15,11 +15,9 @@ export type BarMode = 'discuss' | 'command' | 'ask'
 
 let askSeq = 0
 const nowIso = () => new Date().toISOString()
-const EX_WAITING = ['9 號機今晚要保養', '不要跨組調人', '為什麼用 9 號機？']
-const EX_FREE = ['7 號機現在怎樣？', '#M-201 可能晚交，請重排', '妳是誰']
 
-export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
-  ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+export function ChatBar({ ev, waiting, setAsks, focus }: {
+  ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick?: (id: string) => void
   focus: BarFocus | null
 }) {
   const { transport, state } = useWarRoom()
@@ -48,38 +46,22 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
     setQ('')
     setBusy(true)
     setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true), chat('agent', 'reply', '主 agent 判讀中…', keys[1], n + 0.5, ts, true)])
-    const drop = () => setAsks((xs) => xs.filter((x) => !keys.includes(x.key)))
     try {
       const r: MainReply = await transport.message(text, waiting ? ev?.id ?? null : null)
-      if (r.intent === 'question' && r.ask) {
-        const a = r.ask
-        setAsks((xs) => [...xs.filter((x) => !keys.includes(x.key)),
-          { k: 'ask', key: `ask-${n}`, ts: a.factory_time || ts, seq: 1e9 + n, question: text, answer: a, error: null }])
-      } else if (r.intent === 'change') {
-        drop()                                   // the discussion's audit rows carry it (and the v2 card)
-      } else if (r.intent === 'task' && r.event_id) {
-        drop()
-        onPick(r.event_id)
-      } else {
-        setAsks((xs) => xs.map((x) => (x.key === keys[0] && x.k === 'chat' ? { ...x, pending: false }
-          : x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply ?? '' , classifiedBy: r.by } : x)))
-      }
+      // the reply (with its tool line) stays here until the server's audit row of this turn replaces it
+      setAsks((xs) => xs.map((x) => (x.key === keys[0] && x.k === 'chat' ? { ...x, pending: false, turn: r.id }
+        : x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply, turn: r.id, steps: r.steps, fellBack: r.fell_back, error: r.error } : x)))
     } catch (e) {
       setAsks((xs) => xs.map((x) => (x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: `送出失敗：${String(e)}` } : x)))
     } finally { setBusy(false) }
   }
   return (
     <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }} data-mode="main">
-      <div className="askbar-modes">
-        <span className="askbar-hint">跟主 agent 說：要做的事、要改的計劃{waiting ? '（目前選的待核准計劃）' : ''}，或想問的狀況</span>
-      </div>
-      <div className="askbar-ex">
-        {(waiting ? EX_WAITING : EX_FREE).map((x) => <button type="button" key={x} disabled={!can || busy} onClick={() => void send(x)}>{x}</button>)}
-      </div>
       <div className="askbar-in">
         <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || busy} aria-label="跟主 agent 說"
           data-testid="chat-input"
-          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : '例如：#M-201 可能晚交，請重排・7 號機現在怎樣？（Enter 送出）') : '模擬資料模式不支援，需連線後端'}
+          data-plan={waiting ? 'waiting' : undefined}
+          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : waiting ? '這個計劃要怎麼改，直接說' : '跟主 agent 說…') : '模擬資料模式不支援，需連線後端'}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(q) } }} />
         <button type="submit" className="btn-send" disabled={!can || busy || !q.trim()} data-testid="chat-send">{busy ? '判讀中…' : '送出'}</button>

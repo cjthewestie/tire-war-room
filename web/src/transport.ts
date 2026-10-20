@@ -171,7 +171,7 @@ export class LiveTransport implements Transport {
     getJSON<ScheduleVersion>(API.schedule).then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
     connect()
     // safety net: focus panel and counts come from snapshots; refresh in case the server only sends deltas
-    const poll = setInterval(pullSnapshot, 4000)
+    const poll = setInterval(() => { pullSnapshot(); pullSubagents() }, 4000)   // subagent progress follows worker tasks too
     return () => { closed = true; clearTimeout(timer); clearInterval(poll); ws?.close() }
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
