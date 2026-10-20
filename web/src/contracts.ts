@@ -15,7 +15,6 @@ export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_
 export type DataQuality = "ok" | "out_of_range" | "jump" | "stale" | "neighbor_mismatch" | "missing"
 export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip" | "supervisor_command"
   | "shift_start" | "order_rush" | "staffing_short"  // issue #17 plant events
-  | "material_short"  // issue #36: a delivery comes late or a material runs short
 export type Severity = "info" | "warn" | "critical"
 export type TileStatus = "normal" | "warn" | "alarm"
 export type EventState =
@@ -564,7 +563,7 @@ export interface MachineDetail {
 }
 
 // ---------------- issue #36 模擬事件 (warroom/sim/events.py) ----------------
-export interface SimEventDef { kind: string; label: string; weight: number; source: "fault" | "plant" }
+export interface SimEventDef { kind: string; label: string; weight: number; source: "fault" | "plant" | "world" }
 export interface SimEventFired { at: ISODate; kind: string; label: string; text: string; source: "random" | "manual"; ref: string | null }
 export interface SimEventsView {
   enabled: boolean; every_min: number; seed: number; next_at: ISODate | null; fired: SimEventFired[]; catalog: SimEventDef[]

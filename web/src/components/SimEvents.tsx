@@ -26,7 +26,7 @@ export function SimEventControls({ busy, run }: { busy: boolean; run: (fn: () =>
           {ev.catalog.map((c) => (
             <button key={c.kind} role="menuitem" disabled={busy} data-kind={c.kind}
               onClick={() => { if (menu.current) menu.current.open = false; void run(() => ev.fire(c.kind)) }}>
-              {c.label}<small>{c.source === 'fault' ? '機台' : '工廠'}</small>
+              {c.label}<small>{c.source === 'fault' ? '機台' : c.source === 'world' ? '原料' : '工廠'}</small>
             </button>
           ))}
         </div>

@@ -78,6 +78,7 @@ async def test_day_wraps_with_no_anomaly_resets_state_and_ships(tmp_path):
                 assert after.goods.counts == goods0
         assert checked and rt.sim.loop_n == 2 and rt.clock.now().strftime("%H:%M") == "00:10"
         assert rt.anomalies == [], [(a.machine_id, a.message) for a in rt.anomalies]
+        assert rt.snapshot().header.bad_data_total == 0, rt.snapshot().header.bad_data   # no frozen-sensor flags
         assert rt.clock_info()["day_loop"]["loop"] == 2
     finally:
         await rt.stop()

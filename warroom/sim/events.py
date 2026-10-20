@@ -5,6 +5,8 @@ from a weighted list; the supervisor can also fire a chosen one at once. Nothing
 the agent directly: a machine event becomes a FaultSpec for the sim (the same path as POST /api/sim/fault, so the
 detector has to see it in the readings), and a plant event becomes a PlantInput (the same path as a scripted
 rush order or sick call, so the state machine opens a plant event and every write goes through the Action Gate).
+A material event (late delivery, stock-out) only changes the world's deliveries and stock and shows in its feed;
+the card for a shortfall is the patrol's (#38 owns material_short).
 
 Its own RNG (Random(seed)) is never the Factory's or the World's stream, so a scripted scenario with the
 generator off runs exactly as before, and one seed gives one sequence of events.
@@ -31,6 +33,7 @@ class EventDef:
     label: str
     weight: int
     source: str          # "fault" (machine, through the detector) | "plant" (state machine plant event)
+    #                      | "world" (the world feed and stock only; a shortfall card is #38's patrol)
 
 
 # Weights: machine trouble is the common case on a curing floor; order, people and material events less so.
@@ -41,13 +44,23 @@ CATALOG: tuple[EventDef, ...] = (
     EventDef("sensor_glitch", "感測器壞資料（不叫醒 AI）", 1, "fault"),
     EventDef("rush_order", "急單插單", 2, "plant"),
     EventDef("staff_sick", "人員請病假", 2, "plant"),
-    EventDef("delivery_late", "原料到貨延遲", 1, "plant"),
-    EventDef("material_short", "原料短缺", 1, "plant"),
+    EventDef("delivery_late", "原料到貨延遲", 1, "world"),
+    EventDef("stock_out", "原料缺料（一批驗退）", 1, "world"),
 )
 CATALOG_BY_KIND: dict[str, EventDef] = {e.kind: e for e in CATALOG}
 WATER_MILLS = ("A-OPEN", "A-BIGOPEN", "B-OPEN")
 GLITCH_MACHINES = ("A-MIX", "A-CAL", "B-FORM", "C-EXTR", *CURE_PRESS_IDS)
 RUSH_CUSTOMERS = ("客戶甲", "客戶乙", "客戶丙", "客戶丁", "客戶戊")
+
+
+@dataclass(frozen=True)
+class WorldInput:
+    """A material event: it changes the world's stock or a delivery and shows in the feed, nothing else."""
+    kind: str            # delivery_late | stock_out
+    material: str
+    text: str
+    po_id: str | None = None
+    late_h: float | None = None
 
 
 @dataclass
@@ -101,7 +114,7 @@ class SimEvents:
     def pick(self) -> str:
         return self.rng.choices([e.kind for e in CATALOG], weights=[e.weight for e in CATALOG])[0]
 
-    def build(self, kind: str, sim: Any, now: datetime, busy: set[str]) -> FaultSpec | PlantInput:
+    def build(self, kind: str, sim: Any, now: datetime, busy: set[str]) -> FaultSpec | PlantInput | WorldInput:
         """The FaultSpec or PlantInput for one event. `busy`: machines with an open event or an active fault
         (never stacked)."""
         if kind not in CATALOG_BY_KIND:
@@ -132,18 +145,16 @@ class SimEvents:
         if kind == "staff_sick":
             return self._sick(sim, now)
         world = getattr(sim, "world", None)
+        from warroom.sim.world import MATERIALS
         if kind == "delivery_late":
             moving = world.in_transit() if world is not None else []
             if moving:
                 po, key = rng.choice(moving)
                 late = round(rng.uniform(4.0, 12.0))
-                return PlantInput(kind="delivery_late", material=key, late_h=float(late),
-                                  text=f"{po} {_material_name(key)} 供應商來電：延遲約 {late} 小時到貨")
-            kind = "material_short"                 # nothing on the way: the material event is a shortage instead
-        from warroom.sim.world import MATERIALS
-        m = rng.choice(MATERIALS)
-        return PlantInput(kind="material_short", material=m.key,
-                          text=f"{m.name} 盤點短少：一批驗退，庫存降到再訂購點以下")
+                return WorldInput("delivery_late", key, f"{po} {_material_name(key)} 供應商來電：延遲約 {late} 小時到貨",
+                                  po_id=po, late_h=float(late))
+        m = rng.choice(MATERIALS)                   # stock_out, or a late delivery with nothing on the way
+        return WorldInput("stock_out", m.key, f"{m.name} 一批驗退，庫存歸零（緊急調料）")
 
     def _rush(self, sim: Any, now: datetime) -> PlantInput:
         rng = self.rng

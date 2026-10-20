@@ -458,13 +458,6 @@ def _dispatch_tasks(world: World, req: TaskRequest, now: datetime, teams: list[T
             if press:
                 specs.append(_spec("換模準備", f"{oid} 模具 MD-{oid.lstrip('#').replace('-', '')} 送{MACHINE_BY_ID[press].name}備模",
                                    TeamId.CURING, press, order_ids=[oid]))
-    elif req.event_kind == "material_short":     # issue #36: a late delivery / a material short
-        low = [m for m in world.materials_status() if m["status"] != "ok"]
-        names = "、".join(m["name"] for m in low[:3]) or "原料"
-        specs.append(_spec("盤點", f"到碼頭盤點{names}庫存與在途，回報可用量", TeamId.BODY, None, zone="dock"))
-        feed = _feed_orders(world, now, 6.0)
-        specs.append(_spec("調料", f"現有原料先供最早交期訂單{'（' + '、'.join(feed[:3]) + '）' if feed else ''}，"
-                                   "調整 A 線投料順序", TeamId.BODY, "A-MIX", order_ids=feed[:3]))
     else:
         for team in teams[:3]:
             if team in TEAM_HOME:

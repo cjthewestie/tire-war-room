@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import bisect
 import copy
+import math
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -137,6 +138,7 @@ class LoopFactory(TeamReplayFactory):
             hit = vals.get(r.machine_id)
             if not hit:
                 continue
+            hit = {ch: round(v + _jitter(self._t, r.machine_id, ch), 3) for ch, v in hit.items()}
             m = self._m[r.machine_id]
             row = self._merge(m.hist[-1], SensorReading(ts=self._t, machine_id=r.machine_id, **hit))
             m.hist[-1] = row
@@ -208,10 +210,10 @@ def _shape_day(ticks) -> dict[str, dict[str, list[float]]]:
     h = SMOOTH_N // 2
     for mid, chans in raw.items():
         for ch, vals in chans.items():
-            last = next(v for v in vals if v == v)
+            last = next(v for v in vals if not math.isnan(v))
             filled = []
             for v in vals:                       # hold the last value over a gap
-                last = v if v == v else last
+                last = last if math.isnan(v) else v
                 filled.append(last)
             sm = [sum(filled[(i + k) % n] for k in range(-h, h + 1)) / SMOOTH_N for i in range(n)]
             if ch == "temp_c":
@@ -225,3 +227,14 @@ def _shape_day(ticks) -> dict[str, dict[str, list[float]]]:
                 sm[i] = (1 - a) * sm[i] + a * sm[0]
             out.setdefault(mid, {})[ch] = [round(v, 3) for v in sm]
     return out
+
+
+# A real sensor never repeats one value for 15 s; a line between two equal 10 s samples does, and the validation
+# layer flags that as a frozen sensor (STALE). Each replayed second gets a tiny, repeatable wobble (no RNG drawn).
+JITTER = {"temp_c": 0.03, "water_flow_lpm": 0.05, "steam_kgf_cm2": 0.004}
+
+
+def _jitter(ts: datetime, mid: str, ch: str) -> float:
+    import zlib
+    h = zlib.crc32(f"{ts.timestamp():.0f}|{mid}|{ch}".encode()) / 0xFFFFFFFF
+    return (h * 2.0 - 1.0) * JITTER.get(ch, 0.0)

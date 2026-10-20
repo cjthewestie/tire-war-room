@@ -29,7 +29,7 @@ export function DemoStrip() {
   const net = state.snapshot?.header.network ?? 'online'
   const mock = transport.mode === 'mock'
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
-  const current = scenario ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : null)
+  const current = scenario ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : (state.clock?.scenario as ScenarioName | undefined) ?? null)
   const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
   return (
     <div className="demo" aria-label="展示控制">

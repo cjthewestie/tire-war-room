@@ -137,11 +137,8 @@ from warroom.factory import (
 
 # anomaly kinds with no sensor outcome to verify (page 6 box 4 plan vs actual): VERIFY checks that the
 # approved writes ran; the hypothesis is never CONFIRMED by it
-UNMEASURED_KINDS = frozenset({"schedule_slip", "supervisor_command", "shift_start", "order_rush", "staffing_short",
-                              "material_short"})
-PLANT_KINDS = frozenset({"shift_start", "order_rush", "staffing_short", "material_short"})   # issue #17 / #36 plant events
-MATERIAL_PINS = ("delivery_late", "material_short")   # issue #36: PlantInput kinds about materials
-MATERIAL_DISPATCH_MSG = "原料事件：盤點庫存與在途、催供應商，現有原料先供最早交期的訂單"
+UNMEASURED_KINDS = frozenset({"schedule_slip", "supervisor_command", "shift_start", "order_rush", "staffing_short"})
+PLANT_KINDS = frozenset({"shift_start", "order_rush", "staffing_short"})   # issue #17 plant events
 COMMAND_MACHINE = "PLANT"      # issue #10: a supervisor command that names no machine is about the plant
 # issue #17: a plant event's VERIFY waits (sim time) for the people to finish the tasks its approved steps became
 TASK_VERIFY_MAX_MIN = 180.0
@@ -429,10 +426,8 @@ class StateMachine:
         event, and runs CLASSIFY -> PLAN -> SIMULATE -> GATE -> (approval) -> EXECUTE -> VERIFY (the people finish
         the tasks) -> CLOSED like any event."""
         kind = {"shift_start": AnomalyKind.SHIFT_START, "rush_order": AnomalyKind.ORDER_RUSH,
-                "absence": AnomalyKind.STAFFING_SHORT, "delivery_late": AnomalyKind.MATERIAL_SHORT,
-                "material_short": AnomalyKind.MATERIAL_SHORT}[pin.kind]
-        tag = {"shift_start": "PLAN", "rush_order": "RUSH", "absence": "STAFF", "delivery_late": "MAT",
-               "material_short": "MAT"}[pin.kind]
+                "absence": AnomalyKind.STAFFING_SHORT}[pin.kind]
+        tag = {"shift_start": "PLAN", "rush_order": "RUSH", "absence": "STAFF"}[pin.kind]
         now = at or self._now()
         base = f"EV-{now.astimezone(TZ):%Y%m%d-%H%M%S}-{tag}"
         eid, n = base, 2
@@ -449,8 +444,7 @@ class StateMachine:
                           {"from": None, "to": EventState.DETECTED.value, "reason": "plant event"}, event_id=eid)
         self.audit.append(AuditKind.SYSTEM, "plant", {"plant_input": pin.model_dump(mode="json")}, event_id=eid)
         self._note(ev, "事件偵測", f"[工具] {pin.text} → 喚醒指揮官", "tool", ts=now)
-        title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口", "delivery_late": "到貨延遲",
-                 "material_short": "原料短缺"}[pin.kind]
+        title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
         self._set_alert(ev, AlertCard(title=title, summary=pin.text[:60]), source="detector")
         return ev
 
@@ -472,8 +466,7 @@ class StateMachine:
         await self._loop(run)
 
     PLANT_SOP_QUERY = {"shift_start": "密煉機開機暖機與換批 暖機順序", "rush_order": "急單 插單 排程 交期",
-                       "absence": "人力 缺人 調班 加班 支援", "delivery_late": "原料 到貨延遲 缺料 調料 庫存",
-                       "material_short": "原料 缺料 庫存不足 調料 投料"}
+                       "absence": "人力 缺人 調班 加班 支援"}
 
     PLANT_TOOLS = frozenset({ToolName.QUERY_ORDERS_SHIFTS, ToolName.SOLVE_SCHEDULE, ToolName.CONFIRM_SCHEDULE,
                              ToolName.NOTIFY_TEAMS})
@@ -492,17 +485,15 @@ class StateMachine:
                 st = st.model_copy(update={"args": {k: v for k, v in st.args.items() if k != "machine_id"}})
             keep.append(st)
         kind = self._plant_kind(run.ev)
-        if kind in ("shift_start", "rush_order", *MATERIAL_PINS) and not any(
+        if kind in ("shift_start", "rush_order") and not any(
                 st.tool is ToolName.NOTIFY_TEAMS and st.args.get("kind") == NotifyKind.DISPATCH.value for st in keep):
             # the day's plan / the inserted order reaches the floor only through 派工 (R2, approval): when the model
             # left it out, code adds the fixed-text step so the supervisor still gets one card and people get tasks
             pin = self._plant_inputs.get(run.ev.id)
             teams = [TeamId.BODY.value, TeamId.CURING.value] if kind == "rush_order" else \
-                [TeamId.BODY.value, TeamId.SIDE.value] if kind in MATERIAL_PINS else \
                 [TeamId.BODY.value, TeamId.BIGOPEN.value, TeamId.SIDE.value, TeamId.BEAD_NYLON.value, TeamId.BOND.value,
                  TeamId.CURING.value]
             msg = (f"急單 {pin.order.id} 插單：依新排程補料、備模" if kind == "rush_order" and pin is not None and pin.order
-                   else MATERIAL_DISPATCH_MSG if kind in MATERIAL_PINS
                    else "今日計畫：依 SOP 暖機（密煉 → 開煉），首批膠料補到 A 線，依排程開工")
             confirm = [st.id for st in keep if st.tool is ToolName.CONFIRM_SCHEDULE]
             sid = f"S{len(keep) + 1}"
@@ -603,8 +594,6 @@ class StateMachine:
             out.append(f"急單 {o.id}：{o.customer} {o.size.value} {o.qty} 條，交期 {o.due:%m/%d}（已加入訂單簿）")
         if kind == "absence" and pin is not None:
             out.append(f"缺勤：{pin.text}")
-        if kind in MATERIAL_PINS and pin is not None:
-            out.append(f"原料事件：{pin.text}")
         gaps = d.get("gaps") or []
         if gaps:
             out.append("班表缺口：" + "、".join(gaps[:3]))

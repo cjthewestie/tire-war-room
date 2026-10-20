@@ -148,7 +148,7 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 11. phase=replan 且 context 有 supervisor_rejected（主管否決）、supervisor_discussion（主管討論）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。
 12. context.source=supervisor 時，這不是異常，是主管下的指令（context.command）：hypothesis.cause_code 填 supervisor_command、statement 寫要完成的事、expectation 為 null；只用工具做得到的部分（通知某組用 notify_teams，message 寫清楚要做什麼、何時、哪台機；排程變更用 solve_schedule 再 confirm_schedule；只想知道狀況用讀取工具）。工具做不到的事（搬動機台、改機台設定、開關閥、任何 PLC 動作）不可假裝能做：steps=[]，rationale 說明做不到的原因與可行的替代做法。
 13. context 有 supervisor_discussion 時：主管在核准前提出的條件（constraints，例如某台機某時段保養、不加班、不跨組調人）由程式在每次 solve_schedule 強制套用並檢查結果；你只需保留原計畫的步驟（含 solve_schedule、confirm_schedule 與同一輪的寫入步驟），重新求解。
-14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假、delivery_late 到貨延遲、material_short 原料短缺）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short／material_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；到貨延遲與原料短缺只要 query_orders_shifts 查原料與訂單，再加 notify_teams kind=dispatch（盤點、調料，需核准），不必重排；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
+14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
 
 
 def build_user_message(req: CommanderRequest) -> str:
@@ -439,8 +439,7 @@ class MockCommander:
         ctx = req.context or {}
         if a.kind is AnomalyKind.SUPERVISOR_COMMAND:          # issue #10: a task the supervisor typed
             return self._command(req, hid)
-        if a.kind in (AnomalyKind.SHIFT_START, AnomalyKind.ORDER_RUSH, AnomalyKind.STAFFING_SHORT,   # issue #17
-                      AnomalyKind.MATERIAL_SHORT):                                                  # issue #36
+        if a.kind in (AnomalyKind.SHIFT_START, AnomalyKind.ORDER_RUSH, AnomalyKind.STAFFING_SHORT):   # issue #17
             return self._plant(req, hid)
         if ctx.get("sop_path"):
             return self._sop_path(req, hid, rejected_ids)
@@ -846,19 +845,6 @@ class MockCommander:
                                       cause_code="order_rush", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
                 alert_card=AlertCard(title=f"插單：{oid}", summary=f"{a.message[:40]}；重排看誰延後。"),
                 rationale="急單加入訂單簿；求解器重排並列出延後的訂單，主管核准後才生效。")
-        if a.kind is AnomalyKind.MATERIAL_SHORT:                     # issue #36: a late delivery / a material short
-            steps = [
-                PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查原料庫存、在途採購與受影響訂單", args={}),
-                PlanStep(id="S2", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"], purpose="派工：盤點、調料（需主管核准）",
-                         args={"teams": [TeamId.BODY.value, TeamId.SIDE.value], "kind": NotifyKind.DISPATCH.value,
-                               "message": "原料事件：盤點庫存與在途、催供應商，現有原料先供最早交期的訂單"}),
-            ]
-            return CommanderPlan(
-                goal="原料事件：生產不斷料", steps=steps,
-                hypothesis=Hypothesis(id=hid, statement="現有庫存加在途採購撐得到補貨，先供最早交期的訂單",
-                                      cause_code="material_short", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
-                alert_card=AlertCard(title="原料事件", summary=f"{a.message[:40]}；盤點與調料待核准。"),
-                rationale="原料延遲或短少不動機台：先盤點庫存與在途，現場調料需主管核准，任務由程式派給現場。")
         steps = [
             PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose="查班表缺口與出勤", args={}),
             PlanStep(id="S2", tool=ToolName.SOLVE_SCHEDULE, depends_on=["S1"], purpose="依缺人重排，提出補人方案",

@@ -114,7 +114,6 @@ class AnomalyKind(StrEnum):
     SHIFT_START = "shift_start"
     ORDER_RUSH = "order_rush"
     STAFFING_SHORT = "staffing_short"
-    MATERIAL_SHORT = "material_short"   # issue #36: a delivery comes late or a material runs short
 
 
 class Severity(StrEnum):
@@ -429,7 +428,7 @@ class PlantInput(_M):
     """Issue #17: something that happens to the plant that is not a machine fault, scripted by a scenario.
     It changes the plant's inputs (the order book, the roster), never a machine, and wakes the state
     machine as a plant event."""
-    kind: Literal["shift_start", "rush_order", "absence", "delivery_late", "material_short"]
+    kind: Literal["shift_start", "rush_order", "absence"]
     text: str                         # "急單 #R-009 到：客戶G 中胎 2 條，交期 10/09"
     order: Order | None = None      # rush_order: the order that arrives
     staff_id: str | None = None       # absence: team dataset staff id (S13)
@@ -437,8 +436,6 @@ class PlantInput(_M):
     shift_name: str | None = None     # absence: "早班" (factory.OPTIMISED_SHIFTS name)
     people: int = 1
     note: str | None = None
-    material: str | None = None       # issue #36 delivery_late / material_short: world material key ("carbon_black")
-    late_h: float | None = None       # issue #36 delivery_late: hours the delivery slips
 
 
 class ScenarioStep(_M):

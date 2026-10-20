@@ -13,20 +13,16 @@ import pathlib
 import httpx
 import pytest
 
-from tests.test_plant_events import _check_common
 from warroom.api import Runtime, create_app
 from warroom.config import Settings
 from warroom.contracts import (
-    ApprovalDecision,
     AuditKind,
-    DecisionKind,
-    EventState,
     FaultSpec,
     PlantInput,
     ScenarioName,
 )
 from warroom.sim import Factory
-from warroom.sim.events import CATALOG, CATALOG_BY_KIND, SimEvents
+from warroom.sim.events import CATALOG, CATALOG_BY_KIND, SimEvents, WorldInput
 
 pytestmark = pytest.mark.timeout(300)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -63,7 +59,7 @@ def _sequence(seed: int, n: int = 16) -> list[str]:
     for _ in range(n):
         kind = ev.pick()
         spec = ev.build(kind, f, f.now(), set())
-        out.append(f"{kind}:{spec.model_dump_json()}")
+        out.append(f"{kind}:{spec.model_dump_json() if hasattr(spec, 'model_dump_json') else repr(spec)}")
     return out
 
 
@@ -81,8 +77,8 @@ def test_every_kind_builds_a_fault_or_plant_input():
     ev = SimEvents()
     for e in CATALOG:
         out = ev.build(e.kind, f, f.now(), set())
-        assert isinstance(out, FaultSpec if e.source == "fault" else PlantInput), e.kind
-        if isinstance(out, PlantInput):
+        assert isinstance(out, {"fault": FaultSpec, "plant": PlantInput, "world": WorldInput}[e.source]), e.kind
+        if not isinstance(out, FaultSpec):
             assert out.text
     with pytest.raises(KeyError):
         ev.build("explode", f, f.now(), set())
@@ -151,38 +147,25 @@ async def test_random_machine_event_goes_through_the_detector(tmp_path, monkeypa
     assert any(a["payload"].get("msg") == "模擬事件" and a["actor"] == "sim_events" for a in audit)
 
 
-async def _drive_plant(rt: Runtime, minutes: int = 120):
-    decided = []
-    for _ in range(minutes * 60):
-        await rt.tick(1.0, publish=False)
-        for req in rt.approvals.pending():
-            opt = next((o for o in req.options if o.recommended), req.options[0] if req.options else None)
-            decided.append(rt.approvals.decide(ApprovalDecision(
-                request_id=req.id, decision=DecisionKind.APPROVE, option_id=opt.id if opt else None, reason="test",
-                via="auto", decided_at=rt.now())))
-        evs = rt.events()
-        if evs and all(e.state in (EventState.CLOSED, EventState.SAFE_STOP) for e in evs):
-            break
-    await rt.wait_events(5)
-    return decided
-
-
-@pytest.mark.parametrize("kind", ["material_short", "delivery_late"])
-async def test_material_event_runs_the_plant_path(tmp_path, kind):
+async def test_material_events_stay_in_the_world(tmp_path):
+    """Late delivery and a stock-out change the world (feed + stock) only; a shortfall card is #38's patrol."""
     rt = await _runtime(tmp_path, "normal")
     try:
         await rt.tick(1.0, publish=False)
-        fired = rt.fire_sim_event(kind)
-        assert fired["source"] == "manual" and fired["text"]
-        decided = await _drive_plant(rt)
-        world, events = rt.world_snapshot(), rt.events()
+        w = rt.sim.world
+        late = rt.fire_sim_event("delivery_late")
+        out = rt.fire_sim_event("stock_out")
+        key = out["ref"]
+        assert w._stock[key] == 0.0
+        for _ in range(30):
+            await rt.tick(1.0, publish=False)
+        kinds = [e.kind for e in w.events]
+        assert "stockout" in kinds
+        if late["kind"] == "delivery_late":
+            assert "delivery_late" in kinds
+        assert rt.events() == [] and rt.approvals.pending() == []      # no plant event, no card
     finally:
         await rt.stop()
-    audit = [json.loads(x) for x in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
-    ev, tasks = _check_common(events, decided, world, audit, "material_short")
-    assert {t.kind for t in tasks} >= {"盤點", "調料"}
-    assert any(x.startswith("原料事件") for x in decided[0].done)
-    assert any(e.kind in ("material_short", "delivery_late") for e in world.events)
 
 
 async def test_fire_api_rush_order_and_staff_sick(tmp_path):

@@ -1143,17 +1143,26 @@ class Runtime:
         busy = {m for m in F.MACHINE_IDS if self._open_event_id(m)} | \
             {f.machine_id for f in (self.sim.faults() if callable(getattr(self.sim, "faults", None)) else [])}
         out = self.sim_events.build(kind, self.sim, now, busy)
+        from warroom.sim.events import WorldInput
         if isinstance(out, FaultSpec):
             self.inject_fault(out)
             fired = self.sim_events.log(now, kind, fault_text(out), source, out.machine_id)
+        elif isinstance(out, WorldInput):        # material: world feed and stock only (cards: #38 patrol)
+            world = getattr(self.sim, "world", None)
+            if world is None:
+                raise RuntimeError("this sim has no world")
+            if out.kind == "delivery_late" and out.po_id:
+                world.delay_delivery(now, out.po_id, out.late_h or 6.0, out.text)
+            else:
+                world.empty_stock(now, out.material)
+            fired = self.sim_events.log(now, out.kind, out.text, source, out.po_id or out.material)
         else:
             apply = getattr(self.sim, "apply_plant_input", None)
             if not callable(apply):
                 raise RuntimeError("this sim takes no plant events")
             apply(out, now)
-            ref = out.order.id if out.order else out.staff_id or out.material
-            fired = self.sim_events.log(now, "material_short" if out.kind == "material_short" and kind == "delivery_late"
-                                        else kind, out.text, source, ref)
+            ref = out.order.id if out.order else out.staff_id
+            fired = self.sim_events.log(now, kind, out.text, source, ref)
         self.audit.append(AuditKind.SYSTEM, "supervisor" if source == "manual" else "sim_events",
                           {"msg": "模擬事件", "kind": fired.kind, "text": fired.text, "source": source,
                            "seed": self.sim_events.seed})
@@ -1358,7 +1367,7 @@ class Runtime:
         if ev.machine_id not in F.MACHINE_BY_ID:
             # a plant event (issue #17) or a supervisor command about the whole plant: no machine, no tiles
             auto_done, pending = self._actions_for(ev)
-            kind = {"shift_start": "早班開工", "order_rush": "插單", "staffing_short": "人力缺口", "material_short": "原料事件",
+            kind = {"shift_start": "早班開工", "order_rush": "插單", "staffing_short": "人力缺口",
                     "supervisor_command": "主管指令"}.get(ev.anomaly.kind.value, "工廠事件")
             return FocusPanel(event_id=ev.id, machine_id=ev.machine_id, title=f"{kind}：{ev.goal or ev.anomaly.message}"[:60],
                               detail=ev.anomaly.message, tiles=[], auto_done=auto_done, pending=pending,

@@ -56,7 +56,7 @@
 
 ### 模擬事件：展示時讓工廠自己出狀況（issue #36）
 
-展示列多了 **隨機事件** 開關（3D 工廠按 `4` 也一樣）：打開後每 10／30／60 個模擬分鐘，從加權清單抽一件事件——硫化機蒸汽壓不足、蒸汽洩漏、開煉機冷卻水不足、感測器壞資料（不叫醒 AI）、急單插單、人員請病假、原料到貨延遲、原料短缺。**觸發事件 ▾** 可以立刻觸發指定的一件。事件不走捷徑：機台故障注入模擬器（和 `/api/sim/fault` 同一條路），要被事件偵測從讀值看出來；插單、病假、原料是工廠事件，由狀態機開事件、寫入一律經閘門（Action Gate）。預設關閉；同一個種子（seed，預設 36）抽出同一串事件；關閉時 p.11 腳本結果不變（`tests/test_sim_events.py`）。程式：`warroom/sim/events.py`、`Runtime.fire_sim_event`；API：`GET/POST /api/sim/events`、`POST /api/sim/events/fire`。
+展示列多了 **隨機事件** 開關（3D 工廠按 `4` 也一樣）：打開後每 10／30／60 個模擬分鐘，從加權清單抽一件事件——硫化機蒸汽壓不足、蒸汽洩漏、開煉機冷卻水不足、感測器壞資料（不叫醒 AI）、急單插單、人員請病假、原料到貨延遲、原料缺料（一批驗退）。**觸發事件 ▾** 可以立刻觸發指定的一件。事件不走捷徑：機台故障注入模擬器（和 `/api/sim/fault` 同一條路），要被事件偵測從讀值看出來；插單、病假是工廠事件，由狀態機開事件、寫入一律經閘門（Action Gate）；原料延遲與缺料只改變工廠全貌的庫存與到貨並寫入動態，缺料核准卡由 #38 的巡檢負責。預設關閉；同一個種子（seed，預設 36）抽出同一串事件；關閉時 p.11 腳本結果不變（`tests/test_sim_events.py`）。程式：`warroom/sim/events.py`、`Runtime.fire_sim_event`；API：`GET/POST /api/sim/events`、`POST /api/sim/events/fire`。
 
 ### 3D 工廠（戰情室負責人視角）
 
@@ -168,7 +168,7 @@ With no scenario chosen, the plant plays one day of the team dataset (2026-10-21
 
 ### Simulated events (issue #36)
 
-The demo strip has a **隨機事件** (random events) switch, also key `4` in the 3D factory: every 10 / 30 / 60 factory minutes it draws one event from a weighted list (steam pressure drop, steam leak, cooling-water drop, a bad sensor sample that must not wake the AI, rush order, sick call, late delivery, material shortage). **觸發事件 ▾** fires a chosen one now. Machine events are sim faults the detector has to find in the readings; order, people and material events are plant events the state machine opens, with every write through the Action Gate. Off by default; one seed gives one sequence; page 11 is unchanged while it is off (`tests/test_sim_events.py`). Code: `warroom/sim/events.py`; API `GET/POST /api/sim/events`, `POST /api/sim/events/fire`.
+The demo strip has a **隨機事件** (random events) switch, also key `4` in the 3D factory: every 10 / 30 / 60 factory minutes it draws one event from a weighted list (steam pressure drop, steam leak, cooling-water drop, a bad sensor sample that must not wake the AI, rush order, sick call, late delivery, a stock-out). **觸發事件 ▾** fires a chosen one now. Machine events are sim faults the detector has to find in the readings; order and people events are plant events the state machine opens, with every write through the Action Gate; material events only move the world's stock and deliveries (the shortfall card is #38's patrol). Off by default; one seed gives one sequence; page 11 is unchanged while it is off (`tests/test_sim_events.py`). Code: `warroom/sim/events.py`; API `GET/POST /api/sim/events`, `POST /api/sim/events/fire`.
 
 ### 3D factory (the war-room lead's view)
 

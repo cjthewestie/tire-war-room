@@ -566,6 +566,7 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .top-right .chip.ok, .top-right .chip.bad, .top-right .chip.muted { display: none; }
   .topbar { flex-wrap: nowrap; gap: 12px; }
   .top-right { flex-wrap: nowrap; gap: 8px; }
+  .top-right .chip.loop { font-size: 12px; padding: 2px 8px; }
 }
 @media (max-width: 899px) {
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
