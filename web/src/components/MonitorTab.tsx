@@ -281,7 +281,7 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
   return (
     <Panel num="④" title="機台狀態" className="machines">
       <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・7–10 號可做中大胎</small></p>
-      <div className="presses">
+      <div className="presses" data-line="CURE">
         {presses.map((m) => (
           <button key={m.machine_id} className={`mdot press st-${m.status}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
             onClick={() => onMachine(m.machine_id)} data-machine={m.machine_id}
@@ -295,7 +295,7 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
       </div>
       <div className="mlines">
         {LINES.filter((ln) => ln !== 'CURE').map((ln) => (
-          <div className="mline" key={ln}>
+          <div className="mline" key={ln} data-line={ln}>
             <span className={`mline-k ln-${ln}`}>{LINE_SHORT[ln]}{ln.length === 1 ? ' 線' : ''}</span>
             <div className="mline-items">
               {machines.filter((m) => m.line === ln).map((m) => {

@@ -19,7 +19,7 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
         <h1>實心胎智慧製造戰情室</h1>
       </div>
       <nav className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === 'agent'} className={tab === 'agent' ? 'on' : ''} onClick={() => onTab('agent')} data-testid="tab-agent">對話台</button>
+        <button role="tab" aria-selected={tab === 'agent'} className={tab === 'agent' ? 'on' : ''} onClick={() => onTab('agent')} data-testid="tab-agent">主控台</button>
         <button role="tab" aria-selected={tab === 'monitor'} className={tab === 'monitor' ? 'on' : ''} onClick={() => onTab('monitor')} data-testid="tab-monitor">產線監控</button>
         <button role="tab" aria-selected={tab === 'schedule'} className={tab === 'schedule' ? 'on' : ''} onClick={() => onTab('schedule')}>人力排程</button>
         <button role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'on' : ''} onClick={() => onTab('orders')} data-testid="tab-orders">訂單</button>

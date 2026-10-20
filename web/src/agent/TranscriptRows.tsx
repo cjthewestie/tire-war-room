@@ -1,4 +1,4 @@
-// Transcript rows of the agent console (issue #8), shared by the home 對話台 (final dialogue only) and the
+// Transcript rows of the agent console (issue #8), shared by the home 主控台 (final dialogue only) and the
 // full Agent page (issue #37: every state change, plan, tool call, gate and approval).
 import type { Event } from '../contracts'
 import { fmtHMS, fmtMs } from '../format'
@@ -17,7 +17,7 @@ const DECISION: Record<string, string> = { approve: '核准', modify: '修改', 
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
 
 /** One transcript row. `open` expands tool calls (args, data read, raw result); `brief` keeps a 問戰情室 row to
- *  the question and the answer (the home 對話台 shows the final dialogue only). */
+ *  the question and the answer (the home 主控台 shows the final dialogue only). */
 export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev: Event | null; nth: number; open?: boolean; brief?: boolean }) {
   switch (it.k) {
     case 'state':

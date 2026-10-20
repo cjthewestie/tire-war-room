@@ -826,3 +826,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .sched-next .sub { margin-top: 8px; }
 .sched-next td small { margin-left: 4px; }
 .lg.now { background: var(--info); width: 2px; height: 12px; }
+.ot-row.r-complete .ot-st, .ot-row.r-done .ot-st { color: var(--accent); }
+.ot-row.r-complete { border-left-color: var(--accent); }
+.ok-mark { font-weight: 700; }
+.ot-why.ok { color: var(--accent); }

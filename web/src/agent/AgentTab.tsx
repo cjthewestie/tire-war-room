@@ -1,10 +1,10 @@
-// Home 對話台's Agent panel (issue #8 → #37): only the final dialogue — what the supervisor typed or asked and
+// Home 主控台's Agent panel (issue #8 → #37): only the final dialogue — what the supervisor typed or asked and
 // the agent's replies and plan summaries. Every step behind it (state changes, the plan, tool calls, data read,
 // gates, approvals) is on the Agent page (#console), linked from 「看完整過程」. The input bar keeps three modes
 // (issue #10): 討論這個計劃 (POST /api/events/{id}/discuss), 下新任務 (POST /api/command), 只查不改 (POST /api/ask).
 // CJ, 2026-10-20: 「對話台裡面的 agent 對話台這邊不用太多他思考工具使用的東西就是給最後的對話就可以了」.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { AskAnswer, CommandReply, DiscussReply, Event } from '../contracts'
+import type { AskAnswer, CommandReply, DiscussReply, Event, Line } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHMS } from '../format'
 import { RISK_PLAIN } from '../plain'
@@ -17,6 +17,7 @@ import { useHomeSelection } from './homeSelection'
 import { PlanArea } from './PlanArea'
 import { isDialogue, withAsks, type ChatItem, type Item, type LocalItem } from './transcript'
 import { Row } from './TranscriptRows'
+import { setReplan, useReplans } from './replanStore'
 import { useTranscript } from './useTranscript'
 import './agent.css'
 
@@ -24,13 +25,14 @@ const ASK_EXAMPLES = ['7 號機現在怎樣？', '今晚夜班缺誰？', '9 號
 
 export interface BarFocus { mode?: BarMode; text?: string; n: number }
 
-/** Home 對話台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
+/** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
  *  one status line, then three docked columns — LEFT the ranked 核准區 list, CENTER the 計劃板 of the selected item
  *  (step cards + arrows, delivery impact, who does what, 核准 / 討論 pinned), RIGHT the Agent conversation, which
  *  follows the selected item (or 全部); 討論 puts the caret in its input in 討論這個計劃 mode. */
-export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull }: {
+export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, onFocus }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   picked: string | null; setPicked: (id: string) => void; onMonitor?: () => void; onFull?: (eventId?: string) => void
+  onFocus?: (machine?: string, line?: Line) => void
 }) {
   const { state } = useWarRoom()
   const { events, list, sel, ev, now } = useHomeSelection(picked)
@@ -39,9 +41,17 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull }
   const [focus, setFocus] = useState<BarFocus | null>(null)
   const chat = (mode?: BarMode, text?: string) => { setAll(false); setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
   const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
+  // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
+  const replans = useReplans()
+  const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
+  useEffect(() => {
+    if (!arrived?.eventId) return
+    setReplan(arrived.orderId, { state: 'ready' })
+    setPicked(arrived.eventId)
+  }, [arrived?.eventId, arrived?.orderId, setPicked])
   return (
     <>
-    <HomeStatus onMonitor={onMonitor} />
+    <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
       <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />

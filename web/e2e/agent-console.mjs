@@ -1,4 +1,4 @@
-// Agent 對話台 + visual approval card (issue #8), end to end against a running backend. Headless only.
+// 主控台 Agent panel + visual approval card (issue #8), end to end against a running backend. Headless only.
 //   PORT=8047 ./start.sh   then   node web/e2e/agent-console.mjs http://localhost:8047
 // Starts the press-7 scenario, waits for the approval, checks the console transcript (sop_search and
 // solve_schedule tool rows, the plan block), the visual card (plan diagram, before/after Gantt with

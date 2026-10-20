@@ -582,7 +582,11 @@ export type WorkerState = "待命" | "在機台" | "搬運" | "休息" | "如廁
 export type WorldZone =
   | "war_room" | "staff" | "line_A" | "line_B" | "line_C" | "line_D" | "line_BOND" | "line_CURE"
   | "break" | "toilet" | "dock" | "off_site"
-export interface WorldEvent { ts: ISODate; kind: string; text: string; ref: string | null }
+export interface WorldEvent {
+  ts: ISODate; kind: string; text: string; ref: string | null
+  /** issue #36 order_completed / shipment_departed */
+  order_ids?: string[]; qty?: number | null; on_time?: boolean | null
+}
 export interface WorldOrder {
   id: string; size: TireSize; qty: number; done: number; due: string; customer: string; status: WorldOrderStatus
   rush: boolean; source: "seed" | "world"; created_at: ISODate | null; shipped_at: ISODate | null

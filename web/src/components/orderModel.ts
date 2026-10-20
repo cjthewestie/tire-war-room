@@ -14,8 +14,12 @@ export function dueEnd(due: string): number {
   return /^\d{4}-\d{2}-\d{2}$/.test(due) ? ms(`${due}T23:59:00+08:00`) : ms(due)
 }
 
-export type Risk = 'late' | 'risk' | 'ok' | 'done'
-export const RISK_TEXT: Record<Risk, string> = { late: '會晚交', risk: '有風險', ok: '準時', done: '已出貨' }
+export type Risk = 'late' | 'risk' | 'ok' | 'complete' | 'done'
+export const RISK_TEXT: Record<Risk, string> = { late: '會晚交', risk: '有風險', ok: '準時', complete: '已完成', done: '已出貨' }
+
+/** When an order finished and shipped, from the world feed (issue #36 order_completed / shipment_departed, or
+ *  main's order_done) and the order's own shipped_at; onTime = by the due day. */
+export interface OrderSuccess { doneAt: string | null; doneOnTime: boolean | null; shipAt: string | null; shipOnTime: boolean | null }
 
 export interface OrderView {
   o: WorldOrder
@@ -28,6 +32,7 @@ export interface OrderView {
   why: string[]                               // plain reasons for the risk
   unscheduled: number                         // tyres still to make that the schedule window does not hold
   projected: string | null                    // "10/16": the schedule's capacity estimate past its window (warnings)
+  success: OrderSuccess | null                // finished / shipped: when, and whether by the due day
 }
 
 /** The part of the schedule's warnings about one order: a warning lists several orders
@@ -42,7 +47,7 @@ export function warningsFor(id: string, warnings: string[]): string[] {
   return out
 }
 
-export function orderView(o: WorldOrder, allJobs: ScheduleJob[], now: number, warnings: string[], goods?: OrderGoods): OrderView {
+export function orderView(o: WorldOrder, allJobs: ScheduleJob[], now: number, warnings: string[], goods?: OrderGoods, succ?: Partial<OrderSuccess>): OrderView {
   const jobs = allJobs.filter((j) => j.order_id === o.id).sort((a, b) => ms(a.mold_in) - ms(b.mold_in))
   const passed = (t: string) => isFinite(now) && ms(t) <= now
   const n = jobs.length
@@ -71,11 +76,18 @@ export function orderView(o: WorldOrder, allJobs: ScheduleJob[], now: number, wa
   // the schedule's own capacity estimate past its window ("預估 10/16"), compared with the due day
   const pm = projected ? /^(\d{1,2})\/(\d{1,2})$/.exec(projected) : null
   const projLate = !!pm && isFinite(due) && ms(`${o.due.slice(0, 4)}-${pm[1].padStart(2, '0')}-${pm[2].padStart(2, '0')}T23:59:00+08:00`) > due
-  const risk: Risk = shipped ? 'done' : late || projLate || goods?.late ? 'late' : why.length ? 'risk' : 'ok'
-  return { o, jobs, stages, eta, due, lateH: late ? Math.ceil((eta - due) / H) : null, risk, why, unscheduled, projected }
+  const finished = o.status === '完成' || o.status === '待出貨'
+  const risk: Risk = shipped ? 'done' : finished ? 'complete' : late || projLate || goods?.late ? 'late' : why.length ? 'risk' : 'ok'
+  const byDue = (t: string | null | undefined) => (t ? ms(t) <= due : null)
+  const shipAt = succ?.shipAt ?? o.shipped_at ?? null
+  const success: OrderSuccess | null = shipped || finished ? {
+    doneAt: succ?.doneAt ?? null, doneOnTime: succ?.doneOnTime ?? byDue(succ?.doneAt),
+    shipAt, shipOnTime: succ?.shipOnTime ?? byDue(shipAt),
+  } : null
+  return { o, jobs, stages, eta, due, lateH: late ? Math.ceil((eta - due) / H) : null, risk, why, unscheduled, projected, success }
 }
 
-const RANK: Record<Risk, number> = { late: 0, risk: 1, ok: 2, done: 3 }
+const RANK: Record<Risk, number> = { late: 0, risk: 1, ok: 2, complete: 3, done: 4 }
 
 /** At-risk first, then rush, then the nearest due date. */
 export function byRisk(a: OrderView, b: OrderView): number {

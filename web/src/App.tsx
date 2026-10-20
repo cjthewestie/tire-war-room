@@ -1,8 +1,9 @@
-// War room home 對話台: the 核准區 list, the 計劃板 of the selected item and the docked Agent dialogue;
+// War room home 主控台 (was 對話台; CJ, 2026-10-20: 「這個 page 改成主控台名字」): the 核准區 list, the 計劃板 of the selected item and the docked Agent dialogue;
 // 產線監控 (proposal page 2 + the whole plant, which was 工廠全貌), 人力排程 (pages 4, 6, 11), 訂單, Agent (the full
 // transcript) and 後台 are the other tabs (#monitor, #schedule, #orders, #console, #admin); #world still opens 產線監控.
 // CJ, 2026-10-20: 「產線監控跟人力排程是個別頁面」「產線監控跟工廠全貌…重複到了…可以合併一下」.
 import { lazy, Suspense, useEffect, useState } from 'react'
+import type { Line } from './contracts'
 import type { LocalItem } from './agent/transcript'
 import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
@@ -42,6 +43,16 @@ function Dashboard() {
   const [asks, setAsks] = useState<LocalItem[]>([])
   const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
+  // a ticker item: 產線監控 on that machine (its drawer) or line, scrolled into view and flashed
+  const focusPlant = (m?: string, line?: Line) => {
+    go('monitor')
+    if (m) setMachine(m)
+    setTimeout(() => {
+      const el = document.querySelector(m ? `[data-machine="${m}"]` : line ? `[data-line="${line}"]` : '.machines')
+      el?.scrollIntoView({ block: 'center' })
+      el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
+    }, 120)
+  }
   const openConsole = (eventId?: string) => { setConsoleEvent(eventId ?? null); go('console', eventId ? `?event=${encodeURIComponent(eventId)}` : '') }
   const [demoOpen, setDemoOpen] = useState(false)
   const lanDown = state.snapshot?.header.network === 'lan_down'
@@ -59,12 +70,12 @@ function Dashboard() {
         : tab === 'schedule' ? <><TodayPlan /><ScheduleTab /></> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} initial={consoleEvent} /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
-        : <Suspense fallback={<div className="loading">載入對話台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} /></Suspense>}</main>
+        : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測</footer>
       <nav className="bottomnav" aria-label="分頁">
-        <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} aria-label="對話台" onClick={() => go('agent')}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>對話台{pendingN > 0 && <i className="nav-badge">{pendingN}</i>}
+        <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} aria-label="主控台" onClick={() => go('agent')}>
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>主控台{pendingN > 0 && <i className="nav-badge">{pendingN}</i>}
         </button>
         <button className={tab === 'monitor' ? 'on' : ''} aria-current={tab === 'monitor' ? 'page' : undefined} onClick={() => go('monitor')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M3 13h4l3-8 4 14 3-6h4" /></svg>產線監控

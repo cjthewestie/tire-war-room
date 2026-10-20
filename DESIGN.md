@@ -34,8 +34,8 @@ Contrast (WCAG, measured on `--panel` and `--panel-2`): light ink 17.0 / 14.8, i
 
 ## Layout (UX brief, prototype v12)
 
-- **Header:** product name, tabs 對話台 · 產線監控 · 人力排程 · 訂單 · 工廠全貌, factory time, network / LLM status. No extra buttons; demo controls stay in the 展示 strip (bottom sheet under 1024 px).
-- **對話台 (home):** a status line (machines normal / abnormal, today's de-molds vs schedule, next truck, people short on the current shift, pending approvals, theme toggle), then three docked columns at ≥1100 px:
+- **Header:** product name, tabs 主控台 · 產線監控 · 人力排程 · 訂單 · Agent · 狀態機 · 後台 (工廠全貌 merged into 產線監控, issue #37), factory time, network / LLM status. No extra buttons; demo controls stay in the 展示 strip (bottom sheet under 1024 px).
+- **主控台 (home; was 對話台):** a status line (machines normal / abnormal, today's de-molds vs schedule, next truck, people short on the current shift, pending approvals, theme toggle), then three docked columns at ≥1100 px:
   - 核准區 list (260 px), ranked ① 安全／機台異常 ② 交期風險 ③ 插單／人力決定 ④ 執行中 ⑤ AI 已自行處理 (collapsed);
   - 計劃板 (the rest): a dotted-grid board of step cards S1…Sn joined by `depends_on` arrows (waiting cards outlined in `--warn`, cards a new version changed marked 「改」), then 對交期的影響, 核准後誰去做, the option picker, and **核准 / 討論** pinned at the bottom;
   - Agent 對話 (360 px), which follows the selected item or shows 全部.
