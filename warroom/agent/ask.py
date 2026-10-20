@@ -26,6 +26,7 @@ from warroom import factory as F
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
 from warroom.agent.state_machine import _brief
+from warroom.agent.strict import failure_cause, strict_reason
 from warroom.config import Settings
 from warroom.contracts import (
     ASK_MAX_STEPS,
@@ -275,6 +276,17 @@ class AskAgent:
             raise ValueError("empty answer")
         return text
 
+    def _strict_answer(self, e: Exception, phase: str, error: str, ask_id: str, question: str, audit: AuditLog,
+                       now: Any, t0: float, tp: float, results: list[AskStepResult] | None = None) -> AskAnswer:
+        """--strict: the model failed, so say so; no keyword-rule plan, no template answer."""
+        reason = strict_reason(e, "回答")
+        audit.append(AuditKind.LLM_CALL, "ask", {
+            "phase": phase, "mode": self.mode.value, "model": self.settings.model,
+            "total_ms": round((time.perf_counter() - tp) * 1000, 1), "fell_back_to_mock": False, "error": error,
+            "cause": failure_cause(e), "strict": True, "reason": reason}, event_id=ask_id)
+        return AskAnswer(id=ask_id, question=question, answer=reason, steps=results or [], mode=self.mode,
+                         factory_time=now, total_ms=round((time.perf_counter() - t0) * 1000, 1))
+
     async def ask(self, question: str, *, tools: Any, audit: AuditLog, context: dict[str, Any],
                   now: Any, actor: str = "supervisor") -> AskAnswer:
         t0 = time.perf_counter()
@@ -295,10 +307,10 @@ class AskAgent:
         if self.mode is LLMMode.LLM:
             try:
                 plan = await self._llm_plan(question, context)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - model down / invalid JSON
                 error = f"{type(e).__name__}: {e}"[:300]
                 if not self.settings.llm_fallback_to_mock:
-                    raise
+                    return self._strict_answer(e, "plan", error, ask_id, question, audit, now, t0, tp)
                 plan, fell_back = mock_plan(question, context), True
                 cold = "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower()
         else:
@@ -354,10 +366,10 @@ class AskAgent:
                 if ungrounded:
                     error = f"ungrounded numbers {ungrounded}: model answer replaced by the results"
                     answer = template_answer(results)
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - model down / empty answer
                 error = f"{type(e).__name__}: {e}"[:300]
                 if not self.settings.llm_fallback_to_mock:
-                    raise
+                    return self._strict_answer(e, "answer", error, ask_id, question, audit, now, t0, ta, results)
                 answer, answer_fell_back = template_answer(results), True
         else:
             answer = template_answer(results)
