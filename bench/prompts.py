@@ -27,6 +27,7 @@ from warroom import factory as F
 from warroom.agent.commander import build_messages
 from warroom.agent.commander import plan_schema as commander_plan_schema
 from warroom.agent.narrate import machine_label
+from warroom.config import Settings
 from warroom.contracts import (
     TOOLS_BY_STATE,
     WRITE_TOOLS,
@@ -232,7 +233,7 @@ def card_schema() -> dict[str, Any]:
 # =====================================================================================
 # The commander's real call (judged latency, concurrency, tokens/W, preload)
 # =====================================================================================
-COMMANDER_MAX_TOKENS = 1200          # OpenAICommander default max_tokens
+COMMANDER_MAX_TOKENS = Settings.model_fields["commander_max_tokens"].default   # OpenAICommander default
 
 # CommanderRequest.allowed_tools exactly as StateMachine._ask builds it
 COMMANDER_ALLOWED_TOOLS = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)

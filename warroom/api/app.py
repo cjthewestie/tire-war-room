@@ -483,7 +483,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     @app.get("/api/health", response_model=HealthStatus)
     async def health() -> HealthStatus:
         r = rt()
-        return HealthStatus(ok=True, llm_mode=r.llm_mode, model=r.settings.model,
+        return HealthStatus(ok=True, llm_mode=r.llm_mode, model=r.settings.model, strict=getattr(r, "strict", False),
                             llm_reachable=await r.llm_reachable(), qdrant_ok=r.kb_ok(),
                             sim_running=r.running and not r.paused, factory_time=r.now(), uptime_s=r.uptime_s())
 

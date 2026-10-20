@@ -24,6 +24,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom.agent.narrate import machine_label
+from warroom.agent.strict import TruncatedOutput, failure_cause
 from warroom.config import Settings
 from warroom.contracts import (
     AlertCard,
@@ -293,11 +294,11 @@ class OpenAICommander:
     the allow-list on the latest call."""
     mode = LLMMode.LLM
 
-    def __init__(self, settings: Settings, http_client=None, max_tokens: int = 1200):
+    def __init__(self, settings: Settings, http_client=None, max_tokens: int | None = None):
         from openai import AsyncOpenAI
         self.settings = settings
         self.model = settings.model
-        self.max_tokens = max_tokens
+        self.max_tokens = max_tokens or settings.commander_max_tokens
         self.client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key_effective,
                                   timeout=settings.llm_timeout_s, max_retries=0, http_client=http_client)
         self._fallback = MockCommander()
@@ -306,6 +307,7 @@ class OpenAICommander:
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw: str = ""
         self.last_error: str | None = None     # why the latest call fell back (None = it did not)
+        self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | invalid_output | error
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
         kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req), temperature=0.0,
@@ -324,9 +326,9 @@ class OpenAICommander:
                    ) -> tuple[CommanderPlan, LLMCallInfo]:
         t0 = time.perf_counter()
         ttft: float | None = None
-        text, usage = "", None
+        text, usage, finish = "", None, None
         alert_sent = False
-        self.last_intercepted, self.last_raw, self.last_error = [], "", None
+        self.last_intercepted, self.last_raw, self.last_error, self.last_cause = [], "", None, None
         caught: list[dict[str, Any]] = []
         try:
             stream = await self.client.chat.completions.create(**self.request_kwargs(req))
@@ -338,12 +340,16 @@ class OpenAICommander:
                     if delta and ttft is None:
                         ttft = (time.perf_counter() - t0) * 1000
                     text += delta
+                    finish = getattr(ch, "finish_reason", None) or finish
                 if on_alert and not alert_sent:
                     card = extract_alert_card(text)
                     if card is not None:
                         alert_sent = True
                         on_alert(clamp_alert_card(card))
             self.last_raw = text
+            if finish == "length":
+                raise TruncatedOutput(f"output cut at max_tokens={self.max_tokens} "
+                                      f"(completion_tokens={getattr(usage, 'completion_tokens', None)})")
             plan, self.last_intercepted = parse_plan(text, caught)
             info = LLMCallInfo(mode=LLMMode.LLM, model=self.model, base_url=self.settings.base_url, ttft_ms=ttft,
                                total_ms=(time.perf_counter() - t0) * 1000,
@@ -355,6 +361,7 @@ class OpenAICommander:
         except Exception as e:
             self.last_raw = text
             self.last_error = f"{type(e).__name__}: {e}"[:500]
+            self.last_cause = failure_cause(e)
             # out-of-scope steps in a plan that was then rejected as a whole are still intercepted
             # and logged (page 7); with no parseable JSON, scan the raw text for tool names
             self.last_intercepted = caught or scan_intercepted(text)
