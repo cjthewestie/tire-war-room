@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     # Team dataset replay (data/team_dataset): "" off | team_ev1 | team_ev2 | team_both.
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))
+    # issue #32: the patrol (code) raises material shortfalls as plant events; WARROOM_PATROL=0 turns it off
+    patrol: bool = Field(True, validation_alias=AliasChoices("patrol", "WARROOM_PATROL"))
     approval_timeout_s: float = 600.0
 
     @property

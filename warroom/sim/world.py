@@ -211,7 +211,7 @@ class WorldEvent(_W):
     ts: datetime
     kind: str            # order_new | order_rush | order_change | order_done | shipment | po_created | delivery
     #                      | delivery_late | delivery_short | stockout | defect | maint_start | maint_end
-    #                      | repair_open | repair_close | truck_arrive
+    #                      | repair_open | repair_close | truck_arrive | stock_check | patrol (issue #32)
     text: str
     ref: str | None = None
 
@@ -819,6 +819,23 @@ class World:
                                     days_left=round(s / per_day, 1) if per_day > 0 else None, status=status))  # type: ignore[arg-type]
         return out
 
+    def material_outlook(self) -> list[dict[str, Any]]:
+        """Issue #32 (the patrol reads this): per material, the stock, what the machines running now burn per hour,
+        the hours until it runs out at that rate, and the next inbound purchase as the plant knows it (the promised
+        time; a late one has no new time yet). Read-only."""
+        out = []
+        for m in MATERIALS:
+            use = self._use_per_h(m)
+            s = self._stock[m.key]
+            nxt = min((p for p in self._pos if p.key == m.key and p.status in ("在途", "延遲", "卸貨中")),
+                      key=lambda p: p.eta, default=None)
+            out.append({"key": m.key, "name": m.name, "unit": m.unit, "stock": round(s, 1),
+                        "reorder_point": m.reorder_point, "use_per_h": round(use, 2),
+                        "hours_left": round(s / use, 1) if use > 0 else None,
+                        "next_po": None if nxt is None else {"id": nxt.id, "eta": nxt.eta, "status": nxt.status,
+                                                             "qty": nxt.qty}})
+        return out
+
     def _po_view(self) -> list[PurchaseOrder]:
         keep = [p for p in self._pos if p.status != "已收貨"] + [p for p in self._pos if p.status == "已收貨"][-4:]
         out = []
@@ -1291,6 +1308,14 @@ class World:
             self._emit(at, "order_rush", pin.text, pin.order.id)
         elif pin.kind == "shift_start":
             self._emit(at, "shift_start", pin.text, None)
+        elif pin.kind == "stock_check" and pin.material_key in MATERIAL_BY_KEY and pin.stock is not None:
+            m = MATERIAL_BY_KEY[pin.material_key]     # issue #32: a count sets the usable stock (a lot held back ...)
+            self._stock[m.key] = max(0.0, min(float(pin.stock), m.capacity))
+            if self._stock[m.key] > 0:
+                self._stockout.discard(m.key)
+            self._emit(at, "stock_check", pin.text, m.key)
+        elif pin.kind == "material_short":
+            self._emit(at, "patrol", pin.text, pin.material_key)
 
     def leave_now(self) -> list[dict[str, Any]]:
         """People on leave today, any shift (the team dataset roster's sick days, scripted sick calls, and anyone

@@ -111,6 +111,8 @@ class _Mach:
 class Factory:
     """Implements contracts.FactorySim. Deterministic for a given seed and call sequence."""
 
+    patrol_enabled = True        # issue #32; WARROOM_PATROL=0 turns it off (Runtime)
+
     def __init__(self, clock: SimClock | None = None, seed: int = 7, scenario: ScenarioName = ScenarioName.NORMAL,
                  backfill_min: float = 30.0):
         self.seed = seed
@@ -165,6 +167,9 @@ class Factory:
         # the rest of the plant (orders over time, materials, dock, people, energy, quality, maintenance):
         # reads this Factory, never writes it, own RNG stream -> machine physics and _rng are unchanged
         self.world = World(self, t0, self.seed)
+        # issue #32: the patrol (code) looks over the world and raises a plant input only when it finds something
+        from warroom.sim.patrol import MaterialPatrol
+        self.patrol = MaterialPatrol(self.world, t0) if self.patrol_enabled else None
         return sc
 
     def _init_orders(self, t0: datetime) -> None:
@@ -412,6 +417,9 @@ class Factory:
             out.append(r)
         try:
             self.world.advance(now)
+            for pin in self.patrol.poll(now) if self.patrol is not None else []:
+                self._plant_fired.append((now, pin))   # the runtime opens a plant event, like a rush order
+                self.world.on_plant_input(pin, now)
         except Exception:  # noqa: BLE001 - the world view must never break the plant loop or the red path
             log.exception("world advance failed")
         return out
@@ -674,8 +682,15 @@ class Factory:
     def apply_plant_input(self, pin: PlantInput, at: datetime | None = None) -> None:
         """A rush order joins the order book (the scheduler sees it on the next solve); a sick call takes a
         person off a shift (factory shifts() headcount, the world's roster). The shift start changes nothing.
-        Machines are never touched."""
+        Machines are never touched. A stock count (issue #32) only changes the world's stock: the patrol decides
+        whether that is worth an event."""
         at = at or self._t
+        if pin.kind == "stock_check":
+            try:
+                self.world.on_plant_input(pin, at)
+            except Exception:  # noqa: BLE001 - the world view must never break the plant loop
+                log.exception("world stock count failed")
+            return
         if pin.kind == "rush_order" and pin.order is not None:
             self.add_order(pin.order)
         elif pin.kind == "absence" and pin.team is not None and pin.shift_name:

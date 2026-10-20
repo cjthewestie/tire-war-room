@@ -53,6 +53,8 @@ export const SCENARIOS: { name: ScenarioName; label: string; start: string; spee
   { name: 'shift_start', label: '早班開工', start: '2026-10-05T07:50:00+08:00', speed: 10 },
   { name: 'rush_order', label: '插單', start: '2026-10-07T09:50:00+08:00', speed: 10 },
   { name: 'staffing', label: '人力調度', start: '2026-10-06T07:20:00+08:00', speed: 10 },
+  // issue #32 patrol (backend only): a stock count drops 碳黑, the patrol raises the shortfall by itself
+  { name: 'material_short', label: '缺料巡檢', start: '2026-10-08T13:50:00+08:00', speed: 10 },
 ]
 
 interface LoadedScenario { name: ScenarioName; scripts: Script[]; press7?: ReturnType<typeof press7Script>; badData?: string }

@@ -212,6 +212,8 @@ class ComponentBuilder:
             from warroom.sim import Factory
             return Factory(clock=clock, seed=7, scenario=ScenarioName.NORMAL)
         sim = self._t("sim", sim_real, lambda: FB.FallbackFactory(clock=clock))
+        if not self.s.patrol:
+            sim.patrol_enabled = False          # issue #32; takes effect on the load below
         if self.orders_db is not None:
             sim = ImportedPlanSim(sim, self.orders_db)
         sc = sim.load_scenario(scenario)

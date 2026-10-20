@@ -15,6 +15,7 @@ export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_
 export type DataQuality = "ok" | "out_of_range" | "jump" | "stale" | "neighbor_mismatch" | "missing"
 export type AnomalyKind = "overheat" | "temp_drop" | "pressure_low" | "water_flow_low" | "steam_low" | "sensor_fault" | "multi_machine" | "schedule_slip" | "supervisor_command"
   | "shift_start" | "order_rush" | "staffing_short"  // issue #17 plant events
+  | "material_short"  // issue #32 patrol
 export type Severity = "info" | "warn" | "critical"
 export type TileStatus = "normal" | "warn" | "alarm"
 export type EventState =
@@ -36,6 +37,7 @@ export type SolverName = "cp-sat" | "heuristic"
 export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
+  | "material_short"  // issue #32 patrol
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"

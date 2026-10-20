@@ -23,7 +23,7 @@ import time
 from collections.abc import Callable
 from typing import Any
 
-from warroom.agent.narrate import machine_label
+from warroom.agent.narrate import machine_label, material_dispatch_text
 from warroom.config import Settings
 from warroom.contracts import (
     AlertCard,
@@ -148,7 +148,7 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 11. phase=replan 且 context 有 supervisor_rejected（主管否決）、supervisor_discussion（主管討論）、write_failed（寫入失敗，如排程已過期）或 infeasible 時，假設並未被推翻：沿用同一假設（同 cause_code），重新求解或改提其他方案。
 12. context.source=supervisor 時，這不是異常，是主管下的指令（context.command）：hypothesis.cause_code 填 supervisor_command、statement 寫要完成的事、expectation 為 null；只用工具做得到的部分（通知某組用 notify_teams，message 寫清楚要做什麼、何時、哪台機；排程變更用 solve_schedule 再 confirm_schedule；只想知道狀況用讀取工具）。工具做不到的事（搬動機台、改機台設定、開關閥、任何 PLC 動作）不可假裝能做：steps=[]，rationale 說明做不到的原因與可行的替代做法。
 13. context 有 supervisor_discussion 時：主管在核准前提出的條件（constraints，例如某台機某時段保養、不加班、不跨組調人）由程式在每次 solve_schedule 強制套用並檢查結果；你只需保留原計畫的步驟（含 solve_schedule、confirm_schedule 與同一輪的寫入步驟），重新求解。
-14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
+14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假、material_short 巡檢發現缺料風險）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short／material_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生；缺料風險只用 query_orders_shifts 查原料與訂單，再 notify_teams kind=dispatch（盤點、催貨、調整投料，需核准），不重排。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
 
 
 def build_user_message(req: CommanderRequest) -> str:
@@ -439,7 +439,8 @@ class MockCommander:
         ctx = req.context or {}
         if a.kind is AnomalyKind.SUPERVISOR_COMMAND:          # issue #10: a task the supervisor typed
             return self._command(req, hid)
-        if a.kind in (AnomalyKind.SHIFT_START, AnomalyKind.ORDER_RUSH, AnomalyKind.STAFFING_SHORT):   # issue #17
+        if a.kind in (AnomalyKind.SHIFT_START, AnomalyKind.ORDER_RUSH, AnomalyKind.STAFFING_SHORT,   # issue #17
+                      AnomalyKind.MATERIAL_SHORT):                                                  # issue #32
             return self._plant(req, hid)
         if ctx.get("sop_path"):
             return self._sop_path(req, hid, rejected_ids)
@@ -827,6 +828,20 @@ class MockCommander:
                                       cause_code="shift_start", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
                 alert_card=AlertCard(title="早班開工：今日計畫", summary="已查訂單、出勤、暖機順序與原料；今日計畫待核准。"),
                 rationale="開班例行：讀取今日狀況，排程由求解器產生，派工需主管核准，任務由程式派給現場。")
+        if a.kind is AnomalyKind.MATERIAL_SHORT:    # issue #32: the patrol found it; no re-solve, people act
+            name = str(pe.get("note") or "原料")
+            steps = [
+                PlanStep(id="S1", tool=ToolName.QUERY_ORDERS_SHIFTS, purpose=f"查{name}庫存、在途採購與訂單", args={}),
+                PlanStep(id="S2", tool=ToolName.NOTIFY_TEAMS, depends_on=["S1"], purpose="派工：盤點、催貨、調整投料（需主管核准）",
+                         args={"teams": [TeamId.BODY.value], "kind": NotifyKind.DISPATCH.value,
+                               "message": material_dispatch_text(name)}),
+            ]
+            return CommanderPlan(
+                goal=f"{name}缺料風險：下一批到貨前不停線", steps=steps,
+                hypothesis=Hypothesis(id=hid, statement=f"{name}會在下一批到貨前用完，盤點、催貨並先排不用{name}的批次可避免停線",
+                                      cause_code="material_short", status=HypothesisStatus.ACTIVE, evidence=[a.message]),
+                alert_card=AlertCard(title=f"缺料風險：{name}"[:20], summary=a.message[:60]),
+                rationale="巡檢（程式）依目前用量算出斷料時間早於到貨；派工需主管核准，任務由程式派給現場。")
         if a.kind is AnomalyKind.ORDER_RUSH:
             oid = str(((pe.get("order") or {}).get("id")) or "急單")
             steps = [

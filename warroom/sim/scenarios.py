@@ -41,8 +41,10 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
     ScenarioName.SHIFT_START: datetime(2026, 10, 5, 7, 50, 0, tzinfo=TZ),
     ScenarioName.STAFFING: datetime(2026, 10, 6, 7, 20, 0, tzinfo=TZ),
     ScenarioName.RUSH_ORDER: datetime(2026, 10, 7, 9, 50, 0, tzinfo=TZ),
+    ScenarioName.MATERIAL_SHORT: datetime(2026, 10, 8, 13, 50, 0, tzinfo=TZ),   # issue #32 (Thu)
 }
-PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER})
+PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER,
+                             ScenarioName.MATERIAL_SHORT})
 
 # issue #17 timing: each plant event lands 10 min after the scenario start, so the dashboard shows the
 # plant running normally first.
@@ -56,6 +58,10 @@ RUSH_QTY = 2
 RUSH_DUE_DAYS = 2
 # The sick call: team dataset staff S13 (加硫組, 早) -> our curing team's 早班 loses one person.
 SICK_STAFF_ID = "S13"
+# issue #32: at 14:00 a count finds a lot of 碳黑 damp and holds it back; what is left lasts ~6 h at both mixers'
+# rate, the reorder it triggers is due in a day, so the patrol raises it. Nobody types anything.
+STOCK_CHECK_OFFSET_S = 600.0
+STOCK_CHECK_KEY, STOCK_CHECK_LEFT = "cb", 60.0
 
 
 def _rush_order(start: datetime) -> Order:
@@ -169,6 +175,15 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
                                                       f"交期 {order.due:%m/%d}"))],
             expected=["10:00 訂單事件：CP-SAT 重排", "卡片列出哪些訂單延後幾小時、有沒有誤交期",
                       "核准後補料、換模準備任務由人員執行；佇列重排"])
+    if name is ScenarioName.MATERIAL_SHORT:
+        return Scenario(
+            name=name, title="缺料巡檢：盤點發現碳黑受潮隔離，系統自己發現下午會斷料", start_at=start,
+            steps=[ScenarioStep(at_offset_s=STOCK_CHECK_OFFSET_S, note="14:00 盤點：碳黑一批受潮隔離",
+                                plant=PlantInput(kind="stock_check", material_key=STOCK_CHECK_KEY,
+                                                 stock=STOCK_CHECK_LEFT, note="受潮隔離",
+                                                 text=f"14:00 盤點：碳黑一批受潮隔離，可用庫存剩 {STOCK_CHECK_LEFT:g} kg"))],
+            expected=["盤點只改庫存，不開事件", "巡檢（程式）算出碳黑約 6 小時後用完、補貨要明天才到 → 開缺料事件",
+                      "派工卡（盤點、催貨、調整投料）待核准；核准後人員執行，全部完成才結案"])
     raise ValueError(f"unknown scenario {name}")
 
 

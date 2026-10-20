@@ -335,3 +335,10 @@ def gate_reason_text(reasons: list[str]) -> str:
         else:
             out.append("未通過規則檢查（詳見稽核日誌）")
     return "；".join(dict.fromkeys(out)) or "未通過規則檢查"
+
+
+def material_dispatch_text(name: str | None) -> str:
+    """Issue #32: the 派工 message for a material shortfall the patrol found (fixed text, the same in rule mode
+    and when code adds the step the model left out)."""
+    n = name or "原料"
+    return f"{n}缺料風險：到碼頭盤點{n}、向供應商確認到貨時間，先排不用{n}的批次"

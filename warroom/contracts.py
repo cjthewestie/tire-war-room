@@ -114,6 +114,7 @@ class AnomalyKind(StrEnum):
     SHIFT_START = "shift_start"
     ORDER_RUSH = "order_rush"
     STAFFING_SHORT = "staffing_short"
+    MATERIAL_SHORT = "material_short"  # issue #32: the patrol (code) projects a material running out before it arrives
 
 
 class Severity(StrEnum):
@@ -285,6 +286,7 @@ class ScenarioName(StrEnum):
     SHIFT_START = "shift_start"                # 早班開工 08:00: today's plan card
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
+    MATERIAL_SHORT = "material_short"          # issue #32: a stock count drops 碳黑, the patrol finds the shortfall
 
 
 class AuditKind(StrEnum):
@@ -427,7 +429,7 @@ class PlantInput(_M):
     """Issue #17: something that happens to the plant that is not a machine fault, scripted by a scenario.
     It changes the plant's inputs (the order book, the roster), never a machine, and wakes the state
     machine as a plant event."""
-    kind: Literal["shift_start", "rush_order", "absence"]
+    kind: Literal["shift_start", "rush_order", "absence", "stock_check", "material_short"]
     text: str                         # "急單 #R-009 到：客戶G 中胎 2 條，交期 10/09"
     order: Order | None = None      # rush_order: the order that arrives
     staff_id: str | None = None       # absence: team dataset staff id (S13)
@@ -435,6 +437,10 @@ class PlantInput(_M):
     shift_name: str | None = None     # absence: "早班" (factory.OPTIMISED_SHIFTS name)
     people: int = 1
     note: str | None = None
+    # issue #32: stock_check = a stock count sets a material's usable stock (scripted, opens no event by itself);
+    # material_short = what the patrol found (code), opens the plant event
+    material_key: str | None = None   # world.MATERIALS key ("cb")
+    stock: float | None = None        # stock_check: usable stock after the count
 
 
 class ScenarioStep(_M):
