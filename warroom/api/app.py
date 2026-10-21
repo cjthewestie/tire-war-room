@@ -1049,6 +1049,31 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
 
+    def _log_chat(r: Runtime, body: MainMessage, session: Session, text: str, res: dict[str, Any]) -> None:
+        """Both sides of the turn into the chat log on disk (CJ 2026-10-22: 「這些對話紀錄跟訂單紀錄都要記錄下來」)."""
+        scope = "overview" if body.mode == "overview" else "task"
+        try:
+            r.history_log.add_chat(r.clock.now(), f"{scope}|{session.actor}|{body.conversation_id or ''}", scope,
+                                   session.actor, text, res.get("reply") or "", turn_id=res.get("id"),
+                                   event_id=res.get("event_id") or body.event_id, by=res.get("by"))
+        except Exception:  # noqa: BLE001 - a log write never fails the reply
+            log.exception("chat log write failed")
+
+    @app.get("/api/history/chat")
+    async def history_chat(day: str | None = None, session_id: str | None = None, scope: str | None = None,
+                           limit: int = 200) -> dict[str, Any]:
+        """Stored Agent Nemo chat (warroom/data/history_log.py): the sessions and their turns, oldest first. Read-only;
+        no route deletes a row."""
+        h = rt().history_log
+        lim = max(1, min(limit, 1000))
+        return {"sessions": await asyncio.to_thread(h.sessions, day),
+                "turns": await asyncio.to_thread(h.chats, day, session_id, scope, lim)}
+
+    @app.get("/api/history/orders")
+    async def history_orders(day: str | None = None, kind: str | None = None, limit: int = 200) -> dict[str, Any]:
+        """Stored order events (new, rush, completed, late, shipped), oldest first. Read-only."""
+        return {"orders": await asyncio.to_thread(rt().history_log.orders, day, kind, max(1, min(limit, 1000)))}
+
     @app.post("/api/main/message")
     async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
         """The supervisor talks to the Agent Nemo: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
@@ -1329,8 +1354,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         hit = sf.check_input(text)
         if hit is not None:
             r.audit.append(AuditKind.SYSTEM, "safety_filter", {**hit.audit(), "turn": None}, event_id=None)
-            return {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
-                    "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
+            blocked = {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
+                       "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
+            _log_chat(r, body, session, text, blocked)
+            return blocked
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
@@ -1407,6 +1434,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                   **({"mode": "overview", "links": res.get("links", [])} if overview_mode else {}),
                                                   # a constraint said in chat (「不要動 9 號機」): an observation (📌)
                                                   **({"pinned": p} if (p := _main_agent(r)._pin_of(text)) else {})})
+        _log_chat(r, body, session, text, res)
         return res
 
     # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)

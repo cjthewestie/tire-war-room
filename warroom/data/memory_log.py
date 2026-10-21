@@ -37,9 +37,9 @@ MIN_SCORE = 0.34                       # memory_search: below this nothing count
 INDEX_MAX_LINES = 40                   # the overview chat's 今日紀錄索引
 INDEX_MAX_CHARS = 1500
 ICON = {"order": "📦", "event": "🛠", "approve": "✅", "reject": "❌", "safety": "⛔", "task": "👷", "ship": "🚚",
-        "note": "📌"}
+        "note": "📌", "chat": "💬"}
 TYPE_LABEL = {"order": "訂單", "event": "事件", "approve": "核准", "reject": "否決", "safety": "安全", "task": "任務",
-              "ship": "出貨", "note": "指示"}
+              "ship": "出貨", "note": "指示", "chat": "對話"}
 _FINAL_ORDER = ("結案", "安全停止", "主管中斷", "人工處理", "處理中")
 _EV_MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
 _HYP_RE = re.compile(r"假設\s*(H\d+)[：:]\s*(.+)")
@@ -440,6 +440,11 @@ def observe(row: dict[str, Any]) -> dict[str, Any] | None:
         facts = {"note_id": p.get("note_id"), "text": p.get("text")}
     elif kind == "system" and actor == "main_agent" and p.get("pinned"):
         t, title, facts = "note", f"主管指示：{p['pinned']}", {"pinned": p["pinned"]}
+    elif kind == "system" and actor == "main_agent" and p.get("orch") == "chat" and p.get("text"):
+        # 「對話紀錄都要記錄下來」 (CJ 2026-10-22): each chat turn, so memory_search finds 之前聊過什麼
+        t, title = "chat", f"主管問：{p['text']}"
+        facts = {"text": str(p["text"])[:200], "reply": str(p.get("reply") or "")[:300], "mode": p.get("mode"),
+                 "turn": p.get("turn")}
     if t is None:
         return None
     return {"id": f"OB-{int(row['seq']):04d}", "seq": int(row["seq"]), "ts": row["ts"], "type": t,

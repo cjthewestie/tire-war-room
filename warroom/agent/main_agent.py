@@ -103,6 +103,9 @@ PLANT_TOPICS: dict[str, str] = {
     # CJ 2026-10-22: 「加每日摘要」
     "daily_summary": "每日摘要：某一天（date，不給就是最近結束的一天，例如問昨天）處理了哪些事、結果、沒結的、出貨",
     "memory_search": "搜尋記憶（要給 q）：在每日／每週／每月摘要和過去紀錄裡找某件事，找不到就說沒有",
+    # CJ 2026-10-22: 「從現在開始這些對話紀錄跟訂單紀錄都要記錄下來」
+    "chat_history": "之前的對話紀錄：某一天（date，不給就是今天）跟 Agent Nemo 聊過什麼，每段對話的時間和內容",
+    "orders_arrived": "訂單紀錄：某一天（date，不給就是今天）進了哪些新訂單、急單（客戶、規格、數量、交期），完成、遲交、出貨的",
 }
 # task control from chat (CJ 2026-10-22: 「A」): existing supervisor actions only, each confirmed in chat first.
 # Approving a card and releasing a Safety Core stop are never chat actions (buttons only).
@@ -252,6 +255,8 @@ _TOPIC_RX: list[tuple[str, re.Pattern[str]]] = [
     # past orders first: 「上週 #A-311 什麼時候出貨的」 is the order's history, not the next truck
     ("order_lookup", re.compile(r"(?:#\s?[A-Z]-?\d{2,4}|SO-?\d{1,3}).{0,12}(?:什麼時候|何時|幾號|哪天|出貨|完成|紀錄|歷史|之前|上週|上周)"
                                 r"|(?:上週|上周|之前|以前|前幾天).{0,8}(?:#\s?[A-Z]-?\d{2,4}|SO-?\d{1,3})", re.IGNORECASE)),
+    ("chat_history", re.compile(r"(?:之前|以前|剛才|剛剛|今天|昨天).{0,6}(?:聊|談|說|問)過?.{0,4}(?:什麼|哪些)|對話紀錄|聊天紀錄")),
+    ("orders_arrived", re.compile(r"(?:今天|昨天|剛剛|剛才).{0,6}(?:進|來|收到|接)了?.{0,4}(?:哪些|什麼|幾張|多少).{0,4}(?:訂單|單)|新進.{0,4}訂單|訂單紀錄")),
     ("orders_history", re.compile(r"(?:之前|以前|過去|上週|上周|前幾天|歷史|已經出貨|出過|遲交過).{0,10}訂單|訂單.{0,6}(?:歷史|紀錄)|"
                                   r"(?:之前|以前|過去|上週|上周).{0,10}遲交|遲交過")),
     ("shipments", re.compile(r"出貨|出車|貨車|卡車|台車|班車|車.{0,4}(?:走|出|來|到|離)|物流|碼頭")),
@@ -341,7 +346,7 @@ def control_specs() -> list[dict[str, Any]]:
 # 有這個功能(非單一任務區)」): today's observations come as an index in the context; these two read more on demand.
 MEM_SEARCH, MEM_GET = "memory_search", "memory_get"
 MEMORY_TYPES = {"訂單": "order", "事件": "event", "核准": "approve", "否決": "reject", "安全": "safety", "任務": "task",
-                "出貨": "ship", "指示": "note"}
+                "出貨": "ship", "指示": "note", "對話": "chat"}
 MEMORY_RULE = ("context.today_index 是今天的紀錄索引（編號 · 時間 · 類型 · 標題，新的在上面），context.earlier_days 是前幾天的每日摘要。"
                "問今天有哪些訂單、今天做過哪些任務、某台機或某張單今天後來怎樣、昨天發生什麼：先直接用它們回答，不用查工具；"
                "要細節才呼叫 memory_get（給編號，最多 5 個），索引裡沒有、或問更早的事才用 memory_search。"
@@ -378,7 +383,7 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
             {"topic": {"type": "string", "enum": list(PLANT_TOPICS)},
              "order_id": {"type": "string", "description": "order_lookup 用：訂單編號，例如 #A-311、SO-004"},
              "machine_id": {"type": "string", "description": "machine_history 用：機台編號，例如 CURE-07"},
-             "date": {"type": "string", "description": "daily_summary 用：日期 YYYY-MM-DD（可不給）"},
+             "date": {"type": "string", "description": "daily_summary、chat_history、orders_arrived 用：日期 YYYY-MM-DD（可不給）"},
              "q": {"type": "string", "description": "memory_search 用：要找的事，例如 7 號機 疏水閥"}}, ["topic"]),
         _fn(PROPOSE, "主管要做一件會動到現場的事：擬計劃送主管核准（核准前不執行）", {"task": {"type": "string",
             "description": "要完成的事，一句話，含對象"}}, ["task"]),
@@ -1066,7 +1071,7 @@ class MainAgent:
             return "失敗：machine_history 要給 machine_id（例如 CURE-07）。"
         oid = oid if topic == "order_lookup" else None
         mid = mid if topic == "machine_history" else None
-        day = str((args or {}).get("date") or "").strip()[:20] if topic == "daily_summary" else ""
+        day = str((args or {}).get("date") or "").strip()[:20] if topic in ("daily_summary", "chat_history", "orders_arrived") else ""
         q = str((args or {}).get("q") or "").strip()[:80] if topic == "memory_search" else ""
         if topic == "memory_search" and not q:
             steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": False, "summary": "失敗：沒有要找什麼",

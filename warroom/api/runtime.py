@@ -1028,7 +1028,19 @@ class Runtime:
                 self.audit.append(AuditKind.SYSTEM, "world",
                                   {"msg": ev.text, "kind": ev.kind, "order_ids": ev.order_ids, "qty": ev.qty,
                                    "on_time": ev.on_time, "at": ev.ts.isoformat()})
+                self._log_order(ev)
         w.add_listener(on_event)
+
+    def _log_order(self, ev: Any) -> None:
+        """The order event into the chat/order log on disk (warroom/data/history_log.py), one row per order id."""
+        try:
+            book = dict(getattr(getattr(self.sim, "world", None), "_orders", None) or {})     # world-generated orders
+            book.update({o.id: o for o in (self.sim.orders() if callable(getattr(self.sim, "orders", None)) else [])})
+            for oid in (ev.order_ids or ([ev.ref] if ev.ref else [None])):
+                self.history_log.add_order(ev.ts, ev.kind, oid, ev.text, order=book.get(oid), qty=ev.qty,
+                                           on_time=ev.on_time)
+        except Exception:  # noqa: BLE001 - the log must never break the plant loop
+            log.exception("order log write failed")
 
     def _watch_tasks(self) -> None:
         """Audit every worker-task status change of the current world's task board (once per World)."""
@@ -1944,6 +1956,17 @@ class Runtime:
             from warroom.api.memory_desk import MemoryDesk
             d = self.__dict__["_memory_desk"] = MemoryDesk(self)
         return d
+
+    @property
+    def history_log(self) -> Any:
+        """Chat turns and order events on disk (data/runtime/history.sqlite), append-only: kept across restarts and
+        resets; a reset only starts a new chat session id."""
+        h = self.__dict__.get("_history_log")
+        if h is None:
+            from warroom.data.history_log import HistoryLog
+            h = self.__dict__["_history_log"] = HistoryLog(Path(self.settings.audit_path).parent / "history.sqlite")
+            self.memory_resets.append(h.new_session)
+        return h
 
     @property
     def tasklog(self) -> Any:

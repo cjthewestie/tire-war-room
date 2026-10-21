@@ -457,13 +457,48 @@ def memory_search(r: Any, q: str | None = None) -> dict[str, Any]:
     return r.memory_desk.search(q)
 
 
+def _log_day(r: Any, day: str | None) -> str:
+    return (day or "").strip()[:10] or r.clock.now().astimezone(F.TZ).date().isoformat()
+
+
+def chat_history(r: Any, day: str | None = None) -> dict[str, Any]:
+    """之前聊過什麼: the stored Agent Nemo chat of a day (none = today), newest session first, from the chat log on disk
+    (warroom/data/history_log.py), which survives restarts and resets."""
+    h, d = r.history_log, _log_day(r, day)
+    sessions = h.sessions(d, limit=8)
+    turns = h.chats(day=d, limit=60)
+    by: dict[str, list[dict[str, Any]]] = {}
+    for t in turns:
+        by.setdefault(t["session_id"], []).append({"at": _hm(t["ts"]), "who": "主管" if t["role"] == "user" else "Agent Nemo",
+                                                   "text": t["text"][:120]})
+    return {"day": d, "sessions": len(sessions),
+            "conversations": [{"scope": "總覽" if s["scope"] == "overview" else "任務", "from": _hm(s["first"]),
+                               "to": _hm(s["last"]), "turns": s["turns"], "lines": by.get(s["session_id"], [])[-10:]}
+                              for s in sessions],
+            **({} if sessions else {"note": "這一天沒有對話紀錄"})}
+
+
+def orders_arrived(r: Any, day: str | None = None) -> dict[str, Any]:
+    """今天進了哪些訂單: the order log of a day (none = today): new and rush orders with customer, spec, qty, due; and
+    completed, late, shipped. From the log on disk, so a restart or reset keeps it."""
+    d = _log_day(r, day)
+    rows = r.history_log.orders(day=d, limit=200)
+    arrived = [{"id": o["order_id"], "at": _hm(o["ts"]), "rush": o["kind"] == "order_rush", "customer": o["customer"],
+                "spec": o["spec"], "qty": o["qty"], "due": o["due"]} for o in rows if o["kind"] in ("order_new", "order_rush")]
+    other = {k: sorted({o["order_id"] for o in rows if o["kind"] == k and o["order_id"]})
+             for k in ("order_completed", "delivery_late", "shipment_departed")}
+    return {"day": d, "arrived": arrived, "arrived_count": len(arrived), "completed": other["order_completed"],
+            "late": other["delivery_late"], "shipped": other["shipment_departed"],
+            **({} if rows else {"note": "這一天沒有訂單紀錄"})}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
           "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
           "safety_stops": safety_stops, "questionable": questionable,
           "machine_history": machine_history, "memory_notes": memory_notes, "daily_summary": daily_summary,
-          "memory_search": memory_search}
+          "memory_search": memory_search, "chat_history": chat_history, "orders_arrived": orders_arrived}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -481,7 +516,7 @@ def query(r: Any, topic: str, order_id: str | None = None, machine_id: str | Non
         data = TOPICS[topic](r, order_id)
     elif topic == "machine_history":
         data = TOPICS[topic](r, machine_id)
-    elif topic == "daily_summary":
+    elif topic in ("daily_summary", "chat_history", "orders_arrived"):
         data = TOPICS[topic](r, date)
     elif topic == "memory_search":
         data = TOPICS[topic](r, q)
