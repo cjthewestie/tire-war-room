@@ -67,11 +67,16 @@ if (!FULL) {
 
 /** No cuts: the camera never jumps between two frames while the demo runs (speed between samples < 45 units/s). */
 async function camCheck() {
-  const trace = await page.evaluate(() => { cancelAnimationFrame(window.__camRaf); return window.__camTrace ?? [] })
+  // the demo camera's own trace (its clock, in s): a stalled frame (a screenshot, a loaded machine) is a long step over a
+  // long time, not a jump; a cut would be a long step over one short frame
+  await page.evaluate(() => cancelAnimationFrame(window.__camRaf))
+  const trace = (await page.evaluate(() => window.__demoCamTrace?.() ?? [])).map(([t, x, y, z]) => [t * 1000, x, y, z])
+  writeFileSync(resolve(OUT, 'camera-trace.json'), JSON.stringify(trace))
   let maxV = 0, at = 0
   for (let i = 1; i < trace.length; i++) {
     const [ta, xa, ya, za] = trace[i - 1], [tb, xb, yb, zb] = trace[i]
-    const v = Math.hypot(xb - xa, yb - ya, zb - za) / Math.max((tb - ta) / 1000, 0.05)
+    if (tb <= ta) continue
+    const v = Math.hypot(xb - xa, yb - ya, zb - za) / ((tb - ta) / 1000)
     if (v > maxV) { maxV = v; at = (tb - trace[0][0]) / 1000 }
   }
   check('one take: no camera cut while the demo ran', maxV < 45 && trace.length > 10, `max ${maxV.toFixed(1)} u/s at ${at.toFixed(1)} s over ${trace.length} frames`)
