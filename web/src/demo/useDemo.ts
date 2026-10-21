@@ -16,15 +16,20 @@ export function useDemo() {
   const { state, transport } = useWarRoom()
   const demo: DemoState | null = state.demo
   const running = !!demo?.running
-  const [err, setErr] = useState<string | null>(null)
+  // a refusal (「要先核准…」) belongs to the beat it happened on: the next beat starts clean
+  const [errAt, setErrAt] = useState<{ cue: string | null; msg: string } | null>(null)
+  const cueRef = useRef<string | null>(null)
+  useEffect(() => { cueRef.current = demo?.cue_id ?? null }, [demo?.cue_id])
+  const setErr = useCallback((msg: string | null) => setErrAt(msg ? { cue: cueRef.current, msg } : null), [])
+  const err = errAt && errAt.cue === (demo?.cue_id ?? null) ? errAt.msg : null
   const send = useCallback(async (c: DemoCommand) => {
     if (!transport?.demo) { setErr('Demo 模式需要連到伺服器（live）'); return null }
     try { setErr(null); return await transport.demo(c) } catch (e) {
       const m = String((e as Error).message ?? e)
-      setErr(m.includes('approval') ? '要先核准（手機或核准卡），才能往下' : m.replace(/^\d+：?/, ''))
+      setErr(m.includes('approval') ? '要先核准（手機或核准卡），才能往下' : m.includes('plant event') ? '等工廠事件發生，才能往下' : m.replace(/^\d+：?/, ''))
       return null
     }
-  }, [transport])
+  }, [transport, setErr])
 
   // ---------------------------------------------------------------- driver (this tab started the demo): demo/driver.ts
   const run = useRef<DemoRun | null>(null)
@@ -34,7 +39,7 @@ export function useDemo() {
     run.current = r
     const note = await r.start(performance.now())
     if (note) setErr(note)
-  }, [transport])
+  }, [transport, setErr])
   const cont = useCallback(() => send({ action: 'continue' }), [send])
   // the paused flag the server last sent (a quick P-P must not send pause twice before the push arrives)
   const pausedRef = useRef(false)
