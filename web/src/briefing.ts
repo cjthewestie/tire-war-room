@@ -311,7 +311,9 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
       const doneN = evTasks.length - openTasks.length
       return {
         ...base, state: 'followup', stateLabel: scheduled ? '排程已更新｜現場處理中' : '現場處理中', deadline: null, details, sections,
-        lead: evTasks.length ? `現場工作尚未全部完成（${doneN}/${evTasks.length}），設備尚未確認修復。` : '現場維修仍在進行，設備尚未確認修復。',
+        lead: openTasks.length
+          ? `現場工作尚未全部完成（${doneN}/${evTasks.length}），設備尚未確認修復。`
+          : `現場任務已全部完成${evTasks.length ? `（${evTasks.length}/${evTasks.length}）` : ''}，但維修仍在進行，設備尚未確認修復。`,
       }
     }
     const did = result.slice(0, 3)
