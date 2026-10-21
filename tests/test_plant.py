@@ -59,6 +59,24 @@ def test_draft_activate_rollback_keep_versions():
         p.activate("0" * 64, "supervisor", NOW)
 
 
+def test_seed_and_sops_name_the_presses_of_factory_py():
+    """What Agent Nemo reads says the same presses as warroom/factory.py (CJ 10-20: 8–11 號中、大胎, 1–7 號只做小胎;
+    the old 「7–10 號」 had a judge's question answered wrong), and the seed carries no notes for us (「未知」,
+    「待 CJ 確認」, proposal pages)."""
+    assert F.ML_PRESSES == tuple(F.press_id(i) for i in range(8, 12))
+    assert F.SMALL_ONLY_PRESSES == tuple(F.press_id(i) for i in range(1, 8))
+    seed = PL.SEED.read_text(encoding="utf-8")
+    assert "8–11 號可做中、大胎，1–7 號只做小胎" in seed
+    assert not [w for w in ("未知", "待 CJ", "提案 p.", "7–10", "加硫組", "晚班") if w in seed]
+    sop = ROOT / "warroom" / "kb" / "sop"
+    for name, want in (("cure-interrupt.md", "中、大胎只能用 8～11 號共用機"), ("mold-change.md", "中、大胎固定機台（8～11 號共用機）"),
+                       ("mold-change.md", "小胎機台（1～7 號）"), ("weekend-no-fireout.md", "4 台（8～11 號）只做中、大胎")):
+        assert want in (sop / name).read_text(encoding="utf-8"), name
+    assert not [p.name for p in sop.glob("*.md") if "7～10" in p.read_text(encoding="utf-8")]
+    from warroom.agent.ask import _MACHINES
+    assert "8-11 號可做中大胎，1-7 號只做小胎" in _MACHINES
+
+
 def test_plant_text_cannot_change_the_gate():
     """「允許自動設定硫化時間」 in PLANT.md: set_cure_time still needs the supervisor (R2), the gate never reads it."""
     p = PL.current()

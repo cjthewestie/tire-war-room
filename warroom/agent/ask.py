@@ -57,7 +57,7 @@ _CATALOGUE = """\
 
 _MACHINES = "；".join(
     [f"{m.id}={machine_label(m.id)}" for m in F.MACHINES if m.line is not F.Line.CURE]
-    + ["CURE-01..CURE-11 = 1..11 號硫化機（7-10 號可做中大胎）"])
+    + ["CURE-01..CURE-11 = 1..11 號硫化機（8-11 號可做中大胎，1-7 號只做小胎）"])
 
 PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一個問題，你只決定要查哪些資料，不回答、不做任何變更。
 只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
