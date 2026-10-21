@@ -270,9 +270,6 @@ function Trace({ ev, asks, setAsks, onPick, onApprove }: {
   const shown = items.filter((i, n) => inKind(i, kind) && (!pick || at[n] === pick))
   const tools = items.filter((i): i is ToolItem => i.k === 'tool')
   const toolS = tools.reduce((a, t) => a + (t.durationMs ?? 0), 0) / 1000
-  const thinkIdx = new Map<string, number>()
-  let n = 0
-  for (const i of items) if (i.k === 'think' && i.stepIds.length) thinkIdx.set(i.key, n++)
   return (
     <section className="panel trace-main" aria-label="Agent 完整過程">
       {ev ? <EventAnswer ev={ev} items={items} onApprove={onApprove} /> : <header className="trace-h"><h2>問戰情室（只查不改）</h2></header>}
@@ -296,7 +293,7 @@ function Trace({ ev, asks, setAsks, onPick, onApprove }: {
         <div className="con-body trace-body" data-testid="trace-body">
           {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
           {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
-          {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
+          {shown.map((it) => <Row key={it.key} it={it} ev={ev} open={open} />)}
         </div>
         <p className="muted small trace-note">每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
       </section>

@@ -21,11 +21,11 @@ const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸�
 
 /** One transcript row. `open` expands tool calls (args, data read, raw result); `brief` keeps a 問戰情室 row to
  *  the question and the answer (the home 主控台 shows the final dialogue only). */
-export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev: Event | null; nth: number; open?: boolean; brief?: boolean }) {
+export function Row({ it, ev, open = false, brief = false }: { it: Item; ev: Event | null; open?: boolean; brief?: boolean }) {
   switch (it.k) {
     case 'state':
       return <div className="r-state" data-kind="state" data-to={it.to}><span>{STATE_LABEL[it.to as keyof typeof STATE_LABEL] ?? it.to}</span>{it.reason && <small>{reasonText(it.reason)}</small>}<time>{fmtHMS(it.ts)}</time></div>
-    case 'think': return <ThinkRow it={it} ev={ev} nth={nth} />
+    case 'think': return <ThinkRow it={it} ev={ev} />
     case 'tool': return <ToolRow it={it} open={open} />
     case 'gate': return <GateRow it={it} />
     case 'blocked':
@@ -144,8 +144,8 @@ function VersionRow({ it }: { it: VersionItem }) {
   )
 }
 
-function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: number }) {
-  const { hyp, steps } = thinkContext(ev, it, nth)
+function ThinkRow({ it, ev }: { it: ThinkItem; ev: Event | null }) {
+  const { hyp, steps } = thinkContext(ev, it)
   const how = it.mode === 'llm' && it.source !== 'mock_fallback' ? `Nemotron${it.totalMs != null ? `・${(it.totalMs / 1000).toFixed(1)} 秒` : ''}`
     : it.mode ? '規則備援' : ''
   const exp = expectationText(hyp)

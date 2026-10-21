@@ -21,7 +21,7 @@ const load = (p) => vite.ssrLoadModule(p)
 const { aiStatusParts } = await load('/src/aiStatus.ts')
 const { machineRing, ringRecoveries, recoveryKey } = await load('/src/factory3d/machineRing.ts')
 const { alertText, diffPending, repairNotices } = await load('/src/phone/alert.ts')
-const { fromAudit } = await load('/src/agent/transcript.ts')
+const { fromAudit, thinkContext } = await load('/src/agent/transcript.ts')
 const { buildReport } = await load('/src/report/build.ts')
 
 const s = fx.c3_closed
@@ -179,6 +179,19 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('… 派工 text does not repeat the machine already in the title', swapped[0].text === '檢修 B 線開煉機', swapped[0].text)
   const old = fromAudit([a('system', 'world', { msg: '現場處置完成，故障排除', machine_id: 'B-OPEN' }, at(14))], base)
   check('… the runtime\'s older wording counts as 維修完成 too', old[0]?.k === 'review' && old[0].phase === 'repaired')
+
+  // H1 → the stale H1 round re-solved by code (no 規劃 block) → H2: the second block is H2's own round
+  const sr = (id, tool) => ({ step: { id, tool, purpose: 'p', args: {}, depends_on: [] }, state: 'ok', result: null, gate: null })
+  const h1 = [sr('S1', 'cure_formula'), sr('S2', 'query_orders_shifts')]
+  const ev3 = { ...base, prior_rounds: [{ round: 1, hypothesis_id: 'H1', steps: h1 }, { round: 2, hypothesis_id: 'H1', steps: h1 }],
+    steps: [sr('S1', 'solve_schedule'), sr('S2', 'confirm_schedule')] }
+  const thinks = fromAudit([
+    a('llm_call', 'commander', { phase: 'plan', hypothesis: 'H1', steps: ['S1', 'S2'] }, at(1)),
+    a('system', 'state_machine', { stale_resolve: 'code', commander_called: false, hypothesis: 'H1', steps: ['S1', 'S2'] }, at(5)),
+    a('llm_call', 'commander', { phase: 'replan', hypothesis: 'H2', steps: ['S1', 'S2'] }, at(9)),
+  ], ev3).filter((i) => i.k === 'think')
+  const tools = thinks.map((t) => thinkContext(ev3, t).steps.map((x) => x.tool).join('+'))
+  check('H1 → stale re-solve → H2: each 規劃 block shows its own round\'s tools', tools.join(' | ') === 'cure_formula+query_orders_shifts | solve_schedule+confirm_schedule', tools.join(' | '))
 }
 
 // ---------------------------------------------------------------- report

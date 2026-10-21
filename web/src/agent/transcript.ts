@@ -19,6 +19,9 @@ export interface ThinkItem extends Base {
   k: 'think'; phase: string; mode: string | null; model: string | null; source: 'commander' | 'mock_fallback' | 'unknown'
   hypothesisId: string | null; causeCode: string | null; stepIds: string[]; rationale: string | null
   safeStop: boolean; error: string | null; totalMs: number | null; tokens: number | null
+  /** the round this plan became (prior rounds, then the current one; null: a plan without steps). A stale schedule is
+   *  re-solved by code in a round of its own with no 規劃 block, so counting the blocks alone points at the wrong round. */
+  round: number | null
 }
 export interface ToolItem extends Base {
   k: 'tool'; tool: ToolName; stepId: string | null; args: Record<string, unknown>; attempt: number; callId: string
@@ -275,6 +278,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
   sorted.forEach((e, i) => { if (e.kind === 'state_transition' && e.payload?.from == null) wake = i })
   if (wake > 0) sorted = sorted.slice(sorted[wake - 1].kind === 'anomaly' ? wake - 1 : wake)
   const out: Item[] = []
+  let round = 0
   const calls = new Map<string, ToolItem>()
   // the full result of a step (the audit keeps a brief copy: long fields are cut to "<n chars>")
   const fullResult = new Map<string, ToolResult>()
@@ -289,16 +293,17 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
       case 'state_transition':
         out.push({ ...base, k: 'state', from: str(p.from), to: String(p.to ?? ''), reason: String(p.reason ?? p.text ?? '') })
         break
-      case 'llm_call':
+      case 'llm_call': {
+        const stepIds = (Array.isArray(p.steps) && p.steps.length ? p.steps : Array.isArray(p.fallback_steps) ? p.fallback_steps : []).map(String)
         out.push({
           ...base, k: 'think', phase: String(p.phase ?? ''), mode: str(p.mode), model: str(p.model),
           source: p.plan_source === 'commander' ? 'commander' : p.plan_source === 'mock_fallback' || p.fell_back_to_mock ? 'mock_fallback' : 'unknown',
-          hypothesisId: str(p.hypothesis ?? p.fallback_hypothesis), causeCode: str(p.cause_code),
-          stepIds: (Array.isArray(p.steps) && p.steps.length ? p.steps : Array.isArray(p.fallback_steps) ? p.fallback_steps : []).map(String),
+          hypothesisId: str(p.hypothesis ?? p.fallback_hypothesis), causeCode: str(p.cause_code), stepIds,
           rationale: str(p.rationale), safeStop: p.safe_stop === true, error: str(p.error),
-          totalMs: numOr(p.total_ms), tokens: numOr(p.completion_tokens),
+          totalMs: numOr(p.total_ms), tokens: numOr(p.completion_tokens), round: stepIds.length ? round++ : null,
         })
         break
+      }
       case 'tool_call': {
         const tool = e.actor.replace(/^tool:/, '') as ToolName
         const it: ToolItem = {
@@ -362,6 +367,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         out.push(...taskItems(e, base))
         break
       case 'system': {
+        if (e.actor === 'state_machine' && p.stale_resolve) round++      // the same steps again, re-solved by code
         const rv = reviewItem(p, base, ev)
         if (rv) { out.push(rv); break }
         const text = systemText(e.actor, p)
@@ -431,10 +437,12 @@ export function fromEvent(ev: Event): Item[] {
   const push = (it: Omit<Item, 'seq' | 'key' | 'ts'> & { ts?: string }) => { n++; out.push({ ts, ...it, key: `m${n}`, seq: n } as Item) }
   push({ k: 'anomaly', message: ev.anomaly.message } as Omit<AnomalyItem, 'seq' | 'key' | 'ts'>)
   const rounds = [...(ev.prior_rounds ?? []).map((r) => ({ hyp: r.hypothesis_id, steps: r.steps })), { hyp: ev.plan?.hypothesis.id ?? null, steps: ev.steps }]
+  let round = 0
   for (const r of rounds) {
     if (!r.steps.length) continue
     push({ k: 'think', phase: out.some((x) => x.k === 'think') ? 'replan' : 'plan', mode: null, model: null, source: 'unknown',
-      hypothesisId: r.hyp, causeCode: null, stepIds: r.steps.map((s) => s.step.id), rationale: null, safeStop: false, error: null, totalMs: null, tokens: null } as Omit<ThinkItem, 'seq' | 'key' | 'ts'>)
+      hypothesisId: r.hyp, causeCode: null, stepIds: r.steps.map((s) => s.step.id), rationale: null, safeStop: false, error: null, totalMs: null, tokens: null,
+      round: round++ } as Omit<ThinkItem, 'seq' | 'key' | 'ts'>)
     for (const sr of r.steps) {
       if (sr.gate) pushGate(push, sr.step, sr.gate)
       if (sr.state === 'pending' || sr.state === 'awaiting_approval' || sr.state === 'skipped' || sr.state === 'rejected') continue
@@ -456,14 +464,14 @@ export function withAsks(items: Item[], asks: LocalItem[]): Item[] {
   return [...items, ...asks].sort((a, b) => t(a) - t(b) || (a.k === 'ask' ? 1 : 0) - (b.k === 'ask' ? 1 : 0) || a.seq - b.seq)
 }
 
-/** The hypothesis and planned steps a 思考 block refers to. `nth` = how many plans came before it: the n-th plan is the
- *  n-th round (prior rounds, then the current one). The state machine adds steps of its own to a round (S6 通知維修), so
- *  a round rarely has exactly the plan's ids: each id is looked up in that round first, then in the latest round with it. */
-export function thinkContext(ev: Event | null, it: ThinkItem, nth: number): { hyp: Hypothesis | null; steps: PlanStep[] } {
+/** The hypothesis and planned steps a 思考 block refers to: its own round (it.round: prior rounds, then the current one).
+ *  The state machine adds steps of its own to a round (S6 通知維修), so a round rarely has exactly the plan's ids: each id
+ *  is looked up in that round first, then in the latest round with it. */
+export function thinkContext(ev: Event | null, it: ThinkItem): { hyp: Hypothesis | null; steps: PlanStep[] } {
   if (!ev) return { hyp: null, steps: [] }
   const hyp = ev.hypotheses.find((h) => h.id === it.hypothesisId) ?? null
   const rounds = [...(ev.prior_rounds ?? []).map((r) => r.steps), ev.steps].filter((r) => r.length > 0)
-  const pool = [...(rounds[nth] ?? []), ...[...rounds].reverse().flat()]
+  const pool = [...(it.round != null ? rounds[it.round] ?? [] : []), ...[...rounds].reverse().flat()]
   return { hyp, steps: it.stepIds.flatMap((id) => pool.find((s) => s.step.id === id)?.step ?? []) }
 }
 
