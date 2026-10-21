@@ -43,7 +43,7 @@ import { useGuidedDemo } from './useGuidedDemo'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
-import { PLACED, PLACED_BY_ID, ROOMS, WHITEBOARD, collide, walkable, type Near, type SceneId } from './layout'
+import { BOARD_STAND, PLACED, PLACED_BY_ID, ROOMS, WHITEBOARD, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
@@ -406,7 +406,7 @@ export function FactoryApp() {
       } else if (act === 'fly') {
         // an abnormal machine first (the off-screen arrows point at the same ones), else the whiteboard
         const hot = Object.entries(L.alarms).filter(([id]) => PLACED_BY_ID[id]).map(([id]) => id)
-        if (hot.length) { setMode('third'); standAt(hot[0]) } else teleport(WHITEBOARD.x - 2.4, WHITEBOARD.z, -Math.PI / 2, -Math.PI / 2)
+        if (hot.length) { setMode('third'); standAt(hot[0]) } else teleport(BOARD_STAND.x, BOARD_STAND.z, BOARD_STAND.yaw, BOARD_STAND.yaw)
       } else L.run(act)
     }
   }, [raisePhone, closePanel, goTo, start]))

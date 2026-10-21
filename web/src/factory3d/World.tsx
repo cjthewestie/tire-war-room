@@ -160,7 +160,8 @@ const GLOW = typeof document !== 'undefined' ? glowTexture() : null
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
 function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null }) {
-  const light: Light = statusLight(tile?.status)
+  // repaired (「檢修完成・待恢復運轉」): green, though the machine stays 停用 until the supervisor's 恢復運轉 (CJ: 圈圈變綠)
+  const light: Light = tile?.repaired ? 'green' : statusLight(tile?.status)
   useEffect(() => { DRAWN_LIGHT[p.id] = light }, [p.id, light])
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
   const lampMesh = useRef<THREE.Mesh>(null)
