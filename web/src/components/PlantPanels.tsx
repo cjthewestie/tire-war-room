@@ -1,13 +1,13 @@
-// The whole plant around the 28 machines (issue #11; was the 工廠全貌 tab, merged into 產線監控 by issue #37):
-// goods, people by zone, worker tasks, raw materials against their reorder points, the loading dock, quality,
-// energy and maintenance. Orders live in 產線監控's 訂單 panel and the 訂單 tab. Read only; data comes from
-// GET /api/world and the WS "world" deltas (warroom/sim/world.py).
+// The whole plant around the 28 machines (issue #11; was the 工廠全貌 tab, merged into 產線監控 by issue #37, folded
+// into 「更多全廠資訊」 by issue #102): goods, people by zone, worker tasks, raw materials against their reorder points,
+// the loading dock, quality, energy and maintenance. Read only; data comes from GET /api/world and the WS "world"
+// deltas (warroom/sim/world.py).
+import type { ReactNode } from 'react'
 import type { WorldSnapshot, WorldZone, WorkerState } from '../contracts'
 import { LINE_LABELS } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { PHONE_QUERY, useMediaQuery } from '../media'
 import { Panel } from './common'
 import { GoodsCounts, GoodsQueue } from './GoodsQueue'
 import { movedText } from './goods'
@@ -18,45 +18,39 @@ const ZONE_LABEL: Record<WorldZone, string> = {
   war_room: '戰情室', staff: '員工待命區', line_A: 'A 胎體／胎面膠', line_B: 'B 胎側膠', line_C: 'C 鋼絲圈', line_D: 'D 尼龍布',
   line_BOND: '貼合', line_CURE: '硫化區', break: '休息區', toilet: '廁所', dock: '碼頭', off_site: '廠外',
 }
-const ZONE_ORDER: WorldZone[] = ['war_room', 'line_A', 'line_B', 'line_C', 'line_D', 'line_BOND', 'line_CURE', 'dock', 'staff', 'break', 'toilet']
-const STATE_ORDER: WorkerState[] = ['在機台', '搬運', '待命', '休息', '如廁', '請假', '下班']
+// HY, 2026-10-21: a supervisor does not monitor toilet breaks — 廁所／如廁 are counted as 休息區／休息 on this panel
+const ZONE_ORDER: WorldZone[] = ['war_room', 'line_A', 'line_B', 'line_C', 'line_D', 'line_BOND', 'line_CURE', 'dock', 'staff', 'break']
+const STATE_ORDER: WorkerState[] = ['在機台', '搬運', '待命', '休息', '請假', '下班']
 const MAT_STATUS = { ok: '充足', reorder: '已達再訂購點', low: '偏低', out: '缺料' } as const
 
-export function PlantPanels() {
+/** 「更多全廠資訊」 on 產線監控 (issue #102): a 現場主管 does not need these at a glance, so everything folds into one
+ *  closed panel — `children` (訂單進度, 半成品進度) first, then people, materials and the rest of the plant. Low
+ *  materials, late purchases and maintenance starting soon are already rows in 預警 at the top of the page. */
+export function PlantPanels({ children }: { children?: ReactNode }) {
   const { state, transport } = useWarRoom()
-  const phone = useMediaQuery(PHONE_QUERY)
   const w = state.world
-  if (!w) {
-    return <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>
-  }
-  // UX declutter: 人員分布 and 原料庫存 stay open (a supervisor's first look); the other seven fold into
-  // 「更多全廠資訊」, closed by default. On a phone the whole section folds into its heading.
-  const body = (
-    <>
-      <div className="world world-main">
-        <PeoplePanel w={w} />
-        <MaterialsPanel w={w} />
-      </div>
-      <details className="world-more" data-testid="plant-more">
-        <summary>更多全廠資訊（7）：貨品狀態、人員任務、碼頭進出、品質檢驗、用電、保養與維修、工廠動態</summary>
-        <div className="world">
-          <GoodsPanel w={w} />
-          <TasksPanel w={w} />
-          <DockPanel w={w} />
-          <QualityPanel w={w} />
-          <EnergyPanel w={w} />
-          <MaintenancePanel w={w} />
-          <FeedPanel w={w} />
-        </div>
-      </details>
-    </>
-  )
   return (
-    <section className="world-wrap" data-testid="plant-panels" data-rev={w.rev} aria-label="全廠：人、料、貨、車">
-      {phone
-        ? <details className="world-fold"><summary className="section-h">全廠：人、料、貨、車</summary>{body}</details>
-        : <><h2 className="section-h">全廠：人、料、貨、車</h2>{body}</>}
-      <p className="foot-note" data-testid="world-sources">資料來源：人員與班表（含加班、病假）、換模、異常紀錄、每日產出＝<b>團隊資料集</b>（日期依情境對齊）；訂單到達、原料採購、出貨、用電、檢驗、計畫保養、維修／品管／主管人員＝<b>模擬生成</b>（假設值）</p>
+    <section className="mon-more-wrap" data-testid="plant-panels" data-rev={w?.rev ?? 0} aria-label="更多全廠資訊">
+      <details className="panel mon-more" data-testid="plant-more">
+        <summary><h2>更多全廠資訊</h2><span className="mon-more-sum">訂單、半成品、人員、原料、貨品、任務、碼頭、品質、用電、保養、動態</span></summary>
+        <div className="world">
+          {children}
+          {w && <>
+            <PeoplePanel w={w} />
+            <MaterialsPanel w={w} />
+            <GoodsPanel w={w} />
+            <TasksPanel w={w} />
+            <DockPanel w={w} />
+            <QualityPanel w={w} />
+            <EnergyPanel w={w} />
+            <MaintenancePanel w={w} />
+            <FeedPanel w={w} />
+          </>}
+        </div>
+        {w
+          ? <p className="foot-note" data-testid="world-sources">資料來源：人員、班表、換模、異常紀錄、每日產出來自<b>團隊資料集</b>；訂單、採購、出貨、用電、檢驗、保養為<b>模擬資料</b>。</p>
+          : <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>}
+      </details>
     </section>
   )
 }
@@ -158,22 +152,24 @@ function DockPanel({ w }: { w: WorldSnapshot }) {
 
 function PeoplePanel({ w }: { w: WorldSnapshot }) {
   const p = w.people
-  const max = Math.max(1, ...Object.values(p.by_zone).map((n) => n ?? 0))
+  const zone: Partial<Record<WorldZone, number>> = { ...p.by_zone, break: (p.by_zone.break ?? 0) + (p.by_zone.toilet ?? 0) }
+  const st: Partial<Record<WorkerState, number>> = { ...p.by_state, 休息: (p.by_state.休息 ?? 0) + (p.by_state.如廁 ?? 0) }
+  const max = Math.max(1, ...Object.values(zone).map((n) => n ?? 0))
   return (
-    <Panel title="人員分布" className="w-people" right={<span className="muted small">在廠 {p.on_duty}・全員 {p.total}（資料集 {p.workers.filter((x) => x.source === 'team_dataset').length}）</span>}>
+    <Panel title="人員分布" className="w-people" right={<span className="muted small">在廠 {p.on_duty}・全員 {p.total}</span>}>
       <ul className="zones" data-testid="people-zones">
-        {ZONE_ORDER.filter((z) => p.by_zone[z]).map((z) => (
-          <li key={z}><span>{ZONE_LABEL[z]}</span><span className="zbar"><i style={{ width: `${(100 * (p.by_zone[z] ?? 0)) / max}%` }} /></span><b>{p.by_zone[z]}</b></li>
+        {ZONE_ORDER.filter((z) => zone[z]).map((z) => (
+          <li key={z}><span>{ZONE_LABEL[z]}</span><span className="zbar"><i style={{ width: `${(100 * (zone[z] ?? 0)) / max}%` }} /></span><b>{zone[z]}</b></li>
         ))}
       </ul>
       <div className="states">
-        {STATE_ORDER.filter((s) => p.by_state[s]).map((s) => <span key={s} className={`st st-${s}`}>{s} {p.by_state[s]}</span>)}
+        {STATE_ORDER.filter((s) => st[s]).map((s) => <span key={s} className={`st st-${s}`}>{s} {st[s]}</span>)}
       </div>
       <ul className="w-mini">
         {p.workers.filter((x) => x.role === '主管' || x.state === '請假' || x.role === '維修' || x.note).filter((x) => x.state !== '下班')
           .sort((a, b) => Number(b.state === '請假') - Number(a.state === '請假')).slice(0, 4).map((x) => (
-          <li key={x.id} className={x.state === '請假' ? 'warn' : ''}><b>{x.name}</b> <span className="muted">{x.team_label}・{x.shift}</span>・{x.state}
-            {x.state !== '請假' ? `（${ZONE_LABEL[x.zone]}${x.machine_id ? ` ${machineLabel(x.machine_id)}` : ''}）` : ''}{x.note ? `・${x.note}` : ''}
+          <li key={x.id} className={x.state === '請假' ? 'warn' : ''}><b>{x.name}</b> <span className="muted">{x.team_label}・{x.shift}</span>・{x.state === '如廁' ? '休息' : x.state}
+            {x.state !== '請假' ? `（${ZONE_LABEL[x.zone === 'toilet' ? 'break' : x.zone]}${x.machine_id ? ` ${machineLabel(x.machine_id)}` : ''}）` : ''}{x.note ? `・${x.note}` : ''}
             {x.source === 'team_dataset' && <i className="tag">資料集</i>}</li>
         ))}
       </ul>

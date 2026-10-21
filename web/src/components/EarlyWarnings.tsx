@@ -5,6 +5,7 @@ import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { plain } from '../plain'
 import { useWarRoom } from '../useWarRoom'
+import './monitor.css'
 
 const H = 3_600_000
 
@@ -30,9 +31,9 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
   for (const s of state.schedule?.schedule.warnings ?? []) rows.push({ k: /延遲|延誤|晚於交期/.test(s) ? '交期' : '排程', what: plain(s), when: '排程預估', tone: 'warn' })
   for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `驗證層攔下 ${b.count} 筆壞資料，未喚醒 AI`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
   return (
-    <section className="panel early" aria-label="預警" data-testid="early-warnings">
-      <header className="panel-h"><h2>預警：還沒出事，但在往壞的方向走</h2><span className="muted small">{rows.length ? `${rows.length} 項` : ''}</span></header>
-      {!rows.length && <p className="muted">目前沒有預警。機台、原料、採購、保養與交期都在範圍內。</p>}
+    // council review 10-21: the title says what it is, and an empty 預警 is one line instead of a whole panel
+    <section className={`panel early ${rows.length ? '' : 'is-empty'}`} aria-label="預警" data-testid="early-warnings">
+      <header className="panel-h"><h2>預警</h2><span className="muted small">{rows.length ? `${rows.length} 項：還沒出事，但在變壞` : '目前沒有。機台、原料、保養與交期都正常'}</span></header>
       {rows.length > 0 && (
         <ul className="early-list">
           {rows.slice(0, 3).map((r, i) => (
