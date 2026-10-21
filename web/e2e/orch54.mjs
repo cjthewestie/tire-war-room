@@ -103,7 +103,7 @@ await until(async () => { second = (await subs()).items.find((x) => x.source ===
 await p.goto(`${BASE}/#console?event=${encodeURIComponent(second.id)}`, { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tree-root"]')
 check('Agent page: 「Agent Nemo 對話」 with the events under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('Agent Nemo 對話') && await p.locator('[data-testid="trace-event"]').count() >= 1)
-check('each row is <what>, then its plain status on a second line', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /\n(規劃中|待核准|執行中|維修中|維修完成|現場工作|已恢復正常|已停用|已處置|完成|已停止)/.test(t)),
+check('each row is <what>, then its plain status on a second line', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /\n(規劃中|待核准|執行中|維修中|放慢投料中|暫停投料中|維修完成|現場工作|已恢復正常|已停用|已處置|完成|已停止)/.test(t)),
   (await p.locator('[data-testid="sub-status"]').allInnerTexts()).join(' | '))
 check('no 查詢 row in the tree', (await p.locator('.trace-list').innerText()).indexOf('查詢') < 0)
 await p.click('[data-testid="tree-root"]')
@@ -113,7 +113,10 @@ await p.locator(`[data-testid="trace-event"][data-event="${second.id}"]`).click(
 // veteran audit 10-22: the queue bar only while somebody waits for the model
 const waitingN = ((await subs()).queue?.waiting ?? []).length
 check('the model queue shows only while someone waits', await p.locator('[data-testid="model-queue"]').count() === (waitingN ? 1 : 0), `${waitingN} waiting`)
-check('the selected event opens on its conclusion', /發生/.test(await p.locator('[data-testid="sub-head"]').innerText()), (await p.locator('[data-testid="sub-head"] h2').innerText().catch(() => '')))
+// the conclusion names the command and where it stands, in one sentence (veteran audit: 結論區)
+const head = await p.locator('[data-testid="sub-head"] h2').innerText().catch(() => '')
+check('the selected event opens on its conclusion: the command and where it stands', head.includes('主管指令「夜班缺一人') &&
+  /(Agent Nemo 規劃中|請核准|執行核准的計畫|已停止|已結束)/.test(head), head)
 await p.screenshot({ path: `${OUT}/agent-tree-1440.png`, fullPage: false })
 const s2 = (await subs()).items.find((x) => x.id === second.id)
 if (!['done', 'failed', 'interrupted'].includes(s2.status)) {
