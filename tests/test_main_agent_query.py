@@ -396,10 +396,20 @@ async def test_query_plant_numbers_that_do_not_match_give_an_honest_line_not_raw
 async def test_query_plant_is_capped_at_two_topics_per_turn():
     m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
               ("tool", QUERY, {"topic": "overview"}), ("say", "之前沒有遲交的訂單。"))
-    reader = Reader({"late": []})
+    reader = Reader({"late": [], "n": 1})
     out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
     assert reader.topics == ["orders_history", "orders"] and "已經查了兩項" in _tool_texts(m)[-1]
     assert out["reply"] == "之前沒有遲交的訂單。" and "先只查最相關的一個 topic" in SYSTEM
+
+
+async def test_two_rounds_of_the_same_empty_answer_end_the_lookups():
+    # the loop guard (warroom/agent/budget.py Rule B): nothing new in two rounds → the next call is the text-only answer
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
+              ("say", "之前沒有遲交的訂單。"))
+    reader = Reader({"late": []})
+    out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
+    assert reader.topics == ["orders_history", "orders"] and "tools" not in m.calls[2]
+    assert out["reply"] == "之前沒有遲交的訂單。"
 
 
 def _tool_texts(m):
