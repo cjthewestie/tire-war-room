@@ -1,5 +1,6 @@
 """FastAPI app: REST per contracts.REST_ENDPOINTS (+ a few demo-control extras), one WebSocket
-/ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone, 3D factory at /factory).
+/ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone, 3D factory at /factory,
+floor worker's tasks at /worker).
 
 Everything is local: no CDN, no outbound calls except the optional LLM health probe.
 
@@ -1075,6 +1076,11 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     @app.get("/factory.html", include_in_schema=False)
     async def factory():
         return page("factory.html")
+
+    @app.get("/worker", include_in_schema=False)
+    @app.get("/worker.html", include_in_schema=False)
+    async def worker():                     # issue #46: floor worker's tasks (read-only; reads /api/world + /ws)
+        return page("worker.html")
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon():

@@ -89,4 +89,4 @@ def test_ts_contract_imports_only_from_contracts():
 def test_pnpm_build():
     r = subprocess.run(["pnpm", "build"], cwd=WEB, capture_output=True, text=True)
     assert r.returncode == 0, r.stdout[-2000:] + r.stderr[-2000:]
-    assert all((WEB / "dist" / p).exists() for p in ("index.html", "phone.html", "factory.html"))
+    assert all((WEB / "dist" / p).exists() for p in ("index.html", "phone.html", "factory.html", "worker.html"))
