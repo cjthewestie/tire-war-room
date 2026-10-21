@@ -76,9 +76,9 @@ function ChatRow({ it }: { it: ChatItem }) {
       </div>
     )
   }
-  const head = it.kind === 'dispatch' ? 'NemoClaw・派發' : it.kind === 'report' ? 'NemoClaw・回報' : it.kind === 'interrupt' ? 'NemoClaw・中斷'
-    : it.by === 'main_agent' ? 'NemoClaw'
-    : it.kind === 'summary' ? `NemoClaw${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'NemoClaw・無法執行' : 'NemoClaw・回覆'
+  const head = it.kind === 'dispatch' ? 'Agent Nemo・派發' : it.kind === 'report' ? 'Agent Nemo・回報' : it.kind === 'interrupt' ? 'Agent Nemo・中斷'
+    : it.by === 'main_agent' ? 'Agent Nemo'
+    : it.kind === 'summary' ? `Agent Nemo${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'Agent Nemo・無法執行' : 'Agent Nemo・回覆'
   return (
     <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
@@ -203,7 +203,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
     <div className="r-ask" data-kind="ask">
       <div className="r-q"><span>{it.question}</span><small>主管・{fmtHMS(it.ts)}</small></div>
       <div className="r-a" data-testid={a ? 'ask-answer' : undefined}>
-        <header><ToolIcon name="think" /><b>NemoClaw</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
+        <header><ToolIcon name="think" /><b>Agent Nemo</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
         {!a && !it.error && <p className="muted"><i className="spin" />查詢中…</p>}
         {it.error && <p className="err">{it.error}</p>}
         {a && !brief && a.steps.map((s, i) => (
