@@ -4,11 +4,12 @@
 // Display only: nothing here invents data. Nemotron runs with reasoning off, so a "思考" block shows
 // the plan and hypotheses the model returned, never a hidden chain of thought.
 import type {
-  AskAnswer, AuditEntry, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, ToolName, ToolResult,
+  AskAnswer, AuditEntry, Channel, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, ToolName, ToolResult,
 } from '../contracts'
-import { REPAIR_KINDS, expectationOf, readingText } from '../aiStatus'
+import { CH_LABEL, REPAIR_KINDS, expectationOf, readingText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { hypName } from '../plain'
+import { anomalyWhat } from './subagents'
 
 export type Filter = 'all' | 'tool' | 'think' | 'gate'
 
@@ -30,11 +31,15 @@ export interface ToolItem extends Base {
 export interface GateItem extends Base {
   k: 'gate'; stepId: string | null; tool: string | null; risk: RiskLevel | null; verdict: string | null
   reasons: string[]; checks: Record<string, boolean>; dropped: string | null
+  /** the gate checks the plan's write steps in one go: the first row of a run carries all of them (one 安全把關 row) */
+  group?: GateItem[]
 }
 export interface BlockedItem extends Base { k: 'blocked'; tool: string | null; stepId: string | null; reason: string; actor: string }
 export interface ApprovalItem extends Base {
   k: 'approval'; phase: 'request' | 'decision'; requestId: string; risk: string | null; round: number | null
   title: string | null; decision: string | null; optionId: string | null; reason: string | null; via: string | null; by: string
+  /** the card's options (a request); on a decision, the options of the card it decided (to name the one picked) */
+  options: { id: string; label: string }[]
 }
 export interface SafetyItem extends Base { k: 'safety'; message: string; machine: string | null }
 export interface AnomalyItem extends Base { k: 'anomaly'; message: string }
@@ -55,10 +60,14 @@ export interface ChatItem extends Base {
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }
 /** A new card version replaced the discussed one (v1 → v2) and what changed. */
 export interface VersionItem extends Base { k: 'version'; to: number; from: number; approvalId: string; changes: string[] }
-/** A worker task (issue #17, AuditKind.TASK): 派工, then 前往中 → 執行中 → 完成 by whom; 取消; the verifier's count. */
+/** A worker task (issue #17, AuditKind.TASK): 派工, then 前往中 → 執行中 → 完成 by whom; 取消; the verifier's count.
+ *  mergeTasks makes one row per task: `times` holds when each change happened, `phase` the latest. */
 export interface TaskItem extends Base {
   k: 'task'; phase: 'created' | 'assigned' | 'started' | 'done' | 'cancelled' | 'count'; text: string; who: string | null; repair: boolean
-  taskId: string | null
+  taskId: string | null; kind: string | null; machine: string | null
+  /** made by an automatic step before the supervisor decided: a fast repair waits for the approval (work.py hold) */
+  held: boolean
+  times: Partial<Record<'assigned' | 'started' | 'done' | 'cancelled', string>>
 }
 /** Fast repair (Kyle 10-21 flow, SYSTEM rows with msg): 「維修完成，故障排除」 → 「已恢復正常」 (with the value) → 「異常報告已產生」
  *  → 「主管已讀報告」; older audit files say 「請主管覆核」 / 「主管覆核」 for the last two. */
@@ -85,18 +94,65 @@ const CHANGE: Record<string, TaskItem['phase']> = { assigned: 'assigned', starte
 /** AuditKind.TASK rows → one row per task change (the state machine's 派工 lists every task it made). */
 function taskItems(e: AuditEntry, base: { key: string; ts: string; seq: number }): TaskItem[] {
   const p = (e.payload ?? {}) as D
-  const one = (n: number, phase: TaskItem['phase'], text: string, who: string | null, kind: unknown, id: unknown = null): TaskItem =>
-    ({ ...base, key: `${base.key}.${n}`, k: 'task', phase, text, who, repair: REPAIR_KINDS.has(String(kind ?? '')), taskId: str(id) })
+  const one = (n: number, phase: TaskItem['phase'], text: string, x: Partial<TaskItem> = {}): TaskItem => ({
+    ...base, key: `${base.key}.${n}`, k: 'task', phase, text, who: null, repair: REPAIR_KINDS.has(String(x.kind ?? '')), taskId: null,
+    kind: null, machine: null, held: false, times: {}, ...x,
+  })
   if (Array.isArray(p.created)) {
-    return (p.created as D[]).map((t, i) => {
-      const title = String(t.title ?? t.kind ?? ''), where = t.machine_id ? machineLabel(String(t.machine_id)) : ''
-      return one(i, 'created', where && !title.includes(where) ? `${title}（${where}）` : title, null, t.kind, t.id)
-    })
+    return (p.created as D[]).map((t, i) => one(i, 'created', String(t.title ?? t.kind ?? ''), {
+      kind: str(t.kind), taskId: str(t.id), machine: str(t.machine_id), held: p.approval_id == null && t.status === '待派',
+    }))
   }
-  if (typeof p.change === 'string' && CHANGE[p.change]) return [one(0, CHANGE[p.change], String(p.title ?? p.kind ?? ''), str(p.worker), p.kind, p.task_id)]
-  if (Array.isArray(p.cancelled)) return [one(0, 'cancelled', `${p.cancelled.length} 項任務（撤回 ${String(p.revoked_step ?? '')}）`, null, null)]
-  if (typeof p.tasks === 'number') return [one(0, 'count', `${String(p.done ?? 0)}/${p.tasks} 完成${p.ok ? '' : '（逾時）'}`, null, null)]
+  if (typeof p.change === 'string' && CHANGE[p.change]) {
+    const phase = CHANGE[p.change] as keyof TaskItem['times']
+    // a change row names the place, 「硫化機（CURE-03）」, not the machine id
+    const machine = /（([A-Z0-9-]+)）$/.exec(String(p.where ?? ''))?.[1] ?? null
+    return [one(0, phase, String(p.title ?? p.kind ?? ''), { who: str(p.worker), kind: str(p.kind), taskId: str(p.task_id), machine, times: { [phase]: e.ts } })]
+  }
+  if (Array.isArray(p.cancelled)) return [one(0, 'cancelled', `${p.cancelled.length} 件（撤回 ${String(p.revoked_step ?? '')}）`)]
+  if (typeof p.tasks === 'number') return [one(0, 'count', `${String(p.done ?? 0)}/${p.tasks} 完成${p.ok ? '' : '（逾時）'}`)]
   return []
+}
+
+/** One row per worker task (the audit writes 派工, 前往中, 執行中 and 完成 apart: four rows a task). The row sits where the
+ *  task was made; a repair made before the approval waits for it (work.py hold), so its 「建立維修工作」 row stays where it
+ *  was made and its progress row sits where somebody was sent. */
+function mergeTasks(out: Item[]): Item[] {
+  const held = new Set(out.flatMap((it) => (it.k === 'task' && it.phase === 'created' && it.held && it.taskId ? [it.taskId] : [])))
+  const rows = new Map<string, TaskItem>()
+  const res: Item[] = []
+  for (const it of out) {
+    if (it.k !== 'task' || !it.taskId || (it.phase === 'created' && held.has(it.taskId))) { res.push(it); continue }
+    const row = rows.get(it.taskId)
+    if (!row) { const r = { ...it, times: { ...it.times } }; rows.set(it.taskId, r); res.push(r); continue }
+    row.phase = it.phase
+    row.who = it.who ?? row.who
+    row.kind = row.kind ?? it.kind
+    row.machine = row.machine ?? it.machine
+    row.repair = row.repair || it.repair
+    Object.assign(row.times, it.times)
+  }
+  return res
+}
+
+/** The gate checks the plan's write steps in one go (four rows: S4 R3, S4b R2, S5 R1, S6 R1): one 安全把關 row. */
+function mergeGates(out: Item[]): Item[] {
+  const res: Item[] = []
+  for (const it of out) {
+    const prev = res[res.length - 1]
+    if (it.k === 'gate' && prev?.k === 'gate' && prev.group) prev.group.push(it)
+    else res.push(it.k === 'gate' ? { ...it, group: [it] } : it)
+  }
+  return res
+}
+
+/** The runtime retries a failed write once with the same arguments; the same error twice is one row. */
+function dropRetries(out: Item[]): Item[] {
+  return out.filter((it, n) => {
+    if (it.k !== 'tool' || it.status !== 'failed' || it.attempt < 2) return true
+    const prev = out.slice(0, n).reverse().find((x): x is ToolItem => x.k === 'tool')
+    return !(prev && prev.status === 'failed' && prev.tool === it.tool && prev.stepId === it.stepId && prev.error === it.error)
+  })
 }
 
 /** The world assigns a task the moment it is made, so its 前往中 row is written before the state machine's 派工 row:
@@ -115,36 +171,51 @@ function createdFirst(out: Item[]): void {
  *  event's channel. */
 function reviewItem(p: D, base: { key: string; ts: string; seq: number }, ev: Event | null): ReviewItem | null {
   const msg = String(p.msg ?? '')
-  const where = p.machine_id ? `・${machineLabel(String(p.machine_id))}` : ''
-  if (/故障排除$/.test(msg)) return { ...base, k: 'review', phase: 'repaired', text: `維修完成，故障排除${where}`, note: null }
+  const where = p.machine_id ? machineLabel(String(p.machine_id)) : ''
+  if (/故障排除$/.test(msg)) return { ...base, k: 'review', phase: 'repaired', text: `${where}維修完成`, note: null }
   if (msg === '已恢復正常') {
     const x = expectationOf(ev), v = numOr(p.value)
-    const val = v == null ? '' : x && (!p.machine_id || x.machine_id === p.machine_id) ? ` ${readingText(x.channel, v)}` : ` ${Math.round(v * 10) / 10}`
-    return { ...base, k: 'review', phase: 'recovered', text: `已恢復正常${where}${val}`, note: null }
+    const val = v == null ? '' : x && (!p.machine_id || x.machine_id === p.machine_id) ? readingText(x.channel, v) : `${Math.round(v * 10) / 10}`
+    return { ...base, k: 'review', phase: 'recovered', text: `${where}已恢復正常${val ? `（${val}）` : ''}`, note: null }
   }
-  if (msg === '異常報告已產生' || msg === '請主管覆核') return { ...base, k: 'review', phase: 'report', text: '異常報告已產生', note: null }
+  if (msg === '異常報告已產生' || msg === '請主管覆核') return { ...base, k: 'review', phase: 'report', text: 'Agent Nemo 異常報告已送到主管手機', note: null }
   if (msg === '主管已讀報告' || msg === '主管覆核') return { ...base, k: 'review', phase: 'read', text: '主管已讀報告', note: str(p.note) || null }
   return null
 }
 
-const INTENT: Record<string, string> = { question: '問題（只查不改）', change: '要改計劃', unsupported: '無法用程式保證的要求', other: '其他' }
+const INTENT: Record<string, string> = { question: '問題（只查不改）', change: '要改計畫', unsupported: '無法用程式保證的要求', other: '其他' }
 const strs = (v: unknown): string[] => (Array.isArray(v) ? v.map(String) : [])
+/** a main-agent row the transcript leaves out (it repeats the row next to it) */
+const SKIP = 'skip'
 
-/** Issue #10 audit rows → conversation items (null: not one of them). */
-function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number }): Item | null {
+/** 「10 號硫化機溫度下降（128 → 122°C）」「主管指令「…」」: what an event is about, whole. The runtime's own dispatch line
+ *  cuts the detector's text at 24 characters, inside a number (「預測穩定在 1：開始處理」). */
+function eventSubject(ev: Event): string {
+  if (ev.source === 'supervisor') return `主管指令「${ev.command ?? ''}」`
+  if (ev.source === 'plant') return ev.alert_card?.title ?? ev.anomaly.message
+  const read = /(\d+(?:\.\d+)?) ?→ ?(\d+(?:\.\d+)?)°C/.exec(ev.anomaly.message)
+  return `${machineLabel(ev.machine_id)}${anomalyWhat(ev) || '異常'}${read ? `（${read[1]} → ${read[2]}°C）` : ''}`
+}
+
+/** Issue #10 audit rows → conversation items (null: not one of them; SKIP: one the transcript leaves out). */
+function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number }, ev: Event | null): Item | null | typeof SKIP {
   const p = (e.payload ?? {}) as D
   const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, x: Partial<ChatItem> = {}): ChatItem => ({
     ...base, k: 'chat', role, kind, text, by: e.actor, intent: null, version: null, changes: [], constraints: [], classifiedBy: null, fellBack: false, ...x,
   })
-  // issue #54: the main agent's own rows — dispatch, report back, interrupt (dialogue) and model-queue waits (a step)
+  // issue #54: the main agent's own rows — the start of the work and an interrupt (dialogue) and model-queue waits (a
+  // step). Its 「已核准…執行中」 repeats the decision row and its report the 異常報告 under the conclusion: left out.
   if (e.kind === 'system' && e.actor === 'main_agent') {
     const o = String(p.orch ?? '')
-    if (o === 'dispatch' || o === 'report' || o === 'interrupt') {
-      return chat('agent', o, String(p.text ?? ''), { by: 'main_agent', classifiedBy: o === 'dispatch' ? str(p.by) : null, fellBack: p.fell_back === true })
+    if (o === 'dispatch' && p.phase === 'plan') {
+      return chat('agent', o, ev ? `${eventSubject(ev)}，計畫擬好會送主管核准。` : String(p.text ?? ''), { by: 'main_agent', classifiedBy: str(p.by) })
     }
+    if (o === 'interrupt') return chat('agent', o, String(p.text ?? ''), { by: 'main_agent', fellBack: p.fell_back === true })
+    if (o === 'dispatch' || o === 'report') return SKIP
     if (o === 'queue') {
       const ms = numOr(p.waited_ms) ?? 0
-      return { ...base, k: 'note', tone: 'plain', text: `等模型 ${ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`}（優先：${String(p.priority_label ?? p.priority)}${Number(p.ahead) ? `・前面 ${String(p.ahead)} 個` : ''}）` }
+      if (ms < 1000) return SKIP                    // nobody was ahead: no wait worth a row
+      return { ...base, k: 'note', tone: 'plain', text: `排隊等模型 ${(ms / 1000).toFixed(1)} 秒（${String(p.priority_label ?? p.priority)}優先${Number(p.ahead) ? `・前面 ${String(p.ahead)} 件` : ''}）` }
     }
     return null
   }
@@ -174,7 +245,7 @@ function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number })
         ? `程式檢查：排程第 ${String(p.schedule_version)} 版遵守主管條件（${labels}）`
         : `程式檢查：求解結果違反主管條件（${strs(p.violations).join('；')}）→ 不採用` }
     }
-    if (p.discussion_replan_guard) return { ...base, k: 'note', tone: 'warn', text: '模型的新計劃沒有重排步驟：沿用上一版的步驟，讓程式能套用主管條件' }
+    if (p.discussion_replan_guard) return { ...base, k: 'note', tone: 'warn', text: '模型的新計畫沒有重排步驟：沿用上一版的步驟，讓程式能套用主管條件' }
   }
   if (e.kind === 'llm_call' && e.actor === 'discuss') {
     const how = p.classified_by === 'model' ? 'Nemotron 分類' : p.fell_back_to_mock ? '模型未給出可用結果，改用規則分類' : '規則分類'
@@ -185,6 +256,7 @@ function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number })
 
 type D = Record<string, unknown>
 const obj = (v: unknown): D => (v && typeof v === 'object' && !Array.isArray(v) ? (v as D) : {})
+const arr = (v: unknown): D[] => (Array.isArray(v) ? (v as D[]) : [])
 const str = (v: unknown): string | null => (v == null ? null : String(v))
 const numOr = (v: unknown): number | null => (typeof v === 'number' && isFinite(v) ? v : null)
 
@@ -210,7 +282,8 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
   for (const e of sorted) {
     const p = e.payload ?? {}
     const base = { key: `a${e.seq}`, ts: e.ts, seq: e.seq }
-    const talk = talkItem(e, base)
+    const talk = talkItem(e, base, ev)
+    if (talk === SKIP) continue
     if (talk) { out.push(talk); continue }
     switch (e.kind) {
       case 'state_transition':
@@ -269,12 +342,14 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         out.push({
           ...base, k: 'approval', phase: 'request', requestId: String(p.id ?? ''), risk: str(p.risk), round: numOr(p.round),
           title: str(p.title), decision: null, optionId: null, reason: str(p.reason), via: null, by: e.actor,
+          options: arr(p.options).map((o) => ({ id: String(o.id ?? ''), label: String(o.label ?? '') })),
         })
         break
       case 'approval_decision':
         out.push({
           ...base, k: 'approval', phase: 'decision', requestId: String(p.request_id ?? ''), risk: str(p.risk), round: numOr(p.round),
           title: null, decision: str(p.decision), optionId: str(p.option_id), reason: str(p.reason), via: str(p.via), by: e.actor,
+          options: [],
         })
         break
       case 'safety_action':
@@ -298,7 +373,12 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
     }
   }
   createdFirst(out)
-  return out
+  for (const it of out) {
+    if (it.k !== 'approval' || it.phase !== 'decision') continue
+    const req = out.find((x): x is ApprovalItem => x.k === 'approval' && x.phase === 'request' && x.requestId === it.requestId)
+    if (req) it.options = req.options
+  }
+  return dropRetries(mergeGates(mergeTasks(out)))
 }
 
 /** The audit keeps a brief copy of big results: a cut field reads "<1234 chars>", a schedule only its size. */
@@ -307,18 +387,28 @@ function isBrief(d: D): boolean {
 }
 
 const VERDICT: Record<string, string> = { confirmed: '成立', rejected: '不成立', inconclusive: '無法驗證（安全核心已停機）' }
-const STEP_STATE: Record<string, string> = { failed: '失敗', rejected: '被攔截', skipped: '未執行' }
+const STEP_STATE: Record<string, string> = { failed: '失敗', rejected: '被攔截', skipped: '沒執行' }
 const hypWord = hypName
 
 /** Only the system rows a reader needs: the verifier's verdicts, failures and version rebases. */
 function systemText(actor: string, p: D): { text: string; tone: NoteItem['tone'] } | null {
   if (actor === 'verifier') {
     const h = p.hypothesis ? hypWord(String(p.hypothesis)) : '判斷'
-    if (Array.isArray(p.action_problems) && p.action_problems.length) {
-      return { text: `程式驗證：${p.action_problems.length} 個動作未完成（${(p.action_problems as D[]).map((x) => `${x.step_id} ${STEP_STATE[String(x.state)] ?? x.state}`).join('、')}）`, tone: 'warn' }
+    const problems = arr(p.action_problems)
+    if (problems.length) {
+      // another event put its schedule in force first (concurrent_3): nothing ran, the state machine re-solves and asks again
+      if (problems.some((x) => /is stale/.test(String(x.error ?? '')))) return { text: '這一輪沒有執行，排程要重排', tone: 'warn' }
+      const by = new Map<string, number>()
+      for (const x of problems) { const w = STEP_STATE[String(x.state)] ?? String(x.state); by.set(w, (by.get(w) ?? 0) + 1) }
+      return { text: `程式檢查：${problems.length} 個動作沒有完成（${[...by].map(([w, n]) => `${n} 個${w}`).join('、')}）`, tone: 'warn' }
     }
     if (p.verdict != null) {
       const v = VERDICT[String(p.verdict)] ?? String(p.verdict)
+      const ch = obj(p.expectation).channel as Channel | undefined
+      if (typeof p.observed === 'number' && ch && CH_LABEL[ch] && p.verdict !== 'inconclusive') {
+        const read = readingText(ch, p.observed)
+        return { text: `${CH_LABEL[ch]}${p.verdict === 'confirmed' ? '回到' : '量到'} ${read}，${h}${v}（程式用讀值確認）`, tone: 'verify' }
+      }
       return { text: `程式驗證 ${h}：${v}${typeof p.observed === 'number' ? `（量到 ${Math.round(p.observed * 10) / 10}）` : ''}`, tone: 'verify' }
     }
     if (p.unmeasured) return { text: `程式驗證 ${h}：此類異常沒有讀值可驗證`, tone: 'verify' }
@@ -366,17 +456,15 @@ export function withAsks(items: Item[], asks: LocalItem[]): Item[] {
   return [...items, ...asks].sort((a, b) => t(a) - t(b) || (a.k === 'ask' ? 1 : 0) - (b.k === 'ask' ? 1 : 0) || a.seq - b.seq)
 }
 
-/** The hypothesis and planned steps a 思考 block refers to. `nth` = how many plans came before it:
- *  the n-th plan is the n-th round (prior rounds, then the current one) when the step ids agree. */
+/** The hypothesis and planned steps a 思考 block refers to. `nth` = how many plans came before it: the n-th plan is the
+ *  n-th round (prior rounds, then the current one). The state machine adds steps of its own to a round (S6 通知維修), so
+ *  a round rarely has exactly the plan's ids: each id is looked up in that round first, then in the latest round with it. */
 export function thinkContext(ev: Event | null, it: ThinkItem, nth: number): { hyp: Hypothesis | null; steps: PlanStep[] } {
   if (!ev) return { hyp: null, steps: [] }
   const hyp = ev.hypotheses.find((h) => h.id === it.hypothesisId) ?? null
   const rounds = [...(ev.prior_rounds ?? []).map((r) => r.steps), ev.steps].filter((r) => r.length > 0)
-  const ids = (steps: StepRun[]) => steps.map((s) => s.step.id).join(',')
-  const want = it.stepIds.join(',')
-  const byIndex = rounds[nth]
-  const match = byIndex && ids(byIndex) === want ? byIndex : [...rounds].reverse().find((r) => ids(r) === want) ?? []
-  return { hyp, steps: match.map((s) => s.step) }
+  const pool = [...(rounds[nth] ?? []), ...[...rounds].reverse().flat()]
+  return { hyp, steps: it.stepIds.flatMap((id) => pool.find((s) => s.step.id === id)?.step ?? []) }
 }
 
 /** "預期：30 分鐘內回到 121°C 以上" */

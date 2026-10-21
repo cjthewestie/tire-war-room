@@ -11,10 +11,11 @@
 .task { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .task-b { min-width: 0; flex: 1; }
 .tasks.compact .task { padding: 4px 0; }
-.tchip { font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--panel-3); }
-.tchip.st-前往中 { color: var(--warn); }
-.tchip.st-執行中 { color: var(--accent); }
-.tchip.st-完成 { opacity: .7; }
+/* the status tag (task-st, not tchip: agent.css's tool chips are .tchip, a grid box that stretched it across the row) */
+.task-st { font-style: normal; font-size: 12px; padding: 1px 6px; border-radius: 6px; background: var(--panel-3); }
+.task-st.st-前往中 { color: var(--warn); }
+.task-st.st-執行中 { color: var(--accent); }
+.task-st.st-完成 { opacity: .7; }
 .good { display: flex; gap: 6px; align-items: center; padding: 4px 0; border-bottom: 1px solid var(--border); min-width: 0; }
 .good-s { font-size: 12px; min-width: 3.5em; }
 .good-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
