@@ -429,10 +429,10 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
 
         def run() -> dict[str, Any]:
             desk.sync()
-            items = desk.obs.page(before, after, limit, kinds, machine or None)
+            items = [o | {"k": ML.cursor(o)} for o in desk.obs.page(before, after, limit, kinds, machine or None)]
             days = {o["day"] for o in items}
             cards = {d["name"]: ML.summary_card(d) for d in desk.files.all("daily") if d["name"] in days}
-            return {"items": items, "summaries": cards, "next": items[-1]["seq"] if len(items) == limit else None,
+            return {"items": items, "summaries": cards, "next": items[-1]["k"] if len(items) == limit else None,
                     "last_seq": desk.obs.last_seq(), "types": {k: [ML.ICON[k], ML.TYPE_LABEL[k]] for k in ML.ICON}}
         return await asyncio.to_thread(run)
 

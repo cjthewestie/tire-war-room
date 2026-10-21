@@ -923,6 +923,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 "weekly": [w["name"] for w in await asyncio.to_thread(desk.files.all, "weekly")],
                 "monthly": [m["name"] for m in await asyncio.to_thread(desk.files.all, "monthly")]}
 
+    @app.get("/api/memory/today")
+    async def memory_today() -> dict[str, Any]:
+        """總覽 今日總結 and 前一日總結 (Agent page), derived from the observations and daily summaries; read-only."""
+        return await asyncio.to_thread(rt().memory_desk.today_card)
+
     @app.get("/api/daylog")
     async def daylog_days() -> dict[str, Any]:
         """Days (or demo loops) with their run counts, newest first."""

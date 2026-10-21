@@ -26,6 +26,7 @@ import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import { ReportBlock } from './ReportBlock'
 import { TaskLog } from './TaskLog'
+import { TodaySummary } from './TodaySummary'
 import './agent.css'
 
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
@@ -89,9 +90,9 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
     <>
     <ModelQueueBar />
     <div className="trace" data-testid="agent-page">
-      <aside className="trace-side panel" aria-label="Agent Nemo 與處理中的事件">
+      <aside className="trace-side panel" aria-label="總覽與處理中的事件">
         <button type="button" className={`tree-root ${main ? 'on' : ''}`} onClick={() => pick(MAIN)} data-testid="tree-root" aria-pressed={main}>
-          <span className="tree-title"><span className="tree-dot" aria-hidden />Agent Nemo ▸ 處理中的事件</span>
+          <span className="tree-title"><span className="tree-dot" aria-hidden />總覽</span>
           <span className="muted small">事件 {events.length}・進行中 {events.filter(openOf).length}</span>
         </button>
         <div className="seg sm" role="group" aria-label="事件範圍">
@@ -100,7 +101,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           ))}
         </div>
         <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
-          <option value={MAIN}>Agent Nemo 對話</option>
+          <option value={MAIN}>總覽</option>
           {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa, e, tasksOf(e))}` : evName(e)}</option> })}
         </select>
         <ul className="trace-list tree" role="listbox" aria-label="處理中的事件">
@@ -120,8 +121,9 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
         <TaskLog onPick={pick} />
       </aside>
       {main ? (
-        <section className="panel trace-main main-thread" aria-label="Agent Nemo 總覽" data-testid="main-thread" data-mode="overview">
-          <h2 className="trace-h">Agent Nemo・總覽</h2>
+        <section className="panel trace-main main-thread" aria-label="總覽" data-testid="main-thread" data-mode="overview">
+          <h2 className="trace-h">總覽</h2>
+          <TodaySummary />
           <Bubbles items={thread} empty="問全部任務的狀況、哪些有問題、過去的紀錄，或工廠的任何事。" onLink={pick} guide={(
             <div className="con-guide" data-testid="overview-guide">
               <p className="muted small">我看得到所有進行中的任務、過去的紀錄和工廠資料。提到的任務會附連結，點了直接打開那件的任務版。</p>

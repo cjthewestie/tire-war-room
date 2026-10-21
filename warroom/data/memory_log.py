@@ -546,13 +546,13 @@ class ObservationStore:
 
     def page(self, before: int | None = None, after: int | None = None, limit: int = 50,
              types: list[str] | None = None, machine: str | None = None) -> list[dict[str, Any]]:
-        """Newest first (the 後台 記憶時間軸): `before` a seq pages back, `after` a seq gives only what is newer."""
+        """Newest first by (chain, seq) (the 後台 記憶時間軸). `before` / `after` are cursors: cursor() of a row."""
         where, args = [], []
         if before:
-            where.append("seq < ?")
+            where.append(f"{_CURSOR} < ?")
             args.append(before)
         if after:
-            where.append("seq > ?")
+            where.append(f"{_CURSOR} > ?")
             args.append(after)
         if types:
             where.append(f"type IN ({','.join('?' * len(types))})")
@@ -560,9 +560,17 @@ class ObservationStore:
         if machine:
             where.append("machines LIKE ?")
             args.append(f'%"{machine}"%')
-        q = "SELECT * FROM obs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY seq DESC LIMIT ?"
+        q = _COLS + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY chain DESC, seq DESC LIMIT ?"
         with self._lock, self._db() as db:
             return [self._row(r) for r in db.execute(q, [*args, limit])]
+
+
+_CURSOR = "(chain * 10000000 + seq)"
+
+
+def cursor(o: dict[str, Any]) -> int:
+    """One sortable number for (chain, seq): OB-14.0026 comes after every OB-<seq> of chain 0."""
+    return int(o.get("chain") or 0) * 10_000_000 + int(o["seq"])
 
 
 def summary_card(doc: dict[str, Any]) -> dict[str, Any]:
@@ -683,10 +691,16 @@ class MemoryIndex:
                 cos = {p.payload["id"]: float(p.score) for p in res.points}
             except Exception:  # noqa: BLE001
                 cos = {}
+        named = {m.upper() for m in _EXACT_RE.findall(q)}
         scored = []
         for d in docs:
             lex = _bigram_score(q, d["text"])
             s = 0.5 * cos.get(d["id"], 0.0) + 0.5 * lex if cos else lex
+            if named:
+                # an id asked for by name ranks first: 「SO-012」 is not 「SO-017」 though the bigrams nearly match
+                head = {m.upper() for m in _EXACT_RE.findall(d.get("title") or "")} | {d["id"].upper()}
+                body = {m.upper() for m in _EXACT_RE.findall(d["text"])}
+                s += 0.5 if named & head else 0.25 if named & body else 0.0
             scored.append((round(s, 3), d))
         scored.sort(key=lambda x: -x[0])
         best = [(s, d) for s, d in scored[:k] if s >= MIN_SCORE]
@@ -695,6 +709,9 @@ class MemoryIndex:
                     "note": "記憶裡找不到相關內容（分數太低，不算查到）"}
         return {"found": True, "hits": [{"id": d["id"], "level": d["level"], "date": d["date"], "score": s,
                                          "text": _cut(d["text"], 220)} for s, d in best]}
+
+
+_EXACT_RE = re.compile(r"OB-\d+(?:\.\d+)?|#[A-Z]-?\d{2,4}\b|SO-\d{3}\b|EV-[0-9A-Z-]+|[A-Z]+-\d{2}\b", re.IGNORECASE)
 
 
 def summary_docs(files: MemoryFiles) -> list[dict[str, Any]]:
@@ -709,6 +726,7 @@ def summary_docs(files: MemoryFiles) -> list[dict[str, Any]]:
 
 def observation_docs(store: ObservationStore) -> list[dict[str, Any]]:
     return [{"id": o["id"], "level": "observation", "type": o["type"], "date": o["day"], "machines": o["machines"],
+             "title": o["title"],
              "text": f"{o['day']} {_ts(o['ts']).astimezone(F.TZ):%H:%M} {TYPE_LABEL[o['type']]} {o['title']} "
                      + " ".join(o["orders"]) + " " + json.dumps(o["facts"], ensure_ascii=False)}
             for o in store.all()]

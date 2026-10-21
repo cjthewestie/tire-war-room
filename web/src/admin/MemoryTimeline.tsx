@@ -1,5 +1,5 @@
 // 記憶時間軸 (CJ, 2026-10-22: 「不是說要跟claudemem一樣」): the claude-mem viewer look over the plant's observations
-// (warroom/data/memory_log.py ObservationStore, OB-<audit seq>). Newest first, grouped by day with that day's summary as a
+// (warroom/data/memory_log.py ObservationStore, OB-<audit seq>, OB-<chain>.<seq> after a chain break). Newest first, grouped by day with that day's summary as a
 // session card on top; type chips, machine and a search box (memory_search with its no-answer gate); a row opens its
 // detail (memory_get). New observations appear as they are captured (polled). Read-only: GET /api/admin/memory/*.
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -11,7 +11,7 @@ import { Err } from './adminCommon'
 import './memory.css'
 
 export interface Observation {
-  id: string; seq: number; ts: string; day: string; type: string; title: string
+  id: string; seq: number; chain?: number; k?: number; ts: string; day: string; type: string; title: string
   machines: string[]; orders: string[]; ref: string | null; facts: Record<string, unknown>
 }
 interface SummaryCard { name: string; label: string; sentences: string[]; source: string | null; handled?: string; learned?: string; completed?: string; todo?: string }
@@ -21,9 +21,11 @@ interface SearchHit { id: string; level: string; date: string; score: number; te
 // the types memory_log.py writes (ICON / TYPE_LABEL), labelled for the supervisor
 const OB_TYPES: Record<string, [string, string]> = {
   order: ['📦', '訂單'], event: ['🛠', '事件'], approve: ['✅', '核准'], reject: ['❌', '否決'], safety: ['⛔', '安全核心'],
-  task: ['👷', '員工'], ship: ['🚚', '出貨'], note: ['📌', '主管指示'],
+  task: ['👷', '員工'], ship: ['🚚', '出貨'], note: ['📌', '主管指示'], chat: ['💬', '對話'],
 }
 const POLL_MS = 4000
+// (chain, seq) as one number, as the server's cursor: OB-14.0026 (after an audit chain break) is newer than any OB-<seq>
+const keyOf = (o: Observation) => o.k ?? (o.chain ?? 0) * 10_000_000 + o.seq
 const FACT_LABEL: Record<string, string> = {
   message: '訊息', kind: '類別', command: '指令', version: '版本', reason: '原因', actions: '動作', delivery_impact: '交期影響',
   decision: '決定', option: '方案', request_id: '核准單', by: '由', hypothesis: '假設', verdict: '驗證', observed: '觀察值',
@@ -43,7 +45,7 @@ function factText(v: unknown): string {
 export function ObservationDetail({ o }: { o: Observation }) {
   return (
     <dl className="ob-detail" data-testid="ob-detail">
-      <dt>時間</dt><dd>{o.day}・{fmtHM(o.ts)}（稽核第 {o.seq} 筆）</dd>
+      <dt>時間</dt><dd>{o.day}・{fmtHM(o.ts)}（稽核{o.chain ? `第 ${o.chain} 段` : ''}第 {o.seq} 筆）</dd>
       {!!o.machines.length && <><dt>機台</dt><dd>{o.machines.map(machineLabel).join('、')}</dd></>}
       {!!o.orders.length && <><dt>訂單</dt><dd>{o.orders.join('、')}</dd></>}
       {o.ref && <><dt>關聯</dt><dd>{o.ref}</dd></>}
@@ -56,7 +58,7 @@ function FactRow({ k, v }: { k: string; v: unknown }) {
 }
 
 /** OB-0042 chips under an overview reply (progressive disclosure: index → search → detail). Click opens memory_get. */
-export function ObChips({ ids }: { ids: string[] }) {
+export function ObChips({ ids, label = '讀了記憶' }: { ids: string[]; label?: string }) {
   const [open, setOpen] = useState<string | null>(null)
   const [got, setGot] = useState<Record<string, Observation | null>>({})
   const [err, setErr] = useState<string | null>(null)
@@ -71,7 +73,7 @@ export function ObChips({ ids }: { ids: string[] }) {
   const o = open ? got[open] : undefined
   return (
     <div className="ob-chips" data-testid="ob-chips">
-      <span className="ob-chips-k">讀了記憶</span>
+      <span className="ob-chips-k">{label}</span>
       {ids.map((id) => <button key={id} type="button" className={`ob-chip ${open === id ? 'on' : ''}`} aria-expanded={open === id} onClick={() => show(id)} data-testid="ob-chip">{id}</button>)}
       {open && (
         <div className="ob-pop" role="region" aria-label={`記憶 ${open}`}>
@@ -103,10 +105,10 @@ export function MemoryTimeline() {
     setItems((cur) => {
       const all = mode === 'reset' ? p.items : mode === 'older' ? [...cur, ...p.items] : [...p.items, ...cur]
       const seen = new Set<string>()
-      return all.filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true))).sort((a, b) => b.seq - a.seq)
+      return all.filter((o) => (seen.has(o.id) ? false : (seen.add(o.id), true))).sort((a, b) => keyOf(b) - keyOf(a))
     })
     if (mode !== 'newer') setNext(p.next)
-    if (p.items.length) top.current = Math.max(top.current, p.items[0].seq)
+    if (p.items.length) top.current = Math.max(top.current, keyOf(p.items[0]))
   }, [])
 
   useEffect(() => {
