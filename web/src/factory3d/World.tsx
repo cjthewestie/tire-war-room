@@ -11,6 +11,7 @@ import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
 import { LINES } from '../factory'
 import type { WarRoomState } from '../store'
+import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
 import { GoodsRings } from './GoodsRings'
@@ -498,7 +499,7 @@ function BigScreen({ active }: { active: boolean }) {
       <Html transform occlude="blending" distanceFactor={(SCREEN.w / BIG_W) * 400} zIndexRange={[2, 0]} pointerEvents="none"
         geometry={<planeGeometry args={[SCREEN.w, SCREEN.h]} />}>
         <div className="f3-bigscreen" data-testid="f3-bigscreen" style={{ width: BIG_W, height: BIG_H, display: active ? 'block' : 'none' }}>
-          <iframe title="戰情室大螢幕（儀表板）" src={`/${location.search}#monitor`} tabIndex={-1} aria-hidden />
+          <iframe title="戰情室大螢幕（儀表板）" src={`/${embedSearch()}#monitor`} tabIndex={-1} aria-hidden />
         </div>
       </Html>
     </group>

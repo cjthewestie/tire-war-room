@@ -3,6 +3,7 @@
 // backend through its own code. Mounted only while open, so the page holds one extra /ws connection only then.
 // Esc or F (outside a text field) inside the page stands up again.
 import { useEffect, useRef } from 'react'
+import { embedSearch } from '../transport'
 
 export function DeskMonitor({ onClose }: { onClose: () => void }) {
   const frame = useRef<HTMLIFrameElement>(null)
@@ -26,7 +27,7 @@ export function DeskMonitor({ onClose }: { onClose: () => void }) {
     <div className="f3-monitor-wrap" data-testid="f3-monitor">
       <div className="f3-monitor" role="dialog" aria-label="戰情室電腦">
         <div className="f3-monitor-screen">
-          <iframe ref={frame} title="戰情室儀表板" src={`/${location.search}`} onLoad={hook} />
+          <iframe ref={frame} title="戰情室儀表板" src={`/${embedSearch()}`} onLoad={hook} />
         </div>
         <div className="f3-monitor-chin">
           <span className="f3-monitor-led" />

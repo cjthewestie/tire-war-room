@@ -1,6 +1,7 @@
 // The raised supervisor phone: the real /phone page in an iframe, framed as a phone held in the right hand.
 // Same origin, so approve / deny and 問戰情室 go through the phone page's own code and the same API.
 import { useEffect, useRef } from 'react'
+import { embedSearch } from '../transport'
 
 export function PhoneOverlay({ up, onLower, buzzing }: { up: boolean; onLower: () => void; buzzing: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null)
@@ -31,7 +32,7 @@ export function PhoneOverlay({ up, onLower, buzzing }: { up: boolean; onLower: (
     <div className={`f3-phone ${up ? 'up' : ''} ${buzzing ? 'buzz' : ''}`} aria-hidden={!up} data-testid="f3-phone">
       <div className="f3-phone-body">
         <div className="f3-phone-notch" />
-        <iframe ref={frame} title="主管手機" src={`/phone${location.search}`} onLoad={hook} tabIndex={up ? 0 : -1} />
+        <iframe ref={frame} title="主管手機" src={`/phone${embedSearch()}`} onLoad={hook} tabIndex={up ? 0 : -1} />
         <button className="f3-phone-down" onClick={onLower}>放下手機（P / Esc）</button>
       </div>
       <div className="f3-thumb" aria-hidden />
