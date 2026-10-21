@@ -31,7 +31,12 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent, mode = 'task' }: 
     setSeen(focus.n)
     if (focus.text && !focus.send) setQ(focus.text)
   }
-  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
+  // 討論: the caret goes into this input, scrolled into view (on a narrow screen the chat sits below the card, and
+  // 「按了討論沒有用」 was the click focusing an input off screen). #101's fix, lost when #112 merged.
+  useEffect(() => {
+    if (!focus?.n) return
+    setTimeout(() => { input.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); input.current?.focus() }, 60)
+  }, [focus?.n])
   // the guide questions of an empty chat go out at once
   const sentFocus = useRef(0)
   useEffect(() => {
