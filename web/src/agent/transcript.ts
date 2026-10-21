@@ -6,7 +6,7 @@
 import type {
   AskAnswer, AuditEntry, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, ToolName, ToolResult,
 } from '../contracts'
-import { REPAIR_KINDS } from '../aiStatus'
+import { REPAIR_KINDS, expectationOf, readingText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { hypName } from '../plain'
 
@@ -60,8 +60,9 @@ export interface TaskItem extends Base {
   k: 'task'; phase: 'created' | 'assigned' | 'started' | 'done' | 'cancelled' | 'count'; text: string; who: string | null; repair: boolean
   taskId: string | null
 }
-/** Fast repair (Kyle 10-21): 「維修完成，故障排除」, 「請主管覆核」 and 「主管覆核」 (SYSTEM rows with msg). */
-export interface ReviewItem extends Base { k: 'review'; phase: 'repaired' | 'requested' | 'done'; text: string; note: string | null }
+/** Fast repair (Kyle 10-21 flow, SYSTEM rows with msg): 「維修完成，故障排除」 → 「已恢復正常」 (with the value) → 「異常報告已產生」
+ *  → 「主管已讀報告」; older audit files say 「請主管覆核」 / 「主管覆核」 for the last two. */
+export interface ReviewItem extends Base { k: 'review'; phase: 'repaired' | 'recovered' | 'report' | 'read'; text: string; note: string | null }
 
 /** Rows the console keeps locally until the server's audit carries them (asks; a message being sent). */
 export type LocalItem = AskItem | ChatItem
@@ -109,12 +110,20 @@ function createdFirst(out: Item[]): void {
   }
 }
 
-/** Fast repair rows (SYSTEM, payload.msg); the runtime's older wording 「現場處置完成，故障排除」 counts as 維修完成. */
-function reviewItem(p: D, base: { key: string; ts: string; seq: number }): ReviewItem | null {
+/** Fast repair rows (SYSTEM, payload.msg); the runtime's older wording 「現場處置完成，故障排除」 counts as 維修完成, and the
+ *  older 「請主管覆核」 / 「主管覆核」 as the report and its reading (shown in today's words). 已恢復正常 shows the value in the
+ *  event's channel. */
+function reviewItem(p: D, base: { key: string; ts: string; seq: number }, ev: Event | null): ReviewItem | null {
   const msg = String(p.msg ?? '')
-  if (/故障排除$/.test(msg)) return { ...base, k: 'review', phase: 'repaired', text: `維修完成，故障排除${p.machine_id ? `・${machineLabel(String(p.machine_id))}` : ''}`, note: null }
-  if (msg === '請主管覆核') return { ...base, k: 'review', phase: 'requested', text: msg, note: null }
-  if (msg === '主管覆核') return { ...base, k: 'review', phase: 'done', text: msg, note: str(p.note) || null }
+  const where = p.machine_id ? `・${machineLabel(String(p.machine_id))}` : ''
+  if (/故障排除$/.test(msg)) return { ...base, k: 'review', phase: 'repaired', text: `維修完成，故障排除${where}`, note: null }
+  if (msg === '已恢復正常') {
+    const x = expectationOf(ev), v = numOr(p.value)
+    const val = v == null ? '' : x && (!p.machine_id || x.machine_id === p.machine_id) ? ` ${readingText(x.channel, v)}` : ` ${Math.round(v * 10) / 10}`
+    return { ...base, k: 'review', phase: 'recovered', text: `已恢復正常${where}${val}`, note: null }
+  }
+  if (msg === '異常報告已產生' || msg === '請主管覆核') return { ...base, k: 'review', phase: 'report', text: '異常報告已產生', note: null }
+  if (msg === '主管已讀報告' || msg === '主管覆核') return { ...base, k: 'review', phase: 'read', text: '主管已讀報告', note: str(p.note) || null }
   return null
 }
 
@@ -278,7 +287,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         out.push(...taskItems(e, base))
         break
       case 'system': {
-        const rv = reviewItem(p, base)
+        const rv = reviewItem(p, base, ev)
         if (rv) { out.push(rv); break }
         const text = systemText(e.actor, p)
         if (text) out.push({ ...base, k: 'note', text: text.text, tone: text.tone })

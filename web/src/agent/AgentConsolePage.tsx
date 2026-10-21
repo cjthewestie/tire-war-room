@@ -3,8 +3,8 @@
 // (sensor readings, orders, SOP hits with their source), gate verdicts, approvals and replans — with filters
 // and an event picker. CJ, 2026-10-20: 「在那個大的單獨的 agent 的 page 那邊才要去有這些步驟讓我們看到她思考的過程
 // 跟調用工具調用資料的過程」. Rows come from the same audit-log transcript as the home panel (useTranscript).
-// Fast repair (Kyle 10-21): the 處理歷程 also has the workers' tasks, 維修完成 and 覆核, and ends with the 處理報告 once the
-// event closes (ReportBlock).
+// Fast repair (Kyle 10-21): the 處理歷程 also has the workers' tasks, 維修完成, 已恢復正常, 異常報告已產生 and 主管已讀報告, and
+// ends with the 處理報告 once the event closes (ReportBlock).
 import { useMemo, useState } from 'react'
 import type { Event, EventState, ToolName } from '../contracts'
 import { machineLabel } from '../factory'
@@ -30,12 +30,12 @@ import './agent.css'
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
 const KINDS: { id: Kind; label: string; hint: string }[] = [
   { id: 'all', label: '全部', hint: '每一步' },
-  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與覆核' },
+  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與恢復' },
   { id: 'think', label: '計畫與判斷', hint: '指揮官回傳的計畫、假設、程式驗證' },
   { id: 'tool', label: '工具', hint: '每次工具呼叫：參數、結果、耗時' },
   { id: 'data', label: '讀資料', hint: '只讀的工具：感測器、預測、SOP、訂單班表、排程求解' },
   { id: 'gate', label: '把關', hint: '動作把關的判定與攔截' },
-  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件、主管覆核' },
+  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件、異常報告' },
   { id: 'talk', label: '對話', hint: '主管訊息與 Agent 回覆' },
 ]
 const READ_TOOLS: ToolName[] = ['read_sensors', 'predict_anomaly', 'cure_formula', 'sop_search', 'query_orders_shifts', 'solve_schedule']

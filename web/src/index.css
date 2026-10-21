@@ -1002,13 +1002,12 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ai-status { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; line-height: 1.45; }
 .ai-status > span::before { content: "｜"; margin-right: 10px; opacity: .45; }
 .ph-ai { padding: 10px 12px; margin: 8px 0; border-radius: 10px; background: rgba(46, 158, 91, .08); border-left: 3px solid #2e9e5b; font-size: 14px; }
-/* fast repair: 維修完成，請覆核 (ReviewCard) */
-.ph-review { border-color: rgb(var(--accent-rgb, 118 185 0) / .5); box-shadow: 0 20px 44px -28px rgb(var(--accent-rgb, 118 185 0) / .55); }
+/* fast repair: 維修完成 / 已恢復正常・異常報告已產生 notices (RepairNotice) */
+.ph-review { border-color: rgb(var(--accent-rgb, 118 185 0) / .5); box-shadow: 0 20px 44px -28px rgb(var(--accent-rgb, 118 185 0) / .55); margin-bottom: 12px; }
 .ph-ok { color: var(--accent); background: var(--accent-soft); }
-.ph-ok-t { color: var(--accent); }
-.ph-warn-t { color: var(--warn); }
-.ph-review-acts { grid-template-columns: 1fr; }
-.ph-review-acts button { min-height: 58px; font-size: 19px; }
+.ph-report-acts { grid-template-columns: 1fr auto; }
+.ph-report-acts a { min-height: 54px; border-radius: 14px; font-weight: 700; font-size: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
+.ph-report-acts button { min-height: 54px; padding: 0 18px; font-size: 14px; font-weight: 600; }
 .ph-notif-ok { background: var(--accent-soft); border-color: rgb(var(--accent-rgb, 118 185 0) / .45); }
 .ph-notif-ok b { color: var(--accent); }
 .ph-ai > span::before { content: none; }

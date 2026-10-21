@@ -58,12 +58,12 @@ function TaskRow({ it }: { it: TaskItem }) {
   )
 }
 
-/** 維修完成，故障排除 → 請主管覆核 → 主管覆核. */
+/** 維修完成，故障排除 → 已恢復正常 → 異常報告已產生 → 主管已讀報告. */
 function ReviewRow({ it }: { it: ReviewItem }) {
   return (
     <div className={`r-line r-review rv-${it.phase}`} data-kind="review" data-phase={it.phase} data-testid={`review-${it.phase}`}>
-      <ToolIcon name={it.phase === 'requested' ? 'human' : 'confirm_schedule'} />
-      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'requested' && <small>已送到主管手機</small>}</span>
+      <ToolIcon name={it.phase === 'read' ? 'human' : 'confirm_schedule'} />
+      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'report' && <small>已通知主管手機</small>}</span>
       <time>{fmtHMS(it.ts)}</time></div>
   )
 }

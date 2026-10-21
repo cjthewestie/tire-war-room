@@ -1,0 +1,18 @@
+/* NemoClaw 異常報告 (AiReport.tsx): the model's report, above the code-built 處理報告; theme tokens from index.css */
+.ai-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .55); border-left-width: 4px; background: var(--panel); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
+.ai-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ai-report header b { font-size: 15px; }
+.ai-report header small { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.ai-tag { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-dim); }
+.ai-tag.ai { border-color: var(--accent); color: var(--accent); }
+.ai-report h4 { margin: 2px 0 0; font-size: 15.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.ai-report dl { margin: 0; display: flex; flex-direction: column; gap: 3px; }
+.ai-report dl div { display: grid; grid-template-columns: 3.2em minmax(0, 1fr); gap: 8px; font-size: 14px; line-height: 1.55; }
+.ai-report dt { color: var(--ink-faint); }
+.ai-report dd { margin: 0; overflow-wrap: anywhere; }
+.ai-report .ai-res dd { color: var(--accent); font-weight: 700; }
+.ai-foot { margin: 0; color: var(--ink-faint); font-size: 12.5px; }
+@media print {
+  .ai-report { border-color: #999; background: #fff; color: #000; }
+  .ai-report .ai-res dd, .ai-tag.ai { color: #000; }
+}
