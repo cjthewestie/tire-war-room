@@ -11,6 +11,10 @@
 .ho-copy { margin-left: auto; min-height: 40px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
 .ho-note { margin: 0; font-size: 14px; color: var(--ink-dim); }
 .ho-empty { color: var(--ink-faint); }
+/* the answer on top (has something to hand over: warn edge; nothing left: ok edge); the audit check as a footnote */
+.ho-lead { margin: 0; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--border); border-radius: var(--radius); font-size: 17px; font-weight: 700; line-height: 1.5; overflow-wrap: anywhere; }
+.ho-lead.t-ok { border-left-color: var(--accent); } .ho-lead.t-warn { border-left-color: var(--warn); }
+.ho-foot { margin: 0; font-size: 13px; color: var(--ink-faint); }
 .ho-sec { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .ho-sec h2 { margin: 0; font-size: 17px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
 .ho-sec h2 span { font-size: 14px; font-weight: 500; color: var(--ink-dim); }
