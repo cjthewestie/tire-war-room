@@ -287,9 +287,10 @@ def orders_history(r: Any) -> dict[str, Any]:
              for x in _dataset("history_daily")][-7:]
     return {"completed_or_shipped": items[:12], "late": [i["id"] for i in items if i["late"]],
             "recent_feed": shipped,
-            "team_dataset_plan": {"note": "團隊資料集：每張訂單的交期和預估完工（原始日期）", "orders": plan[:10],
+            # the dataset plan as a count and its late ids only: the full list made the answer slow and long
+            "team_dataset_plan": {"note": "團隊資料集的訂單計畫（原始日期）", "orders": len(plan),
                                   "late": [p["id"] for p in plan if p["late"]]},
-            "daily_output": daily}
+            "daily_output": daily[-3:]}
 
 
 def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
