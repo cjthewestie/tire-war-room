@@ -67,6 +67,18 @@ _PRESS_ID_RX = re.compile(r"(?:CURE[-_ ]?)?0*(\d{1,2})(?:\s*號.*)?", re.IGNOREC
 # a message that leans on the previous one (「那 8 號呢？」「剛剛那台」); only then do earlier messages ride along
 _UNKNOWN_ID_RX = re.compile(r"unknown machine id '([^']+)'")
 NO_SUCH_MACHINE = "廠裡沒有{what}（硫化機是 1–11 號，另有 A／B 線開煉機等），所以查不到。你要查的是哪一台？"
+# a short message (「怎改」「好」「改」) or an answer to the agent's own question also leans on the previous turn
+# (CJ 2026-10-21: 「計畫改」 → 「怎改」 got the self-introduction again: the model saw 「怎改」 with no conversation)
+SHORT_FOLLOW_UP = 6
+_ASKED_RX = re.compile(r"[?？][^。！!?？]*$|請告訴我|請問|要不要|還是")
+# a concrete change to the selected plan (「降到120」「延後一小時」「換 8 號」), not a question about it
+_PLAN_EDIT_RX = re.compile(r"\d|降|升|調|改成|改到|改用|換|延後|提前|不要|不可|不能")
+# 「計畫改」「怎改」「改一下」: wants a change but says none, so the agent asks what to change (no discuss tool offered:
+# it called discuss_waiting_plan with nothing and answered 「目標溫度已改成 122°C」, real run 2026-10-21)
+_VAGUE_EDIT_RX = re.compile(r"^(?:這個|這份)?(?:計[劃畫])?(?:要)?(?:怎麼?|如何)?(?:改|修改|調整)(?:一下|看看)?(?:計[劃畫])?[?？]?$")
+_LAST_Q_RX = re.compile(r"[^。！!?？\n]*[?？]\s*$")
+_INTRO_RX = re.compile(r"^\s*(?:(?:早安|早上好|午安|下午好|晚安|晚上好|你好|您好|哈囉|嗨)[！!，,。～~\s]*)?(?:我是[^。！!\n]{0,30}?agent[^。！!\n]*[。！!]\s*)?",
+                       re.IGNORECASE)
 _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛剛|剛才|上面|前面|這台|那台|它|他們|同一")
 
 SYSTEM = """你是實心胎工廠戰情室的 agent，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
@@ -79,7 +91,10 @@ SYSTEM = """你是實心胎工廠戰情室的 agent，用繁體中文、像同�
 規則：
 1. 你不能直接改任何東西，沒有任何機台或 PLC 的寫入工具。
 2. 數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
-3. 回覆 2–3 句，短。不要每次都自我介紹，只有主管問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+3. 回覆 2–3 句，短。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+   有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_asked 是你上一句最後問主管的問題）：把 message 當成對你那個問題的回答，往下接，不要重複你上一句。
+5. 有 waiting_plan，而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪裡，給 2–3 個這份計劃能改的具體選項（例如目標溫度、換機台、執行時間），不要再介紹一次計劃。
+6. 有 waiting_plan，主管給了具體改法（例如「降到120」「延後一小時」「換 8 號」）：呼叫 discuss_waiting_plan，text 寫成完整的一句（例如「目標溫度改成 120°C」）。
 4. 主管的話很短或看不懂（例如「?」）：依 context 猜他可能想知道什麼，簡短回應並問一句確認，不要只說看不懂。
 機台代號：CURE-01..CURE-11 = 1..11 號硫化機（一定要補零，例如 7 號 = CURE-07）；A-BIGOPEN = A 線大開煉機；其他依 context。"""
 
@@ -293,16 +308,25 @@ class MainAgent:
         # (2026-10-21): replayed as chat turns, Nemotron answered the previous topic (「你好」 → 7 號機讀值); with its own
         # answers alongside, it copied them (「大開煉機過熱怎麼處理」 → the greeting again). Always sent, it also re-answered
         # old topics (「15 號機現在怎樣？」 → read 7 號、11 號 and two SOPs), so only a follow-up message gets them.
-        earlier = [q for q, _a in self.memory] if _FOLLOW_UP_RX.search(text.strip()) else []
+        # A short message or an answer to its own question also gets the last turn: the supervisor's words and only the
+        # question the agent ended on (its whole reply alongside was copied back word for word, real run 2026-10-21).
+        t = text.strip()
+        prev = self.memory[-1] if self.memory else None
+        follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or len(t) <= SHORT_FOLLOW_UP or _ASKED_RX.search(prev[1]))
+        earlier = [q for q, _a in self.memory] if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
+        if follow and prev is not None:
+            asked = _LAST_Q_RX.search(prev[1].strip())
+            ctx["previous_turn"] = {"supervisor": prev[0], "you_asked": asked.group(0).strip() if asked else None}
         msgs.append({"role": "user", "content": json.dumps(ctx, ensure_ascii=False, default=str)})
         from warroom.agent.commander import thinking_off
         extra = thinking_off(self.server_kind)
-        tools = tool_specs(with_discuss=discuss is not None)
+        tools = tool_specs(with_discuss=discuss is not None and not _VAGUE_EDIT_RX.match(text.strip()))
         source = text + " " + json.dumps(context, ensure_ascii=False, default=str) + " " + (waiting_plan or "")
         nudged = waiting_plan is not None             # a message about the selected plan is a discussion, not a new task
         looked = waiting_plan is not None
         called: set[tuple[str, str]] = set()
+        edits = discuss is not None and bool(_PLAN_EDIT_RX.search(t)) and not _QUESTION_RX.search(t)
         for i in range(MAX_STEPS + 1):
             last = i >= MAX_STEPS
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
@@ -382,6 +406,20 @@ class MainAgent:
                     reply = self._results_reply(out["steps"]) or reply
             if out["event_id"]:                       # the proposal line is code's (never 「已完成」 before approval)
                 reply = self._propose_reply(out["steps"])
+            if edits and not last and not any(st["tool"] == DISCUSS for st in out["steps"]):
+                # a concrete change to the waiting plan answered with words only (「降到120」 → 「您覺得如何？」): remind once
+                edits = False
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": "主管給了這份待核准計劃的具體改法。請呼叫 discuss_waiting_plan，text 寫成完整一句，再回覆。"}]
+                continue
+            if prev is not None and reply == prev[1] and not last:
+                # the same answer as last turn: the supervisor said something new, answer that
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": f"這跟你上一句一模一樣。主管這次說的是「{t}」，針對這句回應，不要重複。"}]
+                continue
+            if not (_IDENTITY_RX.search(t) or _HELLO_RX.match(t)):
+                # no greeting / self-introduction unless asked (it opened every reply with 「早上好！我是戰情室的 agent」)
+                reply = _INTRO_RX.sub("", reply, count=1).strip() or reply
             out["reply"] = reply
             return
         raise TimeoutError("too many tool steps")
