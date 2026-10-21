@@ -772,6 +772,20 @@ class Runtime:
             self._last_snapshot_pub = now
             self.bus.publish(WsType.SNAPSHOT, self.snapshot())
 
+    def _publish_schedule(self) -> None:
+        """WS "schedule" with the active version after the store was swapped (scenario load) or rolled back to v1 (24:00
+        wrap). The dashboard reads GET /api/schedule only at page load, so without it the previous scenario's schedule
+        stayed on screen (「SO-004 可能晚 253 小時」, 「10 號機 硫化延長中」 before anything was approved)."""
+        store = self.c.store
+        if store is None:
+            return
+        try:
+            v = store.current()
+        except Exception:  # noqa: BLE001 - a store without an ACTIVE version has nothing to show
+            log.exception("schedule publish")
+            return
+        self.bus.publish(WsType.SCHEDULE, v)
+
     # ------------------------------------------------------------------ the whole plant (issue #11)
     def world_snapshot(self) -> Any:
         """WorldSnapshot of the sim's World (orders, materials, dock, people, energy, quality, maintenance),
@@ -1135,6 +1149,7 @@ class Runtime:
                 if was_running and self.run_loop and not self.running:
                     self._loop_task = asyncio.create_task(self._loop(), name="warroom-loop")
             self._publish_periodic(force=True)
+            self._publish_schedule()
 
     async def reset(self) -> None:
         await self.load_scenario(self.scenario)
@@ -1171,6 +1186,7 @@ class Runtime:
                                                          "ended_at": ended.isoformat(),
                                                          "factory_time": self.clock.now().isoformat()})
         self._publish_periodic(force=True)
+        self._publish_schedule()
 
     def day_loop_info(self) -> dict[str, Any] | None:
         sim = self.sim
@@ -1643,6 +1659,10 @@ class Runtime:
             # an approval carried over after a stale schedule (state machine: "<id>-rebased") ran in a
             # later round than the one it carries over
             start = ri + 1 if "-rebased" in req.id and req.id.split("-rebased")[0] in done_ids else ri
+            # card n is raised in plan round n or later (a discussion or a card-less replan adds plan rounds, never
+            # cards), so the search starts at its own round: from the previous card's round, round 2's card (gated
+            # step "S4" again) matched round 1, whose confirm went stale, and read 「未生效」 while its v4 was in force
+            start = max(start, req.round - 1)
             done_ids.add(req.id)
             j = next((k for k in range(start, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
             ran: list[Any] = []

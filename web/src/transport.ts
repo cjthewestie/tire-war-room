@@ -144,6 +144,10 @@ export class LiveTransport implements Transport {
     // the whole plant: full state from GET /api/world (start and every reconnect), then WS "world" deltas
     const pullWorld = () => getJSON<WorldSnapshot>(API.world)
       .then((w) => onMsg({ type: 'world', ts: w.factory_time, data: { ...w, full: true } })).catch(() => {})
+    // the active schedule: at start and on every reconnect (a scenario switch while disconnected sent its WS "schedule"
+    // to nobody, and the previous scenario's version stayed on screen), then WS "schedule" messages
+    const pullSchedule = () => getJSON<ScheduleVersion>(API.schedule)
+      .then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
     let soon: ReturnType<typeof setTimeout> | undefined
     const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
     // issue #54: the main agent's subagents (status follows every state change; the server also pushes WS "subagents")
@@ -154,7 +158,7 @@ export class LiveTransport implements Transport {
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
-      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSubagents() }
+      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents() }
       ws.onclose = () => {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))
@@ -170,7 +174,7 @@ export class LiveTransport implements Transport {
       }
     }
     pullSnapshot()
-    getJSON<ScheduleVersion>(API.schedule).then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
+    pullSchedule()
     connect()
     // safety net: focus panel and counts come from snapshots; refresh in case the server only sends deltas
     const poll = setInterval(() => { pullSnapshot(); pullSubagents() }, 4000)   // subagent progress follows worker tasks too
