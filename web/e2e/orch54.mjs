@@ -55,7 +55,7 @@ check('gibberish → 「這句我看不懂」, no subagent', await until(async (
 // 1b. a delivery-risk item: the 主 agent drafts the plan by itself → 核准 → executes → reports back
 const risk = p.locator('[data-testid^="home-item-order:"]').first()
 await risk.click()
-check('opening a ② item: 主 agent 規劃中… (no 請 AI 重排 button)', await until(async () => (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') || (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0, 20) &&
+check('opening a 交期風險 item: Agent Nemo 規劃中 (no 請 AI 重排 button)', await until(async () => (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('Agent Nemo 規劃中') || (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0, 20) &&
   await p.locator('[data-testid="plan-replan"]').count() === 0)
 let cardUp = false
 for (let i = 0; i < 40 && !cardUp; i++) {

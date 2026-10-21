@@ -54,7 +54,7 @@ const riskItem = p.locator('[data-testid^="home-item-order:"]').first()
 check('② items say the 主 agent will draft the plan (or is drafting it)', (await p.locator('[data-testid="item-replan-hint"], [data-testid="item-planning"]').count()) >= 1)
 await riskItem.click()
 await p.waitForSelector('[data-testid="item-planning"], [data-testid="replan-status"]', { timeout: 10000 }).catch(() => {})
-check('opening it starts 主 agent 規劃中… with no button to press', (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') && (await p.locator('[data-testid="plan-replan"]').count()) === 0)
+check('opening it starts Agent Nemo 規劃中 with no button to press', (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('Agent Nemo 規劃中') && (await p.locator('[data-testid="plan-replan"]').count()) === 0)
 check('plan area bottom: only 核准 (waits for the plan) and 討論', (await p.locator('[data-testid="plan-approve-wait"]').isDisabled()) && (await p.locator('[data-testid="plan-discuss"]').count()) === 1)
 let selected = false
 for (let i = 0; i < 20 && !selected; i++) {
