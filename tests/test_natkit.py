@@ -70,9 +70,12 @@ def test_instrument_is_idempotent():
     assert isinstance(sm.commander, TracedCommander) and sm.commander.mode == "mock"
 
 
-async def test_page11_event_through_runner_is_fully_traced(tmp_path):
+async def test_page11_event_through_runner_is_fully_traced(tmp_path, monkeypatch):
     """The NAT workflow body: page-11 event through the real Runtime (mock commander). Every tool
     result in the audit log has exactly one TOOL_START/END pair, every commander call an LLM pair."""
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     from warroom.natkit.runner import run_event
     seen: list[StepEvent] = []
     out = await run_event(emit=seen.append, workdir=tmp_path)

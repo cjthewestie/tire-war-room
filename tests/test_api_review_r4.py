@@ -185,7 +185,10 @@ async def test_page11_with_excel_reaches_round1_card_and_moves_a311_to_press9(tm
 
 
 # ---------------------------------------------------------------- 3-5. page 11 B then A, rollback, panel ①
-async def test_page11_rollback_progress_and_revoked_staffing(tmp_path):
+async def test_page11_rollback_progress_and_revoked_staffing(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt = _real(tmp_path, P11)
     await rt.start()
     try:

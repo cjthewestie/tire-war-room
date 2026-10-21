@@ -267,6 +267,13 @@ class TaskBoard:
                                          and t.machine_id == spec["machine_id"] and t.order_ids == spec["order_ids"]
                                          for t in self._tasks.values()):
                 continue
+            # fast repair: the crew is already on (or done with) this machine for this event. A later round re-runs
+            # the plan's R1 檢修 (a stale schedule re-solved by code, a replan): a second task would start the
+            # repair_fast_s wall seconds over and hold the fix and the 綠燈 back that long
+            if self.fast_s > 0 and spec["kind"] in REPAIR_KINDS and any(
+                    t.event_id == req.event_id and t.kind == spec["kind"] and t.machine_id == spec["machine_id"]
+                    for t in self._tasks.values()):
+                continue
             self._seq += 1
             t = _Task(id=f"TK-{self._seq:04d}", event_id=req.event_id, approval_id=req.approval_id, step_id=req.step_id,
                       created_at=now, **spec)
