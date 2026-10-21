@@ -157,6 +157,8 @@ async def test_an_ungrounded_number_is_dropped_or_the_rules_draft_is_used():
     import re
     assert all(n in known for part in ("title", "summary", "cause") for n in re.findall(r"\d+(?:\.\d+)?", rules[part]))
     assert ground(rules, facts)[0] is not None
+    # a line break inside a part stays one line (the report is 5 lines, the page reads 「摘要：」 per line)
+    assert ground({**GOOD, "summary": "膠溫 102°C\n持續上升"}, facts)[0]["summary"] == "膠溫 102°C 持續上升"
 
 
 async def test_timeout_and_unreachable_fall_back_to_the_rules_draft():
@@ -345,6 +347,7 @@ async def test_the_recovery_ramp_holds_the_report_until_recovered_at():
             break
         await asyncio.sleep(0.05)
     assert ev.ai_report is not None and ev.ai_report.text.endswith("（維修完成 14:21、恢復正常 14:21）")
+    assert ev.ai_report.late_ms is None                      # the draft was ready: waiting for the ramp is not 「晚」
 
 
 async def test_only_machine_anomalies_get_a_report():
