@@ -64,6 +64,7 @@ from warroom.agent.narrate import (
     fmt_num,
     machine_label,
     moves_text,
+    press_change_text,
     result_text,
     staffing_label,
     gate_reason_text,
@@ -2228,9 +2229,7 @@ class StateMachine:
                         bits.append(f"{machine_label(str(p))}這一模硫化 {fmt_num(h)} 小時")
                     for p in sstep.args.get("unavailable_presses") or []:
                         bits.append(f"{machine_label(str(p))}停用")
-                    mv = moves_text(data.get("moves"))
-                    bits.append("不換機台" if not mv else mv[0] if len(mv) == 1 and "×" not in mv[0]
-                                else f"{len(mv)} 張訂單換機台")
+                    bits.append(press_change_text(data.get("moves")))
             elif sr.step.tool is ToolName.SET_CURE_TIME:
                 bits.append(f"{machine_label(str(a.get('press_id')))}這一模硫化 {fmt_num(a.get('total_cure_h'))} 小時")
             else:

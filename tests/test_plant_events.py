@@ -170,6 +170,22 @@ def test_order_shifts_text():
     assert moves_text(moves) == ["#R-9 排入 9 號", "#M-1 改 8 號"]
 
 
+def test_option_press_changes_say_change_of_press_only_when_a_tyre_changes_press():
+    """The approval option's short line (StateMachine._option_label) reads the moves themselves: an inserted order's
+    first slots are 新排, not 換機台 (Codex 10-22: 「1 張訂單換機台」 for a new order's 2 molds on 8 號)."""
+    from warroom.agent.narrate import press_change_text
+
+    def mv(order, to, frm=None):
+        return {"job_id": f"J-{order}-{to}", "order_id": order, "from_press": frm, "to_press": to}
+    assert press_change_text([mv("#R-9", "CURE-09"), mv("#M-1", "CURE-08", "CURE-09")]) == \
+        "#R-9 新排 1 模（9 號），#M-1 改 8 號"
+    assert press_change_text([mv("#R-9", "CURE-08"), mv("#R-9", "CURE-08")]) == "#R-9 新排 2 模（8 號），其他訂單不換機台"
+    assert press_change_text([mv("#R-9", "CURE-08"), mv("#R-10", "CURE-11")]) == "2 張新訂單排入，其他訂單不換機台"
+    assert press_change_text([mv("#M-1", "CURE-09", "CURE-09")]) == press_change_text(None) == "不換機台"
+    assert press_change_text([mv("#M-1", "CURE-08", "CURE-09"), mv("#M-1", "CURE-11", "CURE-09")]) == "#M-1 改 8 號、11 號"
+    assert press_change_text([mv("#M-1", "CURE-08", "CURE-09"), mv("#A-3", "CURE-02", "CURE-07")]) == "2 張訂單換機台"
+
+
 # ------------------------------------------------------------------ world: tasks run 待派 → 前往中 → 執行中 → 完成
 def test_task_lifecycle_moves_the_worker_and_reports_every_change():
     f = Factory(seed=7, scenario=ScenarioName.SHIFT_START)
@@ -311,6 +327,7 @@ async def test_rush_order_end_to_end(tmp_path):
     events, decided, world, audit = await _run_scenario(tmp_path, "rush_order")
     ev, tasks = _check_common(events, decided, world, audit, "order_rush")
     card = decided[0]
+    assert f"{RUSH_ORDER_ID} 新排" in card.options[0].label, card.options          # its first slots: no 換機台
     assert f"{RUSH_ORDER_ID} 新排" in card.delivery_impact            # which orders shift, by how much
     assert "完工" in card.delivery_impact or "延誤" in card.delivery_impact
     assert any(t.kind == "補料" and RUSH_ORDER_ID in t.order_ids for t in tasks)
