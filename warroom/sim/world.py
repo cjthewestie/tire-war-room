@@ -1360,7 +1360,7 @@ class World:
     def on_order_arrival(self, order: Any, at: datetime) -> None:
         """Issue #104: a scripted normal order joined the factory's order book: show it in the feed."""
         self._emit(at, "order_new", f"新訂單 {order.id}：{order.customer} {SIZE_LABEL[order.size]} {order.qty} 條，"
-                                    f"交期 {order.due:%m/%d}", order.id)
+                                    f"交期 {order.due:%m/%d}{'（優先）' if order.priority >= 2 else ''}", order.id)
 
     # ------------------------------------------------------------------ issue #36 模擬事件 (world only)
     # Material events stay in the world: the feed shows them and the stock moves. Raising a card for a shortfall is
