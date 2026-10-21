@@ -379,8 +379,8 @@ def tasks(r: Any) -> dict[str, Any]:
 
 
 def safety_stops(r: Any) -> dict[str, Any]:
-    """Safety Core stops and their way back: ① 派現場檢查 ② 讀值回安全範圍 ③ 主管放行. The release itself is a button on
-    the 主控台 only (SOP-SD-01 §4: the supervisor on site); the chat can only report where each one stands."""
+    """Safety Core stops and their way back: ① 派現場檢查 ② 讀值回安全範圍 ③ 主管放行 (the button, or the chat after the
+    supervisor's 好 since CJ 2026-10-22 「開放」; ① and ② are checked either way)."""
     board = getattr(getattr(r.sim, "world", None), "tasks", None)
     try:
         cases = r.cases.view(board)
@@ -393,7 +393,7 @@ def safety_stops(r: Any) -> dict[str, Any]:
         items.append({"machine": c.machine_id, "what": c.message[:40], "since": _hm(c.ts),
                       "①派現場檢查": f"{c.tasks_done}/{len(c.task_ids)} 完成" if c.task_ids else "還沒派",
                       "②讀值回安全範圍": f"{c.safe_samples}/{c.safe_needed}" + ("（已達標）" if c.reading_ok else ""),
-                      "③主管放行": "要主管在主控台按「放行」（只能按按鈕）"})
+                      "③主管放行": "主管在主控台按「確認恢復運轉」，或在對話說「恢復這台」再回「好」；①②沒過不能恢復"})
     return {"count": len(items), "stops": items}
 
 

@@ -71,9 +71,12 @@ async def test_an_unknown_task_is_rejected_and_nothing_is_pending():
     assert not ctl.ran
 
 
-def test_no_approval_or_safety_release_is_reachable_from_chat():
+def test_no_approval_is_reachable_from_chat():
+    """Approving a plan stays the button. A machine's way back (release_safety_stop) is a chat action since CJ
+    2026-10-22 「開放」, confirmed by the supervisor's 好 (tests/test_chat_release.py)."""
     names = {s["function"]["name"] for s in [*tool_specs(True), *control_specs()]}
-    assert not {n for n in names if any(w in n for w in ("approve", "release", "decide", "unlock", "safety"))}
+    assert not {n for n in names if any(w in n for w in ("approve", "decide", "unlock"))}
+    assert {n for n in names if "release" in n or "safety" in n} == {"release_safety_stop"}
     assert names & set(CONTROL) == set(CONTROL)
 
 
