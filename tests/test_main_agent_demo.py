@@ -284,9 +284,12 @@ async def test_canned_replies_skip_the_model():
     m = Model()
     agent = MainAgent(_settings(), client=m)
     f = Floor()
-    assert (await f.turn(agent, "你好"))["reply"] == HELLO_REPLY
-    assert (await f.turn(agent, "妳是誰"))["reply"] == IDENTITY_REPLY
+    # rotated variants (CJ 2026-10-21: 「可以多種回應」); a greeting ends on an offer
+    hi = (await f.turn(agent, "你好"))["reply"]
+    assert hi.startswith(HELLO_REPLY) and hi.endswith(("？", "。"))
+    assert (await f.turn(agent, "妳是誰"))["reply"] != IDENTITY_REPLY            # the next variant
     assert (await f.turn(agent, "謝謝"))["reply"]
+    assert (await f.turn(agent, "你好"))["reply"] != hi
     assert not m.calls
     agent.memory.append(("7 號機要處理嗎", "要不要我擬計劃送你核准？"))
     agent.client = m2 = Model(("say", "好，我先查一下。"))

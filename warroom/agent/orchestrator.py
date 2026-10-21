@@ -50,8 +50,8 @@ _DECISION = {"approve": "核准", "reject": "駁回", "modify": "修改", "super
 TYPES: dict[str, str] = {"machine": "機台處理", "order": "訂單處理", "material": "原料處理", "staff": "人力調度",
                          "shift": "早班開工", "task": "主管任務"}
 PRIORITY: dict[str, int] = {"safety": 0, "machine": 1, "order": 2, "material": 2, "staff": 3, "shift": 3, "task": 2,
-                            "question": 4}
-PRIORITY_LABEL = {0: "安全", 1: "機台故障", 2: "訂單／原料", 3: "人力", 4: "提問"}
+                            "question": 4, "smalltalk": 5}
+PRIORITY_LABEL = {0: "安全", 1: "機台故障", 2: "訂單／原料", 3: "人力", 4: "提問", 5: "閒聊"}
 
 # code routing: anomaly kind -> subagent type (machine faults, orders, staffing, the shift start)
 ROUTES: dict[str, str] = {

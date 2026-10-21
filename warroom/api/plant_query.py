@@ -172,6 +172,21 @@ def staffing(r: Any) -> dict[str, Any]:
 
 
 def orders(r: Any) -> dict[str, Any]:
+    """The order lines #99 computes in code (warroom/tools/orders_today.py: progress, press, ETA, lateness), for the
+    model to phrase; plus the World's pipeline."""
+    w = _world(r)
+    try:
+        from warroom.tools import orders_today as OT
+        data = OT.collect(r.sim, r.c.store, r.clock.now())
+        today = {"overview": OT.overview_text(data, limit=5), "risk": OT.risk_overview_text(data, limit=4)}
+    except Exception as e:  # noqa: BLE001 - the pipeline below still answers
+        today = {"error": f"{type(e).__name__}: {e}"[:120]}
+    if w is not None:
+        return {"pipeline": w.orders.pipeline, "new_today": w.orders.new_today, "rush_open": w.orders.rush_open, **today}
+    return today
+
+
+def _orders_world(r: Any) -> dict[str, Any]:
     w = _world(r)
     if w is None:
         return {"orders": [o.model_dump(mode="json") for o in r.sim.orders()][:20]}

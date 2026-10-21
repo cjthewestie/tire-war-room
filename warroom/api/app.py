@@ -983,8 +983,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             out = await discuss(body.event_id, DiscussRequest(text=t), session)
             return out.model_dump(mode="json")
 
-        def slot():
-            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "Agent Nemo 對話")
+        def slot(low: bool = False):
+            # small talk waits behind everything (an incident plan always goes first); plant questions keep "task"
+            return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
+                                     "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
         async def read_plant(topic: str, call_id: str) -> dict[str, Any]:
             # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
