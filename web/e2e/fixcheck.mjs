@@ -111,8 +111,9 @@ check('step plan shows Chinese tool labels, no snake_case names', !/[a-z]+_[a-z_
 const ids = await d.$$eval('.step-id', (els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth, e.getBoundingClientRect().height]))
 // one line at 16 px × 1.5 = 24 px
 check('step ids fit one line', ids.every(([, , , h]) => h <= 24), JSON.stringify(ids.slice(-3)))
-const cap = await d.locator('.cap-panel').innerText()
-check('⑨ shows page-6 numbers', ['5.9', '4.5', '4.9', '13.3 → 9.3', '2.4 → 2.0'].every((x) => cap.includes(x)), cap.replace(/\n/g, ' | ').slice(0, 200))
+// 人力排程 keeps the page-6 lead time as one line (Kyle 10-22); the weekly table left the page
+const cap = await d.locator('[data-testid=sched-benefit]').innerText()
+check('⑨ shows the page-6 lead time', cap.includes('13.3 → 9.3'), cap.replace(/\n/g, ' | ').slice(0, 200))
 check('⑨ footnote is Chinese', !/Mon|Steady|shift/.test(cap))
 await d.screenshot({ path: `${OUT}/fix-schedule-1440.png`, fullPage: true })
 check('no page errors', errors.length === 0, errors.slice(0, 3).join(' || '))

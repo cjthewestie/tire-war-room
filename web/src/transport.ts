@@ -11,6 +11,9 @@ import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
 import { shiftInstances } from './mock/schedule'
 
+/** Agent Nemo's conversation for this page load (POST /api/main/message conversation_id). */
+const CONVERSATION_ID = `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
 export type Mode = 'live' | 'mock'
 
 /** GET /api/schedule/rollback/preview: what a rollback would do and whether the gate allows it. */
@@ -60,8 +63,8 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
-  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
-   *  approvals. 409 when the event has no pending review. */
+  /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no unread report. */
   review?(eventId: string, note?: string): Promise<Event>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
@@ -194,7 +197,8 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
-  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId }) }
+  // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
+  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {
