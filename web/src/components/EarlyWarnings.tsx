@@ -1,6 +1,8 @@
 // 產線監控 opens with 預警 (UX brief, 「平常巡一下」: 「有沒有快出事」 first): things not yet an event but heading the
-// wrong way, from live data only — machines in 注意, materials under the reorder point, late purchase orders,
-// maintenance starting soon, orders the schedule finishes late, readings the validation layer rejected.
+// wrong way, from live data only — machines in 注意 (not one an open event already covers: its 回溫中 after a repair),
+// materials under the reorder point, late purchase orders, maintenance starting soon, orders the schedule finishes late,
+// readings the validation layer rejected (no longer in the header: here and on 狀態機).
+import { CH_LABEL } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { plain } from '../plain'
@@ -14,8 +16,11 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
   const now = ms(state.clock?.factory_time ?? state.snapshot?.header.factory_time)
   const w = state.world
   const rows: { k: string; what: string; when: string; machine?: string; tone: 'warn' | 'bad' }[] = []
+  const inEvent = new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id))
   for (const m of state.snapshot?.machines ?? []) {
-    if (m.status === 'warning') rows.push({ k: machineLabel(m.machine_id), what: `讀值偏離正常範圍${m.temp_c != null ? `（${m.temp_c.toFixed(1)}°C）` : ''}，事件偵測監看中`, when: '現在', machine: m.machine_id, tone: 'warn' })
+    if (m.status === 'warning' && !inEvent.has(m.machine_id)) {
+      rows.push({ k: machineLabel(m.machine_id), what: m.temp_c != null ? `${CH_LABEL.temp_c}偏離正常（${m.temp_c.toFixed(1)}°C），持續監看` : '讀值偏離正常，持續監看', when: '現在', machine: m.machine_id, tone: 'warn' })
+    }
   }
   for (const mt of w?.materials ?? []) {
     if (mt.status === 'ok') continue
@@ -29,11 +34,11 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
   }
   // only the solver's late-delivery warnings are 交期; the rest (備援排法, 硫化延長中, 停用…) are about the schedule itself
   for (const s of state.schedule?.schedule.warnings ?? []) rows.push({ k: /延遲|延誤|晚於交期/.test(s) ? '交期' : '排程', what: plain(s), when: '排程預估', tone: 'warn' })
-  for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `驗證層攔下 ${b.count} 筆壞資料，未喚醒 AI`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
+  for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `已擋下 ${b.count} 筆不可信的讀值，沒有交給 Agent Nemo`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
   return (
     // council review 10-21: the title says what it is, and an empty 預警 is one line instead of a whole panel
     <section className={`panel early ${rows.length ? '' : 'is-empty'}`} aria-label="預警" data-testid="early-warnings">
-      <header className="panel-h"><h2>預警</h2><span className="muted small">{rows.length ? `${rows.length} 項：還沒出事，但在變壞` : '目前沒有。機台、原料、保養與交期都正常'}</span></header>
+      <header className="panel-h"><h2>預警</h2><span className="muted small">{rows.length ? `${rows.length} 項：還沒出事，但在變壞` : '目前沒有預警'}</span></header>
       {rows.length > 0 && (
         <ul className="early-list">
           {rows.slice(0, 3).map((r, i) => (
