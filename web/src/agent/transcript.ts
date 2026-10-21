@@ -376,11 +376,13 @@ export function thinkContext(ev: Event | null, it: ThinkItem, nth: number): { hy
   if (!ev) return { hyp: null, steps: [] }
   const hyp = ev.hypotheses.find((h) => h.id === it.hypothesisId) ?? null
   const rounds = [...(ev.prior_rounds ?? []).map((r) => r.steps), ev.steps].filter((r) => r.length > 0)
-  const ids = (steps: StepRun[]) => steps.map((s) => s.step.id).join(',')
-  const want = it.stepIds.join(',')
+  // a round holds every step the model planned, plus any the code added after it (state_machine.py adds 「通知維修檢查
+  // 蒸汽供應（自動）」 as the next S<n> when the model's plan has no maintenance notice): an exact id match failed on
+  // those rounds and the block showed bare 「S1…S5」. Match on the planned ids, show those steps in the plan's order.
+  const has = (r: StepRun[]) => it.stepIds.every((id) => r.some((s) => s.step.id === id))
   const byIndex = rounds[nth]
-  const match = byIndex && ids(byIndex) === want ? byIndex : [...rounds].reverse().find((r) => ids(r) === want) ?? []
-  return { hyp, steps: match.map((s) => s.step) }
+  const match = byIndex && has(byIndex) ? byIndex : [...rounds].reverse().find(has) ?? []
+  return { hyp, steps: match.length ? it.stepIds.map((id) => match.find((s) => s.step.id === id)!.step) : [] }
 }
 
 /** "預期：30 分鐘內回到 121°C 以上" */
