@@ -122,7 +122,15 @@ check('supervisor command → window wording', !fastApplies(evOf('supervisor', [
   const ch = optionChoices(card, ev)
   check('方案 A says what it changes', ch[0]?.effect === '原班人員加班，不從別組調人' && !ch[0]?.why, JSON.stringify(ch[0]))
   check('方案 B says what it changes and why the system suggests it', ch[1]?.effect === '2 線少 1 人，可能影響產能・風險較高（跨組調人）' && ch[1]?.why === '不用加班，交期與 A 相同', JSON.stringify(ch[1]))
-  check('one staffing option → no 方案 rows', optionChoices({ ...card, options: [card.options[1]] }, ev).length === 0)
+  // 「不要加班」 left only the transfer (Codex 10-22): no choice to make, but 核准 still moves someone, so the card says
+  // that, never 「這次核准不含人力」
+  const one = { ...card, actions: card.actions.slice(0, 2), options: [{ ...card.options[1], id: 'A' }] }
+  const only = optionChoices(one, { ...ev, constraints: [{ kind: 'no_overtime' }] })
+  check('one staffing option: still a staffing option, why = 照你說的', only.length === 1 && only[0].why === '照你說的', JSON.stringify(only))
+  check('one staffing option: one 人力 line', ct.staffNote(only[0]) === '人力照你說的：從 2 線調 1 人（2 線少 1 人，可能影響產能）', ct.staffNote(only[0]))
+  check('one staffing option: no 「不含人力」 gap note', ct.gapNote(one, true) === null)
+  const bare = optionChoices(one, ev)
+  check('one staffing option, nobody asked: no 「交期與  相同」 comparison', bare.length === 1 && bare[0].why === null, JSON.stringify(bare[0]))
   const rebased = { ...card, version: 2, changes: ['10 號機排程先生效；3 號機依現行排程重算：SO-004：4 號 → 2 號（10/03 14:00 入模）；SO-001：7 號 → 5 號；SO-004 共 2 模改機台', '人力沿用主管上次的選擇：B 從 2 線調 1 人'] }
   check('recomputed card: why, how many orders move, the same 方案', ct.rebasedText({ ...ev, machine_id: 'CURE-03' }, rebased)
     === '10 號硫化機的排程先生效了，3 號硫化機這張已依新排程重算：2 張訂單換機台，人力照你上次選的方案 B。請再核准一次。', ct.rebasedText({ ...ev, machine_id: 'CURE-03' }, rebased))

@@ -520,6 +520,7 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-do li { overflow-wrap: break-word; }
 .ph-do li + li { margin-top: 2px; }
 .ph-gap { margin: 0; font-size: 14px; color: var(--warn); }
+.ph-staff { margin: 0; font-size: 14px; }
 .ph-line { margin: 8px 0 0; font-size: 17px; line-height: 1.45; }
 .ph-big { margin: 0 0 6px; font-size: 30px; font-weight: 700; line-height: 1.2; }
 .ph-did { margin: 10px 0 0; font-size: 14px; }

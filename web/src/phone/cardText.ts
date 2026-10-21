@@ -1,12 +1,14 @@
 // The supervisor phone's words (veteran 10-22, 人力排程 v2 layout: the answer first, one sentence, then what 核准 does).
 // Card:      請核准・03:54 前 → 「7 號硫化機溫度降到 122°C」 → 「疑似蒸汽壓不足。核准後 Agent Nemo 派人進廠維修，約 12 秒；溫度
-//            回到正常才轉綠。」 → 核准後會做 (3 lines at most) → the 方案 only when there are 2+ staffing choices.
+//            回到正常才轉綠。」 → 核准後會做 (3 lines at most) → the 方案 only when there are 2+ staffing choices (a single
+//            one is a 人力 line, never 「不含人力」).
 // Watching:  one line per open event, 「10 號硫化機・維修中・約 4 秒」 (no codes, no R0–R3).
 // Pure (no React, no fetch): built only from the event, its card, the task board and /api/health repair_fast_s; the
 // repair seconds are never written into the text by hand (本機 3 秒, 展示機 12 秒).
 import type { ApprovalRequest, Event, WorkTask } from '../contracts'
 import { CH_LABEL, expectationOf, readingText, recoverWord } from '../aiStatus'
 import { cureChange } from '../agent/approvalView'
+import type { OptionChoice } from '../optionGuide'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { plain } from '../plain'
@@ -103,9 +105,10 @@ export function doLines(ev: Event | null, req: ApprovalRequest, tasks: WorkTask[
   return [...new Set(out)].slice(0, 3)
 }
 
-/** The staffing gap this card leaves open, when no 方案 on it covers it: 「這次核准不含人力：10/03 夜班仍缺 1 人」. */
-export function gapNote(req: ApprovalRequest, staffingChoice: boolean): string | null {
-  if (staffingChoice) return null
+/** The staffing gap this card leaves open, when the 方案 核准 runs is not a staffing one (`staffed`: the picked option
+ *  is, a single one too): 「這次核准不含人力：10/03 夜班仍缺 1 人」. */
+export function gapNote(req: ApprovalRequest, staffed: boolean): string | null {
+  if (staffed) return null
   const left = (req.actions ?? []).find((a) => a.startsWith('人力：本次不含人力'))
   if (left) {
     const shift = left.match(/（(\d{1,2}\/\d{1,2}\s*\S+?班)/)?.[1]
@@ -114,6 +117,12 @@ export function gapNote(req: ApprovalRequest, staffingChoice: boolean): string |
   }
   const g = (req.gaps ?? []).map(plain).filter(Boolean)
   return g.length ? `這次核准不含人力：${g.map((x) => x.replace('缺', '仍缺')).join('、')}` : null
+}
+
+/** The card's only staffing option, said once since there is nothing to choose (「不要加班」 left the transfer):
+ *  「人力照你說的：從 2 線調 1 人（2 線 10/03 夜班少 1 人，可能影響產能）」. */
+export function staffNote(o: OptionChoice): string {
+  return `人力${o.why ?? ''}：${o.label}（${o.effect.split('・')[0]}）`
 }
 
 /** 「03:54 前」, with the date only when it is not today's (factory clock). */

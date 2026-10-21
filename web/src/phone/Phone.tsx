@@ -26,7 +26,7 @@ import { AiStatusLine } from '../AiStatusLine'
 import { optionChoices } from '../optionGuide'
 import { RepairNotice } from './RepairNotice'
 import { fastRepairOf, isRepairTask } from './fastEta'
-import { cardSentence, cardTitle, deadlineText, doLines, gapNote, liveLine, problemText, rebasedText, type LiveLine } from './cardText'
+import { cardSentence, cardTitle, deadlineText, doLines, gapNote, liveLine, problemText, rebasedText, staffNote, type LiveLine } from './cardText'
 
 export function Phone() {
   const { state, transport, connected } = useWarRoom()
@@ -252,16 +252,19 @@ function ApprovalCard({ a, n, of, disabled, onSent }: { a: ApprovalRequest; n: n
     setBusy(true); setErr(null)
     try { const t = text.trim(); onSent(); setText(''); setTalk(false); await transport.discuss(a.event_id, t) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
   }
-  const choices = optionChoices(a, ev)
-  const picked = choices.find((o) => o.id === chosen)
+  // every staffing option; a choice only with 2+ (a single one, e.g. after 「不要加班」, is one 人力 line): what 核准 runs
+  // decides the gap note and 完整處置內容
+  const staff = optionChoices(a, ev)
+  const choices = staff.length > 1 ? staff : []
+  const picked = staff.find((o) => o.id === chosen)
   const does = doLines(ev, a, tasks, fast)
-  const gap = gapNote(a, choices.length > 0)
+  const gap = gapNote(a, !!picked)
   const due = deadlineText(a.expires_at, now)
   const recomputed = (a.version ?? 1) > 1
   const rebased = recomputed ? rebasedText(ev, a) : null
   const locked = disabled || busy || submitted
   // everything 核准 runs, named (the staffing option too), for 看依據
-  const full = [...fullActionLines(a), ...(picked ? [`人力：方案 ${picked.id} ${picked.label}`] : [])]
+  const full = [...fullActionLines(a), ...(picked ? [`人力：${choices.length ? `方案 ${picked.id} ` : ''}${picked.label}`] : [])]
   return (
     <div className="ph-card ph-approval" data-testid="phone-card">
       <div className="ph-col-a">
@@ -285,6 +288,7 @@ function ApprovalCard({ a, n, of, disabled, onSent }: { a: ApprovalRequest; n: n
           <ul>{does.map((l) => <li key={l}><Txt>{l}</Txt></li>)}</ul>
         </div>
       )}
+      {picked && !choices.length && <p className="ph-staff" data-testid="phone-staff">{staffNote(picked)}</p>}
       {gap && <p className="ph-gap" data-testid="phone-gap">{gap}</p>}
       </div>
       <div className="ph-col-b">

@@ -53,15 +53,15 @@ export function optionGuide(a: ApprovalRequest, ev: Event | null): OptionGuide |
   }
 }
 
-/** The phone card's 方案 (veteran 10-22; Kyle 10-21: each option says in one line what it changes, and why the system
- *  suggests it). Only when the card offers 2+ staffing choices; the 「怎麼選」 note above stays on the dashboard card.
+/** The phone card's staffing 方案 (veteran 10-22; Kyle 10-21: each option says in one line what it changes, and why the
+ *  system suggests it), every staffing option on the card: the phone lets the supervisor choose only when there are 2+
+ *  (a single one, e.g. after 「不要加班」, is still what 核准 runs); the 「怎麼選」 note above stays on the dashboard card.
  *  Why: the solver picks a transfer when it is allowed (no overtime cost, warroom/schedule/solver.py) and every option
  *  on a card has the same delivery verdict; a supervisor's preference (討論) or the choice carried over to a recomputed
- *  card wins over that. */
+ *  card wins over that, and a single option has nothing to be compared with. */
 export interface OptionChoice { id: string; label: string; recommended: boolean; effect: string; why: string | null }
 export function optionChoices(a: ApprovalRequest, ev: Event | null): OptionChoice[] {
   const staff = optionViews(a, ev).map((v) => ({ v, kind: staffKind(v) })).filter((x) => x.kind)
-  if (staff.length < 2) return []
   const asked = (ev?.constraints ?? []).some((c) => ['prefer_option', 'no_overtime', 'no_transfer'].includes(c.kind))
   const kept = (a.changes ?? []).some((c) => c.startsWith('人力沿用主管上次的選擇'))
   return staff.map(({ v, kind }) => {
@@ -71,7 +71,7 @@ export function optionChoices(a: ApprovalRequest, ev: Event | null): OptionChoic
       ? `${from}${v.shift ? ` ${v.shift}` : ''}少 ${v.people ?? 1} 人，可能影響產能・風險較高（跨組調人）`
       : '原班人員加班，不從別組調人'
     const why = !v.opt.recommended ? null
-      : asked ? '照你說的' : kept ? '照你上次選的'
+      : asked ? '照你說的' : kept ? '照你上次選的' : !others ? null
         : kind === 'transfer' ? `不用加班，交期與 ${others} 相同` : '不從別組調人，風險較低'
     return { id: v.opt.id, label: plain(v.opt.label), recommended: v.opt.recommended, effect, why }
   })
