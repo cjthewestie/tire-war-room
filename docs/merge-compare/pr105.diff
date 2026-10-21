@@ -1,0 +1,688 @@
+diff --git a/warroom/api/runtime.py b/warroom/api/runtime.py
+index c311bf0..ddc3110 100644
+--- a/warroom/api/runtime.py
++++ b/warroom/api/runtime.py
+@@ -60,7 +60,6 @@ from warroom.contracts import (
+     MachineStatus,
+     MachineTile,
+     MetricTile,
+-    NotifyKind,
+     PendingAction,
+     RiskLevel,
+     SafetyAction,
+@@ -447,22 +446,6 @@ def _is_revoke(step_id: str) -> bool:
+     return "-revoke-" in step_id
+ 
+ 
+-def _needs_approval(sr: Any) -> bool:
+-    """A write step of a plan that needs 主管核准 (R2/R3): by its gate decision, or for a step the gate never saw (its
+-    round stopped first), by what the gate would rule from the tool and the notice kind."""
+-    if sr.gate is not None and sr.gate.risk is not None:
+-        return sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+-    if sr.step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+-        return True
+-    if sr.step.tool is not ToolName.NOTIFY_TEAMS:
+-        return False
+-    from warroom.agent.gate import NOTIFY_RISK
+-    try:
+-        return NOTIFY_RISK[NotifyKind(sr.step.args.get("kind"))] is not RiskLevel.R1_NOTIFY
+-    except (KeyError, ValueError):
+-        return True                         # not a valid notice: never an auto (R1) one
+-
+-
+ class _NoLock:
+     def __enter__(self):
+         return self
+@@ -521,7 +504,6 @@ class Runtime:
+         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
+         self._orch: Any = None
+         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+-        self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
+         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
+         self._orch_c: Any = None
+         self._cases: Any = None                  # SafetyCases of the current components (warroom/api/resolve.py)
+@@ -1037,9 +1019,7 @@ class Runtime:
+ 
+     def _advance_fast_repairs(self, running: bool = True) -> None:
+         """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
+-        at any sim speed, also while another event's model call holds the plant clock), apply a fix that just
+-        finished, and ramp the repaired machines back to nominal (Settings.recover_fast_s). Paused time does not
+-        count."""
++        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+         now = time.monotonic()
+         dt, self._fast_wall = now - self._fast_wall, now
+         board = getattr(getattr(self.sim, "world", None), "tasks", None)
+@@ -1048,76 +1028,29 @@ class Runtime:
+             return
+         board.advance_fast(self.clock.now(), dt)
+         self._apply_repairs()
+-        self._advance_recoveries(dt)
+-
+-    def _advance_recoveries(self, dt: float) -> None:
+-        """回溫中 (Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): every repaired machine's readings move from where the fix
+-        found them to nominal over Settings.recover_fast_s WALL seconds; at the end it is back to normal: audited
+-        「已恢復正常」 and the state machine is told (Event.recovered_at, VERIFY confirms, green)."""
+-        total = float(self.settings.recover_fast_s)
+-        for mid, rec in list(self._recovering.items()):
+-            rec[1] += max(0.0, dt)
+-            frac = 1.0 if total <= 0 else min(1.0, rec[1] / total)
+-            r = self.sim.recover(mid, frac)
+-            if r is not None and frac < 1.0:
+-                continue
+-            del self._recovering[mid]
+-            self._recovered(mid, rec[0], r or self.sim.machine(mid).last_reading)
+-
+-    def _begin_recovery(self, mid: str, eid: str) -> None:
+-        begin = getattr(self.sim, "begin_recovery", None)
+-        if callable(begin):
+-            begin(mid)
+-            self._recovering[mid] = [eid, 0.0]
+-            if self.settings.recover_fast_s <= 0:
+-                self._advance_recoveries(0.0)
+-            return
+-        snap = getattr(self.sim, "snap_to_nominal", None)     # a sim without the ramp: back at once
+-        if callable(snap):
+-            snap(mid)
+-        self._recovered(mid, eid, self.sim.machine(mid).last_reading)
+-
+-    def _recovered(self, mid: str, eid: str, reading: Any) -> None:
+-        self.audit.append(AuditKind.SYSTEM, "world", {"msg": "已恢復正常", "machine_id": mid,
+-                                                      "value": getattr(reading, "temp_c", None)}, eid)
+-        on_recovered = getattr(self.state_machine, "on_recovered", None)
+-        if callable(on_recovered):
+-            on_recovered(eid, mid, self.clock.now(), reading)
+ 
+     def _awaits_decision(self, event_id: str | None) -> bool:
+         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
+         auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
+-        AWAIT_APPROVAL), while a write of that round waits for the card (Spark timing 10-21: the R1 檢修 walked to
+-        7 號 13 s before the card) or its round stopped before its R2/R3 writes were gated — or an event that ended
+-        (SAFE_STOP) with no decision while a round of its plan had, or would have had once gated, an R2/R3 write
+-        (steam_low on an idle press: the solve was refused, the event stopped with no card and its R1 檢修 walked out
+-        on its own). Only a plan of R1 writes repairs with no decision. Not while code re-solves an approved round
+-        whose schedule another event's version made stale (StateMachine.approved_rebase): the approved repair goes on
+-        meanwhile."""
++        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
++        檢修 walked to 7 號 13 s before the card)."""
+         ev = self._event_obj(event_id)
+-        if ev is None:
+-            return False
+-        rebase = getattr(self.state_machine, "approved_rebase", None)
+-        if callable(rebase) and rebase(ev.id):
+-            return False
++        if ev is None or ev.state in TERMINAL_STATES:
++            return False                     # nobody decides on an ended run (SAFE_STOP 交給現場處理 tasks run at once)
+         if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
+                         EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
+             return True
+-        if any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+-               for r in self.approvals.all()):
+-            return False
+-        if ev.state in TERMINAL_STATES:
+-            return ev.state is not EventState.CLOSED and \
+-                any(_needs_approval(sr) for sr in [*ev.steps, *(s for r in ev.prior_rounds for s in r.steps)])
+-        # EXECUTE / VERIFY: a no-op confirm the gate dropped (gated, skipped) needed no card, so that plan repairs
+-        return any(sr.state == "awaiting_approval" or (sr.gate is None and _needs_approval(sr)) for sr in ev.steps)
++        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
++                    for sr in ev.steps)
++        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
++                      for r in self.approvals.all())
++        return needs and not decided
+ 
+     def _apply_repairs(self) -> None:
+         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
+         (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
+-        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the state
+-        machine is told (Event.repaired_at, 回溫中) and the machine's readings ramp back to normal
+-        (_advance_recoveries)."""
++        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
++        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+         fast = self.settings.repair_fast_s > 0
+         board = getattr(getattr(self.sim, "world", None), "tasks", None)
+         for mid, eid in list(self._repaired.items()):
+@@ -1133,13 +1066,14 @@ class Runtime:
+             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
+                 continue                        # nothing injected on it (a replayed or already-cleared fault)
+             self.sim.clear_faults(mid)
++            snap = getattr(self.sim, "snap_to_nominal", None)
++            if fast and callable(snap):
++                snap(mid)                        # no slow cool-down: the next reading is normal
+             self.c.detector.reset(mid, repaired=True)
+             self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
+             on_repaired = getattr(self.state_machine, "on_repaired", None)
+             if fast and callable(on_repaired):
+                 on_repaired(eid, mid, self.clock.now())
+-            if fast:
+-                self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
+ 
+     # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+     @property
+@@ -1493,7 +1427,6 @@ class Runtime:
+                 self._baseline.clear()
+                 self._oob_seen.clear()
+                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+-                self._recovering.clear()
+                 self._holds = self._sim_holds()
+                 self.__dict__.pop("_wip", None)
+                 self.audit.append(AuditKind.SYSTEM, "supervisor",
+@@ -1778,17 +1711,6 @@ class Runtime:
+         except Exception:  # noqa: BLE001
+             return []
+ 
+-    @property
+-    def tasklog(self) -> Any:
+-        """今天處理過的任務 from the audit file (warroom/api/tasklog.py), never cleared."""
+-        tl = self.__dict__.get("_tasklog")
+-        if tl is None:
+-            from warroom.api.tasklog import TaskLog
+-            path = getattr(self.audit, "path", None)
+-            tl = TaskLog(path) if path is not None and str(path) else TaskLog(entries=lambda: self.audit.tail(0, 0))
+-            self.__dict__["_tasklog"] = tl
+-        return tl
+-
+     def _clear_ask_memory(self, why: str) -> None:
+         """Forget every 問戰情室 conversation (issue #95); the audit log says how many and why."""
+         try:
+@@ -1832,8 +1754,8 @@ class Runtime:
+         return sorted(seen.values(), key=lambda r: r.created_at)
+ 
+     def _effective_status(self, m: MachineState) -> MachineStatus:
+-        # WARNING with an open event = the fast repair's 回溫中 (amber, StateMachine.on_repaired), not the red alarm
+-        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE) and self._open_event_id(m.machine_id):
++        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE, MachineStatus.WARNING) and \
++                self._open_event_id(m.machine_id):
+             return MachineStatus.ALARM
+         seen = self._oob_seen.get(m.machine_id)
+         if m.status in NORMAL_STATUSES and seen is not None and \
+diff --git a/warroom/contracts.py b/warroom/contracts.py
+index 3f6306f..bd50620 100644
+--- a/warroom/contracts.py
++++ b/warroom/contracts.py
+@@ -979,8 +979,7 @@ class StepRound(_M):
+ 
+ 
+ class EventReview(_M):
+-    """The incident report of an event closed after a repair (Kyle 10-21 晚: 「異常 report 回報」): pending =
+-    「報告待讀」 from the close (「異常報告已產生」), done = 「主管已讀報告」. A notice, never a gate: nothing waits for it."""
++    """主管覆核 of an event closed after a repair: pending (「請主管覆核」) until the supervisor confirms."""
+     status: Literal["pending", "done"]
+     requested_at: datetime
+     done_at: datetime | None = None
+@@ -1009,7 +1008,7 @@ class StopFollowUp(_M):
+ 
+ 
+ class ReviewRequest(_M):
+-    """POST /api/events/{event_id}/review (主管已讀報告)."""
++    """POST /api/events/{event_id}/review (主管覆核)."""
+     note: str | None = Field(default=None, max_length=300)
+ 
+ 
+@@ -1032,7 +1031,6 @@ class Event(_M):
+     prior_rounds: list[StepRound] = Field(default_factory=list)   # earlier rounds' steps, oldest first
+     closed_at: datetime | None = None
+     outcome: str | None = None
+-    ai_report: EventAiReport | None = None   # Agent Nemo 異常報告 (warroom/agent/reporter.py), set when it closes
+     # issue #10: who opened it (the detector, or a task the supervisor typed) and what the supervisor
+     # asked the agent to honour while discussing its plan
+     source: Literal["detector", "supervisor", "plant"] = "detector"   # plant = issue #17 plant event
+@@ -1040,11 +1038,8 @@ class Event(_M):
+     constraints: list["PlanConstraint"] = Field(default_factory=list)
+     discuss_replans: int = 0
+     # fast repair (Kyle 10-21): every repair task of this event (檢修 / 停用檢修 / 放慢投料 / 暫停投料) finished and the
+-    # machine's fault was cleared (repaired_at, 「維修完成」); its readings then ramp back to nominal (回溫中) and
+-    # recovered_at is when they are back (「已恢復正常」, green). review: the incident report, pending (「報告待讀」) from
+-    # the close, done once the supervisor read it (「主管已讀報告」)
++    # machine's fault was cleared; review: 「請主管覆核」 once it closed after that repair, done when the supervisor confirms
+     repaired_at: datetime | None = None
+-    recovered_at: datetime | None = None
+     review: EventReview | None = None
+     # SAFE_STOP → resolution (CJ, 2026-10-22: 「安全停止也要有可以走向解決的按鈕」)
+     stop_reason: str | None = None            # why it safe-stopped (state machine reason)
+@@ -1214,7 +1209,6 @@ class HealthStatus(_M):
+     uptime_s: float
+     agent_runtime: str | None = None   # WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」 when the app runs inside OpenShell
+     repair_fast_s: float = 0.0         # REPAIR_FAST_S (read only): wall seconds a repair task takes; 0 = real durations
+-    recover_fast_s: float = 0.0        # RECOVER_FAST_S (read only): wall seconds the readings take back to nominal
+ 
+ 
+ # REST surface (warroom/api implements; web/src/contracts.ts mirrors). method, path, request, response
+@@ -1244,7 +1238,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
+     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
+     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
+     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
+-    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管已讀報告 (an event closed after a repair)
++    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管覆核 (an event closed after a repair)
+     ("GET", "/api/safety/cases", None, "SafetyCase[]"),
+     ("POST", "/api/safety/{case_id}/dispatch", None, "SafetyCase"),           # ① 派現場檢查
+     ("POST", "/api/safety/{case_id}/release", "SafetyRelease", "SafetyCase"),  # ③ 確認恢復運轉 (human only)
+@@ -1477,18 +1471,6 @@ class Bus(Protocol):
+     def subscribe(self) -> AsyncIterator[WsMessage]: ...
+ 
+ 
+-class EventAiReport(_M):
+-    """Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+-    (by "model"; mock mode or a model failure: the code-written draft, by "rules"), the result line appended by code when
+-    the event closed. drafted_ms: approval -> draft ready; late_ms: close -> delivered when the draft was not ready yet."""
+-    text: str
+-    summary: str
+-    by: Literal["model", "rules"]
+-    drafted_ms: float | None = None
+-    at: datetime
+-    late_ms: float | None = None
+-
+-
+ QueryOrdersShiftsData.model_rebuild()
+ ApprovalRequest.model_rebuild()
+ Event.model_rebuild()
+diff --git a/web/src/agent/PlanArea.tsx b/web/src/agent/PlanArea.tsx
+index 03c42d0..9a99929 100644
+--- a/web/src/agent/PlanArea.tsx
++++ b/web/src/agent/PlanArea.tsx
+@@ -9,10 +9,12 @@ import { OrderCard } from '../components/OrderCard'
+ import { warningsFor } from '../components/orderModel'
+ import { machineLabel } from '../factory'
+ import { plain } from '../plain'
+-import { TOOL_LABEL, stepLabel } from '../stepText'
++import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
+ import { TaskList } from '../components/TaskList'
++import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
++import { currentRoundTools, planNodes } from './approvalView'
+ import { useWarRoom } from '../useWarRoom'
+-import { ApprovalVisual } from './ApprovalVisual'
++import { ApprovalVisual, PlanFlow } from './ApprovalVisual'
+ import { ResultStrip } from './ResultStrip'
+ import type { HomeItem } from './homeItems'
+ import { expectationText, type Item } from './transcript'
+@@ -86,9 +88,13 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
+   }
+   if (ev) {
+     const steps = ev.steps
++    const ok = steps.filter((s) => s.state === 'ok').length
+     const hyp = ev.plan?.hypothesis ?? null
+     const exp = hyp ? expectationText(hyp) : null
+     const closed = ev.state === 'closed' || ev.state === 'safe_stop'
++    const nodes = planNodes(ev, currentRoundTools(items))
++    const lines: Record<string, string> = {}
++    for (const sr of ev.steps) if (sr.result?.ok) { try { lines[sr.step.id] = plain(resultText(sr.step.tool, sr.step.args, sr.result.data)) } catch { /* purpose instead */ } }
+     const tasks = (state.world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
+     return (
+       <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
+@@ -97,13 +103,20 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
+           <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
+           <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}</h3>
+           {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}
++          {ev.state === 'safe_stop' && <StopFollowUp ev={ev} />}
++          {nodes.length > 0 && (
++            <div className="apv-b">
++              <h4 className="apv-bh">計劃板<small>{ok}/{steps.length} 步完成</small></h4>
++              <PlanFlow nodes={nodes} board lines={lines} />
++            </div>
++          )}
+           {tasks.length > 0 && (
+             <div className="apv-b">
+               <h4 className="apv-bh">人員執行（核准後由程式派工）<small>{tasks.filter((t) => t.status === '完成').length}/{tasks.length} 完成</small></h4>
+               <TaskList tasks={tasks} eventId={ev.id} testId="event-tasks" />
+             </div>
+           )}
+-          {steps.length > 0 && (
++          {steps.length > 0 && !nodes.length && (
+             <ul className="who-list task-list" data-testid="plan-tasks">
+               {steps.map((s) => (
+                 <li key={s.step.id} className={`ts-${s.state}`}><b>{STEP_STATE[s.state] ?? s.state}</b><span>{stepLabel(s.step.id)} {TOOL_LABEL[s.step.tool] ?? s.step.tool}・{plain(s.step.purpose)}</span></li>
+@@ -111,7 +124,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
+             </ul>
+           )}
+           {!closed && exp && <div className="apv-b"><h4 className="apv-bh">怎麼確認做完</h4><p className="impact-line">程式比對讀值：{exp}；達標即自動結案，不達標換下一個假設。</p></div>}
+-          {!steps.length && !closed && <p className="muted">Agent Nemo 正在規劃；有需要你決定的會變成待核准。</p>}
++          {!steps.length && !closed && <p className="muted">AI 指揮官正在規劃；有需要你決定的會變成待核准。</p>}
+         </div>
+         <footer className="apv-act"><div className="apv-btns">
+           <button className="btn-sec" onClick={onAsk}>問 AI</button>
+diff --git a/web/src/agent/homeItems.ts b/web/src/agent/homeItems.ts
+index d696321..c82c4e8 100644
+--- a/web/src/agent/homeItems.ts
++++ b/web/src/agent/homeItems.ts
+@@ -8,7 +8,7 @@
+ import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
+ import { STATE_LABEL } from '../components/common'
+ import { machineLabel } from '../factory'
+-import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
++import { fmtHM, fmtMD, ms } from '../format'
+ import { RISK_PLAIN, plain } from '../plain'
+ import { caseTitle } from '../resolveText'
+ 
+@@ -28,8 +28,6 @@ export interface HomeItem {
+   ts: number
+   progress?: number         // ④: share of the event's worker tasks done (0–1)
+   caseId?: string           // ①: an open Safety Core case (key `safety:<id>`, components/Resolve.tsx)
+-  /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
+-  machine?: string; desc?: string
+ }
+ 
+ const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+@@ -49,7 +47,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
+     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
+     if (req) {
+-      out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
++      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
+         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
+     } else if (ev.state === 'safe_stop') {
+       // CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」: stays in ① until replanned or 確認結案 (buttons in the plan area)
+@@ -74,7 +72,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
+     } else if (OPEN(ev)) {
+       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
+-        sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
++        sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
+     } else {
+       out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
+         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
+@@ -127,13 +125,12 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+ export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
+   const out: { t: number; s: string }[] = []
+   const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
+-  if (dm) out.push({ t: dm.t, s: `${fmtHM12(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
++  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
+   const dep = world?.dock.next_departure
+-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM12(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
++  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
+   const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
+-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
++  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
+   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
+-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
+-  const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
+-  return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
++  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
++  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+ }
+diff --git a/web/src/contracts.ts b/web/src/contracts.ts
+index f3e6b39..40248f6 100644
+--- a/web/src/contracts.ts
++++ b/web/src/contracts.ts
+@@ -394,19 +394,14 @@ export interface Event {
+   prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
+   closed_at: ISODate | null
+   outcome: string | null
+-  ai_report?: EventAiReport | null   // Agent Nemo 異常報告 (warroom/agent/reporter.py), set when the event closes
+   // issue #10
+   source?: "detector" | "supervisor" | "plant"  // plant = issue #17 plant event (machine_id "PLANT")
+   command?: string | null
+   constraints?: PlanConstraint[]
+   discuss_replans?: number
+-  // fast repair (Kyle 10-21 flow: 核准 → 維修 → 維修完成 → 回溫 → 綠燈 → 異常報告): repaired_at = every repair task
+-  // (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; the readings then ramp back to nominal over
+-  // recover_fast_s wall seconds (machine WARNING, 「回溫中」); recovered_at = back to normal (VERIFY confirms, the event
+-  // closes, the machine RUNNING). review = the incident report: pending (「報告待讀」, not a gate: nothing waits for it)
+-  // at close, done (「主管已讀報告」) after POST /api/events/{id}/review
++  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; then
++  // 「請主管覆核」 (review pending) once the event closed, done after POST /api/events/{id}/review
+   repaired_at?: ISODate | null
+-  recovered_at?: ISODate | null
+   review?: EventReview | null
+   // SAFE_STOP → resolution (CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」)
+   stop_reason?: string | null
+@@ -693,7 +688,6 @@ export interface HealthStatus {
+   uptime_s: number
+   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
+   repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
+-  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after the repair
+ }
+ 
+ // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
+@@ -823,7 +817,7 @@ export const API = {
+   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
+   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
+   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
+-  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
++  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
+   safetyCases: "/api/safety/cases", // GET SafetyCase[]
+   safetyDispatch: "/api/safety/{case_id}/dispatch", // POST -> SafetyCase (① 派現場檢查)
+   safetyRelease: "/api/safety/{case_id}/release", // POST SafetyRelease -> SafetyCase (③ 確認恢復運轉; human only)
+@@ -858,9 +852,3 @@ export interface MainReply {
+   id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
+ }
+-
+-/** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+- *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
+-export interface EventAiReport {
+-  text: string; summary: string; by: "model" | "rules"; drafted_ms: number | null; at: ISODate; late_ms: number | null
+-}
+diff --git a/web/src/phone/Phone.tsx b/web/src/phone/Phone.tsx
+index 3596273..6dc9765 100644
+--- a/web/src/phone/Phone.tsx
++++ b/web/src/phone/Phone.tsx
+@@ -1,9 +1,8 @@
+ // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
+ // talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
+ // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
+-// Fast repair (Kyle 10-21 flow): after 核准 the AI line says 專人維修中（n/m）; at Event.repaired_at a 「維修完成：…，溫度回升中」
+-// notice, at close 「已恢復正常・異常報告已產生」 with 看報告 / 知道了 (RepairNotice), one per event (3 件同時異常: one after
+-// another), each ringing once; nothing waits for them. 「主管已讀」 joins the history.
++// Fast repair (Kyle 10-21): an event repaired and closed waits for 覆核 — a 「維修完成，請覆核」 card on top (ReviewCard),
++// one per event (3 件同時異常: one after another), ringing like a new approval; 「已覆核」 joins the history.
+ import { useMemo, useRef, useState } from 'react'
+ import { TodayOrders } from '../components/TodayOrders'
+ import { newConversationId } from '../components/ordersToday'
+@@ -15,7 +14,7 @@ import { MACHINE_META, machineLabel } from '../factory'
+ import { fmtHM, fmtHMS, fmtMD } from '../format'
+ import { primaryEvent } from '../store'
+ import { useWarRoom } from '../useWarRoom'
+-import { repairNotices, resolveAlerts, useApprovalAlerts } from './alert'
++import { resolveAlerts, reviewAlerts, useApprovalAlerts } from './alert'
+ import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
+ import { openCases } from '../resolveText'
+ import { ThemeToggle } from '../components/ThemeToggle'
+@@ -25,7 +24,7 @@ import { actionLines, buildBriefing, fullActionLines, optionBriefs } from '../br
+ import { useBriefCtx } from '../useBriefing'
+ import { AiStatusLine } from '../AiStatusLine'
+ import { OptionGuideNote } from '../OptionGuideNote'
+-import { RepairNotice } from './RepairNotice'
++import { ReviewCard } from './ReviewCard'
+ 
+ const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
+ 
+@@ -43,26 +42,23 @@ export function Phone() {
+   // the idle card: one status line per open event (3 at most, 「3 件同時異常」), the 修復預估 for the newest only
+   const openEvs = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
+     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
+-  // fast-repair notices: 維修完成 while the readings come back, then the report until 知道了 (hidden here at once, the event
+-  // update follows over the socket); keyed by the repair, since a scenario restart reuses event ids
+-  const [read, setRead] = useState<Record<string, Event>>({})
+-  const rkey = (e: Event) => `${e.id}:${e.repaired_at ?? ''}`
++  // 覆核: confirmed here are hidden at once (the event update follows over the socket); keyed by the review request,
++  // since a scenario restart reuses event ids
++  const [reviewed, setReviewed] = useState<Record<string, Event>>({})
++  const rkey = (e: Event) => `${e.id}:${e.review?.requested_at ?? ''}`
+   const events = state.snapshot?.events ?? []
+-  const notices = events.filter((e) => e.repaired_at && !read[rkey(e)] && (e.state === 'closed' ? e.review?.status === 'pending' : e.state !== 'safe_stop'))
+-    .sort((a, b) => (a.repaired_at! < b.repaired_at! ? -1 : 1))
+-  const reports = notices.filter((e) => e.state === 'closed'), fixed = notices.filter((e) => e.state !== 'closed')
+-  const names = (xs: Event[]) => xs.map((e) => machineLabel(e.machine_id)).join('、')
+-  const noticeLine = [names(reports), fixed.length ? `${reports.length ? '維修完成：' : ''}${names(fixed)}` : ''].filter(Boolean).join('；')
+-  const readReports = events.filter((e) => e.review?.status === 'done' || read[rkey(e)])
+-    .map((e) => (e.review?.status === 'done' ? e : read[rkey(e)]))
+-  // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line; 主管已讀
+-  // rows join it by time
++  const reviews = events.filter((e) => e.review?.status === 'pending' && !reviewed[rkey(e)])
++    .sort((a, b) => (a.review!.requested_at < b.review!.requested_at ? -1 : 1))
++  const doneReviews = events.filter((e) => e.review?.status === 'done' || reviewed[rkey(e)])
++    .map((e) => (e.review?.status === 'done' ? e : reviewed[rkey(e)]))
++  // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line; 已覆核 rows
++  // join it by time
+   const history = [
+     ...state.resolved.filter((r) => r.decision?.via !== 'auto').slice(0, 3).map((r) => ({ at: r.decision?.decided_at ?? r.created_at, key: r.id, node: (
+       <>{plain(r.title)}{r.round > 1 ? `（${ROUND[r.round] ?? `第${r.round}輪`}）` : ''}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</>
+     ) })),
+-    ...readReports.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, node: (
+-      <>{machineLabel(e.machine_id)}異常報告・<b data-testid="phone-report-done">主管已讀</b></>
++    ...doneReviews.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, node: (
++      <>{machineLabel(e.machine_id)}維修完成・<b data-testid="phone-reviewed">已覆核</b></>
+     ) })),
+   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
+   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+@@ -70,12 +66,9 @@ export function Phone() {
+   const cases = openCases(state.snapshot?.safety_cases)
+   const stops = events.filter((e) => e.state === 'safe_stop' && (!e.follow_up || e.follow_up.status === 'manual'))
+     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
+-  const noticeCards = notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
+-    onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
+-  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines), ...resolveAlerts(cases, events)], connected && !lanDown)
++  const alerts = useApprovalAlerts([...pending, ...reviewAlerts(reviews), ...resolveAlerts(cases, events)], connected && !lanDown)
+   const bctx = useBriefCtx()
+-  const idle = pending.length === 0
+-  const idleBrief = useMemo(() => (idle ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [idle, ev, bctx])
++  const idleBrief = useMemo(() => (pending.length === 0 ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [pending.length, ev, bctx])
+   return (
+     <div className="phone-wrap">
+       <div className="phone">
+@@ -85,7 +78,7 @@ export function Phone() {
+           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
+           <ThemeToggle className="ph-tog" />
+         </div>
+-        {!top && notices.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・{reports.length ? '異常報告已產生' : '維修完成'}</b>{noticeLine}</div>}
++        {!top && reviews.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・維修完成，請覆核</b>{reviews.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
+         {!alerts.enabled ? (
+           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
+         ) : (
+@@ -106,9 +99,8 @@ export function Phone() {
+             <StopFollowUp ev={e} compact disabled={lanDown || !transport} />
+           </div>
+         ))}
+-        {/* the notices go under a waiting card: with 3 件同時異常 a 維修完成 notice above pushed 核准 off the screen
+-            (review 10-21); with nothing to approve they lead */}
+-        {pending.length === 0 && noticeCards}
++        {reviews.map((e) => <ReviewCard key={rkey(e)} ev={e} disabled={lanDown || !transport}
++          onDone={(x) => setReviewed((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
+         {pending.length === 0 ? (
+           <div className="ph-card idle">
+             {idleBrief ? null : <h2>目前沒有待核准事項</h2>}
+@@ -131,7 +123,6 @@ export function Phone() {
+               {pending.filter((p) => p.id !== top.id).map((p) => <button key={p.id} className="ph-more-i" onClick={() => setPick(p.id)}>{RISK_PLAIN[p.risk]}・{plain(p.title)}</button>)}
+             </div>
+           )}
+-          {noticeCards}
+         </>}
+         <TodayOrders compact />
+         {transport?.ask && <AskBox disabled={lanDown} />}
+diff --git a/web/src/phone/alert.ts b/web/src/phone/alert.ts
+index 20bac37..d0448e9 100644
+--- a/web/src/phone/alert.ts
++++ b/web/src/phone/alert.ts
+@@ -2,13 +2,10 @@
+ // LAN-only, no cloud push service: a new pending approval rings (Web Audio), vibrates, flashes the tab title
+ // and, when the browser allows it, raises a system notification. While the link is down the alerts are held
+ // and flushed as one alert when the phone reconnects.
+-// Fast repair (Kyle 10-21 flow): 維修完成 (Event.repaired_at, the readings coming back) and 已恢復正常・異常報告已產生 (the
+-// event closed with its report, Event.review pending) ring once each, as notices: nothing waits for them, so they do not
+-// re-ring or count as waiting in the tab title.
++// Fast repair (Kyle 10-21): an event waiting for the supervisor's 覆核 (Event.review pending) rings the same way.
+ import { useCallback, useEffect, useRef, useState } from 'react'
+-import type { Event, MachineTile, SafetyCase } from '../contracts'
++import type { Event, SafetyCase } from '../contracts'
+ import { caseTitle } from '../resolveText'
+-import { expectationOf, normalOf, recoverText } from '../aiStatus'
+ import { machineLabel } from '../factory'
+ import { plain } from '../plain'
+ 
+@@ -21,28 +18,14 @@ export interface PushEnv {
+   setTitle(t: string): void
+ }
+ 
+-/** What rings: a pending approval card (ApprovalRequest fits), or a fast-repair notice (notice set). */
+-export interface AlertItem { id: string; title: string; reason: string; risk?: string; notice?: 'repaired' | 'report' }
+-
+-const NOTICE_HEAD: Record<NonNullable<AlertItem['notice']>, string> = { repaired: '維修完成', report: '已恢復正常，報告已產生' }
+-
+-/** The fast-repair notices of these events, oldest repair first: 維修完成 while the readings come back (repaired, not
+- *  closed), then 已恢復正常，報告已產生 once it closed with its report unread (review pending). `tiles` add the live
+- *  temperature to the 維修完成 text. */
+-export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] = []): AlertItem[] {
+-  const out: AlertItem[] = []
+-  for (const e of [...(events ?? [])].sort((a, b) => ((a.repaired_at ?? '') < (b.repaired_at ?? '') ? -1 : 1))) {
+-    if (!e.repaired_at) continue
+-    const title = machineLabel(e.machine_id)
+-    if (e.state !== 'closed' && e.state !== 'safe_stop') {
+-      const x = expectationOf(e)
+-      const now = x?.channel === 'temp_c' ? tiles.find((t) => t.machine_id === e.machine_id)?.temp_c ?? null : null
+-      out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now, normalOf(e, x)), notice: 'repaired' })
+-    } else if (e.state === 'closed' && e.review?.status === 'pending') {
+-      out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: plain(e.outcome) || '異常報告已產生', notice: 'report' })
+-    }
+-  }
+-  return out
++/** What rings: a pending approval card (ApprovalRequest fits), or an event waiting for 覆核 (review: true). */
++export interface AlertItem { id: string; title: string; reason: string; risk?: string; review?: boolean }
++
++/** Events whose repair is done and waits for the supervisor's 覆核, as alert items (one per review request). */
++export function reviewAlerts(events: Event[] | undefined): AlertItem[] {
++  return (events ?? []).filter((e) => e.review?.status === 'pending').map((e) => ({
++    id: `review:${e.id}:${e.review!.requested_at}`, title: `${machineLabel(e.machine_id)}維修完成`, reason: plain(e.outcome) || '請主管覆核', review: true,
++  }))
+ }
+ 
+ /** Open Safety Core cases and unresolved SAFE_STOPs ring like a new approval (CJ 2026-10-22: they need the supervisor). */
+@@ -54,12 +37,10 @@ export function resolveAlerts(cases: SafetyCase[] | undefined, events: Event[] |
+   ]
+ }
+ 
+-/** 「待核准」 or what the notices say, for the multi-item alert. */
++/** 「待核准」, 「待覆核」 or both, for the tab title and the multi-item alert. */
+ export function waitLabel(items: AlertItem[]): string {
+-  const n = items.filter((a) => a.notice), q = items.length > n.length
+-  if (!n.length) return '待核准'
+-  if (q) return '待核准與通知'
+-  return n.every((a) => a.notice === 'repaired') ? '維修完成' : n.every((a) => a.notice === 'report') ? '報告已產生' : '維修通知'
++  const r = items.some((a) => a.review), q = items.some((a) => !a.review)
++  return r && q ? '待核准／覆核' : r ? '待覆核' : '待核准'
+ }
+ 
+ /** Pure diff: which pending ids are new since last time, and which alerts to fire now. */
+@@ -82,7 +63,7 @@ export function diffPending(st: PushState, pending: AlertItem[], online: boolean
+ 
+ export function alertText(fire: AlertItem[], flushed: boolean): { title: string; body: string } {
+   const first = fire[0]
+-  const title = fire.length === 1 ? `${first.notice ? NOTICE_HEAD[first.notice] : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
++  const title = fire.length === 1 ? `${first.review ? '請覆核' : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
+   const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? `${first.risk ? `${first.risk}・` : ''}${first.reason}` : fire.map((a) => a.title).join('；'))
+   return { title, body }
+ }
+@@ -143,8 +124,7 @@ function writeAlertPref(on: boolean): void {
+   try { localStorage.setItem(PREF_KEY, on ? 'on' : 'off') } catch { /* private mode: the choice lasts this visit */ }
+ }
+ 
+-/** Watches the pending list (approval cards and fast-repair notices); fires push alerts on new ones, holds them while
+- *  offline. Only approval cards count as waiting (tab title, the 60 s re-ring). */
++/** Watches the pending list (approval cards and 覆核 requests); fires push alerts on new ones, holds them while offline. */
+ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: PushEnv = browserEnv()): ApprovalAlerts {
+   const st = useRef<PushState>({ seen: new Set(), held: [] })
+   const envRef = useRef(env)
+@@ -164,8 +144,7 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
+     const { fire, flushed } = diffPending(st.current, pending, online)
+     setHeld(st.current.held.length)
+     const e = envRef.current
+-    const asks = pending.filter((a) => !a.notice).length
+-    e.setTitle(asks ? `(${asks}) 待核准・${baseTitle.current}` : baseTitle.current)
++    e.setTitle(pending.length ? `(${pending.length}) ${waitLabel(pending)}・${baseTitle.current}` : baseTitle.current)
+     if (!fire.length || !enabledRef.current) return
+     const { title, body } = alertText(fire, flushed)
+     e.notify(title, body, `approval-${fire[0].id}`)
+@@ -174,13 +153,12 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
+     setLastAlert(title)
+   }, [pending, online])
+ 
+-  // Re-ring every 60 s while an approval is still waiting, so a missed first alert is not the only one.
+-  const waiting = pending.some((a) => !a.notice)
++  // Re-ring every 60 s while something is still waiting, so a missed first alert is not the only one.
+   useEffect(() => {
+-    if (!waiting || !online || !enabled) return
++    if (!pending.length || !online || !enabled) return
+     const t = window.setInterval(() => { envRef.current.vibrate([300]); envRef.current.beep() }, 60_000)
+     return () => window.clearInterval(t)
+-  }, [waiting, online, enabled])
++  }, [pending.length, online, enabled])
+ 
+   const arm = useCallback(async () => {
+     // Browsers only allow sound after a tap, and permission prompts only from a tap.

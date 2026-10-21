@@ -1,0 +1,987 @@
+diff --git a/web/src/agent/AgentTab.tsx b/web/src/agent/AgentTab.tsx
+index da62ef9..cf43edc 100644
+--- a/web/src/agent/AgentTab.tsx
++++ b/web/src/agent/AgentTab.tsx
+@@ -2,16 +2,15 @@
+ // (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
+ // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
+ import { useEffect, useMemo, useState } from 'react'
+-import type { ApprovalRequest, Event, Line } from '../contracts'
+-import { ms } from '../format'
++import type { Event, Line } from '../contracts'
+ import { useWarRoom } from '../useWarRoom'
+ import { ApprovalList } from './ApprovalList'
+ import { HomeOverview } from './HomeOverview'
+ import { HomeStatus } from './HomeStatus'
++import { nextUp } from './homeItems'
+ import { useHomeSelection } from './homeSelection'
+ import { PlanArea } from './PlanArea'
+-import { isDialogue, type Item, type LocalItem } from './transcript'
+-import { PendingNotice } from './PendingNotice'
++import type { LocalItem } from './transcript'
+ import { setReplan, useReplans } from './replanStore'
+ import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
+ import { Bubbles } from './SimpleChat'
+@@ -31,10 +30,11 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull,
+   onFocus?: (machine?: string, line?: Line) => void
+ }) {
+   const { state } = useWarRoom()
+-  const { events, list, sel, ev } = useHomeSelection(picked)
++  const { events, list, sel, ev, now } = useHomeSelection(picked)
+   const { items } = useTranscript(ev)
+   const [focus, setFocus] = useState<BarFocus | null>(null)
+-  const chat = (mode?: BarMode, text?: string, send?: boolean) => { setFocus((f) => ({ mode, text, send, n: (f?.n ?? 0) + 1 })) }
++  const chat = (mode?: BarMode, text?: string) => { setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
++  const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
+   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
+   const replans = useReplans()
+   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
+@@ -56,32 +56,21 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull,
+     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
+     <div className="home">
+       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
+-      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
++      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
+       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
+-      <Console planEv={ev} items={items} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)} />
++      <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
+     </div>
+     </>
+   )
+ }
+ 
+-/** The newest pending card of an event (a v2 replaces its v1). */
+-function latestReq(pending: ApprovalRequest[], evId: string | undefined): ApprovalRequest | null {
+-  if (!evId) return null
+-  return [...pending].filter((p) => p.event_id === evId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null
+-}
+-
+-const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
+-
+-/** The 主控台 conversation panel: the one NemoClaw (主 agent) thread (CJ, 2026-10-21: 「我不要長這樣」 about the
+- *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed; issue #100: the 此事項／全部 switcher is gone too). The plan on
+- *  screen sits in the thread as a short 待核准 notice (or the briefing of its state), placed by its own time. Each
+- *  subagent's progress is on the Agent page, via 看完整過程. */
+-function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide }: {
+-  planEv: Event | null; items: Item[]
++/** The 主控台 conversation panel: the 主 agent conversation only (CJ, 2026-10-21: 「我不要長這樣」 about the
++ *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed). Each subagent's progress is on the Agent page, via 看完整過程. */
++function Console({ planEv, asks, setAsks, focus, onFull }: {
++  planEv: Event | null
+   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
+-  onGuide: (text: string) => void
+ }) {
+-  const { state, transport, connected } = useWarRoom()
++  const { state } = useWarRoom()
+   const thread = useMainThread(asks)
+   // the input talks about the plan on screen
+   const talkEv = planEv
+@@ -89,49 +78,20 @@ function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide }: {
+   const full = (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(talkEv?.id) } }
+   // 主管摘要 (issue #93): one briefing for the plan on screen, following its state (待核准 / 執行中 / 處置完成)
+   const brief = useEventBriefing(talkEv)
+-  const req = useMemo(() => latestReq(state.pending, talkEv?.id), [state.pending, talkEv?.id])
+-  // the briefing sits among the messages by its own time: a 待核准 notice by its card's created_at (so a v2 comes after the
+-  // 討論 that asked for it), any other state by the latest step of the record. No time → it stays last.
+-  const briefAt = useMemo(() => {
+-    if (!brief) return NaN
+-    if (brief.state === 'pending' && req) return ms(req.created_at)
+-    const stepTs = items.filter((i) => !isDialogue(i)).map((i) => ms(i.ts)).filter((t) => !isNaN(t))
+-    return stepTs.length ? Math.max(...stepTs) : NaN
+-  }, [brief, req, items])
+-  const toPlan = () => (document.querySelector('[data-testid=plan-area] [data-testid=approval-visual]') ?? document.querySelector('[data-testid=plan-area]'))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+-  const extra = talkEv && brief ? {
+-    at: briefAt, alignTop: !(brief.state === 'pending' && req),
+-    node: brief.state === 'pending' && req
+-      ? <PendingNotice ev={talkEv} req={req} onPlan={toPlan} />
+-      : (
+-        <div className="con-brief" data-testid="con-brief">
+-          <BriefingView b={brief} footer={(
+-            <a className="br-link" href={`#console?event=${encodeURIComponent(talkEv.id)}`} onClick={full} data-testid="see-record">查看處理紀錄</a>
+-          )} />
+-        </div>
+-      ),
+-  } : null
+-  const askReady = !!transport?.message && (transport.mode !== 'live' || connected)
+-  const guide = (
+-    <div className="con-guide" data-testid="con-guide">
+-      <h3>我是 Agent Nemo</h3>
+-      <p className="muted small">戰情室的主 agent。我可以幫你：</p>
+-      <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
+-      <p className="muted small">試試這些問題：</p>
+-      {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
+-      {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent Nemo 問答</p>}
+-    </div>
+-  )
+ 
+   return (
+     <section className="console panel" aria-label="Agent Nemo 對話">
+       <header className="con-h">
+-        <div className="con-title">
+-          <h2>Agent Nemo 對話</h2>
+-          <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
+-        </div>
++        <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
+       </header>
+-      <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" extra={extra} guide={guide} follow />
++      {talkEv && brief && (
++        <div className="con-brief" data-testid="con-brief">
++          <BriefingView b={brief} footer={brief.state !== 'pending' ? (
++            <a className="br-link" href={`#console?event=${encodeURIComponent(talkEv.id)}`} onClick={full} data-testid="see-record">查看處理紀錄</a>
++          ) : null} />
++        </div>
++      )}
++      <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
+       <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
+     </section>
+   )
+diff --git a/web/src/agent/ApprovalList.tsx b/web/src/agent/ApprovalList.tsx
+index e3e24f3..d01a767 100644
+--- a/web/src/agent/ApprovalList.tsx
++++ b/web/src/agent/ApprovalList.tsx
+@@ -1,4 +1,4 @@
+-// 待核准事件 (left column of the home screen; was 核准區：等待列表). Ranked ①–⑤ (homeItems.ts); ⑤ AI 已自行處理 is collapsed.
++// 核准區：等待列表 (right-top of the home screen). Ranked ①–⑤ (homeItems.ts); ⑤ AI 已自行處理 is collapsed.
+ // Selecting an item drives the 計劃 area below it and the conversation on the left.
+ import { ProgressRing } from '../components/ProgressRing'
+ import { RANK_LABEL, type HomeItem, type Rank } from './homeItems'
+@@ -6,8 +6,8 @@ import { REPLAN_HINT, useReplans, type Replan } from './replanStore'
+ import { useWarRoom } from '../useWarRoom'
+ import { SUB_STATUS } from './subagents'
+ 
+-export function ApprovalList({ items, selected, onPick }: {
+-  items: HomeItem[]; selected: string | null; onPick: (key: string) => void
++export function ApprovalList({ items, selected, onPick, next }: {
++  items: HomeItem[]; selected: string | null; onPick: (key: string) => void; next: string[]
+ }) {
+   const open = items.filter((i) => i.rank < 5)
+   const fyi = items.filter((i) => i.rank === 5)
+@@ -15,11 +15,12 @@ export function ApprovalList({ items, selected, onPick }: {
+   const decide = open.filter((i) => i.req).length
+   const replans = useReplans()
+   return (
+-    <section className="panel home-list" aria-label="待核准事件" data-testid="approval-list">
+-      <header className="hl-h"><h2>待核准事件</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
++    <section className="panel home-list" aria-label="核准區：等待列表" data-testid="approval-list">
++      <header className="hl-h"><h2>核准區：等待列表</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
+       {!open.length && (
+         <div className="hl-empty" data-testid="home-empty">
+-          <p className="hl-none">目前沒有待核准事項</p>
++          <p className="calm-title">全廠正常，沒有要你處理的事</p>
++          {next.length > 0 && <p className="muted">接下來：{next.slice(0, 3).join('・')}</p>}
+         </div>
+       )}
+       <div className="hl-body">
+@@ -45,25 +46,13 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
+   const sub = useWarRoom().state.subagents?.items.find((s) => s.id === i.eventId)
+   const planning = rp?.state === 'sending' || rp?.state === 'planning'
+   return (
+-    <button type="button" className={`hl-item tone-${i.tone} ${i.req ? `has-req r-${i.req.risk}` : ''} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
+-      {i.req ? (
+-        <>
+-          <span className="hl-top">
+-            <span className="hl-pill-row"><span className="hl-pill tone-wait">待核准</span><span className={`hl-risk r-${i.req.risk}`}>{i.req.risk}</span></span>
+-            <span className="hl-t">{i.machine ?? i.title}</span>
+-          </span>
+-          <span className="hl-s hl-desc">{i.desc || i.title}</span>
+-        </>
+-      ) : (
+-        <>
+-          <span className="hl-top">
+-            <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
+-            <span className="hl-t">{i.title}</span>
+-          </span>
+-          <span className="hl-s">{i.sub}</span>
+-        </>
+-      )}
+-      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? `Agent Nemo（${sub.type_label}）・執行中` : `Agent Nemo（${sub.type_label}）・${SUB_STATUS[sub.status]}`}</span>}
++    <button type="button" className={`hl-item tone-${i.tone} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
++      <span className="hl-top">
++        <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
++        <span className="hl-t">{i.title}</span>
++      </span>
++      <span className="hl-s">{i.sub}</span>
++      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
+       {rp === null && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
+       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />Agent Nemo 規劃中…好了會自動切到核准卡</span>}
+       {rp?.state === 'ready' && <span className="hl-hint">Agent Nemo 的計劃已送出，見 ③ 的待核准卡</span>}
+diff --git a/web/src/agent/ApprovalVisual.tsx b/web/src/agent/ApprovalVisual.tsx
+index 4b85572..9ec0f36 100644
+--- a/web/src/agent/ApprovalVisual.tsx
++++ b/web/src/agent/ApprovalVisual.tsx
+@@ -32,10 +32,8 @@ export function PendingApproval({ req, onAgent }: { req: ApprovalRequest; onAgen
+  *  does what after approval, the option picker when there is a choice, and only two actions — 核准 and 討論
+  *  (CJ: 「agent 計劃就只有核准跟討論」; changing or rejecting a plan happens by talking to the agent).
+  *  `wide` = 產線監控: the same decision plus the evidence (plan diagram, schedule before/after, tools). */
+-export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide', showBoard = false }: {
++export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide' }: {
+   req: ApprovalRequest; ev: Event | null; items: Item[]; onAgent?: () => void; onDiscuss?: () => void; layout?: 'wide' | 'plan'
+-  /** the S1–S5 計劃板 inside the plan layout: off on the 主控台 (CJ, 2026-10-22), the code and data stay */
+-  showBoard?: boolean
+ }) {
+   const { transport, state } = useWarRoom()
+   const versions = useVersions()
+@@ -57,7 +55,6 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+   const [busy, setBusy] = useState(false)
+   const [err, setErr] = useState<string | null>(null)
+   const [done, setDone] = useState<string | null>(null)
+-  const [more, setMore] = useState<'chg' | 'why' | null>(null)
+ 
+   // 核准 only: the chosen option (or the system's) executes; a different option than the system's is recorded as such.
+   // Changing or rejecting the plan is done by talking (討論 → POST /api/events/{id}/discuss replans and issues v2).
+@@ -78,9 +75,6 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+   const hyp = ev?.plan?.hypothesis ?? null
+   const afterSteps = nodes.filter((n) => n.status === 'after')
+   const activeV = diff?.before.version ?? versions.find((v) => v.status === 'active')?.version ?? null
+-  // 核准期限 (factory time, from the card): only while the card is still waiting; gone once decided / closed
+-  const deadline = req.expires_at && req.status === 'pending' && !done && !isNaN(ms(req.expires_at))
+-    ? `請於 ${fmtMD(req.expires_at).slice(5)} ${fmtHM(req.expires_at)} 前核准` : null
+   const expires = req.expires_at ? `${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前` : null
+   // one delivery line for all options when the solver gives no per-option figure
+   const dLine = deliveryLine(req.delivery_impact, facts)
+@@ -97,32 +91,30 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+       {!diff && cure && <p className="apv-chips"><span className="chg cure">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</span></p>}
+     </Block>
+   )
+-  // 人力方案: a real choice (the chosen id is sent with 核准, 核准 stays off until one is chosen) — kept as a compact
+-  // radio list. With a single option there is nothing to choose: it only appears in the 執行事項 table (same default pick).
+-  const options = (n: number) => opts.length > 1 && (
++  const options = (n: number) => opts.length > 0 && (
+     <Block key="opts" n={n} title="人力方案" hint="點選一個方案">
+       <OptionGuideNote a={req} ev={ev} />
+-      <div className="apv-opts apv-opts-c" role="group" aria-label="人力方案">
++      <div className="apv-opts" role="group" aria-label="人力方案">
+         {opts.map((o) => {
+           const on = chosen === o.opt.id
+-          const brief = [o.who, o.shift, o.people != null ? `${o.people} 人` : null].filter(Boolean).join('・')
+           return (
+             <button key={o.opt.id} aria-pressed={on} className={`opt ${on ? 'on' : ''}`} disabled={busy || !!done}
+               onClick={() => setPick(o.opt.id)} data-testid={`option-${o.opt.id}`}>
+-              <span className="opt-h"><span className="opt-pick" aria-hidden>{on ? '●' : '○'}</span><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
+-                {o.opt.recommended && <span className="opt-rec">系統建議</span>}
+-                {brief && <span className="opt-brief">{brief}</span>}</span>
+-              {on && (o.teams.length > 0 || (!o.who && o.message)) && (
+-                <dl className="opt-dl">
+-                  {o.teams.length > 0 && <><dt>通知</dt><dd>{o.kind && NOTIFY_LABEL[o.kind] ? `${NOTIFY_LABEL[o.kind]} → ` : ''}{o.teams.join('、')}</dd></>}
+-                  {!o.who && o.message && <><dt>內容</dt><dd>{plain(o.message)}</dd></>}
+-                </dl>
+-              )}
++              <span className="opt-h"><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
++                {o.opt.recommended && <span className="opt-rec">系統建議</span>}</span>
++              <dl className="opt-dl">
++                {o.who && <><dt>人員</dt><dd>{o.who}</dd></>}
++                {o.shift && <><dt>班別</dt><dd>{o.shift}</dd></>}
++                {o.people != null && <><dt>人數</dt><dd>{o.people} 人</dd></>}
++                {o.teams.length > 0 && <><dt>通知</dt><dd>{o.kind && NOTIFY_LABEL[o.kind] ? `${NOTIFY_LABEL[o.kind]} → ` : ''}{o.teams.join('、')}</dd></>}
++                {!o.who && o.message && <><dt>內容</dt><dd>{plain(o.message)}</dd></>}
++              </dl>
++              <span className="opt-pick" aria-hidden>{on ? '● 已選' : '○ 選這個'}</span>
+             </button>
+           )
+         })}
+       </div>
+-      {dLine !== '—' && <p className="opt-shared" data-testid="option-delivery">交期（求解器結果，各方案相同）：{dLine}</p>}
++      {dLine !== '—' && <p className="opt-shared" data-testid="option-delivery">交期（求解器結果，{opts.length > 1 ? '各方案相同' : '此方案'}）：{dLine}</p>}
+     </Block>
+   )
+   const toolsUsed = (n: number) => (
+@@ -159,43 +151,35 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+           )}
+         </dd>
+         <dt className="no">不同意時</dt>
+-        <dd>按「討論」跟 Agent Nemo 說，Agent Nemo 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
++        <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
+       </dl>
+     </Block>
+   )
+   // 對交期的影響: one row per order the proposed schedule changes (code-built diff of the two schedule versions)
+   const impactRows = diff ? impactTable(diff, facts) : []
+   const impact = (n: number) => (
+-    <Block key="impact" n={n} title="對交期的影響" hint="時間以模擬工廠時間顯示" className="apv-impact">
++    <Block key="impact" n={n} title="對交期的影響" className="apv-impact">
+       {impactRows.length > 0 && (
+-        <table className="impact-t apv-impact-t" data-testid="impact-table">
+-          <thead><tr><th>訂單</th><th>原排程</th><th>調整後</th><th>時間變化</th><th>交期</th></tr></thead>
++        <table className="impact-t" data-testid="impact-table">
++          <thead><tr><th>訂單</th><th>原本</th><th>改後</th><th>交期</th></tr></thead>
+           <tbody>{impactRows.map((r) => (
+-            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={`dm dm-${r.dir}`} data-testid="demold-change"><span className="dm-tag">{r.change}</span></td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
++            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
+           ))}</tbody>
+         </table>
+       )}
+       {!impactRows.length && cure && <p className="impact-line">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</p>}
+-      {impactRows.length > 0 && <p className="impact-note">「時間變化」是出模時間的差，不等於客戶交期延誤。</p>}
+-      {!planLayout && <p className="impact-line impact-sub">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>}
++      <p className="impact-line">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>
+     </Block>
+   )
+-  // 核准後的執行事項: what happens on approval (the card's actions, the chosen staffing option, the R1 steps after).
+-  // Only the R1 steps that follow in the plan are labelled 系統自動; nothing else is guessed to be manual or automatic.
+-  const execRows = mergeExec([
+-    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => actionRow(plain(a))),
+-    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ item: '人力安排', how: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
+-    ...afterSteps.map((n) => ({ item: TOOL_LABEL[n.tool], how: `系統自動・${plain(n.purpose)}` })),
+-  ])
++  // 核准後誰去做: what executes on approval (the card's actions, the chosen staffing option, the R1 steps after)
++  const whoRows = [
++    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => splitAction(plain(a))),
++    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ who: o.who ?? (o.teams.join('、') || '人力'), what: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
++    ...afterSteps.map((n) => ({ who: '系統（R1 自動）', what: `${TOOL_LABEL[n.tool]}・${plain(n.purpose)}` })),
++  ]
+   const who = (n: number) => (
+     <Block key="who" n={n} title="核准後誰去做" className="apv-who">
+-      {execRows.length
+-        ? (
+-          <table className="exec-t" data-testid="who-does-what">
+-            <thead><tr><th>執行項目</th><th>執行方式</th></tr></thead>
+-            <tbody>{execRows.map((r, i) => <tr key={i}><td><b>{r.item}</b></td><td><Clamp text={r.how} /></td></tr>)}</tbody>
+-          </table>
+-        )
++      {whoRows.length ? <ul className="who-list" data-testid="who-does-what">{whoRows.map((r, i) => <li key={i}><b>{r.who}</b><span>{r.what}</span></li>)}</ul>
+         : <p className="muted small">這張卡沒有列出要執行的動作</p>}
+     </Block>
+   )
+@@ -212,42 +196,33 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+     </Block>
+   )
+   // plan: impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
+-  const order = planLayout ? [...(showBoard ? [boardBlock] : []), impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
++  const order = planLayout ? [boardBlock, impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
+   let k = 0
+   const blocks = order.map((f) => { const el = f(k + 1); if (el) k++; return el })
+ 
+   return (
+-    <section className="apv" data-testid="approval-visual" data-layout={layout} data-version={req.version ?? 1} data-round={req.round} aria-label={`核准：${plain(req.title)}`}>
++    <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
+       <header className="apv-h">
+         <div className="apv-tags">
+-          {!planLayout && <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>}
+-          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{planLayout ? ({ R3: '高風險', R2: '中風險' } as Record<string, string>)[req.risk] ?? RISK_PLAIN[req.risk] : RISK_PLAIN[req.risk]}</span>
+-          {!planLayout && <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>}
+-          {!planLayout && (req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
+-          {!planLayout && ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
+-          {!planLayout && expires && <span className="apv-exp">{expires}決定</span>}
+-          {!planLayout && onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
++          <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>
++          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
++          <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
++          {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
++          {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
++          {expires && <span className="apv-exp">{expires}決定</span>}
++          {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
+         </div>
+         <h3 className="apv-title">{plain(req.title)}</h3>
+-        {/* secondary facts are folded by default (nothing removed): 判斷依據, 與 v(n-1) 相比, 主管條件 */}
+-        {!planLayout && <div data-testid="card-changes"><div className="apv-meta">
+-          {(req.version ?? 1) > 1 && (
+-            <button type="button" className="apv-tog" aria-expanded={more === 'chg'} onClick={() => setMore(more === 'chg' ? null : 'chg')} data-testid="changes-toggle">
+-              與 v{(req.version ?? 2) - 1} 相比：{(req.changes ?? []).length ? `${(req.changes ?? []).length} 項異動` : '排程內容相同'} {more === 'chg' ? '▾' : '›'}
+-            </button>
+-          )}
+-          {req.reason && (
+-            <button type="button" className="apv-tog" aria-expanded={more === 'why'} onClick={() => setMore(more === 'why' ? null : 'why')} data-testid="why-toggle">
+-              判斷依據 {more === 'why' ? '▾' : '›'}
+-            </button>
+-          )}
+-          {(req.constraints ?? []).length > 0 && (
+-            <span className="apv-chips" data-testid="card-constraints">{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</span>
+-          )}
+-        </div>
+-        {more === 'chg' && (req.changes ?? []).length > 0 && <ul className="apv-fold" data-testid="changes-list">{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul>}
+-        {more === 'why' && <p className="apv-fold apv-reason" data-testid="why-text">{plain(req.reason)}</p>}
+-        </div>}
++        <p className="apv-reason">{plain(req.reason)}</p>
++        {(req.version ?? 1) > 1 && (
++          <div className="apv-changed" data-testid="card-changes">
++            <b>與 v{(req.version ?? 2) - 1} 相比</b>
++            {(req.changes ?? []).length ? <ul>{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul> : <span>排程內容相同</span>}
++          </div>
++        )}
++        {(req.constraints ?? []).length > 0 && (
++          <p className="apv-chips" data-testid="card-constraints"><small>主管條件：</small>{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</p>
++        )}
+       </header>
+ 
+       {planLayout
+@@ -267,9 +242,8 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
+               {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
+             </button>
+             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
+-            {deadline && <span className="apv-deadline" data-testid="approve-deadline" title="期限依模擬工廠時間計算">{deadline}<small>模擬工廠時間</small></span>}
++            <span className="apv-hint">核准後才執行；要改，按「討論」</span>
+           </div>
+-          {!planLayout && <p className="apv-hint">核准後 Agent Nemo 派人執行並回報；要改，按「討論」跟 Agent Nemo 說</p>}
+         </>}
+       </footer>
+     </section>
+@@ -291,20 +265,7 @@ function changedSteps(evId: string, version: number, nodes: PlanNode[], lines: R
+   return changed
+ }
+ 
+-interface ImpactRow { order: string; before: string; after: string; change: string; dir: 'later' | 'earlier' | 'same' | 'none'; verdict: string; late: boolean; ok: boolean }
+-
+-/** 出模時間變化: after − before of the order's last demold (works across day / month / year). Not the customer-delivery delay. */
+-export function demoldChange(before: string | null | undefined, after: string | null | undefined): { text: string; dir: ImpactRow['dir'] } {
+-  if (before == null || after == null) return { text: '—', dir: 'none' }
+-  const a = ms(before), b = ms(after)
+-  if (isNaN(a) || isNaN(b)) return { text: '—', dir: 'none' }
+-  const mins = Math.round((b - a) / 60000)
+-  if (mins === 0) return { text: '無變化', dir: 'same' }
+-  const abs = Math.abs(mins)
+-  const d = Math.floor(abs / 1440), h = Math.floor((abs % 1440) / 60), m = abs % 60
+-  const span = `${d ? `${d}d ` : ''}${h || d ? `${h}h ` : ''}${String(m).padStart(2, '0')}m`.trim()
+-  return mins > 0 ? { text: `延後 ${span}`, dir: 'later' } : { text: `提前 ${span}`, dir: 'earlier' }
+-}
++interface ImpactRow { order: string; before: string; after: string; verdict: string; late: boolean; ok: boolean }
+ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: string[] }): ImpactRow[] {
+   const byOrder = new Map<string, { before: ScheduleJob | null; after: ScheduleJob }>()
+   for (const c of diff.changes) {
+@@ -312,57 +273,20 @@ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: str
+     const cur = byOrder.get(c.job.order_id)
+     if (!cur || ms(c.job.demold) > ms(cur.after.demold)) byOrder.set(c.job.order_id, { before: c.before, after: c.job })
+   }
+-  // short stamp "10/04 08:04 AM"; the machine only when it changed, the year only when the two times differ in year
+-  const at = (j: ScheduleJob, other: ScheduleJob | null, press: boolean) => {
+-    const yr = other && fmtMD(other.demold).slice(0, 4) !== fmtMD(j.demold).slice(0, 4) ? `${fmtMD(j.demold).slice(0, 4)}/` : ''
+-    return `${press ? `${Number(j.press_id.slice(5))} 號・` : ''}${yr}${fmtMD(j.demold).slice(5)} ${fmtHM(j.demold).replace(' ', '\u00a0')}`
+-  }
++  const at = (j: ScheduleJob) => `${Number(j.press_id.slice(5))} 號・${fmtMD(j.demold)} ${fmtHM(j.demold)} 出模`
+   return [...byOrder.entries()].map(([order, { before, after }]) => {
+     const late = facts.late.some((l) => l.includes(order))
+-    const ch = demoldChange(before?.demold, after.demold)
+-    return { order, before: before ? at(before, after, before.press_id !== after.press_id) : '—', after: at(after, before, !!before && before.press_id !== after.press_id), change: ch.text, dir: ch.dir, late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
++    return { order, before: before ? at(before) : '—', after: at(after), late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
+   })
+ }
+ 
+-/** One approved action as 執行項目 / 執行方式: the line's own label ("人力：…", "通知：…") if it has one, else what it changes.
+- *  No who-does-it guess: the text is shown as the card wrote it. */
+-function actionRow(a: string): { item: string; how: string } {
++/** Who carries out one approved action: the line's own label ("人力：…", "通知：…"), else by what it changes. */
++function splitAction(a: string): { who: string; what: string } {
+   const m = /^([^：:（(]{1,8})[：:]\s*(.+)$/.exec(a)
+-  if (m) return { item: m[1] === '人力' ? '人力安排' : m[1], how: m[2] }
+-  if (a.includes('排程')) return { item: '排程調整', how: a }
+-  if (a.includes('硫化')) return { item: '硫化時間', how: a }
+-  return { item: '執行事項', how: a }
+-}
+-
+-/** Merge repeats: the same text twice; one row whose text only restates another row of the same item; a 硫化時間 row
+- *  whose hours are already written in another row (e.g. the 排程 line). Nothing else is dropped. */
+-function mergeExec(rows: { item: string; how: string }[]): { item: string; how: string }[] {
+-  const norm = (t: string) => t.replace(/\s+/g, '')
+-  const out: { item: string; how: string }[] = []
+-  for (const r of rows) {
+-    const k = norm(r.how)
+-    const dup = out.findIndex((o) => norm(o.how) === k || (o.item === r.item && (norm(o.how).includes(k) || k.includes(norm(o.how)))))
+-    if (dup >= 0) { if (norm(out[dup].how).length < k.length) out[dup] = r; continue }
+-    out.push(r)
+-  }
+-  return out.filter((r, i) => {
+-    if (r.item !== '硫化時間') return true
+-    const h = /(\d+(?:\.\d+)?)\s*h/.exec(r.how)?.[0]
+-    return !(h && out.some((o, j) => j !== i && o.how.replace(/\s+/g, '').includes(h.replace(/\s+/g, ''))))
+-  })
+-}
+-
+-/** Long cell text: first part shown, the rest one click away (never cut off for good). */
+-function Clamp({ text, max = 34 }: { text: string; max?: number }) {
+-  const [open, setOpen] = useState(false)
+-  const chars = Array.from(text)
+-  if (chars.length <= max + 6) return <>{text}</>
+-  return (
+-    <>
+-      {open ? text : `${chars.slice(0, max).join('')}…`}{' '}
+-      <button type="button" className="apv-tog sm" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '收合' : '詳情'}</button>
+-    </>
+-  )
++  if (m) return { who: m[1], what: m[2] }
++  if (a.includes('排程')) return { who: '排程（系統生效）', what: a }
++  if (a.includes('硫化')) return { who: '硫化機（系統設定）', what: a }
++  return { who: '系統', what: a }
+ }
+ 
+ function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {
+diff --git a/web/src/agent/ChatBar.tsx b/web/src/agent/ChatBar.tsx
+index adb6f96..2779779 100644
+--- a/web/src/agent/ChatBar.tsx
++++ b/web/src/agent/ChatBar.tsx
+@@ -10,7 +10,7 @@ import { useWarRoom } from '../useWarRoom'
+ import type { ChatItem, LocalItem } from './transcript'
+ 
+ /** `mode` is kept for callers (討論 / 問 AI buttons) and ignored: the 主 agent decides. */
+-export interface BarFocus { mode?: BarMode; text?: string; n: number; /** send `text` at once (the guide questions in an empty chat) instead of only filling the box */ send?: boolean }
++export interface BarFocus { mode?: BarMode; text?: string; n: number }
+ export type BarMode = 'discuss' | 'command' | 'ask'
+ 
+ let askSeq = 0
+@@ -27,14 +27,13 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
+   const [seen, setSeen] = useState(0)
+   if (focus && focus.n !== seen) {
+     setSeen(focus.n)
+-    if (focus.text && !focus.send) setQ(focus.text)
++    if (focus.text) setQ(focus.text)
+   }
+-  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
+-  // the guide questions of an empty chat go out at once
+-  const sentFocus = useRef(0)
++  // 討論: the caret goes into this input, scrolled into view (on a narrow screen the chat sits below the card, and
++  // 「按了討論沒有用」 was the click focusing an input off screen)
+   useEffect(() => {
+-    if (focus?.send && focus.text && focus.n !== sentFocus.current) { sentFocus.current = focus.n; void send(focus.text) }
+-    // eslint-disable-next-line react-hooks/exhaustive-deps
++    if (!focus?.n) return
++    setTimeout(() => { input.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); input.current?.focus() }, 60)
+   }, [focus?.n])
+   const can = !!transport?.message
+   const lanDown = state.snapshot?.header.network === 'lan_down'
+diff --git a/web/src/agent/SimpleChat.tsx b/web/src/agent/SimpleChat.tsx
+index a758b7f..c774e94 100644
+--- a/web/src/agent/SimpleChat.tsx
++++ b/web/src/agent/SimpleChat.tsx
+@@ -5,9 +5,9 @@
+ // MainThread: the 主 agent's whole thread across subagents — its turns (audit kind=system actor=main_agent orch=chat,
+ // backfilled once from GET /api/audit and then live), its dispatches / reports / interrupts, and what is being sent now.
+ // SubProgress: one subagent's progress in the same panel (state, tools with results, worker tasks, 中斷).
+-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
++import { useLayoutEffect, useRef, useState } from 'react'
+ import type { Event } from '../contracts'
+-import { fmtHM, ms } from '../format'
++import { fmtHMS } from '../format'
+ import { plain } from '../plain'
+ import { TOOL_LABEL, resultText } from '../stepText'
+ import { STATE_LABEL } from '../components/common'
+@@ -18,78 +18,15 @@ import type { ToolItem } from './transcript'
+ import type { Bubble } from './mainThread'
+ import { useTranscript } from './useTranscript'
+ 
+-/** `extra`: one node placed among the bubbles by time (the 待核准 notice / briefing: bubbles at or before `at` come first).
+- *  `guide`: shown instead of the plain `empty` text when there is nothing yet. `follow`: the 主控台 behaviour — stay at
+- *  the newest message only while the reader is at the bottom, a 「跳到最新」 button otherwise, and the order hint. */
+-export function Bubbles({ items, empty, extra = null, guide = null, follow = false }: {
+-  items: Bubble[]; empty: string; extra?: { at: number; node: ReactNode; alignTop?: boolean } | null; guide?: ReactNode; follow?: boolean
+-}) {
++export function Bubbles({ items, empty }: { items: Bubble[]; empty: string }) {
+   const scroller = useRef<HTMLDivElement>(null)
+-  const extraBox = useRef<HTMLDivElement>(null)
+-  const [pinned, setPinned] = useState(true)
+-  const skip = useRef(false)      // our own scroll (to the newest / to a briefing's heading) is not the reader leaving the bottom
+   const last = items[items.length - 1]
+-  const at = extra && !isNaN(extra.at) ? extra.at : Infinity
+-  let cut = items.length
+-  while (cut > 0 && ms(items[cut - 1].ts) > at) cut--
+-  const before = extra ? items.slice(0, cut) : items
+-  const after = extra ? items.slice(cut) : []
+-  const onScroll = () => {
+-    const el = scroller.current
+-    if (skip.current) { skip.current = false; return }
+-    if (follow && el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
+-  }
+-  useLayoutEffect(() => {
+-    const el = scroller.current
+-    if (!el || (follow && !pinned)) return
+-    const box = extraBox.current
+-    // a long briefing that is the last thing is shown from its heading; everything else: the newest message at the bottom
+-    const was = el.scrollTop
+-    if (follow && box && extra?.alignTop && !after.length) el.scrollTop += box.getBoundingClientRect().top - el.getBoundingClientRect().top - 8
+-    else el.scrollTop = el.scrollHeight
+-    skip.current = el.scrollTop !== was
+-  }, [items.length, last?.text, last?.pending, !!extra, after.length, pinned, follow])
+-  const jump = () => { const el = scroller.current; if (el) { el.scrollTop = el.scrollHeight; setPinned(true) } }
+-  const nothing = !items.length && !extra
++  useLayoutEffect(() => { const el = scroller.current; if (el) el.scrollTop = el.scrollHeight }, [items.length, last?.text, last?.pending])
+   return (
+-    <>
+-      <div className="con-body sc" ref={scroller} onScroll={onScroll} data-testid="transcript">
+-        {follow && !nothing && <p className="con-order small">舊訊息在上 ↓ 新訊息在下</p>}
+-        {nothing && (guide ?? <p className="muted con-empty">{empty}</p>)}
+-        {before.map((b) => <BubbleRow key={b.key} b={b} />)}
+-        {extra && <div ref={extraBox}>{extra.node}</div>}
+-        {after.map((b) => <BubbleRow key={b.key} b={b} />)}
+-      </div>
+-      {follow && !pinned && <button className="con-jump" onClick={jump} data-testid="con-jump">↓ 跳到最新</button>}
+-    </>
+-  )
+-}
+-
+-/** A long reply: the conclusion first, 「展開詳細」 shows the whole original text (unchanged). */
+-export function leadOf(text: string): { lead: string; rest: boolean } {
+-  const parts = text.split(/(?<=[。！？!?；;\n])/).map((x) => x.trim()).filter(Boolean)
+-  let lead = ''
+-  for (const sent of parts) {
+-    if (lead && Array.from(lead + sent).length > 90) break
+-    lead += sent
+-    if (Array.from(lead).length >= 24) break
+-  }
+-  lead = lead.replace(/[；;\s]+$/, '')
+-  return { lead, rest: lead.length < text.trim().length }
+-}
+-
+-function ReplyText({ text }: { text: string }) {
+-  const [open, setOpen] = useState(false)
+-  const box = useRef<HTMLSpanElement>(null)
+-  // keep the opened reply readable: bring it into view inside the chat scroller
+-  useEffect(() => { if (open) box.current?.scrollIntoView({ block: 'nearest' }) }, [open])
+-  const { lead, rest } = leadOf(text)
+-  if (!rest || Array.from(text).length <= 90) return <>{text}</>
+-  return (
+-    <>
+-      <span ref={box} data-testid="reply-text">{open ? text : lead}</span>
+-      <button type="button" className="sc-more" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="reply-more">{open ? '收合 ▴' : '展開詳細 ▾'}</button>
+-    </>
++    <div className="con-body sc" ref={scroller} data-testid="transcript">
++      {!items.length && <p className="muted con-empty">{empty}</p>}
++      {items.map((b) => <BubbleRow key={b.key} b={b} />)}
++    </div>
+   )
+ }
+ 
+@@ -99,9 +36,7 @@ function BubbleRow({ b }: { b: Bubble }) {
+   return (
+     <div className={`sc-row ${b.who}`} data-testid={b.who === 'me' ? 'sc-me' : 'sc-agent'}>
+       <div className={`sc-b ${b.pending ? 'pending' : ''}`}>
+-        {b.who === 'agent' && !b.pending && <b className="sc-ag">Agent Nemo</b>}
+-        {b.pending && b.who === 'agent' ? <><i className="spin" />Agent Nemo 思考中…</> : b.who === 'agent' ? <ReplyText text={plain(b.text)} /> : plain(b.text)}
+-        {!b.pending && <time className="sc-time">{fmtHM(b.ts)}</time>}
++        {b.pending && b.who === 'agent' ? <><i className="spin" />Agent Nemo 思考中…</> : plain(b.text)}
+       </div>
+       {steps.length > 0 && (
+         <button type="button" className="sc-tools" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid="sc-tools">
+@@ -140,7 +75,7 @@ export function SubProgress({ ev, talk = [] }: { ev: Event; talk?: Bubble[] }) {
+         {tools.map((t) => {
+           let line = ''
+           if (t.status === 'ok' && t.data) { try { line = resultText(t.tool, t.args, t.data) } catch { line = '' } }
+-          return <li key={t.key} className={t.status}><span className="muted">{fmtHM(t.ts)}</span> {TOOL_LABEL[t.tool] ?? t.tool}：{t.status === 'running' ? '執行中…' : t.status === 'failed' ? `失敗 ${t.error ?? ''}` : plain(line) || '完成'}</li>
++          return <li key={t.key} className={t.status}><span className="muted">{fmtHMS(t.ts).slice(0, 5)}</span> {TOOL_LABEL[t.tool] ?? t.tool}：{t.status === 'running' ? '執行中…' : t.status === 'failed' ? `失敗 ${t.error ?? ''}` : plain(line) || '完成'}</li>
+         })}
+         {!tools.length && <li className="muted">還沒用工具</li>}
+       </ul>
+diff --git a/web/src/agent/agent.css b/web/src/agent/agent.css
+index 2cff3bd..2bfea24 100644
+--- a/web/src/agent/agent.css
++++ b/web/src/agent/agent.css
+@@ -22,12 +22,6 @@
+ .con-filters small { font-size: 11px; color: var(--ink-faint); }
+ .con-body { flex: 1; overflow-y: auto; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; scrollbar-width: thin; }
+ .con-empty { padding: 30px 4px; }
+-.con-guide { display: grid; gap: 8px; padding: 6px 2px; }
+-.con-guide h3 { margin: 0; font-size: 15px; }
+-.con-guide p { margin: 0; }
+-.con-guide ul { margin: 0; padding-left: 18px; color: var(--ink-dim); font-size: 13.5px; display: grid; gap: 2px; }
+-.con-guide-q { text-align: left; background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; font: inherit; font-size: 14px; }
+-.con-guide-q:hover { border-color: var(--ink-faint); }
+ .con-jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: 118px; z-index: 2; background: var(--panel-3); color: var(--ink); border: 1px solid var(--ink-faint); border-radius: 999px; padding: 5px 14px; font-size: 13px; box-shadow: 0 6px 18px rgb(var(--shade-rgb, 0 0 0) / .45); }
+ .con-live { display: flex; align-items: center; gap: 8px; color: var(--info); font-size: 13.5px; padding: 8px 2px 0; }
+ .con-live.wait { color: var(--warn); }
+@@ -134,7 +128,7 @@
+ .askbar-ex button { background: var(--panel-2); border: 1px solid var(--panel-3); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; color: var(--ink-dim); }
+ .askbar-ex button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
+ .askbar-in { display: flex; gap: 8px; align-items: stretch; }
+-.askbar textarea { flex: 1; resize: none; min-height: 56px; max-height: 120px; line-height: 1.4; background: var(--bg); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 15px; }
++.askbar textarea { flex: 1; resize: none; min-height: 42px; max-height: 120px; background: var(--bg); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 15px; }
+ .askbar textarea:focus { outline: none; border-color: var(--accent); }
+ .btn-send { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 0 18px; font-weight: 700; flex: none; }
+ 
+@@ -320,7 +314,6 @@
+ .askbar-modes button.on { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); font-weight: 700; }
+ .askbar-modes button:disabled { opacity: .45; cursor: not-allowed; }
+ .askbar-hint { font-size: 12px; color: var(--ink-faint); margin-left: 4px; }
+-.askbar-modes:empty { display: none; }
+ .askbar[data-mode="command"] textarea:focus { border-color: var(--info); }
+ .apv-ver { font-size: 12.5px; padding: 2px 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; border: 1px solid rgb(var(--warn-rgb, 245 184 61) / .45); }
+ .apv-changed { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); font-size: 14px; color: var(--ink); }
+@@ -348,9 +341,6 @@
+ .home { --home-h: max(560px, calc(100vh - 236px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
+ .home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
+ .home > .plan-area { grid-area: plan; height: var(--home-h); }
+-/* 今日工廠概況 grows with its content (no clipped last section at 1440); the side columns stay sticky */
+-.home > .home-ov { height: auto; min-height: var(--home-h); overflow: visible; }
+-.home > .home-ov .po-body { overflow: visible; }
+ .home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
+ .con-view button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ .feed-ev { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
+@@ -368,15 +358,7 @@
+ .hl-k { margin: 0; padding: 8px 14px 2px; font-size: 12px; font-weight: 600; color: var(--ink-faint); letter-spacing: .04em; }
+ .hl-item { display: grid; gap: 2px; width: 100%; text-align: left; background: none; border: 0; padding: 6px 14px 8px; color: var(--ink); }
+ .hl-item:hover { background: var(--panel-2); }
+-.hl-item.on { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--ink-faint); }   /* neutral selection, no green frame */
+-.hl-item.has-req { border-left: 4px solid var(--warn); }
+-.hl-item.has-req.r-R3 { border-left-color: var(--alarm); }
+-.hl-risk { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
+-.hl-risk.r-R3 { background: var(--alarm-soft); color: var(--alarm); }
+-.hl-risk.r-R2 { background: var(--warn-soft); color: var(--warn); }
+-.hl-pill-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+-.hl-item.has-req .hl-desc { display: block; }
+-.hl-none { margin: 0; font-size: 14px; color: var(--ink-dim); }
++.hl-item.on { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--accent); }
+ .hl-top { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+ .hl-pill { align-self: flex-start; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; background: var(--panel-3); color: var(--ink-dim); }
+ .hl-pill.tone-wait, .hl-pill.tone-risk { background: var(--warn-soft); color: var(--warn); }
+@@ -388,6 +370,7 @@
+ .hl-fyi > summary { padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--ink-dim); }
+ .hl-fyi .hl-item { opacity: .85; }
+ .hl-empty { padding: 20px 14px; }
++.hl-empty .calm-title { font-size: 19px; }
+ 
+ /* 計劃 (center column): the board, delivery impact, who does what; 核准 / 討論 pinned at the bottom */
+ .plan-area { min-width: 0; overflow-y: auto; scrollbar-width: thin; border-radius: var(--radius); }
+@@ -453,6 +436,8 @@
+ .ov-prog .ov-pn { font-variant-numeric: tabular-nums; white-space: nowrap; }
+ .ov-prog .ov-pn b { font-size: 15px; }
+ .ov-prog .ov-pr { font-size: 12.5px; white-space: nowrap; min-width: 9.5em; text-align: right; }
++.ov-line { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 14px; }
++.ov-line.has-bad span:last-child { color: var(--ink); }
+ .ov-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
+ .ov-list > li { display: grid; grid-template-columns: 4.2em minmax(0, 1fr); gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+ .ov-list > li:last-child { border-bottom: 0; }
+@@ -471,31 +456,12 @@ a.ov-row:hover { background: var(--panel-2); }
+ .ov-tag.t-ok, .ov-tag.t-back { background: var(--accent-soft); color: var(--accent); }
+ .ov-tag.t-stop, .ov-tag.t-no { background: var(--alarm-soft); color: var(--alarm); }
+ .ov-tag.t-decide { background: var(--panel-3); color: var(--info); }
+-.ov-sim { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+-.ov-sim small { font-size: 11px; color: var(--ink-faint); }
+-.ov-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+-.ov-kpi { display: grid; gap: 2px; align-content: start; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+-.ov-kpi .k-l { font-size: 12px; color: var(--ink-dim); }
+-.ov-kpi .k-v { font-size: 13px; color: var(--ink-dim); white-space: nowrap; }
+-.ov-kpi .k-v b { font-size: 22px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+-.ov-kpi .k-s { font-size: 12px; color: var(--ink-dim); overflow-wrap: anywhere; }
+-.ov-kpi.bad { background: var(--alarm-soft); border-color: var(--alarm); }
+-.ov-kpi.bad .k-v b, .ov-kpi.bad .k-s { color: var(--alarm); }
+-.ov-next > li { grid-template-columns: 6.2em 3.4em minmax(0, 1fr); align-items: center; }
+-.ov-cat { justify-self: start; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 6px; background: var(--panel-3); color: var(--ink-dim); white-space: nowrap; }
+-.ov-cat.cat-硫化 { background: var(--accent-soft); color: var(--accent); }
+-.ov-cat.cat-出貨 { background: var(--info-soft, var(--panel-3)); color: var(--info); }
+-.ov-cat.cat-物流, .ov-cat.cat-保養 { background: var(--warn-soft); color: var(--warn); }
+-.ov-cat.cat-換模 { background: var(--alarm-soft); color: var(--alarm); }
+-.ov-view { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
+ @media (max-width: 759px) {
+   .home > .home-ov .po-body { overflow: visible; }
+   .ov-prog li { grid-template-columns: 3.5em minmax(0, 1fr) auto; }
+   .ov-prog .ov-pr { grid-column: 2 / -1; text-align: left; min-width: 0; }
+   .ov-row { grid-template-columns: 3.6em minmax(0, 1fr); }
+   .ov-row .ov-tags { grid-column: 2; justify-content: flex-start; }
+-  .ov-kpis { grid-template-columns: 1fr; }
+-  .ov-next > li { grid-template-columns: 5.6em 3.2em minmax(0, 1fr); }
+   .rs-link { margin-left: 0; }
+ }
+ 
+@@ -577,7 +543,12 @@ a.ov-row:hover { background: var(--panel-2); }
+ .apv-next.live { color: var(--info); display: flex; gap: 6px; align-items: center; }
+ 
+ /* ---------- 主控台 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」) ---------- */
+-.tk { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; margin: 0 0 12px; }
++.tk { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: stretch; margin: 0 0 12px; }
++.tk-fixed { display: flex; align-items: center; gap: 4px 14px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; color: var(--ink-dim); font: inherit; font-size: 13.5px; white-space: nowrap; }
++.tk-fixed:hover { border-color: var(--ink-faint); }
++.tk-fixed b { color: var(--ink); font-size: 15px; }
++.tk-fixed .as-item.bad, .tk-fixed .as-item.bad b { color: var(--alarm); }
++.tk-fixed .as-item.warn, .tk-fixed .as-item.warn b { color: var(--warn); }
+ .tk-run { display: flex; align-items: center; min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+ .tk-pinned { display: flex; gap: 4px; padding: 0 6px; flex: none; max-width: 55%; overflow-x: auto; scrollbar-width: none; border-right: 1px solid var(--border); }
+ .tk-view { flex: 1; min-width: 0; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+@@ -605,7 +576,9 @@ a.ov-row:hover { background: var(--panel-2); }
+   .tk-toast { animation: none; }
+ }
+ @media (max-width: 899px) {
+-  .tk-run { flex-wrap: wrap; }
++  .tk { grid-template-columns: minmax(0, 1fr) auto; }
++  .tk-fixed { justify-content: space-between; }
++  .tk-run { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
+   .tk-pinned { max-width: none; width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+   .tk-view { flex: 1 1 100%; }
+   .tk-toast { left: 16px; right: 16px; text-align: center; }
+@@ -657,135 +630,6 @@ a.ov-row:hover { background: var(--panel-2); }
+ .con-brief .br-head { font-size: 15px; }
+ .br-link { color: var(--accent); font-size: 13.5px; width: fit-content; }
+ 
+-/* ── Console chat bubbles (Phase 2): supervisor right / light green, Agent left / light grey ── */
+-.con-body .r-q { background: var(--accent-soft); color: var(--ink); max-width: 85%; }
+-.con-body .r-ask, .con-body .r-chat { gap: 6px; }
+-.con-body .r-a, .con-body .r-chat.agent {
+-  justify-self: start; max-width: 92%; background: var(--panel-3); border-left: 0;
+-  border-radius: 12px 12px 12px 3px; padding: 8px 12px;
+-}
+-.con-body .r-chat.agent header, .con-body .r-a header { color: var(--ink-dim); }
+-.con-body .con-guide-q:disabled { opacity: .5; cursor: not-allowed; }
+-.con-offline { margin: 6px 0 0; font-size: 13px; color: var(--warn); }
+-
+-/* short 待核准 notice (desktop Console only) */
+-.con-notice { margin: 8px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--panel-2); border-left: 4px solid var(--alarm); min-width: 0; display: grid; gap: 4px; }
+-.cn-head { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+-.cn-st { color: var(--alarm); margin-left: 6px; font-weight: 600; }
+-.cn-line { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+-.cn-link { justify-self: start; background: none; border: 0; padding: 2px 0; color: var(--info); font: inherit; font-size: 14px; cursor: pointer; text-decoration: underline; }
+-.cn-ts { color: var(--ink-faint); font-size: 11.5px; }
+-
+-/* ── center items (Phase 2) ── */
+-.apv-impact-t td.dm { font-weight: 600; }
+-.apv-impact-t td.dm-later { color: var(--warn); }
+-.apv-impact-t td.dm-earlier { color: var(--info); }
+-.apv-impact-t td.dm-same, .apv-impact-t td.dm-none { color: var(--ink-faint); font-weight: 400; }
+-.exec-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+-.exec-t th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-dim); padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); }
+-.exec-t td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+-.exec-t td:first-child { width: 28%; white-space: nowrap; }
+-.exec-t td b { color: var(--ink-dim); font-weight: 600; }
+-.apv-deadline { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; background: #f6d860; color: #4a3a00; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; align-self: center; }
+-.apv-deadline small { font-size: 12px; font-weight: 500; opacity: .85; }
+-.apv-act > .apv-hint { margin: 0; }
+-@media (max-width: 720px) {
+-  .apv-impact-t { display: block; overflow-x: auto; }
+-  .apv-impact-t td, .apv-impact-t th { white-space: normal; }
+-  .exec-t td:first-child { white-space: normal; width: 34%; }
+-  .apv-deadline { width: 100%; justify-content: center; border-radius: 14px; }
+-}
+-
+-/* ── visual pass 2 (issue #100): denser center, target-mock look ── */
+-.apv-h { margin-bottom: 8px; }
+-.apv-title { font-size: 19px; margin: 6px 0 4px; }
+-.apv-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin: 2px 0 0; }
+-.apv-meta .apv-chips { margin: 0; }
+-.apv-tog { background: none; border: 0; padding: 2px 0; color: var(--ink-dim); font: inherit; font-size: 13px; cursor: pointer; }
+-.apv-tog:hover { color: var(--ink); text-decoration: underline; }
+-.apv-tog.sm { font-size: 12.5px; color: var(--info); padding: 0 2px; }
+-.apv-fold { margin: 6px 0 0; padding: 8px 12px 8px 28px; border-radius: 8px; background: var(--panel-2); font-size: 13.5px; line-height: 1.55; color: var(--ink-dim); }
+-.apv-fold.apv-reason { padding-left: 12px; }
+-.apv[data-layout="plan"] .apv-n { display: none; }
+-.apv[data-layout="plan"] .apv-bh { font-size: 14px; margin-bottom: 6px; }
+-.apv-plan-body { gap: 12px; }
+-.apv-impact-t { font-size: 13.5px; }
+-.apv-impact-t td { padding: 5px 8px 5px 0; }
+-.apv-impact-t td.dm { white-space: nowrap; }
+-.apv-impact-t td.dm-later, .apv-impact-t td.dm-earlier { }
+-.apv-impact-t td.dm-later span, .apv-impact-t td.dm-later { color: var(--warn); }
+-.impact-note { margin: 6px 0 0; font-size: 12px; color: var(--ink-faint); }
+-.impact-sub { font-size: 12.5px; color: var(--ink-faint); margin: 2px 0 0; }
+-.exec-t { font-size: 13.5px; }
+-.exec-t td { padding: 5px 8px 5px 0; }
+-.apv-opts-c { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+-.apv-opts-c .opt { padding: 7px 10px; gap: 4px; }
+-.apv-opts-c .opt-h { gap: 8px; flex-wrap: wrap; }
+-.apv-opts-c .opt-id { width: 22px; height: 22px; font-size: 13px; }
+-.apv-opts-c .opt-l { font-size: 14px; }
+-.apv-opts-c .opt-brief { color: var(--ink-dim); font-size: 13px; margin-left: auto; }
+-.apv-opts-c .opt-pick { font-size: 13px; }
+-.apv-act { gap: 6px; margin-top: 10px; padding-top: 10px; }
+-.apv-btns { gap: 8px; align-items: center; flex-wrap: nowrap; }
+-.apv-btns .btn-approve { min-width: 110px; font-size: 15px; }
+-.apv-act > .apv-hint { font-size: 12px; color: var(--ink-faint); }
+-@media (max-width: 720px) { .apv-btns { flex-wrap: wrap; } .apv-opts-c .opt-brief { margin-left: 0; } }
+-
+-/* Agent reply: the answer first, the details one click away */
+-.r-lead { margin: 0; }
+-.r-more { background: none; border: 0; padding: 2px 0 0; color: var(--info); font: inherit; font-size: 13px; cursor: pointer; justify-self: start; }
+-.r-more:hover { text-decoration: underline; }
+-.apv-impact-t td.dm-later { border: 1.5px solid var(--warn); background: var(--warn-soft); padding: 4px 8px; border-radius: 4px; }
+-.apv-impact-t td:last-child, .apv-impact-t th:last-child { padding-left: 12px; }
+-@media (max-width: 720px) {
+-  .apv-impact-t { font-size: 13px; }
+-  .apv-impact-t td:first-child, .apv-impact-t th:first-child, .apv-impact-t td:last-child, .apv-impact-t th:last-child, .apv-impact-t th { white-space: nowrap; }
+-  .apv-impact-t td.dm-later { padding: 3px 6px; }
+-}
+-
+-/* ── target-mock pass (CJ 2026-10-22): chat look + center panel ── */
+-.con-order { text-align: center; color: var(--ink-faint); font-size: 12px; margin: 0 0 6px; }
+-.con-order a { margin-left: 10px; color: var(--info); }
+-.con-body .r-chat.agent.compact, .con-body .r-a.compact {
+-  display: grid; gap: 4px; padding: 8px 12px 6px; max-width: 88%; background: var(--panel-3); border: 0; border-radius: 12px 12px 12px 3px; justify-self: start;
+-}
+-.con-body .r-ag { color: var(--accent); font-size: 12.5px; font-weight: 700; }
+-.con-body .compact .r-answer { margin: 0; font-size: 14px; line-height: 1.55; }
+-.con-body .r-time { color: var(--ink-faint); font-size: 11.5px; }
+-.con-body .r-q { padding: 7px 12px 5px; border-radius: 12px 12px 3px 12px; }
+-.con-body .r-q small { color: var(--ink-faint); }
+-.con-body .con-notice { background: var(--warn-soft, #fbeaea); border: 1px solid rgb(var(--alarm-rgb, 214 69 65) / .35); border-left: 4px solid var(--alarm); }
+-.cn-link { color: var(--accent); font-weight: 600; text-decoration: none; }
+-/* decision card, plan layout: plain heading, quiet panel, tight rows */
+-.apv[data-layout="plan"] { border-color: var(--border); background: var(--panel); }
+-.apv[data-layout="plan"] .apv-title { font-size: 19px; margin: 8px 0 10px; }
+-.apv[data-layout="plan"] .apv-bh { font-size: 13.5px; font-weight: 700; margin-bottom: 6px; }
+-.apv[data-layout="plan"] .apv-bh small { margin-left: 8px; }
+-.apv[data-layout="plan"] .apv-plan-body { gap: 14px; }
+-.apv[data-layout="plan"] .apv-btns { justify-content: flex-start; }
+-.apv-deadline { background: #fdf0c4; color: #7a5200; border: 1.5px solid #e3a92b; padding: 5px 14px; font-weight: 600; }
+-.apv-deadline small { color: #7a5200; }
+-.con-body .con-notice { background: color-mix(in srgb, var(--alarm) 9%, var(--panel)); border: 1px solid color-mix(in srgb, var(--alarm) 35%, transparent); border-left: 4px solid var(--alarm); }
+-.apv-impact-t td.dm-later { border: 0; background: none; padding: 5px 8px 5px 0; }
+-.apv-impact-t td.dm-later .dm-tag { display: inline-block; border: 1.5px solid var(--warn); background: var(--warn-soft); border-radius: 8px; padding: 2px 10px; color: var(--warn); font-weight: 700; white-space: nowrap; }
+-.apv-impact-t td.dm-later, .apv-impact-t td.dm-earlier, .apv-impact-t td.dm-same, .apv-impact-t td.dm-none { border-bottom: 1px solid var(--border); }
+-@media (max-width: 720px) {
+-  .apv-impact-t { display: table; width: 100%; font-size: 12.5px; }
+-  .apv-impact-t td, .apv-impact-t th { padding-right: 6px; }
+-  .apv-impact-t td.dm-later .dm-tag { white-space: normal; font-size: 12px; padding: 2px 6px; border-radius: 7px; }
+-  .apv-impact-t td:last-child, .apv-impact-t th:last-child { padding-left: 4px; padding-right: 0; }
+-}
+-
+-/* phone ticker (CJ, 2026-10-22): ONE line that scrolls, 異常／警告 first — no second pinned row */
+-@media (max-width: 599px) {
+-  .tk-run { flex-wrap: nowrap; }
+-  .tk-pinned { display: none; }
+-  .tk-view { flex: 1 1 auto; }
+-  .tk-track .tk-i.t-bad { order: -2; }
+-  .tk-track .tk-i.t-warn { order: -1; }
+-  .tk-dup .tk-i.t-bad { order: -2; }
+-  .tk-dup .tk-i.t-warn { order: -1; }
+-}
+ /* ---------- issue #54: 主 agent rows and subagent tags ---------- */
+ .r-chat.agent.main { border-left: 3px solid var(--line-c); }
+ .r-chat.agent.main header b { color: var(--line-c); }
+@@ -889,9 +733,3 @@ a.ov-row:hover { background: var(--panel-2); }
+ .tasklog .tl-out { flex-basis: 100%; }
+ .tasklog .tl-report { font-size: 12px; white-space: nowrap; padding-top: 7px; }
+ .tasklog .tl-tag { margin: 6px 0 2px; }
+-
+-/* NemoClaw chat bubbles (#100): label, text, 展開詳細 and time each on their own line */
+-.sc-b .sc-ag { display: block; color: var(--accent); font-size: 12.5px; font-weight: 700; margin-bottom: 2px; }
+-.sc-b .sc-more { display: block; background: none; border: 0; padding: 4px 0 0; color: var(--info); font: inherit; font-size: 13px; cursor: pointer; }
+-.sc-b .sc-more:hover { text-decoration: underline; }
+-.sc-b .sc-time { display: block; margin-top: 4px; text-align: right; color: var(--ink-faint); font-size: 11.5px; }
+diff --git a/web/src/index.css b/web/src/index.css
+index 1ad04a5..d35337e 100644
+--- a/web/src/index.css
++++ b/web/src/index.css
+@@ -100,8 +100,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
+ .dot.data { background: var(--ink-faint); }
+ .dq-tag { display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 4px; font-size: 11px; line-height: 16px; background: var(--panel-3); color: var(--ink-dim); border: 1px dashed var(--ink-faint); text-decoration: none; }
+ .mdot.dq .dot { box-shadow: 0 0 0 2px var(--ink-faint); }
+-.clock { display: inline-flex; gap: 8px; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+-.clock-short { display: none; }
++.clock { display: inline-flex; gap: 8px; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: .02em; }
++.clock span:first-child { color: var(--ink-dim); font-weight: 400; }
+ .mode { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px dashed var(--panel-3); color: var(--ink-dim); white-space: nowrap; }
+ /* the link chip (linkStatus.ts): 連線中 green, 模型未連線 / 離線・示範資料 amber, 重新連線… red */
+ .mode { border-style: solid; font-weight: 600; }
+@@ -1022,7 +1022,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
+ 
+ /* 頂部：現在的日期時間、模擬工廠時間、登入身分 (issue #100) */
+ .clock-wrap { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
+-.clock-lbl { font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
++.clock-sim { font-size: 11px; color: var(--ink-faint); white-space: nowrap; cursor: help; }
+ .usermenu { position: relative; }
+ .user-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); cursor: pointer; font-size: 14px; }
+ .user-av { width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
+@@ -1031,21 +1031,4 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
+ .user-who { display: grid; padding: 4px 6px; } .user-who small { color: var(--ink-dim); }
+ .user-pop button { text-align: left; padding: 6px 8px; border-radius: 8px; border: 0; background: var(--panel-2); color: inherit; }
+ .user-pop button:disabled { opacity: .6; cursor: not-allowed; }
+-@media (max-width: 700px) { .user-name { display: none; } .clock-full { display: none; } .clock-short { display: inline; } }
+-
+-/* 核准區「接下來」：一件事一行，照時間排 (issue #100) */
+-
+-/* phone header (CJ, 2026-10-22): row 1 = title + 主管 + 深色; row 2 = 系統時間 + 連線狀態. Nothing removed. */
+-@media (max-width: 599px) {
+-  .topbar { flex-wrap: wrap; gap: 4px 8px; padding: 8px 14px; background: rgb(var(--bar-rgb, 11 13 16) / 1); }
+-  .top-right { display: contents; }
+-  .brand { flex: 1 1 calc(100% - 100px); min-width: 0; order: 1; }
+-  .brand h1 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+-  .topbar .usermenu { order: 2; }
+-  .topbar .user-caret { display: none; }
+-  .topbar .user-btn { padding: 3px; }
+-  .topbar .theme-tog { order: 3; }
+-  .top-right > .clock-wrap { order: 4; flex-direction: row; align-items: baseline; gap: 6px; flex: 1 1 auto; justify-content: flex-start; }
+-  .top-right > .mode { order: 5; margin-left: auto; }
+-  .top-right > .chip, .top-right > .clock-loop { order: 6; }
+-}
++@media (max-width: 700px) { .user-name, .clock-sim { display: none; } }

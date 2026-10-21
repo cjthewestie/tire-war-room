@@ -1,0 +1,975 @@
+diff --git a/warroom/api/app.py b/warroom/api/app.py
+index ae6cd11..5b77883 100644
+--- a/warroom/api/app.py
++++ b/warroom/api/app.py
+@@ -78,8 +78,6 @@ from warroom.contracts import (
+     ReviewRequest,
+     RiskLevel,
+     SafetyAction,
+-    SafetyCase,
+-    SafetyRelease,
+     ScenarioName,
+     ScheduleVersion,
+     Shift,
+@@ -466,7 +464,6 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
+     if runtime is not None:
+         app.state.runtime = runtime
+     app.state.access = access
+-    app.state.pin_guard, app.state.weak_push_delay_s, app.state.holder = guard, weak_push_delay_s, holder   # 後台 系統參數 / 健康
+ 
+     # ------------------------------------------------------------------ on-site seat pairing
+     @app.get("/kiosk", include_in_schema=False)
+@@ -501,8 +498,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
+                             llm_reachable=await r.llm_reachable(), qdrant_ok=r.kb_ok(),
+                             sim_running=r.running and not r.paused, factory_time=r.now(), uptime_s=r.uptime_s(),
+                             agent_runtime=os.environ.get("WARROOM_AGENT_RUNTIME") or None,
+-                            repair_fast_s=float(r.settings.repair_fast_s),
+-                            recover_fast_s=float(r.settings.recover_fast_s))
++                            repair_fast_s=float(r.settings.repair_fast_s))
+ 
+     @app.get("/api/health/components")
+     async def health_components() -> dict[str, Any]:
+@@ -584,12 +580,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
+     @app.post("/api/events/{event_id}/review", response_model=Event)
+     async def event_review(event_id: str, body: ReviewRequest | None = Body(default=None),
+                            session: Session = Depends(supervisor)) -> Event:
+-        """主管已讀報告: the supervisor read the incident report of an event that closed after its repair (review
+-        pending → done; nothing waited for it). Same session rule as approvals; 409 when the event has no pending
+-        report. Clients get it as any event change."""
++        """主管覆核: the supervisor confirms an event that closed after its repair (review pending → done). Same
++        session rule as approvals; 409 when the event has no pending review. Clients get it as any event change."""
+         r = rt()
+         if r.network == "lan_down" and not session.local:
+-            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕標記已讀")
++            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕覆核")
+         sm = r.state_machine
+         if not callable(getattr(sm, "review", None)):
+             raise HTTPException(status_code=503, detail="agent unavailable (degraded mode)")
+@@ -616,53 +611,6 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
+             raise HTTPException(status_code=409, detail=str(e)) from None
+         return {"machine_id": machine_id, "status": "running"}
+ 
+-    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+-    # CJ, 2026-10-22: 「安全核心要設計可以被解決 安全停止也要有可以走向解決的按鈕」. Every write here is a HUMAN supervisor
+-    # action (same session rule as approvals); none of it is a tool, and the agent / commander cannot reach it.
+-    def _resolve_call(session: Session, fn: Callable[[], Any], what: str) -> Any:
+-        r = rt()
+-        if r.network == "lan_down" and not session.local:
+-            raise HTTPException(status_code=409, detail=f"LAN 中斷：請至現場觸控螢幕{what}")
+-        try:
+-            return fn()
+-        except KeyError as e:
+-            raise HTTPException(status_code=404, detail=f"not found: {e.args[0] if e.args else ''}") from None
+-        except ValueError as e:
+-            raise HTTPException(status_code=409, detail=str(e)) from None
+-
+-    @app.get("/api/safety/cases", response_model=list[SafetyCase])
+-    async def safety_cases() -> list[SafetyCase]:
+-        r = rt()
+-        return r.cases.view(r._board())
+-
+-    @app.post("/api/safety/{case_id}/dispatch", response_model=SafetyCase)
+-    async def safety_dispatch(case_id: str, session: Session = Depends(supervisor)) -> SafetyCase:
+-        """① 派現場檢查: worker tasks from the rule's SOP."""
+-        return _resolve_call(session, lambda: rt().safety_dispatch(case_id, session.actor), "派工")
+-
+-    @app.post("/api/safety/{case_id}/release", response_model=SafetyCase)
+-    async def safety_release(case_id: str, body: SafetyRelease, session: Session = Depends(supervisor)) -> SafetyCase:
+-        """③ 確認恢復運轉 / QC 合格放行 / 報廢. 409 until the reading is back in range for the core's re-arm count AND the
+-        field tasks are done (or 「已現場確認」 with a reason). Audited with the session as actor."""
+-        return _resolve_call(session, lambda: rt().safety_release(case_id, body, session.actor), "確認復機")
+-
+-    @app.post("/api/events/{event_id}/replan", response_model=Event)
+-    async def stop_replan(event_id: str, session: Session = Depends(supervisor)) -> Event:
+-        """SAFE_STOP → 「請 AI 重新規劃」: returns the NEW event (its `previous` names the stopped one and why)."""
+-        return _resolve_call(session, lambda: rt().stop_replan(event_id, session.actor), "操作")
+-
+-    @app.post("/api/events/{event_id}/handoff", response_model=Event)
+-    async def stop_handoff(event_id: str, session: Session = Depends(supervisor)) -> Event:
+-        """SAFE_STOP → 「交給現場處理」: worker tasks from the SOP; the event shows 人工處理中."""
+-        return _resolve_call(session, lambda: rt().stop_handoff(event_id, session.actor), "派工")
+-
+-    @app.post("/api/events/{event_id}/close", response_model=Event)
+-    async def stop_close(event_id: str, body: ReviewRequest | None = Body(default=None),
+-                         session: Session = Depends(supervisor)) -> Event:
+-        """SAFE_STOP → 「確認結案」 (supervisor acknowledge; after the floor's tasks when it was handed over)."""
+-        note = ((body.note or "").strip() if body is not None else "") or None
+-        return _resolve_call(session, lambda: rt().stop_close(event_id, session.actor, note), "結案")
+-
+     # ------------------------------------------------------------------ approvals
+     @app.get("/api/approvals", response_model=list[ApprovalRequest])
+     async def approvals(status: str | None = None) -> list[ApprovalRequest]:
+diff --git a/warroom/api/runtime.py b/warroom/api/runtime.py
+index 7ddedcf..a1cacde 100644
+--- a/warroom/api/runtime.py
++++ b/warroom/api/runtime.py
+@@ -60,7 +60,6 @@ from warroom.contracts import (
+     MachineStatus,
+     MachineTile,
+     MetricTile,
+-    NotifyKind,
+     PendingAction,
+     RiskLevel,
+     SafetyAction,
+@@ -447,22 +446,6 @@ def _is_revoke(step_id: str) -> bool:
+     return "-revoke-" in step_id
+ 
+ 
+-def _needs_approval(sr: Any) -> bool:
+-    """A write step of a plan that needs 主管核准 (R2/R3): by its gate decision, or for a step the gate never saw (its
+-    round stopped first), by what the gate would rule from the tool and the notice kind."""
+-    if sr.gate is not None and sr.gate.risk is not None:
+-        return sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+-    if sr.step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+-        return True
+-    if sr.step.tool is not ToolName.NOTIFY_TEAMS:
+-        return False
+-    from warroom.agent.gate import NOTIFY_RISK
+-    try:
+-        return NOTIFY_RISK[NotifyKind(sr.step.args.get("kind"))] is not RiskLevel.R1_NOTIFY
+-    except (KeyError, ValueError):
+-        return True                         # not a valid notice: never an auto (R1) one
+-
+-
+ class _NoLock:
+     def __enter__(self):
+         return self
+@@ -522,11 +505,8 @@ class Runtime:
+         self._orch: Any = None
+         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+         self._repaired_out: dict[str, str] = {}   # #104 machine id -> event id: 檢修完成 while out of service
+-        self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
+         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
+         self._orch_c: Any = None
+-        self._cases: Any = None                  # SafetyCases of the current components (warroom/api/resolve.py)
+-        self._cases_c: Any = None
+         self.speed = float(self.settings.sim_speed)
+         self.paused = False
+         self.network = "online"
+@@ -918,15 +898,6 @@ class Runtime:
+             applied.append(a.model_copy(update={"latency_ms": round((time.perf_counter() - t0) * 1000.0, 3)}))
+         self.safety_log.extend(applied)
+         del self.safety_log[:-100]
+-        # resolution path (CJ, 2026-10-22: 「安全核心要設計可以被解決」): a case per stopped machine, ② counted read-only
+-        try:
+-            cases = self.cases
+-            for a in applied:
+-                cases.on_action(a, self._open_event_id(a.machine_id))
+-            if cases.observe(readings) or applied:
+-                self._last_snapshot_pub = 0.0       # republish the snapshot on the next periodic publish
+-        except Exception:  # noqa: BLE001 - bookkeeping must never touch the red path
+-            log.exception("safety case bookkeeping")
+         # 2. then record. A record that fails is queued, retried every pass, and lights the warning light.
+         self._retry_safety_records()
+         for a in applied:
+@@ -1039,9 +1010,7 @@ class Runtime:
+ 
+     def _advance_fast_repairs(self, running: bool = True) -> None:
+         """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
+-        at any sim speed, also while another event's model call holds the plant clock), apply a fix that just
+-        finished, and ramp the repaired machines back to nominal (Settings.recover_fast_s). Paused time does not
+-        count."""
++        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+         now = time.monotonic()
+         dt, self._fast_wall = now - self._fast_wall, now
+         board = getattr(getattr(self.sim, "world", None), "tasks", None)
+@@ -1050,76 +1019,29 @@ class Runtime:
+             return
+         board.advance_fast(self.clock.now(), dt)
+         self._apply_repairs()
+-        self._advance_recoveries(dt)
+-
+-    def _advance_recoveries(self, dt: float) -> None:
+-        """回溫中 (Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): every repaired machine's readings move from where the fix
+-        found them to nominal over Settings.recover_fast_s WALL seconds; at the end it is back to normal: audited
+-        「已恢復正常」 and the state machine is told (Event.recovered_at, VERIFY confirms, green)."""
+-        total = float(self.settings.recover_fast_s)
+-        for mid, rec in list(self._recovering.items()):
+-            rec[1] += max(0.0, dt)
+-            frac = 1.0 if total <= 0 else min(1.0, rec[1] / total)
+-            r = self.sim.recover(mid, frac)
+-            if r is not None and frac < 1.0:
+-                continue
+-            del self._recovering[mid]
+-            self._recovered(mid, rec[0], r or self.sim.machine(mid).last_reading)
+-
+-    def _begin_recovery(self, mid: str, eid: str) -> None:
+-        begin = getattr(self.sim, "begin_recovery", None)
+-        if callable(begin):
+-            begin(mid)
+-            self._recovering[mid] = [eid, 0.0]
+-            if self.settings.recover_fast_s <= 0:
+-                self._advance_recoveries(0.0)
+-            return
+-        snap = getattr(self.sim, "snap_to_nominal", None)     # a sim without the ramp: back at once
+-        if callable(snap):
+-            snap(mid)
+-        self._recovered(mid, eid, self.sim.machine(mid).last_reading)
+-
+-    def _recovered(self, mid: str, eid: str, reading: Any) -> None:
+-        self.audit.append(AuditKind.SYSTEM, "world", {"msg": "已恢復正常", "machine_id": mid,
+-                                                      "value": getattr(reading, "temp_c", None)}, eid)
+-        on_recovered = getattr(self.state_machine, "on_recovered", None)
+-        if callable(on_recovered):
+-            on_recovered(eid, mid, self.clock.now(), reading)
+ 
+     def _awaits_decision(self, event_id: str | None) -> bool:
+         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
+         auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
+-        AWAIT_APPROVAL), while a write of that round waits for the card (Spark timing 10-21: the R1 檢修 walked to
+-        7 號 13 s before the card) or its round stopped before its R2/R3 writes were gated — or an event that ended
+-        (SAFE_STOP) with no decision while a round of its plan had, or would have had once gated, an R2/R3 write
+-        (steam_low on an idle press: the solve was refused, the event stopped with no card and its R1 檢修 walked out
+-        on its own). Only a plan of R1 writes repairs with no decision. Not while code re-solves an approved round
+-        whose schedule another event's version made stale (StateMachine.approved_rebase): the approved repair goes on
+-        meanwhile."""
++        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
++        檢修 walked to 7 號 13 s before the card)."""
+         ev = self._event_obj(event_id)
+         if ev is None:
+             return False
+-        rebase = getattr(self.state_machine, "approved_rebase", None)
+-        if callable(rebase) and rebase(ev.id):
+-            return False
+         if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
+                         EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
+             return True
+-        if any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+-               for r in self.approvals.all()):
+-            return False
+-        if ev.state in TERMINAL_STATES:
+-            return ev.state is not EventState.CLOSED and \
+-                any(_needs_approval(sr) for sr in [*ev.steps, *(s for r in ev.prior_rounds for s in r.steps)])
+-        # EXECUTE / VERIFY: a no-op confirm the gate dropped (gated, skipped) needed no card, so that plan repairs
+-        return any(sr.state == "awaiting_approval" or (sr.gate is None and _needs_approval(sr)) for sr in ev.steps)
++        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
++                    for sr in ev.steps)
++        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
++                      for r in self.approvals.all())
++        return needs and not decided
+ 
+     def _apply_repairs(self) -> None:
+         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
+         (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
+-        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the state
+-        machine is told (Event.repaired_at, 回溫中) and the machine's readings ramp back to normal
+-        (_advance_recoveries)."""
++        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
++        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+         fast = self.settings.repair_fast_s > 0
+         board = getattr(getattr(self.sim, "world", None), "tasks", None)
+         for mid, eid in list(self._repaired.items()):
+@@ -1141,6 +1063,9 @@ class Runtime:
+             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
+                 continue                        # nothing injected on it (a replayed or already-cleared fault)
+             self.sim.clear_faults(mid)
++            snap = getattr(self.sim, "snap_to_nominal", None)
++            if fast and callable(snap):
++                snap(mid)                        # no slow cool-down: the next reading is normal
+             self.c.detector.reset(mid, repaired=True)
+             status_of = getattr(self.sim, "status_of", None)
+             if callable(status_of) and status_of(mid) is MachineStatus.OUT_OF_SERVICE:
+@@ -1149,139 +1074,6 @@ class Runtime:
+             on_repaired = getattr(self.state_machine, "on_repaired", None)
+             if fast and callable(on_repaired):
+                 on_repaired(eid, mid, self.clock.now())
+-            if fast:
+-                self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
+-
+-    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+-    @property
+-    def cases(self) -> Any:
+-        """The Safety Core cases of the current run (rebuilt with the components on a scenario load)."""
+-        if getattr(self, "_cases", None) is None or self._cases_c is not self.c:
+-            from warroom.api.resolve import SafetyCases
+-            self._cases = SafetyCases(self.c.safety, self.audit)
+-            self._cases_c = self.c
+-        return self._cases
+-
+-    def _board(self) -> Any:
+-        return getattr(getattr(self.sim, "world", None), "tasks", None)
+-
+-    def _after_resolution(self) -> None:
+-        self._last_snapshot_pub = 0.0
+-        try:
+-            self.bus.publish(WsType.SNAPSHOT, self.snapshot())
+-        except Exception:  # noqa: BLE001
+-            log.exception("snapshot publish after a resolution step")
+-
+-    def safety_dispatch(self, case_id: str, actor: str) -> Any:
+-        """① 派現場檢查 (supervisor session only). KeyError: no such case; ValueError: not allowed now."""
+-        cases = self.cases
+-        c = cases.get(case_id)
+-        tasks = cases.dispatch(case_id, actor, self._board(), self.clock.now())
+-        sm = self.state_machine
+-        if c.event_id and callable(getattr(sm, "add_note", None)):
+-            sm.add_note(c.event_id, "主管", f"[人工] 安全核心處置：派現場檢查 {len(tasks)} 項（"
+-                        + "、".join(t.kind for t in tasks) + "，" + "、".join(c.sop_ids) + "）")
+-        self._after_resolution()
+-        return c
+-
+-    def safety_release(self, case_id: str, body: Any, actor: str) -> Any:
+-        """③ 確認恢復運轉 / QC 放行 / 報廢 (supervisor session only; never the agent). KeyError / ValueError as above."""
+-        c = self.cases.release(case_id, body, actor, self.sim, self._board(), self.clock.now())
+-        if c.resolution != "scrap":
+-            # the core re-arms by itself after the same count of clear samples (② required it); the detector goes back
+-            # to the machine's normal baseline (as after a repair), so the way back to normal is not a new 「溫度驟降」
+-            try:
+-                self.c.detector.reset(c.machine_id, repaired=True)
+-            except Exception:  # noqa: BLE001
+-                log.exception("detector reset after release")
+-        sm = self.state_machine
+-        label = {"resume": "確認恢復運轉", "qc_pass": "QC 合格，放行", "scrap": "QC 報廢"}[c.resolution]
+-        if c.event_id and callable(getattr(sm, "add_note", None)):
+-            sm.add_note(c.event_id, "主管", f"[人工] 安全核心解除：{label}（讀值 {c.reading}°C，連續 {c.safe_samples} 筆在安全範圍"
+-                        + (f"；已現場確認：{c.reason}" if c.field_confirmed else "") + "）")
+-        self._after_resolution()
+-        return c
+-
+-    def _stopped_event(self, event_id: str) -> Event:
+-        ev = self._event_obj(event_id)
+-        if ev is None:
+-            raise KeyError(event_id)
+-        if ev.state is not EventState.SAFE_STOP:
+-            raise ValueError(f"{event_id} 不是安全停止的事件")
+-        if ev.follow_up is not None and ev.follow_up.status in ("replanned", "closed"):
+-            raise ValueError("這件安全停止已經處理過了")
+-        return ev
+-
+-    def stop_replan(self, event_id: str, actor: str) -> Event:
+-        """「請 AI 重新規劃」: a new event through the normal state machine, gate and approval; the stopped one is marked
+-        replanned (and leaves the waiting list)."""
+-        from warroom.contracts import StopFollowUp
+-        old = self._stopped_event(event_id)
+-        sm = self.state_machine
+-        if not callable(getattr(sm, "open_replan", None)):
+-            raise ValueError("agent unavailable (degraded mode)")
+-        ev = sm.open_replan(event_id, actor)
+-        run = sm.run_command if ev.source == "supervisor" else sm.run_plant if ev.source == "plant" else sm.run_event
+-        task = asyncio.create_task(run(ev.id), name=f"replan-{ev.id}")
+-        self._tasks[ev.id] = task
+-        task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
+-        prev_tasks = old.follow_up.task_ids if old.follow_up else []
+-        old.follow_up = StopFollowUp(status="replanned", by=actor, at=self.clock.now(), new_event_id=ev.id,
+-                                     task_ids=prev_tasks)
+-        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：請 AI 重新規劃", "follow_up": "replanned",
+-                                                    "new_event_id": ev.id, "stop_reason": old.stop_reason,
+-                                                    "stop_reason_text": old.stop_reason_text}, old.id)
+-        sm.add_note(old.id, "主管", f"[人工] 請 AI 重新規劃 → {ev.id}")
+-        self._after_resolution()
+-        return ev
+-
+-    def stop_handoff(self, event_id: str, actor: str) -> Event:
+-        """「交給現場處理」: worker tasks from the SOP for this machine; the event shows 「人工處理中」 until 確認結案."""
+-        from warroom.api.resolve import sop_for_stop
+-        from warroom.contracts import StopFollowUp
+-        ev = self._stopped_event(event_id)
+-        if ev.follow_up is not None:
+-            raise ValueError("已交給現場處理")
+-        board = self._board()
+-        if board is None or not callable(getattr(board, "add_specs", None)):
+-            raise ValueError("現場任務板不可用（模擬工廠沒有人員）")
+-        sops, specs = sop_for_stop(ev.machine_id, ev.alert_card.title if ev.alert_card else ev.anomaly.message)
+-        tasks = board.add_specs(ev.id, specs, self.clock.now())
+-        ev.follow_up = StopFollowUp(status="manual", by=actor, at=self.clock.now(), task_ids=[t.id for t in tasks],
+-                                    sop_ids=sops)
+-        self.audit.append(AuditKind.TASK, actor,
+-                          {"created": [t.model_dump(mode="json", include={"id", "kind", "title", "team", "machine_id",
+-                                                                          "zone", "status", "worker_id", "eta"})
+-                                       for t in tasks], "sop_ids": sops, "generated_by": "code",
+-                           "follow_up": "manual"}, ev.id)
+-        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：交給現場處理", "follow_up": "manual",
+-                                                    "task_ids": [t.id for t in tasks], "sop_ids": sops}, ev.id)
+-        self.state_machine.add_note(ev.id, "主管", f"[人工] 交給現場處理：{len(tasks)} 項任務（{'、'.join(sops)}）・人工處理中")
+-        self._after_resolution()
+-        return ev
+-
+-    def stop_close(self, event_id: str, actor: str, note: str | None = None) -> Event:
+-        """「確認結案」: the supervisor acknowledges the SAFE_STOP (after the floor's tasks, if handed over). Audited, and
+-        the daylog shows it (warroom/api/daylog.py)."""
+-        from warroom.contracts import StopFollowUp
+-        ev = self._stopped_event(event_id)
+-        now = self.clock.now()
+-        if ev.follow_up is not None and ev.follow_up.status == "manual":
+-            board = self._board()
+-            live = {t.id: t.status for t in board.for_event(ev.id)} if board is not None else {}
+-            left = [t for t in ev.follow_up.task_ids if live.get(t, "完成") != "完成"]
+-            if left:
+-                raise ValueError(f"現場任務還沒完成（{len(ev.follow_up.task_ids) - len(left)}/{len(ev.follow_up.task_ids)}）")
+-            ev.follow_up = ev.follow_up.model_copy(update={"status": "closed", "closed_at": now, "closed_by": actor,
+-                                                           "note": note})
+-        else:
+-            ev.follow_up = StopFollowUp(status="closed", by=actor, at=now, closed_at=now, closed_by=actor, note=note)
+-        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：確認結案", "follow_up": "closed", "note": note,
+-                                                    "stop_reason": ev.stop_reason, "stop_reason_text": ev.stop_reason_text,
+-                                                    "task_ids": ev.follow_up.task_ids}, ev.id)
+-        self.state_machine.add_note(ev.id, "主管", "[人工] 主管確認結案" + (f"：{note}" if note else ""))
+-        self._after_resolution()
+-        return ev
+ 
+     @property
+     def orch(self) -> Any:
+@@ -1561,7 +1353,6 @@ class Runtime:
+                 self._oob_seen.clear()
+                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+                 self._repaired_out.clear()
+-                self._recovering.clear()
+                 self._holds = self._sim_holds()
+                 self.__dict__.pop("_wip", None)
+                 self.audit.append(AuditKind.SYSTEM, "supervisor",
+@@ -1900,8 +1691,8 @@ class Runtime:
+         return sorted(seen.values(), key=lambda r: r.created_at)
+ 
+     def _effective_status(self, m: MachineState) -> MachineStatus:
+-        # WARNING with an open event = the fast repair's 回溫中 (amber, StateMachine.on_repaired), not the red alarm
+-        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE) and self._open_event_id(m.machine_id):
++        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE, MachineStatus.WARNING) and \
++                self._open_event_id(m.machine_id):
+             return MachineStatus.ALARM
+         seen = self._oob_seen.get(m.machine_id)
+         if m.status in NORMAL_STATUSES and seen is not None and \
+@@ -2439,9 +2230,6 @@ class Runtime:
+         evs = sorted(self.events(), key=lambda e: e.opened_at, reverse=True)
+         open_ = [e for e in evs if e.state not in TERMINAL_STATES]
+         closed = [e for e in evs if e.state in TERMINAL_STATES][:5]
+-        # a SAFE_STOP nobody resolved yet stays on the list however old (its buttons are the way out)
+-        closed += [e for e in evs if e.state is EventState.SAFE_STOP and e not in closed
+-                   and (e.follow_up is None or e.follow_up.status == "manual")]
+         from warroom.api import progress as P
+         wip = self.__dict__.setdefault("_wip", P.WipTracker())
+         return DashboardSnapshot(header=self.header(), orders=P.order_progress(self.sim, self.events(), self.c.store),
+@@ -2449,15 +2237,7 @@ class Runtime:
+                                  focus=self.focus_panel(),
+                                  machines=self.machine_tiles(), events=open_ + closed,
+                                  pending_approvals=list(self.approvals.pending()),
+-                                 safety_actions=list(reversed(self.safety_log[-20:])),
+-                                 safety_cases=self._case_view())
+-
+-    def _case_view(self) -> list[Any]:
+-        try:
+-            return self.cases.view(self._board())
+-        except Exception:  # noqa: BLE001 - the snapshot must never fail on this
+-            log.exception("safety case view")
+-            return []
++                                 safety_actions=list(reversed(self.safety_log[-20:])))
+ 
+     def _active_schedule(self):
+         if self.c.store is None:
+diff --git a/warroom/sim/factory_sim.py b/warroom/sim/factory_sim.py
+index d4c7328..72ec26c 100644
+--- a/warroom/sim/factory_sim.py
++++ b/warroom/sim/factory_sim.py
+@@ -132,7 +132,6 @@ class Factory:
+         self._t = t0
+         self._rng = random.Random(self.seed)
+         self._faults: list[_Fault] = []
+-        self._recovery: dict[str, tuple] = {}      # fast repair ramp: machine -> (temp, pressure, flow, steam) at its start
+         self._pending: list[tuple[datetime, ScenarioStep]] = sorted(
+             ((t0 + timedelta(seconds=s.at_offset_s), s) for s in sc.steps if s.fault is not None),
+             key=lambda x: x[0])
+@@ -311,42 +310,22 @@ class Factory:
+             self._pending = [(at, st) for at, st in self._pending if st.fault is None or st.fault.machine_id != machine_id]
+ 
+     def snap_to_nominal(self, machine_id: str) -> None:
+-        """Fast repair with RECOVER_FAST_S=0: the repaired machine's process values go straight back to nominal (see
+-        recover)."""
+-        self.begin_recovery(machine_id)
+-        self.recover(machine_id, 1.0)
+-
+-    def begin_recovery(self, machine_id: str) -> None:
+-        """Fast repair (Settings.recover_fast_s, Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): remember where the repaired
+-        machine's process values are; recover() then moves them back to nominal. Only after its faults were cleared."""
++        """Fast repair (Settings.repair_fast_s): the repaired machine's process values go straight back to nominal (no
++        cool-down / heat-up), and so does its current reading (tiles, VERIFY): the sim clock may be held while another
++        event's solver runs, so the fix must not wait for the next step. Only after its faults were cleared; the
++        status is untouched. The reading is noiseless so the plant's RNG stream stays as it was."""
+         m = self._m[machine_id]
+-        self._recovery[machine_id] = (m.temp, m.pressure, m.flow, m.steam)
+-
+-    def recover(self, machine_id: str, frac: float) -> SensorReading | None:
+-        """Put the repaired machine's process values `frac` (0–1) of the way from where begin_recovery found them to
+-        nominal, and its current reading with them (tiles, VERIFY): the runtime drives it on the WALL clock, and the
+-        sim clock may be held while another event's model call runs. 1 ends the ramp (exactly nominal). The status is
+-        untouched; the reading is noiseless so the plant's RNG stream stays as it was. None: no ramp on it."""
+-        start = self._recovery.get(machine_id)
+-        if start is None:
+-            return None
+-        m, f = self._m[machine_id], min(1.0, max(0.0, frac))
+-        nom = (m.nominal.temp_c, m.nominal.pressure, m.nominal.flow_lpm, P.STEAM_NOMINAL_KGF_CM2)
+-        cur = [None if a is None else (b if f >= 1.0 or b is None else a + (b - a) * f) for a, b in zip(start, nom)]
+-        m.temp, m.pressure = cur[0], cur[1]
++        m.temp, m.pressure = m.nominal.temp_c, m.nominal.pressure
+         if m.flow is not None:
+-            m.flow = cur[2]
++            m.flow = m.nominal.flow_lpm
+         if m.steam is not None:
+-            m.steam = cur[3]
+-        if f >= 1.0:
+-            del self._recovery[machine_id]
++            m.steam = P.STEAM_NOMINAL_KGF_CM2
+         if m.hist:
+             ts, *_, seq = m.hist[-1]
+             row = (ts, round(m.temp, 2), round(m.pressure, 2), None if m.flow is None else round(m.flow, 2),
+                    None if m.steam is None else round(m.steam, 3), seq)
+             m.hist[-1] = row
+             m.last = self._to_reading(machine_id, row)
+-        return m.last
+ 
+     def faults(self, active_only: bool = True) -> list[FaultSpec]:
+         t = self._t
+@@ -854,22 +833,6 @@ class Factory:
+         """The machine's current status (KeyError for an unknown id)."""
+         return self._m[machine_id].status
+ 
+-    def scrap_held_job(self, press_id: str) -> str | None:
+-        """QC 報廢 of the tyre a CURE_HOLD kept in the mold (supervisor decision, warroom/api/resolve.py): the job
+-        leaves the press, the order counts it as not made, and the press goes idle for the next mold-in after the usual
+-        de-mold / mold-in time. Returns the scrapped job id (None: no job in the press)."""
+-        ps = self._press.get(press_id)
+-        if ps is None or ps.job is None:
+-            return None
+-        job = ps.job
+-        if job.order_id in self._in_press:
+-            self._in_press[job.order_id] = max(0, self._in_press[job.order_id] - 1)
+-        ps.job = None
+-        ps.idle_until = self._t + timedelta(minutes=DEMOLD_MOLDIN_MIN)
+-        m = self._m[press_id]
+-        m.status, m.note = MachineStatus.IDLE, f"QC 報廢 {job.order_id}，換模入模中"
+-        return job.job_id
+-
+     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
+         self._m[machine_id].active_event_id = event_id
+ 
+diff --git a/web/src/agent/ApprovalList.tsx b/web/src/agent/ApprovalList.tsx
+index dd51771..82dc4d4 100644
+--- a/web/src/agent/ApprovalList.tsx
++++ b/web/src/agent/ApprovalList.tsx
+@@ -1,4 +1,4 @@
+-// 待核准事件 (left column of the home screen; was 核准區：等待列表). Ranked ①–⑤ (homeItems.ts); ⑤ AI 已自行處理 is collapsed.
++// 核准區：等待列表 (right-top of the home screen). Ranked ①–⑤ (homeItems.ts); ⑤ AI 已自行處理 is collapsed.
+ // Selecting an item drives the 計劃 area below it and the conversation on the left.
+ import { ProgressRing } from '../components/ProgressRing'
+ import { RANK_LABEL, type HomeItem, type Rank } from './homeItems'
+@@ -6,8 +6,8 @@ import { REPLAN_HINT, useReplans, type Replan } from './replanStore'
+ import { useWarRoom } from '../useWarRoom'
+ import { SUB_STATUS } from './subagents'
+ 
+-export function ApprovalList({ items, selected, onPick }: {
+-  items: HomeItem[]; selected: string | null; onPick: (key: string) => void
++export function ApprovalList({ items, selected, onPick, next }: {
++  items: HomeItem[]; selected: string | null; onPick: (key: string) => void; next: string[]
+ }) {
+   const open = items.filter((i) => i.rank < 5)
+   const fyi = items.filter((i) => i.rank === 5)
+@@ -15,11 +15,12 @@ export function ApprovalList({ items, selected, onPick }: {
+   const decide = open.filter((i) => i.req).length
+   const replans = useReplans()
+   return (
+-    <section className="panel home-list" aria-label="待核准事件" data-testid="approval-list">
+-      <header className="hl-h"><h2>待核准事件</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
++    <section className="panel home-list" aria-label="核准區：等待列表" data-testid="approval-list">
++      <header className="hl-h"><h2>核准區：等待列表</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
+       {!open.length && (
+         <div className="hl-empty" data-testid="home-empty">
+-          <p className="hl-none">目前沒有待核准事項</p>
++          <p className="calm-title">全廠正常，沒有要你處理的事</p>
++          {next.length > 0 && <p className="muted">接下來：{next.slice(0, 3).join('・')}</p>}
+         </div>
+       )}
+       <div className="hl-body">
+@@ -45,25 +46,13 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
+   const sub = useWarRoom().state.subagents?.items.find((s) => s.id === i.eventId)
+   const planning = rp?.state === 'sending' || rp?.state === 'planning'
+   return (
+-    <button type="button" className={`hl-item tone-${i.tone} ${i.req ? `has-req r-${i.req.risk}` : ''} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
+-      {i.req ? (
+-        <>
+-          <span className="hl-top">
+-            <span className="hl-pill-row"><span className="hl-pill tone-wait">待核准</span><span className={`hl-risk r-${i.req.risk}`}>{i.req.risk}</span></span>
+-            <span className="hl-t">{i.machine ?? i.title}</span>
+-          </span>
+-          <span className="hl-s hl-desc">{i.desc || i.title}</span>
+-        </>
+-      ) : (
+-        <>
+-          <span className="hl-top">
+-            <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
+-            <span className="hl-t">{i.title}</span>
+-          </span>
+-          <span className="hl-s">{i.sub}</span>
+-        </>
+-      )}
+-      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? `Agent Nemo（${sub.type_label}）・執行中` : `Agent Nemo（${sub.type_label}）・${SUB_STATUS[sub.status]}`}</span>}
++    <button type="button" className={`hl-item tone-${i.tone} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
++      <span className="hl-top">
++        <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
++        <span className="hl-t">{i.title}</span>
++      </span>
++      <span className="hl-s">{i.sub}</span>
++      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
+       {i.checked && <span className="hl-hint" data-testid="item-prechecked">{i.checked}</span>}
+       {rp === null && !i.checked && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
+       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />Agent Nemo 規劃中…好了會自動切到核准卡</span>}
+diff --git a/web/src/agent/homeItems.ts b/web/src/agent/homeItems.ts
+index 0fa5e72..6e03272 100644
+--- a/web/src/agent/homeItems.ts
++++ b/web/src/agent/homeItems.ts
+@@ -8,9 +8,8 @@
+ import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
+ import { STATE_LABEL } from '../components/common'
+ import { ML_PRESSES, machineLabel } from '../factory'
+-import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
++import { fmtHM, fmtMD, ms } from '../format'
+ import { RISK_PLAIN, plain } from '../plain'
+-import { caseTitle } from '../resolveText'
+ 
+ export type Rank = 1 | 2 | 3 | 4 | 5
+ export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
+@@ -28,9 +27,6 @@ export interface HomeItem {
+   ts: number
+   progress?: number         // ④: share of the event's worker tasks done (0–1)
+   checked?: string          // ②: the pre-plan ran and found nothing to change (precheckLine)
+-  caseId?: string           // ①: an open Safety Core case (key `safety:<id>`, components/Resolve.tsx)
+-  /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
+-  machine?: string; desc?: string
+ }
+ 
+ const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+@@ -50,22 +46,10 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
+     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
+     if (req) {
+-      out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
++      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
+         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
+     } else if (ev.state === 'safe_stop') {
+-      // CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」: stays in ① until replanned or 確認結案 (buttons in the plan area)
+-      const fu = ev.follow_up ?? null
+-      const why = ev.stop_reason_text ?? plain(ev.outcome ?? '')
+-      const title = `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`
+-      if (!fu || fu.status === 'manual') {
+-        const fuDone = fu ? fu.task_ids.filter((id) => (tasks.find((t) => t.id === id)?.status ?? '完成') === '完成').length : 0
+-        out.push({ ...base, rank: 1, tone: 'bad', pill: fu ? '人工處理中' : '安全停止', title,
+-          sub: `原因：${why}${fu ? `・現場任務 ${fuDone}/${fu.task_ids.length}` : '・可請 AI 重新規劃、交給現場或確認結案'}`,
+-          ...(fu && fu.task_ids.length ? { progress: fuDone / fu.task_ids.length } : {}) })
+-      } else {
+-        out.push({ ...base, rank: 5, tone: 'done', pill: fu.status === 'replanned' ? '已重新規劃' : '已結案', title,
+-          sub: `安全停止（${why}）・${fu.status === 'replanned' ? `已請 AI 重新規劃 → ${fu.new_event_id ?? ''}` : `主管確認結案${fu.closed_at ? `・${fmtHM(fu.closed_at)}` : ''}`}` })
+-      }
++      out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
+     } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
+       // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
+       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
+@@ -75,7 +59,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
+     } else if (OPEN(ev)) {
+       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
+-        sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
++        sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
+     } else {
+       out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
+         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
+@@ -106,13 +90,6 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+         title: `${id} 預估晚於交期`, sub: `${plain(seg.trim())}${head ? `・${plain(head)}` : ''}` })
+     }
+   }
+-  // ① a Safety Core stop / hold still open: its checklist is the way back (components/Resolve.tsx)
+-  for (const c of (snap?.safety_cases ?? []).filter((x) => x.status === 'open')) {
+-    const done = c.tasks_done
+-    out.push({ key: `safety:${c.id}`, rank: 1, tone: 'bad', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(c.ts), caseId: c.id,
+-      title: caseTitle(c),
+-      sub: `${c.task_ids.length ? `① 現場檢查 ${done}/${c.task_ids.length}` : '① 待派現場檢查'}・${c.reading_ok ? '② 讀值已回到安全範圍' : `② 讀值 ${c.safe_samples}/${c.safe_needed}`}・③ 待主管確認` })
+-  }
+   // ⑤ the Safety Core and the validation layer acted without the AI
+   for (const a of (snap?.safety_actions ?? []).slice(-5)) {
+     out.push({ key: `fyi:${a.id}`, rank: 5, tone: 'done', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(a.ts),
+@@ -129,15 +106,14 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
+ export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
+   const out: { t: number; s: string }[] = []
+   const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
+-  if (dm) out.push({ t: dm.t, s: `${fmtHM12(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
++  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
+   const dep = world?.dock.next_departure
+-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM12(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
++  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
+   const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
+-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
++  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
+   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
+-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
+-  const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
+-  return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
++  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
++  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+ }
+ 
+ const CURE_PRESSES = 11
+diff --git a/web/src/components/DemoStrip.tsx b/web/src/components/DemoStrip.tsx
+index 8b38c12..d712315 100644
+--- a/web/src/components/DemoStrip.tsx
++++ b/web/src/components/DemoStrip.tsx
+@@ -1,10 +1,11 @@
+ import { useState } from 'react'
+-import type { ScenarioName } from '../contracts'
++import type { HeaderStatus, ScenarioName } from '../contracts'
+ import { SCENARIOS } from '../mock/engine'
+ import { useWarRoom } from '../useWarRoom'
+ import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
+ import { SimEventControls } from './SimEvents'
+ 
++const SPEEDS = [1, 5, 10, 40, 60]   // 40×: 一早訂單湧入's demo speed
+ const Q = new URLSearchParams(location.search)
+ /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
+ export const DEMO_MODE = Q.get('demo') === '1'
+@@ -33,9 +34,12 @@ export function DemoStrip() {
+   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
+   const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
+   if (!transport) return null
++  const clock = state.clock
++  const net = state.snapshot?.header.network ?? 'online'
+   const mock = transport.mode === 'mock'
+   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
+   const current = scenario ?? (state.clock?.scenario as ScenarioName | undefined) ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : null)
++  const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
+   // a scenario picked while paused used to load and stay paused (the plant looked frozen): loading it also plays
+   const loadAndPlay = async (name: ScenarioName, speed: number) => {
+     await transport.control({ action: 'scenario', scenario: name, speed, preroll: true })
+@@ -66,6 +70,13 @@ export function DemoStrip() {
+       {overlaid && (overlays.length > 0 || overlaid.startsWith('疊加沒有成功')) && !loading && (
+         <span className="demo-overlay" role="status" data-testid="demo-overlay" title={overlaid}>{overlaid}</span>
+       )}
++      <div className="seg" role="group" aria-label="播放">
++        <button disabled={busy} onClick={() => run(() => transport.control({ action: clock?.paused ? 'play' : 'pause' }))}>{clock?.paused ? '▶ 播放' : '❚❚ 暫停'}</button>
++        {SPEEDS.map((s) => (
++          <button key={s} disabled={busy} className={clock?.speed === s ? 'on' : ''} onClick={() => run(() => transport.control({ action: 'speed', speed: s }))}>{s}×</button>
++        ))}
++        <button disabled={busy} onClick={() => { setOverlaid(null); run(() => transport.control({ action: 'reset' })) }}>↺ 重來</button>
++      </div>
+       {!mock && ALL_SCENARIOS && state.clock?.day_loop && (
+         <div className="seg" role="group" aria-label="跳到時間（一日循環）" data-testid="day-jumps">
+           {DAY_JUMPS.map((j) => (
+@@ -80,6 +91,14 @@ export function DemoStrip() {
+         </div>
+       )}
+       {ALL_SCENARIOS && <SimEventControls busy={busy} run={run} />}
++      <div className="seg net" role="group" aria-label="拔網路測試" title="模擬離線分層（p.9）：弱網→Agent 不受影響，只延後同步與推播；WAN 斷→手機走廠內 LAN；LAN 斷→現場觸控螢幕＋警示燈">
++        {(['online', 'weak', 'wan_down', 'lan_down'] as const).map((n) => (
++          <button key={n} disabled={busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}
++            title={n === 'weak' ? '弱網・延後推播：手機與遠端畫面延後數秒批次更新，事件處理與安全核心不受影響' : undefined}>
++            {n === 'online' ? '● 在線' : n === 'weak' ? '弱網' : n === 'wan_down' ? 'WAN 斷' : 'LAN 斷'}
++          </button>
++        ))}
++      </div>
+       {state.lastAlert && (
+         <span className="demo-alert" title={state.lastAlert.summary}>⚡ 最新告警卡：{state.lastAlert.title}</span>
+       )}
+diff --git a/web/src/contracts.ts b/web/src/contracts.ts
+index d509b4e..e166081 100644
+--- a/web/src/contracts.ts
++++ b/web/src/contracts.ts
+@@ -41,7 +41,7 @@ export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat"
+ export type AuditKind =
+   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
+   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
+-  | "rollback" | "notify" | "system" | "task" | "safety_release"
++  | "rollback" | "notify" | "system" | "task"
+ export type WsType =
+   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
+   | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents"
+@@ -180,40 +180,6 @@ export interface SafetyAction {
+   latency_ms: number
+ }
+ 
+-/** A Safety Core stop / hold / alarm and its way back (warroom/api/resolve.py; CJ 2026-10-22 「安全核心要設計可以被解決」):
+- *  ① 派現場檢查 → ② reading back in range for `safe_needed` samples → ③ the supervisor's release (human only). */
+-export type SafetyDecision = "resume" | "qc_pass" | "scrap"
+-export interface SafetyCase {
+-  id: string
+-  machine_id: string
+-  rule_id: string
+-  rule_ids: string[]
+-  actions: string[]
+-  action: SafetyActionKind
+-  message: string
+-  value: number
+-  threshold: number
+-  ts: ISODate
+-  latency_ms: number
+-  status: "open" | "resolved"
+-  event_id: string | null
+-  sop_ids: string[]
+-  task_ids: string[]
+-  tasks_done: number
+-  dispatched_at: ISODate | null
+-  reading: number | null
+-  safe_samples: number
+-  safe_needed: number
+-  reading_ok: boolean
+-  decisions: SafetyDecision[]
+-  resolved_at: ISODate | null
+-  resolved_by: string | null
+-  resolution: SafetyDecision | null
+-  reason: string | null
+-  field_confirmed: boolean
+-}
+-export interface SafetyRelease { decision: SafetyDecision; reason?: string; field_confirmed?: boolean }
+-
+ // 問戰情室: the supervisor's read-only question (POST /api/ask)
+ export interface AskStepResult {
+   tool: string
+@@ -395,37 +361,15 @@ export interface Event {
+   prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
+   closed_at: ISODate | null
+   outcome: string | null
+-  ai_report?: EventAiReport | null   // Agent Nemo 異常報告 (warroom/agent/reporter.py), set when the event closes
+   // issue #10
+   source?: "detector" | "supervisor" | "plant"  // plant = issue #17 plant event (machine_id "PLANT")
+   command?: string | null
+   constraints?: PlanConstraint[]
+   discuss_replans?: number
+-  // fast repair (Kyle 10-21 flow: 核准 → 維修 → 維修完成 → 回溫 → 綠燈 → 異常報告): repaired_at = every repair task
+-  // (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; the readings then ramp back to nominal over
+-  // recover_fast_s wall seconds (machine WARNING, 「回溫中」); recovered_at = back to normal (VERIFY confirms, the event
+-  // closes, the machine RUNNING). review = the incident report: pending (「報告待讀」, not a gate: nothing waits for it)
+-  // at close, done (「主管已讀報告」) after POST /api/events/{id}/review
++  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; then
++  // 「請主管覆核」 (review pending) once the event closed, done after POST /api/events/{id}/review
+   repaired_at?: ISODate | null
+-  recovered_at?: ISODate | null
+   review?: EventReview | null
+-  // SAFE_STOP → resolution (CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」)
+-  stop_reason?: string | null
+-  stop_reason_text?: string | null
+-  follow_up?: StopFollowUp | null
+-  previous?: PreviousRun | null
+-}
+-export interface PreviousRun { event_id: string; reason: string; reason_text: string }
+-export interface StopFollowUp {
+-  status: "replanned" | "manual" | "closed"
+-  by: string
+-  at: ISODate
+-  new_event_id: string | null
+-  task_ids: string[]
+-  sop_ids: string[]
+-  closed_at: ISODate | null
+-  closed_by: string | null
+-  note: string | null
+ }
+ export interface EventReview {
+   status: "pending" | "done"
+@@ -629,7 +573,6 @@ export interface DashboardSnapshot {
+   events: Event[]
+   pending_approvals: ApprovalRequest[]
+   safety_actions: SafetyAction[]
+-  safety_cases?: SafetyCase[]   // open ones + the last few resolved (warroom/api/resolve.py)
+ }
+ 
+ export interface MachineDetail {
+@@ -696,7 +639,6 @@ export interface HealthStatus {
+   uptime_s: number
+   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
+   repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
+-  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after the repair
+ }
+ 
+ // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
+@@ -826,14 +768,8 @@ export const API = {
+   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
+   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
+   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
+-  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
++  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
+   returnToService: "/api/machines/{machine_id}/return-to-service", // POST -> {machine_id, status} (#104 主管恢復運轉, 409 unless 檢修完成)
+-  safetyCases: "/api/safety/cases", // GET SafetyCase[]
+-  safetyDispatch: "/api/safety/{case_id}/dispatch", // POST -> SafetyCase (① 派現場檢查)
+-  safetyRelease: "/api/safety/{case_id}/release", // POST SafetyRelease -> SafetyCase (③ 確認恢復運轉; human only)
+-  stopReplan: "/api/events/{event_id}/replan", // POST -> the NEW Event (SAFE_STOP: 請 AI 重新規劃)
+-  stopHandoff: "/api/events/{event_id}/handoff", // POST -> Event (SAFE_STOP: 交給現場處理)
+-  stopClose: "/api/events/{event_id}/close", // POST {note?} -> Event (SAFE_STOP: 確認結案)
+   ws: "/ws",
+ } as const
+ 
+@@ -862,9 +798,3 @@ export interface MainReply {
+   id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
+ }
+-
+-/** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+- *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
+-export interface EventAiReport {
+-  text: string; summary: string; by: "model" | "rules"; drafted_ms: number | null; at: ISODate; late_ms: number | null
+-}
+diff --git a/web/src/transport.ts b/web/src/transport.ts
+index 7bf68b0..8e75f00 100644
+--- a/web/src/transport.ts
++++ b/web/src/transport.ts
+@@ -4,7 +4,7 @@ import type { OrdersToday } from './components/ordersToday'
+ import {
+   API, apiPath,
+   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
+-  type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
++  type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
+ } from './contracts'
+ import { MockEngine, type Network } from './mock/engine'
+@@ -63,17 +63,11 @@ export interface Transport {
+   command?(text: string): Promise<CommandReply>
+   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
+   discuss?(eventId: string, text: string): Promise<DiscussReply>
+-  /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
+-   *  approvals. 409 when the event has no unread report. */
++  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
++   *  approvals. 409 when the event has no pending review. */
+   review?(eventId: string, note?: string): Promise<Event>
+   /** Live only (#104): 恢復運轉, the supervisor puts a machine whose 檢修 is done back in service. PIN like approvals. */
+   returnToService?(machineId: string): Promise<{ machine_id: string; status: string }>
+-  /** Live only: resolution paths (warroom/api/resolve.py), supervisor session like approvals. */
+-  safetyDispatch?(caseId: string): Promise<SafetyCase>
+-  safetyRelease?(caseId: string, body: SafetyRelease): Promise<SafetyCase>
+-  stopReplan?(eventId: string): Promise<Event>
+-  stopHandoff?(eventId: string): Promise<Event>
+-  stopClose?(eventId: string, note?: string): Promise<Event>
+   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
+   interrupt?(eventId: string): Promise<Record<string, unknown>>
+   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
+@@ -151,28 +145,6 @@ export async function adminFetch<T>(path: string, init: { method?: string; body?
+   return (await r.json()) as T
+ }
+ 
+-/** 後台 稽核紀錄 匯出: the same PIN rule as adminFetch, but the body is a file the browser saves. Returns the row count. */
+-export async function adminDownload(path: string, retried = false): Promise<number> {
+-  const pin = supervisorPin()
+-  const r = await fetch(path, { headers: pin ? { 'X-Supervisor-Pin': pin } : {} })
+-  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+-  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+-    const p = window.prompt('後台需要主管 PIN')
+-    if (p) {
+-      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+-      return adminDownload(path, true)
+-    }
+-  }
+-  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+-  const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') ?? '')?.[1] ?? 'audit.jsonl'
+-  const url = URL.createObjectURL(await r.blob())
+-  const a = document.createElement('a')
+-  a.href = url; a.download = name
+-  document.body.appendChild(a); a.click(); a.remove()
+-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+-  return Number(r.headers.get('X-Rows') ?? 0)
+-}
+-
+ export class LiveTransport implements Transport {
+   mode: Mode = 'live'
+   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void) {
+@@ -230,11 +202,6 @@ export class LiveTransport implements Transport {
+   returnToService(machineId: string) { return postJSON<{ machine_id: string; status: string }>(apiPath(API.returnToService, { machine_id: machineId }), {}) }
+   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
+   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
+-  safetyDispatch(caseId: string) { return postJSON<SafetyCase>(apiPath(API.safetyDispatch, { case_id: caseId }), {}) }
+-  safetyRelease(caseId: string, body: SafetyRelease) { return postJSON<SafetyCase>(apiPath(API.safetyRelease, { case_id: caseId }), body) }
+-  stopReplan(eventId: string) { return postJSON<Event>(apiPath(API.stopReplan, { event_id: eventId }), {}) }
+-  stopHandoff(eventId: string) { return postJSON<Event>(apiPath(API.stopHandoff, { event_id: eventId }), {}) }
+-  stopClose(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.stopClose, { event_id: eventId }), note ? { note } : {}) }
+   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
+   async control(c: SimControl) { await postJSON(API.simControl, c) }
+   async overlay(scenario: ScenarioName) {

@@ -1,0 +1,620 @@
+diff --git a/tests/test_morning_rush.py b/tests/test_morning_rush.py
+index 9016465..3752406 100644
+--- a/tests/test_morning_rush.py
++++ b/tests/test_morning_rush.py
+@@ -1,31 +1,30 @@
+-"""Issue #104 一早訂單湧入 (morning_rush), the finals demo, cut to ~3 real minutes at 40×: 07:00–07:07 eight orders
+-arrive (SO-012 can never make its due date, SO-017 is the rush order), 07:12 page 11 on press 7 (H1 rejected -> H2,
+-fixed by H2's 停用檢修 also under fast repair); 10:00 the truck leaves. MORNING_RUSH_LEAK=0 drops the leak,
+-MORNING_RUSH_SAFETY=1 adds the 08:30 Safety Core stop on B 線開煉機 (no false 溫度下降 card while it is stopped).
++"""Issue #104 一早訂單湧入 (morning_rush), the finals demo: 07:00 早班開工, 07:05–07:20 eight orders arrive (SO-012 can
++never make its due date, SO-017 is the rush order), 07:40 page 11 on press 7, 08:30 the Safety Core stops B 線開煉機
++(MORNING_RUSH_SAFETY=0 leaves it out), 10:00 the truck leaves.
+ 
+ CJ, 2026-10-22: 「因為我demo 是以一天的開始就是訂單湧進來 然後事件 然後 我還沒想到完整展示流程」.
+ """
+ from __future__ import annotations
+ 
+-import asyncio
+ from datetime import datetime, timedelta
+ 
+ import pytest
+ 
+ from warroom import factory as F
+ from warroom.config import Settings
+-from warroom.contracts import ApprovalDecision, DecisionKind, EventState, MachineStatus, SafetyActionKind, ScenarioName
++from warroom.contracts import ApprovalDecision, DecisionKind, EventState, SafetyActionKind, ScenarioName
+ from warroom.sim import Factory
+ from warroom.sim.scenarios import (
+     MR_AT_RISK_ORDER,
+     MR_ORDERS,
+     MR_RUSH_ORDER,
++    MR_SAFETY_OFFSET_S,
+     get_scenario,
+ )
+ 
+ pytestmark = pytest.mark.timeout(300)
+ TZ = F.TZ
+-START = datetime(2026, 10, 23, 6, 59, tzinfo=TZ)
++START = datetime(2026, 10, 23, 6, 55, tzinfo=TZ)
+ 
+ 
+ def _at(hh: int, mm: int, ss: int = 0) -> datetime:
+@@ -37,33 +36,28 @@ def _run(f: Factory, until: datetime) -> None:
+         f.step(1.0)
+ 
+ 
+-def _faults(sc) -> dict[str, list[datetime]]:
+-    out: dict[str, list[datetime]] = {}
+-    for st in sc.steps:
+-        if st.fault is not None:
+-            out.setdefault(st.fault.machine_id, []).append(START + timedelta(seconds=st.at_offset_s))
+-    return out
+-
+-
+-def test_scenario_loads_with_its_beats(monkeypatch):
+-    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
+-    monkeypatch.delenv("MORNING_RUSH_SAFETY", raising=False)
++def test_scenario_loads_with_its_beats():
+     sc = get_scenario(ScenarioName.MORNING_RUSH)
+     assert sc.start_at == START
+-    assert not any(st.plant is not None and st.plant.kind == "shift_start" for st in sc.steps)
++    at = {round(st.at_offset_s): st for st in sc.steps}
++    assert at[300].plant is not None and at[300].plant.kind == "shift_start"
+     orders = [st for st in sc.steps if st.order is not None]
+     rush = [st for st in sc.steps if st.plant is not None and st.plant.kind == "rush_order"]
+     assert len(orders) == 7 and len(rush) == 1 and rush[0].plant.order.id == MR_RUSH_ORDER
+     assert 6 <= len(orders) + len(rush) <= 10
+-    assert all(_at(7, 0) <= START + timedelta(seconds=st.at_offset_s) <= _at(7, 7) for st in orders + rush)
+-    assert _faults(sc) == {"CURE-07": [_at(7, 12), _at(7, 21, 40)]}     # the 3-minute cut: no Safety Core step
++    assert all(_at(7, 5) <= START + timedelta(seconds=st.at_offset_s) <= _at(7, 20) for st in orders + rush)
++    faults: dict[str, datetime] = {}
++    for st in sc.steps:
++        if st.fault is not None:
++            faults.setdefault(st.fault.machine_id, START + timedelta(seconds=st.at_offset_s))
++    assert faults["CURE-07"] == _at(7, 40) and faults["B-OPEN"] == _at(8, 30)
+ 
+ 
+-def test_leak_and_safety_steps_are_toggleable(monkeypatch):
+-    monkeypatch.setenv("MORNING_RUSH_LEAK", "0")
+-    monkeypatch.setenv("MORNING_RUSH_SAFETY", "1")
+-    f = _faults(get_scenario(ScenarioName.MORNING_RUSH))
+-    assert f["CURE-07"] == [_at(7, 12)] and f["B-OPEN"] == [_at(8, 30)]
++def test_safety_step_is_toggleable(monkeypatch):
++    monkeypatch.setenv("MORNING_RUSH_SAFETY", "0")
++    sc = get_scenario(ScenarioName.MORNING_RUSH)
++    assert not any(st.fault and st.fault.machine_id == "B-OPEN" for st in sc.steps)
++    assert not any(st.at_offset_s == MR_SAFETY_OFFSET_S for st in sc.steps)
+ 
+ 
+ def test_orders_arrive_at_their_times_and_only_the_rush_order_is_a_plant_event():
+@@ -94,19 +88,20 @@ def test_the_flood_is_deterministic():
+     assert feed() == feed()
+ 
+ 
+-async def _run_day(tmp_path, until: datetime, fast_s: float):
+-    """Mock commander, every card approved as it appears. Returns (events, world, safety log, when SO-012 went at risk,
+-    when its pre-plan started)."""
++async def test_morning_rush_end_to_end(tmp_path):
++    """Mock commander, every card approved as it appears (the at-risk order's own card left waiting): the rush re-plan
++    makes SO-012 a 交期風險 item and the pre-plan starts on it without anyone asking; page 11 fires at 07:40 and H1 is
++    rejected; the Safety Core stops B 線開煉機; the 10:00 truck leaves."""
+     from warroom.api import Runtime
+     s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
+-                 scenario="morning_rush", llm_mode="mock", repair_fast_s=fast_s)
++                 scenario="morning_rush", llm_mode="mock", repair_fast_s=0.0)   # fast repair runs on the wall clock
+     rt = Runtime(s, allow_fallback=False, run_loop=False)
+     assert rt.degraded == {}
+     await rt.start()
+     rt.preplan_on = True
+     risk_at = preplan_at = None
+     try:
+-        while rt.now() < until:
++        while rt.now() < _at(10, 1):
+             await rt.tick(1.0, publish=False)
+             for req in rt.approvals.pending():
+                 opt = next((o for o in req.options if o.recommended), req.options[0])
+@@ -117,173 +112,23 @@ async def _run_day(tmp_path, until: datetime, fast_s: float):
+             if preplan_at is None and MR_AT_RISK_ORDER in rt._preplanned:
+                 preplan_at = rt.now()
+         await rt.wait_events(5)
+-        return rt.events(), rt.world_snapshot(), list(rt.safety_log), risk_at, preplan_at, rt.PREPLAN_EVERY_S, rt
++        events = rt.events()
++        world = rt.world_snapshot()
+     finally:
+         await rt.stop()
+-
+-
+-async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
+-    """The 3-minute cut under fast repair: the rush re-plan makes SO-012 a 交期風險 item and the pre-plan starts on it
+-    without anyone asking; page 11 fires at 07:12; H1's approved 檢修 finishes fast but the press keeps leaking, so
+-    VERIFY still reads 119.5 °C and H1 is rejected; H2's 停用檢修 then fixes it fast; the 10:00 truck leaves."""
+-    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
+-    monkeypatch.delenv("MORNING_RUSH_SAFETY", raising=False)
+-    events, world, safety, risk_at, preplan_at, every, rt = await _run_day(tmp_path, _at(10, 1), 0.05)
+-    assert risk_at is not None and _at(7, 7) < risk_at < _at(7, 12), risk_at
+-    assert preplan_at is not None and preplan_at - risk_at <= timedelta(seconds=every), preplan_at
++    assert risk_at is not None and _at(7, 20) < risk_at < _at(7, 25), risk_at
++    assert preplan_at is not None and preplan_at - risk_at <= timedelta(seconds=rt.PREPLAN_EVERY_S), preplan_at
+     cmd = next(e for e in events if (e.command or "").startswith(f"{MR_AT_RISK_ORDER} "))
+-    assert cmd.source == "supervisor" and cmd.opened_at < _at(7, 12)
++    assert cmd.source == "supervisor" and cmd.opened_at < _at(7, 25)
+     rush = next(e for e in events if e.anomaly.message.startswith(f"急單 {MR_RUSH_ORDER}"))
+-    assert _at(7, 7) <= rush.opened_at < _at(7, 8)
++    assert _at(7, 20) <= rush.opened_at < _at(7, 21)
+     p11 = next(e for e in events if e.machine_id == "CURE-07")
+-    assert _at(7, 12) < p11.opened_at < _at(7, 14)
+-    h1 = p11.hypotheses[0]
+-    assert h1.status.value == "rejected" and any("119.5" in x for x in h1.evidence), h1.evidence
+-    assert len(p11.hypotheses) >= 2 and p11.state is EventState.CLOSED
+-    tasks = [t for t in world.tasks.items if t.event_id == p11.id]
+-    assert {"檢修", "停用檢修"} <= {t.kind for t in tasks} and all(t.status == "完成" for t in tasks if t.kind.endswith("檢修"))
+-    assert not [f for f in rt.sim.faults(active_only=False) if f.machine_id == "CURE-07"]     # H2 fixed the press
+-    assert not [a for a in safety if a.machine_id == "B-OPEN"]
++    assert _at(7, 40) < p11.opened_at < _at(7, 42)
++    assert p11.hypotheses and p11.hypotheses[0].status.value == "rejected" and len(p11.hypotheses) >= 2
++    stops = [a for a in rt.safety_log if a.machine_id == "B-OPEN" and a.action is SafetyActionKind.STOP_MACHINE]
++    assert stops and _at(8, 30) < stops[0].ts < _at(8, 45)
++    assert any(e.machine_id == "B-OPEN" and e.opened_at < stops[0].ts for e in events)
+     left = [e for e in world.events if e.kind == "shipment_departed"]
+     assert left and left[0].ts == _at(10, 0)
+-    # one pre-plan per change of SO-012's inputs (here: the start, and press 7 going out of service), never one per
+-    # schedule version; each reports 「已預先檢查：…」 instead of 「沒有可執行的動作」
+-    pre = [e for e in events if (e.command or "").startswith(f"{MR_AT_RISK_ORDER} ")]
+-    assert 1 <= len(pre) <= 2, [(e.id, e.opened_at) for e in pre]
+-    reports = [a for a in rt.audit.tail(0, 100000) if a.payload.get("orch") == "report" and a.event_id in {e.id for e in pre}]
+-    assert len(reports) == len(pre) and all(r.payload["text"].startswith(f"已預先檢查：{MR_AT_RISK_ORDER} 明天無法交齊（")
+-                                            for r in reports), [r.payload["text"] for r in reports]
+-
+-
+-async def test_preplan_is_not_rerun_for_a_new_eta_alone(tmp_path, monkeypatch):
+-    """A pre-plan that found nothing to change runs again only when the order's due date, quantity or the presses
+-    that can cure it change; a new ETA (a schedule version bump) alone does not start another one."""
+-    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
+-    from warroom.api import Runtime
+-    s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
+-                 scenario="morning_rush", llm_mode="mock")
+-    rt = Runtime(s, allow_fallback=False, run_loop=False)
+-    await rt.start()
+-    try:
+-        while rt.now() < _at(7, 9):                               # the rush re-plan (SO-012 in it) is approved
+-            await rt.tick(1.0, publish=False)
+-            for req in rt.approvals.pending():
+-                rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE,
+-                                                     option_id=req.options[0].id if req.options else None,
+-                                                     reason="test", via="auto", decided_at=rt.now()))
+-        await rt.wait_events(30)
+-        sig = {"SO-012": "eta 1"}
+-        rt.at_risk_orders = lambda: dict(sig)
+-
+-        async def preplan() -> int:
+-            rt._preplan_at = None
+-            rt._preplan_orders()
+-            mine = [e for e in rt.events() if (e.command or "").startswith("SO-012 ")]
+-            for _ in range(600):                                   # the run needs sim seconds to finish
+-                if all(e.state in (EventState.CLOSED, EventState.SAFE_STOP) for e in rt.events() if e.id in {m.id for m in mine}):
+-                    break
+-                await rt.tick(1.0, publish=False)
+-            return len(mine)
+-        assert await preplan() == 1
+-        ev = next(e for e in rt.events() if (e.command or "").startswith("SO-012 "))
+-        assert ev.state is EventState.CLOSED and not ev.approvals                   # nothing to change (mock)
+-        sig["SO-012"] = "eta 2"                                                     # a new ETA only
+-        assert await preplan() == 1
+-        o = next(o for o in rt.sim.orders() if o.id == "SO-012")
+-        rt.sim._orders["SO-012"] = o.model_copy(update={"qty": o.qty + 2})         # the customer adds two tyres
+-        assert await preplan() == 2
+-    finally:
+-        await rt.stop()
+-
+-
+-async def test_morning_rush_long_cut(tmp_path, monkeypatch):
+-    """MORNING_RUSH_SAFETY=1: the Safety Core stops B 線開煉機 and, while it is stopped and cooling, no 溫度下降 card."""
+-    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
+-    monkeypatch.setenv("MORNING_RUSH_SAFETY", "1")
+-    events, _world, safety, *_rest = await _run_day(tmp_path, _at(9, 45), 0.0)
+-    stops = [a for a in safety if a.machine_id == "B-OPEN" and a.action is SafetyActionKind.STOP_MACHINE]
+-    assert stops and _at(8, 30) < stops[0].ts < _at(8, 45)
+-    bopen = [e for e in events if e.machine_id == "B-OPEN"]
+-    assert len(bopen) == 1 and bopen[0].opened_at < stops[0].ts, [(e.id, e.anomaly.message) for e in bopen]
+-
+-
+-def test_detector_ignores_a_stopped_machine_cooling():
+-    """A stopped (or out-of-service) machine cools to room temperature: no 溫度下降 anomaly. Running, the same drop is one."""
+-    from warroom.detect.detector import StreamDetector
+-    from warroom.contracts import FaultKind, FaultSpec, MachineStatus
+-
+-    def run(stop: bool) -> list:
+-        f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+-        det = StreamDetector()
+-        det.attach_plan(sim=f)
+-        for _ in range(300):
+-            det.ingest(f.step(1.0))
+-        if stop:
+-            f.set_machine_status("B-OPEN", MachineStatus.STOPPED)
+-        else:
+-            f.inject_fault(FaultSpec(id="F-T", machine_id="B-OPEN", kind=FaultKind.TEMP_RAMP,
+-                                     params={"target": 40.0, "rate_c_per_min": 5.0}))
+-        found = []
+-        for _ in range(900):
+-            found += [a for a in det.ingest(f.step(1.0)) if a.machine_id == "B-OPEN"]
+-        assert f.true_temp("B-OPEN") < 60
+-        return found
+-    assert run(stop=True) == []
+-    assert run(stop=False)
+-
+-
+-async def test_page11_fast_repair_keeps_h1_rejected_until_h2(tmp_path):
+-    """press7_temp_drop under fast repair: H1's 檢修 finishes in wall seconds but the scripted leak stays, so VERIFY
+-    reads 119.5 °C and H1 is rejected; H2's 停用檢修 is what fixes press 7 (fast), and the event closes."""
+-    from warroom.api import Runtime
+-    s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
+-                 scenario="press7_temp_drop", llm_mode="mock", repair_fast_s=0.05)
+-    rt = Runtime(s, allow_fallback=False, run_loop=False)
+-    await rt.start()
+-    approved: list[str] = []
+-    try:
+-        for _ in range(60 * 60):
+-            await rt.tick(1.0, publish=False)
+-            for req in rt.approvals.pending():
+-                opt = next((o for o in req.options if o.recommended), req.options[0])
+-                rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE, option_id=opt.id,
+-                                                     reason="test", via="auto", decided_at=rt.now()))
+-                approved.append(req.id)
+-            ev = next((e for e in rt.events() if e.machine_id == "CURE-07"), None)
+-            if ev is not None and ev.state in (EventState.CLOSED, EventState.SAFE_STOP):
+-                break
+-        for _ in range(300):                 # H2's people finish after the event closed (fast repair: wall seconds)
+-            await rt.tick(1.0, publish=False)
+-            await asyncio.sleep(0.005)
+-        await rt.wait_events(5)
+-        ev = next(e for e in rt.events() if e.machine_id == "CURE-07")
+-        tasks = [t for t in rt.world_snapshot().tasks.items if t.event_id == ev.id]
+-        faults = [f for f in rt.sim.faults(active_only=False) if f.machine_id == "CURE-07"]
+-        tile = next(m for m in rt.machine_tiles() if m.machine_id == "CURE-07")
+-        # 檢修完成 shows green but the press stays out of service: only the supervisor's 恢復運轉 lifts it
+-        assert tile.status is MachineStatus.OUT_OF_SERVICE and tile.repaired
+-        import httpx
+-        from warroom.api.app import create_app
+-        app = create_app(rt, supervisor_pin="mr-pin")
+-        url = "/api/machines/CURE-07/return-to-service"
+-
+-        def client(addr=("127.0.0.1", 1)):
+-            return httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=addr), base_url="http://local")
+-        async with client(("192.168.1.20", 5000)) as phone, client() as local:
+-            assert (await phone.post(url)).status_code == 401                         # LAN without the PIN
+-            assert (await local.post("/api/machines/CURE-01/return-to-service")).status_code == 409   # not out of service
+-            assert (await local.post("/api/machines/NOPE/return-to-service")).status_code == 404
+-            r = await phone.post(url, headers={"X-Supervisor-Pin": "mr-pin"})
+-            assert r.status_code == 200, r.text
+-            assert (await local.post(url)).status_code == 409                          # running again
+-        assert rt.sim.status_of("CURE-07") is MachineStatus.RUNNING
+-        assert not next(m for m in rt.machine_tiles() if m.machine_id == "CURE-07").repaired
+-        back = [e for e in rt.audit.tail(0, 100000) if e.payload.get("msg") == "恢復運轉"]
+-        assert len(back) == 1 and back[0].actor.startswith("supervisor") and back[0].event_id == ev.id
+-    finally:
+-        await rt.stop()
+-    h1 = ev.hypotheses[0]
+-    assert h1.status.value == "rejected" and any("119.5" in x for x in h1.evidence), h1.evidence
+-    assert len(ev.hypotheses) >= 2 and len(approved) >= 2 and ev.state is EventState.CLOSED
+-    assert any(t.kind == "停用檢修" and t.status == "完成" for t in tasks), [(t.kind, t.status) for t in tasks]
+-    assert not faults
++    assert all(e.state in (EventState.CLOSED, EventState.SAFE_STOP, EventState.AWAIT_APPROVAL, EventState.VERIFY)
++               or e.source == "supervisor" for e in events)
+diff --git a/warroom/sim/scenarios.py b/warroom/sim/scenarios.py
+index 8282902..66b548c 100644
+--- a/warroom/sim/scenarios.py
++++ b/warroom/sim/scenarios.py
+@@ -42,8 +42,8 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
+     ScenarioName.RUSH_ORDER: datetime(2026, 10, 7, 9, 50, 0, tzinfo=TZ),
+     # issue #36 一日循環: the team dataset's one full quiet day (10/21, a Wednesday), from midnight
+     ScenarioName.DAY_LOOP: datetime(2026, 10, 21, 0, 0, 0, tzinfo=TZ),
+-    # issue #104 一早訂單湧入: the finals' second day (a Friday; the roster has a full 早班), the first order at 07:00
+-    ScenarioName.MORNING_RUSH: datetime(2026, 10, 23, 6, 59, 0, tzinfo=TZ),
++    # issue #104 一早訂單湧入: the finals' second day (a Friday; the roster has a full 早班), five minutes before 開工
++    ScenarioName.MORNING_RUSH: datetime(2026, 10, 23, 6, 55, 0, tzinfo=TZ),
+ }
+ DAY_LOOP_SHIFT_START_S = 8 * 3600.0     # 08:00 開工 every loop
+ PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER})
+@@ -88,52 +88,42 @@ P2_FLOW_DROP_OFFSET_S = 135.0
+ 
+ 
+ # issue #104 一早訂單湧入 (the finals demo). CJ, 2026-10-22: 「因為我demo 是以一天的開始就是訂單湧進來 然後事件」.
+-# The 3D guided demo gives the story ~3 real minutes (orders by ~0:15, a planned card by ~0:45, the p.11 card by ~1:15,
+-# the H2 card by ~2:00, press 7 fixed by ~2:30), so the default cut is: orders 07:00–07:07, page 11 on press 7 at 07:12
+-# (steam drop, then the leak: H1 rejected -> H2, fixed by H2's 停用檢修). Demo speed 40× (web/src/mock/engine.ts
+-# SCENARIOS); a demo button's preroll lands 15 s before 07:00. The sim clock also waits while the model plans
+-# (Runtime._hold_for_compute): the rush plan, the pre-plan and each p.11 plan add their model time (~12–19 s each on
+-# the Mac) on top. Offsets are from 06:59.
+-# The order flood: (offset s, id, customer, size, qty, due in days, priority, rush). Ids continue the team dataset's
+-# orders.csv (SO-001..SO-009, customers 客戶A–G). A re-solve keeps the active plan's tyres and adds only orders of
+-# priority >= 2 it does not carry (solver._prepare), so the normal orders wait for the next full plan and SO-012,
+-# flagged 優先 (priority 2, no card of its own), goes in with the rush order's re-solve. SO-012 is the at-risk one:
+-# 8 小胎 due tomorrow (10/24 23:59). 小胎 cures 24 h on the 7 small presses (01–07) and its compound is fed 100 min
+-# before mold-in, so from 07:07 each press can de-mold at most one of them by 10/24 and the eighth always ends after
+-# its due date, whatever the solver picks. Once the rush re-plan is approved it is a 交期風險 item (rule ②: last
++# Offsets from 06:55. Demo speed 30× (web/src/mock/engine.ts SCENARIOS): 07:00 → 10:00 is 6 real minutes of sim time;
++# the sim clock also waits while the model plans (Runtime._hold_for_compute), which adds the model's time on top.
++MR_SHIFT_START_S = 300.0                 # 07:00 早班開工
++# The order flood, 07:05–07:20: (offset s, id, customer, size, qty, due in days, priority, rush). Ids continue the team
++# dataset's orders.csv (SO-001..SO-009, customers 客戶A–G). A re-solve keeps the active plan's tyres and adds only
++# orders of priority >= 2 it does not carry (solver._prepare), so the normal orders wait for the next full plan and
++# SO-012, flagged 優先 (priority 2, no card of its own), goes in with the rush order's re-solve. SO-012 is the at-risk
++# one: 8 小胎 due tomorrow (10/24 23:59). 小胎 cures 24 h on the 7 small presses (01–07) and its compound is fed
++# 100 min before mold-in, so from 07:20 each press can de-mold at most one of them by 10/24 and the eighth always ends
++# after its due date, whatever the solver picks. Once the rush re-plan is approved it is a 交期風險 item (rule ②: last
+ # de-mold after the due date) and #101's pre-plan drafts its plan. The rush order comes last, so its re-solve sees
+ # the whole flood.
+ MR_ORDERS: tuple[tuple[float, str, str, TireSize, int, int, int, bool], ...] = (
+-    (60.0, "SO-010", "客戶A", TireSize.S, 20, 17, 0, False),
+-    (120.0, "SO-011", "客戶B", TireSize.M, 12, 28, 0, False),
+-    (180.0, "SO-012", "客戶F", TireSize.S, 8, 1, 2, False),
+-    (240.0, "SO-013", "客戶C", TireSize.S, 16, 21, 0, False),
+-    (300.0, "SO-014", "客戶D", TireSize.L, 6, 35, 0, False),
+-    (360.0, "SO-015", "客戶E", TireSize.S, 24, 24, 0, False),
+-    (420.0, "SO-016", "客戶B", TireSize.M, 10, 30, 0, False),
+-    (480.0, "SO-017", "客戶G", TireSize.M, 2, 3, 3, True),    # 07:07 急單: SO-009's customer again, 2 中胎 by Monday
++    (600.0, "SO-010", "客戶A", TireSize.S, 20, 17, 0, False),
++    (720.0, "SO-011", "客戶B", TireSize.M, 12, 28, 0, False),
++    (840.0, "SO-012", "客戶F", TireSize.S, 8, 1, 2, False),
++    (960.0, "SO-013", "客戶C", TireSize.S, 16, 21, 0, False),
++    (1080.0, "SO-014", "客戶D", TireSize.L, 6, 35, 0, False),
++    (1200.0, "SO-015", "客戶E", TireSize.S, 24, 24, 0, False),
++    (1320.0, "SO-016", "客戶B", TireSize.M, 10, 30, 0, False),
++    (1500.0, "SO-017", "客戶G", TireSize.M, 2, 3, 3, True),   # 07:20 急單: SO-009's customer again, 2 中胎 by Monday
+ )
+ MR_AT_RISK_ORDER = "SO-012"
+ MR_RUSH_ORDER = "SO-017"
+-# 07:12 the page-11 steam drop on press 7 (the press is curing EV-2's S-027 until ~11:50); detected ~45 s later. Page
+-# 11's leak follows 580 s later, so H1 (extend the cure) fails at verify ~17 min after the drop and H2 follows; fast
+-# repair leaves a leaking press alone until H2's 停用檢修 (Runtime._apply_repairs). MORNING_RUSH_LEAK=0 drops the leak:
+-# then H1's 檢修 fixes the press and closes the event.
+-MR_P11_OFFSET_S = 780.0
+-# 08:30, MORNING_RUSH_SAFETY=1 only: B 線開煉機 loses its cooling and the compound climbs past 120 °C; the Safety Core
+-# stops the machine on the reading (SR-COMPOUND-120), without waiting for the AI
+-MR_SAFETY_OFFSET_S = 5460.0
++# 07:40 the page-11 incident on press 7 (the press is curing EV-2's S-027 until ~11:50), same relative timing as
++# page 11: steam drop, then the leak 580 s later that makes H1 (extend the cure) fail at verify (~17 min later)
++MR_P11_OFFSET_S = 2700.0
++# 08:30 (MORNING_RUSH_SAFETY=0 leaves it out): B 線開煉機 loses its cooling and the compound climbs past 120 °C; the
++# Safety Core stops the machine on the reading (SR-COMPOUND-120), without waiting for the AI
++MR_SAFETY_OFFSET_S = 5700.0
+ MR_SAFETY_RATE_C_PER_MIN = 3.0
+ 
+ 
+-def morning_rush_leak() -> bool:
+-    """Page 11's steam leak (H1 rejected -> H2); MORNING_RUSH_LEAK=0 drops it. Read on each load."""
+-    return os.environ.get("MORNING_RUSH_LEAK", "1") != "0"
+-
+-
+ def morning_rush_safety() -> bool:
+-    """MORNING_RUSH_SAFETY=1 adds the 08:30 Safety Core step. Read on each load."""
+-    return os.environ.get("MORNING_RUSH_SAFETY", "0") == "1"
++    """MORNING_RUSH_SAFETY=0 drops the 08:30 Safety Core step (read when the scenario is built, i.e. on each load)."""
++    return os.environ.get("MORNING_RUSH_SAFETY", "1") != "0"
+ 
+ 
+ def _mr_order(start: datetime, oid: str, cust: str, size: TireSize, qty: int, days: int, prio: int) -> Order:
+@@ -143,7 +133,8 @@ def _mr_order(start: datetime, oid: str, cust: str, size: TireSize, qty: int, da
+ 
+ def _morning_rush(start: datetime) -> Scenario:
+     size_zh = {TireSize.S: "小胎", TireSize.M: "中胎", TireSize.L: "大胎"}
+-    steps: list[ScenarioStep] = []
++    steps = [ScenarioStep(at_offset_s=MR_SHIFT_START_S, note="07:00 早班開工",
++                          plant=PlantInput(kind="shift_start", text="07:00 早班開工：排今日計畫"))]
+     for off, oid, cust, size, qty, days, prio, rush in MR_ORDERS:
+         o = _mr_order(start, oid, cust, size, qty, days, prio)
+         at = scenario_time_of(start, off)
+@@ -153,26 +144,24 @@ def _morning_rush(start: datetime) -> Scenario:
+                                       plant=PlantInput(kind="rush_order", order=o, text=f"急單 {oid} 到：{what}")))
+         else:
+             steps.append(ScenarioStep(at_offset_s=off, note=f"{at} 新訂單 {oid}：{what}", order=o))
+-    p11 = scenario_time_of(start, MR_P11_OFFSET_S)
+-    steps.append(ScenarioStep(at_offset_s=MR_P11_OFFSET_S, note=f"{p11} 蒸汽壓不足：7 號 128 → 122°C",
+-                              fault=_f("F-MR-STEAM", "CURE-07", FaultKind.STEAM_PRESSURE_DROP, target_c=122.0)))
+-    expected = ["07:00–07:07 訂單湧入 8 張：7 張一般訂單進訂單簿，07:07 急單 SO-017 → 重排核准卡",
++    steps += [
++        ScenarioStep(at_offset_s=MR_P11_OFFSET_S, note="07:40 蒸汽壓不足：7 號 128 → 122°C",
++                     fault=_f("F-MR-STEAM", "CURE-07", FaultKind.STEAM_PRESSURE_DROP, target_c=122.0)),
++        ScenarioStep(at_offset_s=MR_P11_OFFSET_S + P11_LEAK_OFFSET_S - P11_STEAM_DROP_OFFSET_S,
++                     note="持續洩壓：7 號溫度續降到 120°C 以下",
++                     fault=_f("F-MR-LEAK", "CURE-07", FaultKind.STEAM_LEAK, rate_c_per_min=P11_LEAK_RATE_C_PER_MIN,
++                              floor_kgf_cm2=2.0, header_drop=0.1)),
++    ]
++    expected = ["07:00 早班開工：今日計畫核准卡", "07:05–07:20 訂單湧入 8 張：7 張一般訂單進訂單簿，07:20 急單 SO-017 → 重排核准卡",
+                 "急單核准後 SO-012（小胎 8 條、交期明天）交期風險 → Agent Nemo 先擬保交期方案",
+-                f"{p11} 7 號硫化機溫降 (p.11) → 核准卡 → 檢修完成、7 號回綠"]
+-    if morning_rush_leak():
+-        steps.append(ScenarioStep(at_offset_s=MR_P11_OFFSET_S + P11_LEAK_OFFSET_S - P11_STEAM_DROP_OFFSET_S,
+-                                  note="持續洩壓：7 號溫度續降到 120°C 以下",
+-                                  fault=_f("F-MR-LEAK", "CURE-07", FaultKind.STEAM_LEAK,
+-                                           rate_c_per_min=P11_LEAK_RATE_C_PER_MIN, floor_kgf_cm2=2.0,
+-                                           header_drop=0.1)))
+-        expected[-1] = f"{p11} 7 號硫化機溫降 (p.11)：H1 延長硫化 → 驗證不成立 → H2"
++                "07:40 7 號硫化機溫降 (p.11)：H1 延長硫化 → 驗證不成立 → H2"]
+     if morning_rush_safety():
+         steps.append(ScenarioStep(at_offset_s=MR_SAFETY_OFFSET_S, note="08:30 B 線開煉機冷卻失效：膠溫上升",
+                                   fault=_f("F-MR-BOPEN", "B-OPEN", FaultKind.TEMP_RAMP, target=126.0,
+                                            rate_c_per_min=MR_SAFETY_RATE_C_PER_MIN)))
+         expected.append("~08:39 B 線開煉機膠溫 ≥120°C → 安全核心 STOP_MACHINE（不等 AI）")
+     expected.append("10:00 出貨車出廠（shipment_departed）")
+-    return Scenario(name=ScenarioName.MORNING_RUSH, title="一早訂單湧入：訂單湧入、急單與交期風險、7 號機溫降、出貨",
++    return Scenario(name=ScenarioName.MORNING_RUSH, title="一早訂單湧入：開工、訂單湧入、急單與交期風險、7 號機溫降、出貨",
+                     start_at=start, steps=steps, expected=expected)
+ 
+ 
+diff --git a/web/src/components/DemoStrip.tsx b/web/src/components/DemoStrip.tsx
+index 8b38c12..138a150 100644
+--- a/web/src/components/DemoStrip.tsx
++++ b/web/src/components/DemoStrip.tsx
+@@ -1,10 +1,11 @@
+ import { useState } from 'react'
+-import type { ScenarioName } from '../contracts'
++import type { HeaderStatus, ScenarioName } from '../contracts'
+ import { SCENARIOS } from '../mock/engine'
+ import { useWarRoom } from '../useWarRoom'
+ import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
+ import { SimEventControls } from './SimEvents'
+ 
++const SPEEDS = [1, 5, 10, 30, 60]   // 30×: 一早訂單湧入's demo speed
+ const Q = new URLSearchParams(location.search)
+ /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
+ export const DEMO_MODE = Q.get('demo') === '1'
+@@ -33,9 +34,12 @@ export function DemoStrip() {
+   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
+   const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
+   if (!transport) return null
++  const clock = state.clock
++  const net = state.snapshot?.header.network ?? 'online'
+   const mock = transport.mode === 'mock'
+   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
+   const current = scenario ?? (state.clock?.scenario as ScenarioName | undefined) ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : null)
++  const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
+   // a scenario picked while paused used to load and stay paused (the plant looked frozen): loading it also plays
+   const loadAndPlay = async (name: ScenarioName, speed: number) => {
+     await transport.control({ action: 'scenario', scenario: name, speed, preroll: true })
+@@ -66,6 +70,13 @@ export function DemoStrip() {
+       {overlaid && (overlays.length > 0 || overlaid.startsWith('疊加沒有成功')) && !loading && (
+         <span className="demo-overlay" role="status" data-testid="demo-overlay" title={overlaid}>{overlaid}</span>
+       )}
++      <div className="seg" role="group" aria-label="播放">
++        <button disabled={busy} onClick={() => run(() => transport.control({ action: clock?.paused ? 'play' : 'pause' }))}>{clock?.paused ? '▶ 播放' : '❚❚ 暫停'}</button>
++        {SPEEDS.map((s) => (
++          <button key={s} disabled={busy} className={clock?.speed === s ? 'on' : ''} onClick={() => run(() => transport.control({ action: 'speed', speed: s }))}>{s}×</button>
++        ))}
++        <button disabled={busy} onClick={() => { setOverlaid(null); run(() => transport.control({ action: 'reset' })) }}>↺ 重來</button>
++      </div>
+       {!mock && ALL_SCENARIOS && state.clock?.day_loop && (
+         <div className="seg" role="group" aria-label="跳到時間（一日循環）" data-testid="day-jumps">
+           {DAY_JUMPS.map((j) => (
+@@ -80,6 +91,14 @@ export function DemoStrip() {
+         </div>
+       )}
+       {ALL_SCENARIOS && <SimEventControls busy={busy} run={run} />}
++      <div className="seg net" role="group" aria-label="拔網路測試" title="模擬離線分層（p.9）：弱網→Agent 不受影響，只延後同步與推播；WAN 斷→手機走廠內 LAN；LAN 斷→現場觸控螢幕＋警示燈">
++        {(['online', 'weak', 'wan_down', 'lan_down'] as const).map((n) => (
++          <button key={n} disabled={busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}
++            title={n === 'weak' ? '弱網・延後推播：手機與遠端畫面延後數秒批次更新，事件處理與安全核心不受影響' : undefined}>
++            {n === 'online' ? '● 在線' : n === 'weak' ? '弱網' : n === 'wan_down' ? 'WAN 斷' : 'LAN 斷'}
++          </button>
++        ))}
++      </div>
+       {state.lastAlert && (
+         <span className="demo-alert" title={state.lastAlert.summary}>⚡ 最新告警卡：{state.lastAlert.title}</span>
+       )}
+diff --git a/web/src/factory3d/FactoryApp.tsx b/web/src/factory3d/FactoryApp.tsx
+index a1b1d6a..890a6cd 100644
+--- a/web/src/factory3d/FactoryApp.tsx
++++ b/web/src/factory3d/FactoryApp.tsx
+@@ -22,8 +22,7 @@ import type { SimControl } from '../contracts'
+ import { machineLabel } from '../factory'
+ import { fmtHM, fmtMD } from '../format'
+ import { useLinkStatus } from '../linkStatus'
+-import { alertText, diffPending, repairNotices, type PushState } from '../phone/alert'
+-import { repairStage } from '../aiStatus'
++import { alertText, diffPending, reviewAlerts, type PushState } from '../phone/alert'
+ import { SCENARIOS } from '../mock/engine'
+ import { primaryEvent } from '../store'
+ import { useWarRoom } from '../useWarRoom'
+@@ -45,7 +44,6 @@ import { SPACES, arrival } from './spaces'
+ import { TiltShift } from './TiltShift'
+ import { TouchControls } from './TouchControls'
+ import { DRAWN_LIGHT, Lights, World } from './World'
+-import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
+ 
+ type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
+ const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
+@@ -120,7 +118,7 @@ export function FactoryApp() {
+   const [scene, setScene] = useState<SceneId>('factory')
+   const [fading, setFading] = useState(false)
+   const [locked, setLocked] = useState(false)
+-  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean } | null>(null)
++  const [toast, setToast] = useState<{ title: string; body: string; at: number; review?: boolean } | null>(null)
+   const [buzzUntil, setBuzzUntil] = useState(0)
+   const [buzz, setBuzz] = useState(false)
+   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
+@@ -137,29 +135,25 @@ export function FactoryApp() {
+   const ev = primaryEvent(state.snapshot?.events)
+   const evOpen = ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
+   const pending = state.pending
+-  // fast repair (Kyle 10-21 flow): 維修完成 and 已恢復正常，報告已產生 ring the phone once each (notices, nothing waits)
+-  const notices = useMemo(() => repairNotices(state.snapshot?.events, state.snapshot?.machines), [state.snapshot?.events, state.snapshot?.machines])
+-  // HUD: 維修中 = after the decision, the crew working or the readings coming back; 報告待讀 = closed, report unread
+-  const stages = (state.snapshot?.events ?? []).map((e) => repairStage(e, state.world?.tasks.items ?? []))
+-  const repairing = stages.filter((x) => x === 'repairing' || x === 'recovering').length
+-  const unread = stages.filter((x) => x === 'report').length
++  // fast repair: repaired events waiting for the supervisor's 覆核 ring the phone like a new approval
++  const reviews = useMemo(() => reviewAlerts(state.snapshot?.events), [state.snapshot?.events])
+   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+   const overlay = panel !== null || phoneUp
+   const lanDown = state.snapshot?.header.network === 'lan_down'
+   const fp = started && mode === 'first'
+   const paused = !!state.clock?.paused
+ 
+-  // New approval (or fast-repair notice) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
++  // New approval (or 覆核 request) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
+   useEffect(() => {
+-    const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
++    const out = diffPending(push.current, [...pending, ...reviews], connected && !lanDown)
+     if (!out.fire.length) return
+     const { title, body } = alertText(out.fire, out.flushed)
+-    setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
++    setToast({ title, body, at: Date.now(), review: out.fire.every((a) => a.review) })
+     setBuzzUntil(performance.now() + 2200)
+     setBuzz(true)
+     try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
+     ring()
+-  }, [pending, notices, connected, lanDown])
++  }, [pending, reviews, connected, lanDown])
+   useEffect(() => {
+     if (!buzz) return
+     const t = setTimeout(() => setBuzz(false), 2200)
+@@ -354,7 +348,7 @@ export function FactoryApp() {
+         {scene === 'toilet' && <Restroom />}
+         <Player
+           enabled={started && !overlay && !fading && !demoOn} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
+-          pending={pending.length + notices.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
++          pending={pending.length + reviews.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
+           prompt={prompt}
+         />
+         <TiltShift enabled={(!started || mode === 'third') && !phoneUp && !pitchView} />
+@@ -367,8 +361,6 @@ export function FactoryApp() {
+         ? <div className="f3-look-hint">拖曳畫面看四周</div>
+         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
+ 
+-      <PendingApprovalAlert variant="corner" newTab />
+-
+       {/* HUD */}
+       <div className="f3-hud" data-testid="f3-hud">
+         <div className="f3-hud-top">
+@@ -389,7 +381,7 @@ export function FactoryApp() {
+         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
+           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
+         </div>
+-        <div className={`f3-pend ${pending.length || repairing || unread ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{repairing ? `・維修中 ${repairing} 件` : ''}{unread ? `・報告待讀 ${unread} 件` : ''}{pending.length || unread ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
++        <div className={`f3-pend ${pending.length || reviews.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{reviews.length ? `・待覆核 ${reviews.length} 件` : ''}{pending.length || reviews.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
+         {!demoOn && (
+           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
+         )}
+@@ -409,7 +401,7 @@ export function FactoryApp() {
+       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
+       {toast && (
+         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
+-          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
++          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.review ? '覆核' : '核准'}</i>
+         </div>
+       )}
+       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
+diff --git a/web/src/mock/engine.ts b/web/src/mock/engine.ts
+index a5dbb23..4baaed9 100644
+--- a/web/src/mock/engine.ts
++++ b/web/src/mock/engine.ts
+@@ -51,7 +51,7 @@ function baseNoise(id: string, t: number, amp: number): number {
+ export const SCENARIOS: { name: ScenarioName; label: string; start: string; speed: number }[] = [
+   { name: 'day_loop', label: '一日循環', start: '2026-10-21T00:00:00+08:00', speed: 60 },
+   // issue #104 the finals demo: the day starts, orders flood in, then incidents (backend only; mock plays it as normal)
+-  { name: 'morning_rush', label: '一早訂單湧入', start: '2026-10-23T06:59:00+08:00', speed: 40 },
++  { name: 'morning_rush', label: '一早訂單湧入', start: '2026-10-23T06:55:00+08:00', speed: 30 },
+   { name: 'normal', label: '正常運轉', start: '2026-10-22T14:20:00+08:00', speed: 1 },
+   { name: 'open_mill_overheat', label: '大開煉機過熱（p.2）', start: '2026-10-22T14:25:30+08:00', speed: 10 },
+   { name: 'press7_temp_drop', label: '7 號硫化機溫降（p.11）', start: '2026-10-03T02:12:00+08:00', speed: 10 },
