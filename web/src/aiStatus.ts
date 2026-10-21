@@ -7,8 +7,8 @@
 // Detection is a Python rule (warroom/detect), not AI: 「偵測到」, never 「AI 偵測到」. The repair task is made before the
 // approval but held 待派 (warroom/sim/work.py): 「建議派人維修」 before, 「已派人維修」 after.
 // Fast repair (Kyle 10-21 flow): 維修中（n/m）→ 維修完成・溫度回升中 (Event.repaired_at, the readings ramp back) →
-// 7 號硫化機已恢復正常（128°C）｜Agent Nemo 異常報告已產生 (closed, Event.review pending = the incident report unread) →
-// …｜主管已讀報告.
+// 7 號硫化機已恢復正常（128°C）｜Agent Nemo 異常報告已產生 (closed, Event.review pending = the incident report unread, and
+// Event.ai_report written: until then 「Agent Nemo 異常報告整理中」) → …｜主管已讀報告.
 import type { Channel, Event, Expectation, WorkTask } from './contracts'
 import { machineLabel } from './factory'
 import { fmtHM, fmtMD, ms } from './format'
@@ -110,11 +110,17 @@ export function recoverText(x: Expectation | null, now: number | null, normal: n
   return `${recoverWord(x, now, normal)}${x && now != null ? ` ${readingText(x.channel, now)} → ${to}` : ''}`
 }
 
+/** The incident report is unread and written: Event.review pending is set at close, Event.ai_report once Agent Nemo's
+ *  draft is in (warroom/agent/reporter.py, up to its close wait later). */
+export function reportReady(ev: Event): ev is Event & { review: NonNullable<Event['review']> } {
+  return ev.review?.status === 'pending' && !!ev.ai_report
+}
+
 /** Where a fast repair stands: the crew working (after the supervisor's decision), the readings coming back after the
- *  repair (repaired_at), back to normal (recovered_at), the report unread / read (closed, Event.review). */
+ *  repair (repaired_at), back to normal (recovered_at), the report unread / read (closed, Event.review and ai_report). */
 export type RepairStage = 'repairing' | 'recovering' | 'recovered' | 'report' | 'read'
 export function repairStage(ev: Event, items: WorkTask[]): RepairStage | null {
-  if (ev.state === 'closed') return ev.review?.status === 'done' ? 'read' : ev.review?.status === 'pending' ? 'report' : ev.repaired_at ? 'recovered' : null
+  if (ev.state === 'closed') return ev.review?.status === 'done' ? 'read' : reportReady(ev) ? 'report' : ev.repaired_at ? 'recovered' : null
   if (ev.state === 'safe_stop') return null
   if (ev.recovered_at) return 'recovered'
   if (ev.repaired_at) return 'recovering'
@@ -192,7 +198,8 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null,
   const who = !verified && work.length ? `Agent Nemo ${before ? '建議' : '已'}派人${work.join('、')}` : ''
   const phase =
     ev.state === 'closed' ? (plantEvent ? '已處理完' : unverified
-      ?? (ev.review?.status === 'pending' ? 'Agent Nemo 異常報告已產生' : ev.review?.status === 'done' ? '主管已讀報告' : ''))
+      ?? (ev.review?.status === 'done' ? '主管已讀報告' : ev.review?.status === 'pending'
+        ? (ev.ai_report ? 'Agent Nemo 異常報告已產生' : 'Agent Nemo 異常報告整理中') : ''))
       : ev.state === 'safe_stop' ? '已安全停止'
         : recovering ? (ev.recovered_at ? '已恢復正常' : `維修完成・${recoverWord(est.x)}`)
         : ev.state === 'await_approval' ? '待核准'

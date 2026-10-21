@@ -3,11 +3,11 @@
 // and, when the browser allows it, raises a system notification. While the link is down the alerts are held
 // and flushed as one alert when the phone reconnects.
 // Fast repair (Kyle 10-21 flow): 維修完成 (Event.repaired_at, the readings coming back) and 已恢復正常・異常報告已產生 (the
-// event closed with its report, Event.review pending) ring once each, as notices: nothing waits for them, so they do not
-// re-ring or count as waiting in the tab title.
+// event closed with its report written: Event.review pending and Event.ai_report) ring once each, as notices: nothing
+// waits for them, so they do not re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Event, MachineTile } from '../contracts'
-import { CH_LABEL, expectationOf, normalOf, readingText, recoverText } from '../aiStatus'
+import { CH_LABEL, expectationOf, normalOf, readingText, recoverText, reportReady } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM } from '../format'
 import { plain } from '../plain'
@@ -28,8 +28,8 @@ export interface AlertItem { id: string; title: string; reason: string; notice?:
 const NOTICE_HEAD: Record<NonNullable<AlertItem['notice']>, string> = { repaired: '維修完成', report: '已恢復正常，報告已產生' }
 
 /** The fast-repair notices of these events, oldest repair first: 維修完成 while the readings come back (repaired, not
- *  closed), then 已恢復正常，報告已產生 once it closed with its report unread (review pending). `tiles` add the live
- *  temperature to the 維修完成 text. */
+ *  closed), then 已恢復正常，報告已產生 once it closed with its report written and unread (review pending, ai_report; the
+ *  draft can land after the close). `tiles` add the live temperature to the 維修完成 text. */
 export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] = []): AlertItem[] {
   const out: AlertItem[] = []
   for (const e of [...(events ?? [])].sort((a, b) => ((a.repaired_at ?? '') < (b.repaired_at ?? '') ? -1 : 1))) {
@@ -39,7 +39,7 @@ export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] 
       const x = expectationOf(e)
       const now = x?.channel === 'temp_c' ? tiles.find((t) => t.machine_id === e.machine_id)?.temp_c ?? null : null
       out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now, normalOf(e, x)), notice: 'repaired' })
-    } else if (e.state === 'closed' && e.review?.status === 'pending') {
+    } else if (e.state === 'closed' && reportReady(e)) {
       out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: backText(e), notice: 'report' })
     }
   }

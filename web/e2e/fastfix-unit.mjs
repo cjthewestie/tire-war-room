@@ -63,8 +63,12 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('repaired, not closed (overheat ≤118°C) → 維修完成・溫度回降中, no ETA', w.phase === '維修完成・溫度回降中' && !w.eta, line(w))
   const cold = { ...warm, plan: { ...warm.plan, hypothesis: { ...warm.plan.hypothesis, expectation: { ...warm.plan.hypothesis.expectation, op: '>=', value: 121 } } } }
   check('… a temperature drop (≥121°C) → 維修完成・溫度回升中', aiStatusParts(cold, stateOf([cold], [done, slow]), null).phase === '維修完成・溫度回升中')
-  const closed = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null } }
-  const q = aiStatusParts(closed, stateOf([closed], [done, slow]), null)
+  const closed = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null }, ai_report: null }
+  const drafting = aiStatusParts(closed, stateOf([closed], [done, slow]), null)
+  check('closed, review pending, Event.ai_report not written yet → …已恢復正常（94°C）｜Agent Nemo 異常報告整理中 (not 已產生)',
+    drafting.lead === 'B 線開煉機已恢復正常（94°C）' && drafting.phase === 'Agent Nemo 異常報告整理中', line(drafting))
+  const report = { text: '…', summary: '…', by: 'rules', drafted_ms: null, at: iso(now + 4000), late_ms: null }
+  const q = aiStatusParts({ ...closed, ai_report: report }, stateOf([closed], [done, slow]), null)
   check('closed + report unread → B 線開煉機已恢復正常（94°C）｜Agent Nemo 異常報告已產生, no detection, no ETA',
     q.lead === 'B 線開煉機已恢復正常（94°C）' && !q.who && q.phase === 'Agent Nemo 異常報告已產生' && !q.eta, line(q))
   const r = aiStatusParts({ ...closed, review: { ...closed.review, status: 'done', done_at: iso(now + 5000), by: 'supervisor' } }, stateOf([closed], [done, slow]), null)
@@ -139,7 +143,10 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('two more (3 concurrent) → only the new ones ring: 2 件維修完成', more.fire.length === 2 && alertText(more.fire, false).title === '2 件維修完成', alertText(more.fire, false).title)
   check('… and not again (the reading moving does not re-ring)', diffPending(st, repairNotices(evs, [{ machine_id: 'B-OPEN', temp_c: 120 }]), true).fire.length === 0)
   const closed = evs.map((e, i) => (i === 0 ? { ...e, state: 'closed', closed_at: iso(now + 4000), recovered_at: iso(now + 4000), outcome: '已修復：B 線開煉機 膠溫回到 100°C',
-    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null } } : e))
+    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null },
+    ai_report: { text: '…', summary: '…', by: 'rules', drafted_ms: null, at: iso(now + 4000), late_ms: null } } : e))
+  const drafting = repairNotices(closed.map((e, i) => (i === 0 ? { ...e, ai_report: null } : e)), tiles)
+  check('closed, report not written yet (ai_report null) → no 報告已產生 notice yet', drafting.length === 2 && drafting.every((a) => a.notice === 'repaired'), drafting.map((a) => a.notice).join(','))
   const rep = repairNotices(closed, tiles)
   const ring = diffPending(st, rep, true)
   check('closed with its report → 已恢復正常，報告已產生：B 線開煉機 rings once', ring.fire.length === 1 && ring.fire[0].notice === 'report' && alertText(ring.fire, false).title === '已恢復正常，報告已產生：B 線開煉機', alertText(ring.fire, false).title)
