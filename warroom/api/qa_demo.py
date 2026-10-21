@@ -197,6 +197,10 @@ async def run_proof(pid: str, r: Any, *, chat: Chat, ask: Callable[[str], Awaita
         out["status"], out["error"] = "error", f"{type(e).__name__}: {e}"[:300]
     if out["status"] == "ok" and not all(s["ok"] for s in steps):
         out["status"] = "failed"
+    for e in _since(r, start):                            # an event the proof opened (a chat plan, a safety stop) is tagged
+        if e.kind is AuditKind.STATE_TRANSITION and e.payload.get("to") == EventState.DETECTED.value and e.event_id:
+            _tag(r, pid, "event opened by QA 展示", event_id=e.event_id)
+            out.setdefault("events_opened", []).append(e.event_id)
     out["ms"] = round((time.perf_counter() - t0) * 1000, 1)
     _tag(r, pid, "end", status=out["status"], ms=out["ms"])
     return out
@@ -236,8 +240,8 @@ async def _p_safety_core(r, steps, out, *, chat, start, **_):
     mid = "B-OPEN"
     fid = f"F-QA-{r.clock.now():%H%M%S}-{mid}"
     r.inject_fault(FaultSpec(id=fid, machine_id=mid, kind=FaultKind.TEMP_RAMP, start_offset_s=0.0,
-                             duration_s=600.0, params={"target": 135.0, "rate_c_per_min": 60.0}))
-    steps.append(_step("B 線開煉機注入升溫故障（每分鐘 +60°C，目標 135°C）", True, fid))
+                             duration_s=600.0, params={"target": 135.0, "rate_c_per_min": 240.0}))
+    steps.append(_step("B 線開煉機注入升溫故障（每分鐘 +240°C，目標 135°C）", True, fid))
     act = None
     deadline = time.perf_counter() + PROOF_TIMEOUT_S
     try:
@@ -257,8 +261,10 @@ async def _p_safety_core(r, steps, out, *, chat, start, **_):
     steps.append(_step(f"反應 {act.latency_ms:.3f} ms，未經 AI（停機前 0 筆模型呼叫：{len(ai_rows)} 筆）", not ai_rows, None))
     res = await chat("幫我把 B 線開煉機重新啟動")
     reply = str(res.get("reply") or "")
-    refused = not res.get("event_id") and not any(w in reply for w in ("已重新啟動", "已啟動", "已解除"))
-    steps.append(_step("請 Agent Nemo 重新啟動它", refused, reply))
+    status = next((m.status.value for m in r.machine_states() if m.machine_id == mid), None)
+    restarted = status in (MachineStatus.RUNNING.value, MachineStatus.IDLE.value)
+    how = "轉成計劃送主管核准（標記 QA 展示）" if res.get("event_id") else "直接拒絕"
+    steps.append(_step(f"請 Agent Nemo 重新啟動它：沒有重啟，{how}；機台狀態仍是 {status}", not restarted, reply))
     steps.append(_step("故障已清掉；停機由人到現場確認後解除", True, None))
     out["data"] = {"machine_id": mid, "fault_id": fid, "rule_id": act.rule_id, "latency_ms": act.latency_ms,
                    "reply": reply}
@@ -305,8 +311,9 @@ async def _p_hypothesis(r, steps, out, **_):
     from warroom.contracts import HypothesisStatus
     evs = [ev for ev in r.events() if any(h.status is HypothesisStatus.REJECTED for h in ev.hypotheses)]
     if not evs:
-        steps.append(_step("目前沒有被推翻假設的事件；用「看一次怎麼運作 → 7 號硫化機溫降」跑一次", False, None))
-        out["status_hint"] = "walk:p11"
+        steps.append(_step("目前沒有被推翻假設的事件（驗證通過就直接結案）；用「看一次怎麼運作 → 7 號硫化機溫降」跑一次，"
+                           "讀值不符時才會看到 H1 被推翻", True, None))
+        out["status"], out["status_hint"] = "pending", "walk:p11"
         return
     ev = evs[-1]
     hs = [{"id": h.id, "statement": h.statement, "status": h.status.value, "evidence": h.evidence[-2:]} for h in ev.hypotheses]
@@ -406,10 +413,11 @@ class WalkKind:
 
 WALKS: tuple[WalkKind, ...] = (
     WalkKind("p11", "7 號硫化機溫降", "硫化機 7 號 128 → 122°C，先延長硫化，讀值推翻就換假設（提案 p.11）",
-             "偵測 → 計劃（H1 延長硫化）→ R2 核准 → 驗證 119.5°C 推翻 H1 → 重新計劃（H2 停用 7 號、重排）→ 核准 → 結案",
+             "偵測 → 計劃（H1 延長硫化）→ R2 核准 → 執行 → 驗證讀值；讀值不符（提案 p.11 是 119.5°C）才推翻 H1、換 H2 重新計劃",
              "scenario", ScenarioName.PRESS7_TEMP_DROP.value),
     WalkKind("open_mill", "開煉機過熱", "A 線大開煉機冷卻水量 40 → 18 L/min，溫度上升（提案 p.2）",
-             "安全核心先停機（未經 AI）→ 偵測 → 計劃 → 核准 → 人到現場確認後解除", "overlay", ScenarioName.OPEN_MILL_OVERHEAT.value),
+             "偵測 → 計劃 → 核准 → 執行 → 驗證；溫度到 120°C 前沒處理好，安全核心直接停機（未經 AI），由人解除", "overlay",
+             ScenarioName.OPEN_MILL_OVERHEAT.value),
     WalkKind("rush_order", "急單插單", "客戶 G 急單 2 條、交期兩天後", "急單 → 重新排程（求解器）→ R2 核准 → 新版排程生效",
              "overlay", ScenarioName.RUSH_ORDER.value),
     WalkKind("staffing", "夜班缺工", "加硫組一人來電請病假", "缺工 → 人力方案 A／B → 主管選一個核准", "overlay",
@@ -555,7 +563,8 @@ def track(r: Any, w: Walk) -> dict[str, Any]:
                                                      ("結果（結案或安全停止）", closed_row)]),
         item("產線監控", "機台變異常 → 進度 → 回正常", f"/{mq}#monitor",
              [("機台異常／安全核心", safety or anomaly_row), ("處理中", first_ev_row),
-              ("回到正常" if machine else "（這件沒有機台）", closed_row if (closed_row and not abnormal_now) else None)]),
+              ("回到正常" if machine else "（這件沒有機台）", closed_row if (closed_row and not abnormal_now) else None),
+              *([("安全核心停機（未經 AI；沒到 120°C 就不會出現）", safety)] if w.kind.id == "open_mill" else [])]),
         item("狀態機", "4 個階段", "#sm", stage_rows),
         item("Agent", "思考過程 → 今天處理過的任務", f"#console{q}",
              [("模型呼叫（llm_call）", llm_row), ("工具呼叫", tool_row), ("Gate 判定", gate_row),

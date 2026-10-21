@@ -128,3 +128,17 @@ def test_walk_unknown_kind_404(app_rt):
         assert c.post("/api/qa/walk", json={"kind": "nope"}).status_code == 404
         assert c.get("/api/qa/walk/WALK-999").status_code == 404
         assert c.post("/api/qa/proofs/nope/run").status_code == 404
+
+
+def test_safety_proof_cleans_up_its_fault_even_without_a_stop(app_rt, monkeypatch):
+    """No sim loop here, so no Safety Core stop arrives: the proof says so and still removes the fault it injected."""
+    import warroom.api.qa_demo as qd
+    monkeypatch.setattr(qd, "PROOF_TIMEOUT_S", 1.0)
+    app, rt = app_rt
+    with TestClient(app) as c:
+        decided0 = _decided(rt)
+        out = c.post("/api/qa/proofs/safety_core/run").json()
+    assert out["status"] == "failed" and not out["steps"][-1]["ok"]
+    assert not [f for f in rt.sim.faults(active_only=False) if f.machine_id == "B-OPEN" and f.id.startswith("F-QA-")]
+    assert _decided(rt) == decided0
+    assert any(e.payload.get("msg") == "faults cleared" and e.payload.get("machine_id") == "B-OPEN" for e in rt.audit.tail(limit=0))

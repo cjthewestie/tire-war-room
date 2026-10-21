@@ -38,6 +38,14 @@ async function run(width, height, name, { big = false, chip = 'AI 會不會亂�
   const sw = await page.evaluate(() => document.documentElement.scrollWidth)
   if (sw > width) fail(`${name}: horizontal scroll ${sw} > ${width}`)
   await page.screenshot({ path: `${OUT}/${name}.png`, fullPage: true })
+  if (viewer && (await page.getByTestId('qa-card-proofs').count())) {     // the answer's 「▶ 現場展示」
+    page.on('dialog', (d) => d.accept())
+    const t1 = Date.now()
+    await page.getByTestId('qa-card-proofs').getByTestId('qa-proof-run').first().click()
+    await page.getByTestId('qa-card-proofs').getByTestId('qa-proof-result').waitFor({ timeout: 150000 })
+    console.log(`${name} proof: ${((Date.now() - t1) / 1000).toFixed(1)} s to visible`)
+    await page.getByTestId('qa-answer').screenshot({ path: `${OUT}/${name}-proof.png` })
+  }
   if (viewer) {
     await page.locator('.qa-ref').first().click()
     await page.getByTestId('qa-viewer').locator('.qa-code').waitFor({ timeout: 10000 })
@@ -50,5 +58,15 @@ async function run(width, height, name, { big = false, chip = 'AI 會不會亂�
 await run(1440, 900, 'qa-1440', { viewer: true })
 await run(1440, 900, 'qa-1440-big', { big: true, chip: '為什麼不用 NAT 做狀態機' })
 await run(390, 844, 'qa-390', { chip: '斷網還能跑嗎' })
+for (const [sec, w] of [['walk', 390], ['proofs', 390]]) {
+  const page = await browser.newPage({ viewport: { width: w, height: 844 } })
+  await page.goto(`${BASE}/#qa/${sec}`)
+  await page.getByTestId(sec === 'walk' ? 'qa-walk' : 'qa-proofs').waitFor()
+  await page.waitForTimeout(800)
+  const sw = await page.evaluate(() => document.documentElement.scrollWidth)
+  if (sw > w) fail(`${sec}-${w}: horizontal scroll ${sw}`)
+  await page.screenshot({ path: `${OUT}/qa-${sec}-${w}.png` })
+  await page.close()
+}
 await browser.close()
 console.log(`screenshots in ${OUT}`)
