@@ -415,9 +415,10 @@ async def test_main_agent_numbers_only_from_tools_and_fallback():
     out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
     assert "118" not in out["reply"] and "122.3" in out["reply"]          # an invented number is replaced by the results
     h = _Harness()
-    llm = Model()
+    llm = Model(("say", "我是 Agent Nemo，戰情室的 AI 同事。"))
     out = await h.turn(MainAgent(_settings(), client=llm), "妳是誰")
-    assert out["reply"] == IDENTITY_REPLY and not llm.calls                # fixed reply, no model call
+    # every message goes to the model (CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」)
+    assert out["reply"] == "我是 Agent Nemo，戰情室的 AI 同事。" and len(llm.calls) == 1 and not h.tools
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=Model(("say", "這句我看不懂，你要查哪台機台？"))), "vu04y94u.3s83uv,")
     assert not h.tools and not h.proposed                                 # reaches the model, opens nothing

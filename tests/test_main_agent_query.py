@@ -152,10 +152,15 @@ async def test_a_poem_is_written_not_refused():
 
 
 async def test_no_weather_data_is_said_plainly():
-    """At 0.7 the real model said 「今天天氣是晴天」: code answers, honestly, then one plant fact and an offer."""
+    """At 0.7 the real model said 「今天天氣是晴天」: the model is asked (no code in front of it), and the check after it
+    replaces a made-up answer with an honest one, a plant fact and an offer."""
     m = Model(("say", "今天天氣是晴天。"))
     out, f = await _turn(m, "今天天氣怎樣")
-    assert "晴" not in out["reply"] and ("沒有" in out["reply"] or "查不到" in out["reply"]) and not f.tools and not m.calls
+    assert "晴" not in out["reply"] and ("沒有" in out["reply"] or "查不到" in out["reply"]) and not f.tools
+    assert len(m.calls) == 1 and out["intent"] == "no_data"
+    m = Model(("say", "我沒有天氣資料。"))
+    out, _ = await _turn(m, "今天天氣怎樣")
+    assert out["reply"] == "我沒有天氣資料。"                                    # an honest model answer stays
     assert out["reply"].endswith(("？", "。"))
 
 

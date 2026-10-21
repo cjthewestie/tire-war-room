@@ -280,21 +280,22 @@ async def test_results_reply_and_grounding_sources():
     assert out["reply"] == "118°C 低於硫化下限。"
 
 
-async def test_canned_replies_skip_the_model():
-    m = Model()
+async def test_greetings_go_to_the_model_and_rule_mode_keeps_the_canned_lines():
+    """CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」: 你好／你是誰／謝謝 reach the model; a greeting is
+    small talk (code adds a plant fact and an offer). Without a model the rotated canned lines answer."""
+    m = Model(("say", "你好呀！"), ("say", "我是 Agent Nemo，戰情室的 AI 同事。"), ("say", "不客氣！"))
     agent = MainAgent(_settings(), client=m)
     f = Floor()
-    # rotated variants (CJ 2026-10-21: 「可以多種回應」); a greeting ends on an offer
-    hi = (await f.turn(agent, "你好"))["reply"]
-    assert hi.startswith(HELLO_REPLY) and hi.endswith(("？", "。"))
-    assert (await f.turn(agent, "妳是誰"))["reply"] != IDENTITY_REPLY            # the next variant
-    assert (await f.turn(agent, "謝謝"))["reply"]
-    assert (await f.turn(agent, "你好"))["reply"] != hi
-    assert not m.calls
-    agent.memory.append(("7 號機要處理嗎", "要不要我擬計劃送你核准？"))
-    agent.client = m2 = Model(("say", "好，我先查一下。"))
-    await f.turn(agent, "好")                                         # an answer to its own question goes to the model
-    assert m2.calls
+    hi = await f.turn(agent, "你好")
+    assert hi["reply"].startswith("你好呀！") and hi["intent"] == "smalltalk" and hi["by"] == "model"
+    assert (await f.turn(agent, "妳是誰"))["reply"] == "我是 Agent Nemo，戰情室的 AI 同事。"
+    assert (await f.turn(agent, "謝謝"))["reply"].startswith("不客氣！")
+    assert len(m.calls) == 3 and not f.tools
+    rules = MainAgent(None)
+    r1 = await f.turn(rules, "你好")
+    assert r1["reply"].startswith(HELLO_REPLY) and r1["by"] == "rules"
+    assert (await f.turn(rules, "妳是誰"))["reply"] != IDENTITY_REPLY            # rotated: the next variant
+    assert (await f.turn(rules, "你好"))["reply"] != r1["reply"]
 
 
 async def test_sop_timeout_while_the_knowledge_base_loads():

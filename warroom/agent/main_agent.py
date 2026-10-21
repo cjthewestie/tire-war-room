@@ -435,12 +435,8 @@ class MainAgent:
         if not (self.llm and self.client is not None) and is_gibberish(text):
             out.update(reply=GIBBERISH_REPLY, intent="unclear")
             return self._done(out, text, t0)
-        if self.llm and self.client is not None and self._canned(text):
-            out["reply"], out["intent"] = self._canned_reply(text, context)
-            return self._done(out, text, t0)
-        if _NO_DATA_TOPIC_RX.search(text) and not (has_object(text) or topic_for(text)):
-            out.update(reply=self._with_fact(self._rot(NO_DATA_REPLIES), context), intent="no_data")
-            return self._done(out, text, t0)
+        # no code in front of the model (CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」): greetings, 你是誰,
+        # 謝謝 and 天氣 all go to it; the checks run on its reply. The canned lines are the rule-mode fallback only.
         if self.llm and self.client is not None:
             try:
                 await asyncio.wait_for(self._model_loop(text, context, waiting_plan, out, run_tool, propose, discuss, tid,
@@ -457,15 +453,6 @@ class MainAgent:
                 out.pop("unknown_orders", None)
         await self._rule_turn(text, context, waiting_plan, out, run_tool, propose, discuss, tid)
         return self._done(out, text, t0)
-
-    def _canned(self, text: str) -> bool:
-        """A greeting, 你是誰 or a thanks gets the fixed reply without the model: they took 14 s on the Spark while the
-        commander was planning (real run 2026-10-21). 「好」「收到」 answering the agent's own question still go to it."""
-        t = text.strip()
-        prev = self.memory[-1] if self.memory else None
-        asked = prev is not None and bool(_ASKED_RX.search(prev[1]))
-        return bool((_IDENTITY_RX.search(t) and not has_object(t)) or _HELLO_RX.match(t)
-                    or (_THANKS_RX.match(t) and not asked))
 
     def _rot(self, options: tuple[str, ...]) -> str:
         self._turns += 1
@@ -693,7 +680,8 @@ class MainAgent:
         # 「為什麼」 about its own last answer is no small talk: at 0.7 it got 「這是我這週看到的最有意思的事」
         casual = (waiting_plan is None and not inject and not about_last and not wants_lookup(t) and not wants_task(t)
                   and not has_object(t))
-        small = casual and bool(_SMALLTALK_RX.search(t))
+        # a greeting or a thanks is small talk too: the model's line, then code's plant fact and offer
+        small = casual and bool(_SMALLTALK_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t))
         out["intent"] = "smalltalk" if small else "general" if casual else out["intent"]
         if small:
             # the model writes the warm line only; code adds one plant fact and the offer (the model's own facts were
@@ -818,7 +806,7 @@ class MainAgent:
             # no greeting / self-introduction unless asked (it opened every reply with 「早上好！我是戰情室的 agent」)
             if small and code is None and not out["steps"]:
                 joke = bool(re.search(r"笑話", t))
-                line = tidy(reply, False, limit=4 if joke else 1)
+                line = tidy(reply, bool(_HELLO_RX.match(t)), limit=4 if joke else 1)   # a greeting answers in kind
                 if joke:                               # the joke, cut before the plant lines it tacked on itself
                     parts = _SENTENCE_RX.findall(line)
                     cut = next((k for k, x in enumerate(parts) if _JOKE_TAIL_RX.search(x)), len(parts))
@@ -833,6 +821,10 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not re.search(r"沒有|查不到|無法|沒辦法|答不了", words):
+                # weather / news: the plant has no such data; at 0.7 the model said 「今天天氣是晴天」 (preview run 10-21)
+                out["intent"] = "no_data"
+                words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
             if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
                 # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
                 words = INJECT_REPLY
