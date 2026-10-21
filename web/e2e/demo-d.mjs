@@ -1,7 +1,7 @@
 // Group D demo walk, headless (phone, approval card, AI status line, 3D field panel, 狀態機 forecast):
 //  p.11 (press7_temp_drop): round 1 approved B over the API; on the round-2 card 「7 號機停用」 the phone's 修復預估 shows
-//  SOP-CP-01 and no round-1 tasks / 預計完成, 「怎麼選」 names the remedy; 產線監控's folded card picks A without 展開 and
-//  核准（A） sends option A; after close the status line says 專人維修中 while 停用檢修 runs and the 3D panel on 7 號
+//  SOP-CP-01 and no round-1 tasks / 預計完成, 「怎麼選」 names the remedy; 產線監控 shows it as one line to 主控台 and
+//  option A is approved over the API; after close the status line says 專人維修中 while 停用檢修 runs and the 3D panel on 7 號
 //  shows the 停用檢修 task, not a checklist. concurrent_3: the phone's idle card lists one status line per open event and
 //  狀態機 shows 「約 N 分後達上限 120°C」 for B 線開煉機 instead of the 229.7°C extrapolation.
 // Run against a live server: PORT=8010 ./start.sh & node web/e2e/demo-d.mjs http://localhost:8010
@@ -62,18 +62,17 @@ const ai2 = await text(phone, '[data-testid=ai-status]')
 check('round-2 status line: what = the detection, not 「7 號機停用，重排中」', /AI 偵測到：7 號 128 → 122°C/.test(ai2 ?? ''), (ai2 ?? '').replace(/\n/g, '｜'))
 await phone.screenshot({ path: `${OUT}/demo-d-phone-390-round2.png`, fullPage: true })
 
+// issue #102: 產線監控 shows the round-2 approval as one line with a button to 主控台 (the card lives there); A over the API
 const dash = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await dash.goto(`${BASE}/#monitor`)
-await until(() => dash.$('[data-testid=apv-fold-opt-A]'), 30000)
-await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440-folded-B.png` })
-await dash.click('[data-testid=apv-fold-opt-A]')
-const label = await text(dash, '[data-testid=visual-approve]')
-check('folded card: A toggle → 核准（A）', label === '核准（A）', label)
-check('folded card: grid stays folded', !(await dash.$eval('.apv-compact', (el) => el.classList.contains('is-open'))))
-await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440-folded-A.png` })
-await dash.click('[data-testid=visual-approve]')
+await until(() => dash.$('[data-testid=monitor-pending]'), 30000)
+const line = await text(dash, '[data-testid=monitor-pending]')
+check('產線監控: round-2 approval is one line on 7 號 with 到主控台核准', /7 號硫化機/.test(line ?? '') && /到主控台核准/.test(line ?? ''), (line ?? '').replace(/\n/g, '｜'))
+check('產線監控: no approval card there', !(await dash.$('.monitor-wrap [data-testid=approval-visual]')))
+await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440.png` })
+await api(`/api/approvals/${r2.id}/decision`, { request_id: r2.id, decision: 'approve', option_id: 'A', via: 'dashboard' })
 const decided = await until(async () => (await api('/api/approvals')).find((a) => a.id === r2.id && a.status !== 'pending'), 15000)
-check('核准（A） sends option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
+check('round 2: option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
 await ctl({ action: 'play' })
 const closed = await until(async () => (await api('/api/events')).find((e) => e.machine_id === 'CURE-07' && e.state === 'closed'), 60000, 1000)
 check('p.11 event closed', !!closed, closed?.outcome)

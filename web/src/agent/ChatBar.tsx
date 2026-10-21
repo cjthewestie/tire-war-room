@@ -10,7 +10,7 @@ import { useWarRoom } from '../useWarRoom'
 import type { ChatItem, LocalItem } from './transcript'
 
 /** `mode` is kept for callers (討論 / 問 AI buttons) and ignored: the 主 agent decides. */
-export interface BarFocus { mode?: BarMode; text?: string; n: number }
+export interface BarFocus { mode?: BarMode; text?: string; n: number; /** send `text` at once (the guide questions in an empty chat) instead of only filling the box */ send?: boolean }
 export type BarMode = 'discuss' | 'command' | 'ask'
 
 let askSeq = 0
@@ -27,13 +27,14 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
   const [seen, setSeen] = useState(0)
   if (focus && focus.n !== seen) {
     setSeen(focus.n)
-    if (focus.text) setQ(focus.text)
+    if (focus.text && !focus.send) setQ(focus.text)
   }
-  // 討論: the caret goes into this input, scrolled into view (on a narrow screen the chat sits below the card, and
-  // 「按了討論沒有用」 was the click focusing an input off screen)
+  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
+  // the guide questions of an empty chat go out at once
+  const sentFocus = useRef(0)
   useEffect(() => {
-    if (!focus?.n) return
-    setTimeout(() => { input.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); input.current?.focus() }, 60)
+    if (focus?.send && focus.text && focus.n !== sentFocus.current) { sentFocus.current = focus.n; void send(focus.text) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.n])
   const can = !!transport?.message
   const lanDown = state.snapshot?.header.network === 'lan_down'

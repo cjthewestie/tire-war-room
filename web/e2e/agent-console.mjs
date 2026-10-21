@@ -68,13 +68,13 @@ try {
   await d.waitForSelector('[data-testid=transcript]')
 
   // home (UX brief v12): 核准區 list | 計劃板 | Agent 對話. The plan shows the board, delivery impact, who does what,
-  // the option picker and only 核准 / 討論; the evidence (Gantt compare, tools, conclusion) is on 產線監控's card.
+  // the option picker and only 核准 / 討論 (產線監控 links here with one line since issue #102).
   const apv = d.locator('[data-testid=plan-area] [data-testid=approval-visual]').first()
-  const flow = await apv.locator('[data-testid=plan-board] svg').getAttribute('aria-label')
-  check('plan board shows S1…S5 with status', !!flow && /S1/.test(flow) && /S5/.test(flow) && flow.includes('等主管核准'), flow?.slice(0, 120))
+  // CJ, 2026-10-22: the S1–S5 board is not shown on the 主控台 (component and data stay); no empty gap is left behind
+  check('主控台 center shows no S1–S5 board', (await apv.locator('[data-testid=plan-board]').count()) === 0 && (await apv.locator('svg[aria-label*=S1]').count()) === 0)
   const impact = await apv.locator('[data-testid=impact-table]').innerText().catch(() => '')
   check('delivery-impact table names #A-311', impact.includes('#A-311'), impact.replace(/\n/g, ' | ').slice(0, 160))
-  check('核准後誰去做 lists the actions', (await apv.locator('[data-testid=who-does-what] li').count()) >= 2)
+  check('核准後的執行事項 lists the actions (2 columns)', (await apv.locator('[data-testid=who-does-what] tbody tr').count()) >= 2)
   check('staffing options A and B', (await apv.locator('[data-testid=option-A]').count()) === 1 && (await apv.locator('[data-testid=option-B]').count()) === 1)
   check('one option carries the 系統建議 badge', (await apv.locator('.opt-rec').count()) === 1)
   check('plan actions are only 核准 and 討論', (await apv.locator('[data-testid=visual-discuss]').count()) === 1 && (await apv.locator('.apv-act button', { hasText: /修改|駁回/ }).count()) === 0)
@@ -104,24 +104,18 @@ try {
   check('plain answer: the tools collapse to one grey line (no tool rows, no labels)', (await d.locator('[data-testid=transcript] [data-kind=tool]').count()) === 0 && (await d.locator('[data-testid=sc-tools]').count()) >= 1)
   await d.screenshot({ path: `${OUT}/console-agent-ask-1440.png` })
 
-  // dashboard tab carries the same visual card
+  // issue #102: 產線監控 no longer repeats the card — one sentence, one line per approval and a button to 主控台
   await d.locator('.tabs button', { hasText: '產線監控' }).click()
-  await d.waitForSelector('.monitor-wrap [data-testid=approval-visual]', { timeout: 5000 }).catch(() => {})
-  check('monitor tab shows the visual card', (await d.locator('.monitor-wrap [data-testid=approval-visual]').count()) >= 1)
-  // UX declutter: the card is compact on 產線監控; 核准 and the recommended option show, the evidence opens with 展開
-  check('monitor card: compact, 核准 visible before 展開', await d.locator('.monitor-wrap [data-testid=visual-approve]').first().isVisible() &&
-    !(await d.locator('.monitor-wrap [data-testid=schedule-compare]').first().isVisible().catch(() => false)))
-  await d.locator('.monitor-wrap [data-testid=apv-expand]').first().click()
-  const mon = d.locator('.monitor-wrap [data-testid=approval-visual]').first()
-  const gantt = await mon.locator('[data-testid=schedule-compare]').innerText().catch(() => '')
-  check('monitor card: before/after Gantt names #A-311', gantt.includes('#A-311'), gantt.replace(/\n/g, ' | ').slice(0, 160))
-  check('monitor card: Gantt shows the cure time change', /硫化 28 h → 36\.5 h/.test(gantt))
-  const chips = await mon.locator('[data-testid=tool-chips]').innerText().catch(() => '')
-  check('monitor card: tools-used chips list SOP and 排程求解', chips.includes('SOP') && chips.includes('排程求解'), chips.replace(/\n/g, ' | ').slice(0, 120))
-  const concl = await mon.locator('.apv-concl').innerText().catch(() => '')
-  check('monitor card: conclusion why, delivery, after approval, if you disagree', ['為什麼', '交期影響', '核准後', '不同意時'].every((k) => concl.includes(k)))
-  check('monitor card: plan diagram', (await mon.locator('[data-testid=plan-flow] svg').count()) === 1)
+  await d.waitForSelector('[data-testid=monitor-pending]', { timeout: 5000 }).catch(() => {})
+  const line = await d.locator('[data-testid=monitor-pending]').innerText().catch(() => '')
+  check('monitor: the approval is one line naming the machine, with 到主控台核准', line.includes('7 號硫化機') && line.includes('到主控台核准'), line.replace(/\n/g, ' | '))
+  check('monitor: no approval card repeated from 主控台', (await d.locator('.monitor-wrap [data-testid=approval-visual]').count()) === 0)
+  check('monitor: the sentence says how many wait for the supervisor', /要你處理 \d+ 件/.test(await d.locator('[data-testid=mon-answer]').innerText()))
+  check('monitor: 硫化機排程 moved here, 11 presses', (await d.locator('[data-testid=cure-schedule] .cs-press').count()) === 11)
   await d.screenshot({ path: `${OUT}/console-monitor-1440.png`, fullPage: true })
+  await d.locator('[data-testid=monitor-pending-go]').click()
+  await d.waitForSelector('[data-testid=plan-area] [data-testid=approval-visual]', { timeout: 5000 }).catch(() => {})
+  check('到主控台核准 opens the home tab on that card', (await d.locator('[data-testid=plan-area] [data-testid=approval-visual]').count()) >= 1)
 
   // 390 wide
   const m = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, timezoneId: 'Asia/Taipei', isMobile: true, hasTouch: true })
@@ -142,7 +136,7 @@ try {
   await p.locator('[data-testid=transcript]').scrollIntoViewIfNeeded()
   await p.screenshot({ path: `${OUT}/console-transcript-390.png` })
   await p.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
-  await p.waitForSelector('[data-testid=approval-visual]', { timeout: 15000 }).catch(() => {})
+  await p.waitForSelector('[data-testid=monitor-pending]', { timeout: 15000 }).catch(() => {})
   await p.waitForTimeout(800)
   await p.screenshot({ path: `${OUT}/console-monitor-390.png`, fullPage: true })
   await m.close()
@@ -150,10 +144,8 @@ try {
   // approve from the visual card (option B), confirm via GET /api/approvals
   // the press-7 card (a delivery-risk plan the 主 agent drafted on its own may also be waiting: issue #54)
   const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => (a.find((r) => r.event_id.includes('CURE-07')) ?? a[0])?.id))
-  const fold = d.locator('.monitor-wrap [data-testid=apv-expand]').first()
-  if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click()   // the options sit behind 展開
-  await d.locator('.monitor-wrap [data-testid=option-B]').first().click()
-  await d.locator('.monitor-wrap [data-testid=visual-approve]').first().click()
+  await d.locator('[data-testid=plan-area] [data-testid=option-B]').first().click()
+  await d.locator('[data-testid=plan-area] [data-testid=visual-approve]').first().click()
   let status = ''
   for (let i = 0; i < 20 && status !== 'approved' && status !== 'modified'; i++) {
     await d.waitForTimeout(500)
@@ -163,24 +155,24 @@ try {
   check('approved from the visual card (GET /api/approvals)', status === 'approved', `${reqId} ${status} option=${dec?.option_id} via=${dec?.via}`)
   check('decision recorded via dashboard with option B', dec?.via === 'dashboard' && dec?.option_id === 'B')
 
-  // several approvals at once: one full card on the monitor, the rest one line each
+  // several approvals at once (issue #102): 產線監控 says how many, names the first, lists the others in one line
   const r3 = [await sim(d, { action: 'scenario', scenario: 'concurrent_3' }), await sim(d, { action: 'speed', speed: 30 }), await sim(d, { action: 'play' })]
   check('concurrent_3 scenario started', r3.every((x) => x === 200), r3.join(','))
   let np = 0
   for (let i = 0; i < 150 && np < 2; i++) { await d.waitForTimeout(1000); np = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => a.length)) }
   await sim(d, { action: 'pause' })
+  await d.locator('.tabs button', { hasText: '產線監控' }).click()
   await d.waitForTimeout(1500)
-  const cards = await d.locator('.monitor-wrap [data-testid=approval-visual]').count()
-  const rows = await d.locator('[data-testid=pending-more] li').count()
-  check('monitor: one full card, the other approvals as one-line rows', np >= 2 && cards === 1 && rows === np - 1, `pending ${np} cards ${cards} rows ${rows}`)
-  // the 預警 panel (#16) now opens 產線監控 on purpose; the check is that the approvals don't push the grid down
-  const monTop = await d.evaluate(() => Math.round(document.querySelector('.monitor')?.getBoundingClientRect().top + scrollY - (((e) => (e ? e.getBoundingClientRect().height + parseFloat(getComputedStyle(e).marginBottom) : 0))(document.querySelector('[data-testid=early-warnings]')))))
-  check('monitor stays within ~1.5 screens of the top (not counting 預警)', monTop < 1400, `${monTop}px`)
+  const many = await d.locator('[data-testid=monitor-pending]').innerText().catch(() => '')
+  check('monitor: no card, one line with the other approvals', np >= 2 && (await d.locator('.monitor-wrap [data-testid=approval-visual]').count()) === 0 && many.includes(`另有 ${np - 1} 件`), `pending ${np}: ${many.replace(/\n/g, ' | ')}`)
+  check('monitor: one row per abnormal machine', (await d.locator('[data-testid=abnormal-list] li').count()) >= np)
+  const listTop = await d.evaluate(() => Math.round(document.querySelector('[data-testid=abnormal-list]')?.getBoundingClientRect().top ?? 9e9))
+  check('monitor: the abnormal machines start on the first screen', listTop < 900, `${listTop}px`)
   check('no duplicate element ids (several pending)', (await d.evaluate(() => { const ids = [...document.querySelectorAll('[id]')].map((e) => e.id); return ids.length === new Set(ids).size })))
   await d.screenshot({ path: `${OUT}/console-monitor-concurrent-1440.png`, fullPage: true })
-  await d.locator('[data-testid=pending-more] a').first().click()
+  await d.locator('[data-testid=monitor-pending-go]').click()
   await d.waitForSelector('[data-testid=plan-area] [data-testid=approval-visual]', { timeout: 5000 }).catch(() => {})
-  check('a one-line row opens the home tab on its event', (await d.locator('[data-testid=plan-area] [data-testid=approval-visual]').count()) >= 1)
+  check('到主控台核准 opens the home tab on its event', (await d.locator('[data-testid=plan-area] [data-testid=approval-visual]').count()) >= 1)
   await d.screenshot({ path: `${OUT}/console-agent-concurrent-1440.png` })
   await sim(d, { action: 'scenario', scenario: 'normal' })
   await sim(d, { action: 'play' })

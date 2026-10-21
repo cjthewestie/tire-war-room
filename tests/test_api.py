@@ -423,6 +423,9 @@ async def test_real_open_mill_page2_focus(tmp_path):
 async def test_runtime_drives_real_state_machine_page11(tmp_path, monkeypatch):
     """Real sim/detector/safety/agent/store through Runtime; while warroom.tools is still a stub the
     registry is the agent builder's page-11 FakeRegistry (reads come from the real sim)."""
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     import warroom.tools as tools_mod
     try:
         tools_mod.build_registry(tools_mod.ToolContext())

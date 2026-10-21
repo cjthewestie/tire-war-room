@@ -2,9 +2,13 @@
 // LAN-only, no cloud push service: a new pending approval rings (Web Audio), vibrates, flashes the tab title
 // and, when the browser allows it, raises a system notification. While the link is down the alerts are held
 // and flushed as one alert when the phone reconnects.
-// Fast repair (Kyle 10-21): an event waiting for the supervisor's 覆核 (Event.review pending) rings the same way.
+// Fast repair (Kyle 10-21 flow): 維修完成 (Event.repaired_at, the readings coming back) and 已恢復正常・異常報告已產生 (the
+// event closed with its report, Event.review pending) ring once each, as notices: nothing waits for them, so they do not
+// re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Event } from '../contracts'
+import type { Event, MachineTile, SafetyCase } from '../contracts'
+import { caseTitle } from '../resolveText'
+import { expectationOf, normalOf, recoverText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 
@@ -17,20 +21,45 @@ export interface PushEnv {
   setTitle(t: string): void
 }
 
-/** What rings: a pending approval card (ApprovalRequest fits), or an event waiting for 覆核 (review: true). */
-export interface AlertItem { id: string; title: string; reason: string; risk?: string; review?: boolean }
+/** What rings: a pending approval card (ApprovalRequest fits), or a fast-repair notice (notice set). */
+export interface AlertItem { id: string; title: string; reason: string; risk?: string; notice?: 'repaired' | 'report' }
 
-/** Events whose repair is done and waits for the supervisor's 覆核, as alert items (one per review request). */
-export function reviewAlerts(events: Event[] | undefined): AlertItem[] {
-  return (events ?? []).filter((e) => e.review?.status === 'pending').map((e) => ({
-    id: `review:${e.id}:${e.review!.requested_at}`, title: `${machineLabel(e.machine_id)}維修完成`, reason: plain(e.outcome) || '請主管覆核', review: true,
-  }))
+const NOTICE_HEAD: Record<NonNullable<AlertItem['notice']>, string> = { repaired: '維修完成', report: '已恢復正常，報告已產生' }
+
+/** The fast-repair notices of these events, oldest repair first: 維修完成 while the readings come back (repaired, not
+ *  closed), then 已恢復正常，報告已產生 once it closed with its report unread (review pending). `tiles` add the live
+ *  temperature to the 維修完成 text. */
+export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] = []): AlertItem[] {
+  const out: AlertItem[] = []
+  for (const e of [...(events ?? [])].sort((a, b) => ((a.repaired_at ?? '') < (b.repaired_at ?? '') ? -1 : 1))) {
+    if (!e.repaired_at) continue
+    const title = machineLabel(e.machine_id)
+    if (e.state !== 'closed' && e.state !== 'safe_stop') {
+      const x = expectationOf(e)
+      const now = x?.channel === 'temp_c' ? tiles.find((t) => t.machine_id === e.machine_id)?.temp_c ?? null : null
+      out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now, normalOf(e, x)), notice: 'repaired' })
+    } else if (e.state === 'closed' && e.review?.status === 'pending') {
+      out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: plain(e.outcome) || '異常報告已產生', notice: 'report' })
+    }
+  }
+  return out
 }
 
-/** 「待核准」, 「待覆核」 or both, for the tab title and the multi-item alert. */
+/** Open Safety Core cases and unresolved SAFE_STOPs ring like a new approval (CJ 2026-10-22: they need the supervisor). */
+export function resolveAlerts(cases: SafetyCase[] | undefined, events: Event[] | undefined): AlertItem[] {
+  return [
+    ...(cases ?? []).filter((c) => c.status === 'open').map((c) => ({ id: `safety:${c.id}`, title: caseTitle(c), reason: plain(c.message), risk: 'R3' })),
+    ...(events ?? []).filter((e) => e.state === 'safe_stop' && !e.follow_up).map((e) => ({
+      id: `stop:${e.id}`, title: `安全停止：${machineLabel(e.machine_id)}`, reason: e.stop_reason_text ?? plain(e.outcome), risk: 'R3' })),
+  ]
+}
+
+/** 「待核准」 or what the notices say, for the multi-item alert. */
 export function waitLabel(items: AlertItem[]): string {
-  const r = items.some((a) => a.review), q = items.some((a) => !a.review)
-  return r && q ? '待核准／覆核' : r ? '待覆核' : '待核准'
+  const n = items.filter((a) => a.notice), q = items.length > n.length
+  if (!n.length) return '待核准'
+  if (q) return '待核准與通知'
+  return n.every((a) => a.notice === 'repaired') ? '維修完成' : n.every((a) => a.notice === 'report') ? '報告已產生' : '維修通知'
 }
 
 /** Pure diff: which pending ids are new since last time, and which alerts to fire now. */
@@ -53,7 +82,7 @@ export function diffPending(st: PushState, pending: AlertItem[], online: boolean
 
 export function alertText(fire: AlertItem[], flushed: boolean): { title: string; body: string } {
   const first = fire[0]
-  const title = fire.length === 1 ? `${first.review ? '請覆核' : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
+  const title = fire.length === 1 ? `${first.notice ? NOTICE_HEAD[first.notice] : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
   const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? `${first.risk ? `${first.risk}・` : ''}${first.reason}` : fire.map((a) => a.title).join('；'))
   return { title, body }
 }
@@ -114,7 +143,8 @@ function writeAlertPref(on: boolean): void {
   try { localStorage.setItem(PREF_KEY, on ? 'on' : 'off') } catch { /* private mode: the choice lasts this visit */ }
 }
 
-/** Watches the pending list (approval cards and 覆核 requests); fires push alerts on new ones, holds them while offline. */
+/** Watches the pending list (approval cards and fast-repair notices); fires push alerts on new ones, holds them while
+ *  offline. Only approval cards count as waiting (tab title, the 60 s re-ring). */
 export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: PushEnv = browserEnv()): ApprovalAlerts {
   const st = useRef<PushState>({ seen: new Set(), held: [] })
   const envRef = useRef(env)
@@ -134,7 +164,8 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
     const { fire, flushed } = diffPending(st.current, pending, online)
     setHeld(st.current.held.length)
     const e = envRef.current
-    e.setTitle(pending.length ? `(${pending.length}) ${waitLabel(pending)}・${baseTitle.current}` : baseTitle.current)
+    const asks = pending.filter((a) => !a.notice).length
+    e.setTitle(asks ? `(${asks}) 待核准・${baseTitle.current}` : baseTitle.current)
     if (!fire.length || !enabledRef.current) return
     const { title, body } = alertText(fire, flushed)
     e.notify(title, body, `approval-${fire[0].id}`)
@@ -143,12 +174,13 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
     setLastAlert(title)
   }, [pending, online])
 
-  // Re-ring every 60 s while something is still waiting, so a missed first alert is not the only one.
+  // Re-ring every 60 s while an approval is still waiting, so a missed first alert is not the only one.
+  const waiting = pending.some((a) => !a.notice)
   useEffect(() => {
-    if (!pending.length || !online || !enabled) return
+    if (!waiting || !online || !enabled) return
     const t = window.setInterval(() => { envRef.current.vibrate([300]); envRef.current.beep() }, 60_000)
     return () => window.clearInterval(t)
-  }, [pending.length, online, enabled])
+  }, [waiting, online, enabled])
 
   const arm = useCallback(async () => {
     // Browsers only allow sound after a tap, and permission prompts only from a tap.

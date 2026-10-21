@@ -1,166 +1,219 @@
-import { useRef, useState } from 'react'
-import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress, TimelineItem } from '../contracts'
-import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, SIZE_LABEL, machineLabel } from '../factory'
+import { useState } from 'react'
+import type { AnomalyKind, ApprovalRequest, BadDataMark, DashboardSnapshot, Event, EventState, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress, TimelineItem } from '../contracts'
+import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, ML_RANGE, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
-import { isAbnormal, primaryEvent } from '../store'
+import { isAbnormal } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { Panel, QUALITY_LABEL, STATE_LABEL, STATUS_LABEL, StageChain, TimelineTable } from './common'
+import { Panel, QUALITY_LABEL, STATUS_LABEL, TimelineTable } from './common'
 import { TemperatureTrend } from './Trend'
-import { PendingApproval } from '../agent/ApprovalVisual'
+import { CureSchedule, NextAtPress } from './CureSchedule'
 import { OrderGoodsLine, OrderRing, PlantPanels } from './PlantPanels'
 import { ORDER_STAGES } from './orderModel'
+import './monitor.css'
 
-/** 產線監控 (proposal page 2) with the whole plant below it — issue #37 merged the 工廠全貌 tab in here, so the
- *  page reads top-down: 預警 (rendered by App), the KPI strip, the approval card, ③ event / ④ 28 machines /
- *  ①② orders and semi-finished goods, then people and materials (dock, goods, tasks and the rest of the plant fold into
- *  「更多全廠資訊」). UX declutter: the page is for the 現場主管; on a phone ①②④ and the plant fold into their headers. */
+/** 產線監控, laid out like the approved 人力排程 draft (issue #102; Kyle, 2026-10-22). HY: 「界面簡單易懂、必要資訊就好；
+ *  重複的、主管不需要知道的全部刪掉」. One sentence first — which machines are abnormal (or that all are normal) and what
+ *  waits for the supervisor, with one button to 主控台 where approvals are made (the full approval card lived here too
+ *  and repeated 主控台) — then the abnormal machines, the 28 machines (11 presses first), the 硫化機排程 for today +
+ *  tomorrow (moved here from 人力排程) beside the next de-molds / mold-ins, and the rest of the plant folded into
+ *  「更多全廠資訊」. 預警 is rendered by App; monitor.css places it right under the sentence. */
 export function MonitorTab({ onMachine, onAgent, onOrders }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void; onOrders?: () => void }) {
   const { state } = useWarRoom()
   const s = state.snapshot
   if (!s) return <div className="loading">等待工廠資料…</div>
+  const machines = <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
   return (
-    <div className="monitor-wrap">
-      <KpiStrip s={s} pending={state.pending} />
-      <PendingCards pending={state.pending} focusEvent={s.focus?.event_id ?? primaryEvent(s.events)?.id ?? null} onAgent={onAgent} />
-      <div className="monitor">
-        <FocusPanelView focus={s.focus} pending={state.pending} />
-        <div className="col-left">
-          <OrdersPanel orders={s.orders} onOrders={onOrders} />
-          <SemiPanel semi={s.semi_finished} />
+    <div className="monitor-wrap mon">
+      <Answer s={s} pending={state.pending} onAgent={onAgent} />
+      {badRows(s).length > 0 ? <>
+        <div className="mon-row">
+          <AbnormalPanel s={s} onMachine={onMachine} />
+          {machines}
         </div>
-        <MachinesPanel machines={s.machines} bad={s.header.bad_data ?? []} onMachine={onMachine} focusId={s.focus?.machine_id} />
-      </div>
-      <PlantPanels />
+        <div className="mon-row">
+          <CureSchedule onAgent={onAgent} />
+          <NextAtPress />
+        </div>
+      </> : <>
+        {/* all normal: the sentence already says so, so no empty 異常機台 panel; the machines lead and the schedule
+            takes the full width */}
+        <div className="mon-row">
+          {machines}
+          <NextAtPress />
+        </div>
+        <CureSchedule onAgent={onAgent} />
+      </>}
+      <PlantPanels>
+        <OrdersPanel orders={s.orders} onOrders={onOrders} />
+        <SemiPanel semi={s.semi_finished} />
+      </PlantPanels>
     </div>
   )
 }
 
-/** One visual card (the focus event's, else the oldest) above the monitor; any other pending
- *  approval is a one-line row that opens the Agent tab on its event, so the plant view stays near the top.
- *  UX declutter: the card is compact here — risk, title, reason, the system's recommended option and 核准 / 討論
- *  stay; the evidence (plan, schedule before/after, options, tools, conclusion) opens with 「展開」. */
-function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalRequest[]; focusEvent: string | null; onAgent?: (eventId?: string) => void }) {
-  const { state } = useWarRoom()
-  if (!pending.length) return null
-  const main = pending.find((a) => a.event_id === focusEvent) ?? pending[0]
-  const rest = pending.filter((a) => a !== main)
-  const machineOf = (a: ApprovalRequest) => state.snapshot?.events.find((e) => e.id === a.event_id)?.machine_id
-  return (
-    <>
-      <CompactApproval key={main.id} req={main} onAgent={onAgent ? () => onAgent(main.event_id) : undefined} />
-      {rest.length > 0 && (
-        <ul className="apv-more" aria-label="其他待核准" data-testid="pending-more">
-          {rest.map((a) => {
-            const m = machineOf(a)
-            return (
-              <li key={a.id}>
-                <a href="#agent" onClick={(e) => { if (onAgent) { e.preventDefault(); onAgent(a.event_id) } }}>
-                  <span className={`risk r-${a.risk}`}>{a.risk}</span>
-                  {m && <b>{machineLabel(m)}</b>}
-                  <span>{plain(a.title)}</span>
-                  <span className="go">看計畫並核准 →</span>
-                </a>
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </>
-  )
+/** What Agent Nemo is doing, in the supervisor's words (veteran glossary 10-22: Agent Nemo is the only subject; detection is rules). */
+const AI_STEP: Record<EventState, string> = {
+  detected: '偵測到異常', classify: 'Agent Nemo 判斷中', plan: 'Agent Nemo 規劃中', simulate: '排程模擬中', gate: '安全把關中',
+  await_approval: '待核准', execute: '照計畫處理中', verify: '確認有沒有恢復', replan: '重新判斷中', closed: '已處理完', safe_stop: '已安全停止',
+}
+const KIND_WORD: Partial<Record<AnomalyKind, string>> = {
+  overheat: '溫度過高', temp_drop: '溫度下降', pressure_low: '壓力偏低', water_flow_low: '水流偏低', steam_low: '蒸汽偏低',
+  sensor_fault: '感測器異常', multi_machine: '多台同時異常', schedule_slip: '排程延誤', supervisor_command: '主管交辦',
+  shift_start: '早班開工', order_rush: '插單', staffing_short: '人手不足',
+}
+const STATUS_WORD: Partial<Record<MachineTile['status'], string>> = { out_of_service: '停用', stopped: '停機', warning: '讀值偏離', alarm: '異常' }
+
+interface BadRow { id: string; name: string; problem: string; what: string; ev: Event | null; ended: Event | null; tile?: MachineTile }
+
+const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+
+/** Machines that are abnormal (same rule as the header's 異常 count) or have an open event; 等你核准 first. A machine
+ *  still abnormal after its event ended (e.g. 安全中止：核准逾時) says how it ended. */
+function badRows(s: DashboardSnapshot): BadRow[] {
+  const byAge = [...s.events].sort((a, b) => (a.opened_at < b.opened_at ? -1 : 1))
+  const evBy = new Map(byAge.filter(isOpen).map((e) => [e.machine_id, e]))   // the newest open event per machine
+  const lastBy = new Map(byAge.map((e) => [e.machine_id, e]))
+  const ids = [...new Set([...evBy.keys(), ...s.machines.filter((m) => isAbnormal(m.status)).map((m) => m.machine_id)])]
+  const rows = ids.map((id): BadRow => {
+    const ev = evBy.get(id) ?? null
+    const ended = ev ? null : lastBy.get(id) ?? null
+    const tile = s.machines.find((m) => m.machine_id === id)
+    const temp = tile?.temp_c != null ? `（${tile.temp_c.toFixed(1)}°C）` : ''
+    const problem = ev ? KIND_WORD[ev.anomaly.kind] ?? '異常' : tile ? STATUS_WORD[tile.status] ?? STATUS_LABEL[tile.status] : '異常'
+    const what = ev ? plain(ev.anomaly.message).replace(new RegExp(`^(${machineLabel(id)}|\\d+ 號)\\s*`), '')
+      : tile?.status === 'out_of_service' ? '停用中，等維修；排程不再排入這台'
+      : ended?.outcome ? `${STATUS_LABEL[tile?.status ?? 'alarm']}${temp}。上一次處理：${plain(ended.outcome)}`
+      : tile?.status === 'stopped' ? '停機中'
+      : tile?.status === 'warning' ? `讀值偏離正常範圍${temp}，事件偵測監看中` : `${STATUS_LABEL[tile?.status ?? 'alarm']}${temp}`
+    return { id, name: machineLabel(id), problem, what, ev, ended, tile }
+  })
+  const rank = (r: BadRow) => (r.ev?.state === 'await_approval' ? 0 : r.ev ? 1 : 2)
+  return rows.sort((a, b) => rank(a) - rank(b))
 }
 
-/** The shared approval card with its evidence grid folded away (CSS hides `.apv-grid` until 「展開」); the card
- *  itself lives in agent/ and is not changed, so 核准 / 討論 and the option ids keep their test hooks.
- *  Folded, a small A/B toggle picks the option without 展開: it clicks the card's own (hidden) option button, so the
- *  card keeps the one selection and 「核准（A）」 sends the same request and option ids. */
-function CompactApproval({ req, onAgent }: { req: ApprovalRequest; onAgent?: () => void }) {
-  const [open, setOpen] = useState(false)
-  const rec = req.options.find((o) => o.recommended) ?? null
-  const box = useRef<HTMLDivElement>(null)
-  const [pick, setPick] = useState<string | null>(null)
-  const chosen = pick ?? rec?.id ?? req.options[0]?.id ?? null
-  const choose = (id: string) => box.current?.querySelector<HTMLButtonElement>(`[data-testid="option-${id}"]`)?.click()
-  // follows a pick made in the expanded card too (its option buttons are data-testid="option-<id>")
-  const follow = (e: React.MouseEvent) => {
-    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-testid^="option-"]')
-    if (b && !b.disabled && b.dataset.testid) setPick(b.dataset.testid.slice('option-'.length))
-  }
+/** The one sentence the page opens with (the draft's 「今晚夜班缺 1 人」), and on its right the one thing to do: the
+ *  approvals waiting, as one line and one button to 主控台; else what the AI is doing; else the next time someone is
+ *  needed at a press. */
+function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: ApprovalRequest[]; onAgent?: (eventId?: string) => void }) {
+  const rows = badRows(s)
+  const mach = rows.filter((r) => r.id !== 'PLANT')
+  const plant = rows.find((r) => r.id === 'PLANT')
+  const working = rows.filter((r) => r.ev && r.ev.state !== 'await_approval')
+  const main = pending.find((a) => a.event_id === rows[0]?.ev?.id) ?? pending[0] ?? null   // the first row of 異常機台
+  const who = (a: ApprovalRequest) => { const m = s.events.find((e) => e.id === a.event_id)?.machine_id; return m ? machineLabel(m) : plain(a.title) }
+  const rec = main ? main.options.find((o) => o.recommended) ?? main.options[0] ?? null : null
+  const others = pending.filter((a) => a !== main).map(who)
+  const calm = rows.length === 0
+  // machine names never break inside (「3 號｜硫化機」) on a phone
+  const h1 = calm ? `${s.machines.length} 台機台都正常`
+    : mach.length === 1 ? `${mach[0].name}${mach[0].problem}`
+    : mach.length > 1 ? <>{mach.length} 台機台異常：{mach.map((r, i) => <span key={r.id} className="nw">{r.name}{i < mach.length - 1 && '、'}</span>)}</>
+    : `全廠：${plant?.problem ?? '有異常'}`
+  // abnormal with no open event: out of service waits for maintenance, a 注意 reading is watched by the detector,
+  // anything else (異常／停機 after its event ended) needs someone on site
+  const idle = (st: string[]) => rows.filter((r) => !r.ev && st.includes(r.tile?.status ?? 'alarm'))
+  const [check, out, watch] = [idle(['alarm', 'stopped']), idle(['out_of_service']), idle(['warning'])]
+  const names = (rs: BadRow[]) => rs.map((r) => r.name).join('、')
+  const said = [
+    main && `Agent Nemo 已擬好處理計畫，${pending.length} 件待核准`,
+    working.length > 0 && `${names(working)}${main ? ' Agent Nemo 還在處理' : ' Agent Nemo 正在處理，目前不用你做什麼'}`,
+    check.length > 0 && `${names(check)}沒有在處理中，請到現場確認`,
+    out.length > 0 && `${names(out)}已停用，等維修；排程不再排入`,
+    watch.length > 0 && `${names(watch)}讀值偏離，事件偵測監看中`,
+    calm ? '機台全天自動監看，有異常 1 分鐘內交給 Agent Nemo 處理' : `其他 ${s.header.normal_count} 台正常`,
+  ].filter(Boolean).join('。') + '。'
+  const k = main ? `要你處理 ${pending.length} 件` : calm ? '全廠正常' : check.length ? '要你到現場確認' : working.length ? 'Agent Nemo 處理中' : out.length ? '停用中，等維修' : '監看中'
+  const ended = [...check, ...out].find((r) => r.ended?.outcome)?.ended ?? null
   return (
-    <div ref={box} className={`apv-compact ${open ? 'is-open' : ''}`} data-testid="approval-compact" onClick={follow}>
-      <PendingApproval req={req} onAgent={onAgent} />
-      <div className="apv-fold">
-        {req.options.length > 1 && !open ? (
-          <span className="apv-fold-pick" role="radiogroup" aria-label="人力方案" data-testid="apv-fold-pick">
-            <b>人力方案</b>
-            {req.options.map((o) => (
-              <button key={o.id} type="button" role="radio" aria-checked={chosen === o.id} className={chosen === o.id ? 'on' : ''}
-                onClick={(e) => { e.stopPropagation(); choose(o.id) }} data-testid={`apv-fold-opt-${o.id}`}>
-                {o.id} {plain(o.label)}{o.recommended ? <small>系統建議</small> : null}
-              </button>
-            ))}
-          </span>
-        ) : rec ? <span className="apv-fold-rec"><b>系統建議</b>{rec.id} {plain(rec.label)}{req.options.length > 1 ? `（共 ${req.options.length} 個方案）` : ''}</span> : <span />}
-        <button type="button" className="btn-ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="apv-expand">
-          {open ? '收起 ▴' : '展開：處理計畫、排程前後對照、方案與結論 ▾'}
-        </button>
+    <section className={`panel mon-answer ${calm ? 'is-calm' : ''}`} aria-label="產線現在的結論" data-testid="mon-answer">
+      <div>
+        <span className="mon-k">{k}</span>
+        <h1>{h1}</h1>
+        <p>{said}</p>
       </div>
-    </div>
-  )
-}
-
-/** The numbers a supervisor reads first: machines running, what needs attention, what waits for approval, where the AI
- *  is, who is in the plant. Low materials are not repeated here: they are already rows in 預警 (UX declutter). */
-function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalRequest[] }) {
-  const w = useWarRoom().state.world
-  const h = s.header
-  const total = h.normal_count + h.abnormal_count
-  const bad = s.machines.filter((m) => isAbnormal(m.status))
-  const ev = primaryEvent(s.events)
-  const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
-  const round = pending.reduce((r, a) => Math.max(r, a.round), 0)
-  return (
-    <section className="kpis" aria-label="全廠重點">
-      <div className="kpi">
-        <span className="kpi-l">機台運轉</span>
-        <span className="kpi-v" data-testid="kpi-normal">{h.normal_count}<small> / {total} 台</small></span>
-        <span className="kpi-s">事件偵測常駐監看，不經 AI</span>
-      </div>
-      <div className={`kpi ${h.abnormal_count > 0 ? 'is-alarm' : ''}`}>
-        <span className="kpi-l">需要注意</span>
-        <span className="kpi-v">{h.abnormal_count}<small> 台</small></span>
-        <span className="kpi-s">{bad.length ? bad.map((m) => machineLabel(m.machine_id)).join('、') : '全廠正常'}</span>
-      </div>
-      <div className={`kpi ${pending.length ? 'is-warn' : ''}`}>
-        <span className="kpi-l">等主管核准</span>
-        <span className="kpi-v">{pending.length}<small> 件</small></span>
-        <span className="kpi-s">{pending.length ? `第 ${round} 輪・已推到主管手機` : '沒有待核准事項'}</span>
-      </div>
-      <div className={`kpi ${open ? 'is-live' : ''}`}>
-        <span className="kpi-l">AI 指揮官</span>
-        <span className="kpi-v kpi-word">{open ? STATE_LABEL[ev.state] : '待命'}</span>
-        <span className="kpi-s">{open ? `${plain(ev.machine_id)}${ev.replans ? `・重新規劃 ${ev.replans} 次` : '・處理中'}` : ev ? `上一事件：${machineLabel(ev.machine_id)}已結案` : '有異常才喚醒'}</span>
-      </div>
-      {w && (
-        <div className="kpi">
-          <span className="kpi-l">在廠人員</span>
-          <span className="kpi-v" data-testid="kpi-people">{w.people.on_duty}<small> / {w.people.total} 人</small></span>
-          <span className="kpi-s">在機台 {w.people.by_state['在機台'] ?? 0}・請假 {w.people.by_state['請假'] ?? 0}</span>
+      {main ? (
+        <div className="mon-fix" data-testid="monitor-pending">
+          <span className="mon-fix-k">系統建議</span>
+          <b title={rec ? plain(rec.label) : plain(main.title)}>{who(main)}：{rec ? plain(rec.label) : plain(main.title)}</b>
+          {others.length > 0 && <small>另有 {others.length} 件：{others.join('、')}</small>}
+          <button type="button" className="mon-btn" onClick={() => onAgent?.(main.event_id)} data-testid="monitor-pending-go">到主控台核准 →</button>
+        </div>
+      ) : working.length > 0 ? (
+        <div className="mon-fix">
+          <span className="mon-fix-k">Agent Nemo 正在做</span>
+          <b>{working[0].name}：{AI_STEP[working[0].ev!.state]}</b>
+          <small>目前沒有要你核准的事</small>
+        </div>
+      ) : calm ? (
+        <div className="mon-fix">
+          <span className="mon-fix-k">下一次要有人在硫化機旁</span>
+          <b><NextAtPress limit={1} inline /></b>
+        </div>
+      ) : (
+        <div className="mon-fix">
+          <span className="mon-fix-k">{ended ? `上一次處理（${machineLabel(ended.machine_id)}）` : 'Agent Nemo 沒有在處理'}</span>
+          <b title={ended?.outcome ? plain(ended.outcome) : undefined}>{ended?.outcome ? plain(ended.outcome) : '請到現場確認'}</b>
+          <small>{check.length ? '機台還沒恢復正常，請到現場確認' : out.length ? '維修確認後才恢復排入' : '不用你做什麼'}</small>
         </div>
       )}
     </section>
   )
 }
 
-/** ① 訂單: the proposal's per-size progress (page 2) with 剩餘約 N 小時; the order pipeline, the open orders with their
- *  goods rings (was 工廠全貌's 訂單流程) and today's counts fold into 「訂單明細」 so ①②③④ fit the first screen
- *  (UX declutter). Search, ETA vs due and risk are on the 訂單 tab. */
+/** The abnormal machines, one row each: what is wrong and how far the AI got. The event in focus keeps its evidence
+ *  under the list: temperature trend, the AI's judgement, the schedule impact and, folded, what was done. */
+function AbnormalPanel({ s, onMachine }: { s: DashboardSnapshot; onMachine: (id: string) => void }) {
+  const { state } = useWarRoom()
+  const rows = badRows(s)
+  const focus = s.focus && (rows.some((r) => r.id === s.focus!.machine_id) || (s.focus.state !== 'closed' && s.focus.state !== 'safe_stop')) ? s.focus : null
+  return (
+    <Panel title={`異常機台（${rows.length}）`} className="mon-bad">
+      <ul className="mon-bad-list" data-testid="abnormal-list">
+        {rows.map((r) => {
+          const st = r.ev ? r.ev.state : null
+          return (
+            <li key={r.id} className={r.tile && (r.tile.status === 'alarm' || r.tile.status === 'stopped' || r.tile.status === 'out_of_service') ? 'is-bad' : ''}>
+              {r.id in MACHINE_META
+                ? <button type="button" className="mon-m" onClick={() => onMachine(r.id)} title="看溫度、壓力、水流">{r.name}<small>{r.problem}</small></button>
+                : <b className="mon-m">{r.name}<small>{r.problem}</small></b>}
+              <span className="mon-what">{r.what}</span>
+              {st && <span className={`mon-step ${st === 'await_approval' ? 'is-wait' : ''}`}>{AI_STEP[st]}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      {focus && <FocusDetail focus={focus} pending={state.pending} />}
+    </Panel>
+  )
+}
+
+function FocusDetail({ focus, pending }: { focus: FocusPanel; pending: ApprovalRequest[] }) {
+  const { state } = useWarRoom()
+  const closed = focus.state === 'closed' || focus.state === 'safe_stop'
+  const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
+  const title = focusTitle(focus, ev, [...pending, ...state.resolved])
+  return (
+    <div className="mon-fd focus" data-testid="focus-detail">
+      <h3 className="mon-fd-h focus-title">{closedTitle(plain(title), closed)}</h3>
+      <div className={`mon-fd-grid ${ev && ev.hypotheses.length > 0 ? 'has-judge' : ''}`}>
+        {focus.machine_id in MACHINE_META && <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} compact />}
+        {ev && ev.hypotheses.length > 0 && <JudgmentTrail ev={ev} />}
+      </div>
+      <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
+      <FocusTimeline focus={focus} />
+    </div>
+  )
+}
+
+/** ① 訂單: per-size progress with 剩餘約 N 小時; the pipeline, the open orders with their goods rings and today's counts
+ *  fold into 「訂單明細」. Now inside 「更多全廠資訊」: search, ETA vs due and risk are on the 訂單 tab. */
 function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?: () => void }) {
   const w = useWarRoom().state.world
   const open = (w?.orders.items ?? []).filter((o) => o.status === '待排程' || o.status === '生產中')
     .sort((a, b) => Number(b.rush) - Number(a.rush) || (a.due < b.due ? -1 : 1)).slice(0, 4)
   return (
-    <Panel num="①" title="訂單進度" className="orders" fold="phone"
+    <Panel title="訂單進度" className="orders"
       right={onOrders && <a className="panel-link" href="#orders" onClick={(e) => { e.preventDefault(); onOrders() }}>全部訂單 →</a>}>
       {orders.map((o) => (
         <div className="order" key={o.size}>
@@ -176,7 +229,7 @@ function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?:
       ))}
       {w && (
         <details className="orders-more" data-testid="orders-more">
-          <summary>訂單明細（流程、生產中的單、今日新單與庫存）</summary>
+          <summary>訂單明細</summary>
           <ol className="pipe" data-testid="order-pipeline" aria-label="訂單流程">
             {ORDER_STAGES.map((st) => <li key={st} className={w.orders.pipeline[st] ? 'has' : ''}><b>{w.orders.pipeline[st] ?? 0}</b><span>{st}</span></li>)}
           </ol>
@@ -198,11 +251,11 @@ function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?:
   )
 }
 
-/** ② stays open on desktop as a compact one-line-per-part list. The data has one planned mold-in time for the
- *  whole tyre (not per part), so it sits in the header; the note trails in small text. */
+/** ② a compact one-line-per-part list. The data has one planned mold-in time for the whole tyre (not per part), so it
+ *  sits in the header; the note trails in small text. */
 function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
   return (
-    <Panel num="②" title={`半成品進度（${semi.tire_label}）`} className="semi" fold="phone"
+    <Panel title={`半成品進度（${semi.tire_label}）`} className="semi"
       right={semi.planned_mold_in_at && <span className="muted small">預計 {fmtHM(semi.planned_mold_in_at)} 入硫化機</span>}>
       <ul className="semi-list compact">
         {semi.parts.map((p) => (
@@ -217,46 +270,15 @@ function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
   )
 }
 
-function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending: ApprovalRequest[] }) {
-  const { state } = useWarRoom()
-  if (!focus) {
-    const ev = primaryEvent(state.snapshot?.events)
-    return (
-      <Panel num="③" title="目前事件" className="focus calm">
-        <div className="calm-body">
-          <p className="calm-title">全廠正常</p>
-          <p className="muted">事件偵測常駐監看 28 台機台（不經 AI、全天候）。發現異常 1 分鐘內喚醒 AI 指揮官。</p>
-          {(state.snapshot?.header.bad_data_total ?? 0) > 0 && (
-            <p className="note dq-note" data-testid="bad-data-note">驗證層攔下 {state.snapshot?.header.bad_data_total} 筆壞資料（近 30 分）：{(state.snapshot?.header.bad_data ?? []).map((b) => `${machineLabel(b.machine_id)} ${b.count} 筆・${QUALITY_LABEL[b.last_quality] ?? b.last_quality}`).join('；')}。壞資料不進預測、不喚醒 AI。</p>
-          )}
-          {ev && <p className="muted small">上一事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>}
-        </div>
-      </Panel>
-    )
-  }
-  const closed = focus.state === 'closed' || focus.state === 'safe_stop'
-  const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
-  const view = focusView(focus, ev, [...pending, ...state.resolved])
+/** What was done for the event in focus and its timeline, folded (the demo opens it here): the last 6 rows, 「看全部」
+ *  for the rest. */
+function FocusTimeline({ focus }: { focus: FocusPanel }) {
+  const [all, setAll] = useState(false)
+  const items: TimelineItem[] = focus.timeline
+  const nDone = focus.auto_done.length + (focus.approved ?? []).length
   return (
-    <Panel num="③" title="目前事件" className={`focus ${closed ? 'closed' : 'hot'}`} right={<span className={`state-pill st-${focus.state}`}>{STATE_LABEL[focus.state]}</span>}>
-      {ev && <StageChain ev={ev} />}
-      <h3 className="focus-title">{closedTitle(plain(view.title), closed)}</h3>
-      <p className="focus-detail">{plain(view.detail)}</p>
-      <div className={`focus-grid ${ev && ev.hypotheses.length > 0 ? 'has-judge' : ''}`}>
-        <div className="focus-main">
-          {focus.machine_id in MACHINE_META && <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} />}
-          <div className="tiles">
-            {focus.tiles.map((t) => (
-              <div className={`tile ${t.status}`} key={t.label}>
-                <span className="tile-l">{t.label}</span>
-                <span className="tile-v">{tileValue(t.label, t.value, focus.machine_id)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-        {ev && ev.hypotheses.length > 0 && <JudgmentTrail ev={ev} />}
-      </div>
-      <h4 className="sub">處置與核准</h4>
+    <details className="focus-tl" data-testid="focus-timeline">
+      <summary>處理紀錄（已做 {nDone} 項・時間軸 {items.length} 筆）</summary>
       <ul className="actions">
         {focus.auto_done.map((a) => <li key={a} className="done"><span className="ck">✓</span><span><em className="act-k">已自動<span className="sr">：</span></em>{plain(a)}</span></li>)}
         {(focus.approved ?? []).map((a, i) => (
@@ -268,23 +290,10 @@ function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending:
           <li key={`rv-${r}`} className="revoked"><span className="ck" aria-hidden>↺</span><span><em className="act-k">已撤回<span className="sr">：</span></em>{plain(r)}</span></li>
         ))}
         {focus.pending.length > 0 && (
-          <li className="todo-visual"><span className="ck" aria-hidden>◆</span><span><em className="act-k">待核准<span className="sr">：</span></em>{focus.pending.length > 1 ? `${focus.pending.length} 個方案擇一，` : ''}請在上方核准卡看計畫、排程與方案後決定</span></li>
+          <li className="todo-visual"><span className="ck" aria-hidden>◆</span><span><em className="act-k">待核准<span className="sr">：</span></em>{focus.pending.length > 1 ? `${focus.pending.length} 個方案擇一，` : ''}請到主控台看計畫後決定</span></li>
         )}
       </ul>
-      <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
-      {focus.timeline.length > 0 && <FocusTimeline items={focus.timeline} />}
-    </Panel>
-  )
-}
-
-/** ③'s 事件時間軸 (the demo opens it here): the last 6 rows, 「看全部」 for the rest. The full table used to be ⑦ on
- *  人力排程; that copy was removed in the UX declutter, so this is where the whole timeline is read now. */
-function FocusTimeline({ items }: { items: TimelineItem[] }) {
-  const [all, setAll] = useState(false)
-  return (
-    <details className="focus-tl" data-testid="focus-timeline">
-      <summary>事件時間軸（{items.length} 筆）</summary>
-      <TimelineTable items={all ? items : items.slice(-6)} compact />
+      {items.length > 0 && <TimelineTable items={all ? items : items.slice(-6)} compact />}
       {items.length > 6 && (
         <button type="button" className="btn-ghost tl-all" aria-expanded={all} onClick={() => setAll((a) => !a)} data-testid="timeline-all">
           {all ? '只看最近 6 筆' : `看全部（${items.length} 筆）`}
@@ -297,8 +306,8 @@ function FocusTimeline({ items }: { items: TimelineItem[] }) {
 /** Page 7 "dynamic adjustment": each hypothesis the commander made, what it expected, and what code verified. */
 function JudgmentTrail({ ev }: { ev: Event }) {
   return (
-    <section className="judge" aria-label="AI 指揮官的判斷">
-      <h4 className="sub">AI 指揮官的判斷</h4>
+    <section className="judge" aria-label="Agent Nemo 的判斷">
+      <h4 className="sub">Agent Nemo 的判斷</h4>
       <ol className="judge-list">
         {ev.hypotheses.map((h, i) => {
           const label = hypLabel(h.status, ev)
@@ -323,6 +332,8 @@ function JudgmentTrail({ ev }: { ev: Event }) {
   )
 }
 
+/** All 28 machines, 11 presses first (the bottleneck). Every machine keeps its data-machine / data-line hook: the
+ *  ticker and 主控台 scroll here and open the drawer. */
 function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: MachineTile[]; bad: BadDataMark[]; onMachine: (id: string) => void; focusId?: string }) {
   const badBy = new Map(bad.map((b) => [b.machine_id, b]))
   const dqText = (id: string) => {
@@ -332,9 +343,9 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
   const presses = machines.filter((m) => m.line === 'CURE')
   const off = machines.filter((m) => isAbnormal(m.status))
   return (
-    <Panel num="④" title="機台狀態" className="machines" fold="phone"
+    <Panel title="機台現況" className="machines" fold="phone"
       summary={off.length ? <span className="late">需要注意：{off.map((m) => machineLabel(m.machine_id)).join('、')}</span> : `${machines.length} 台・全部正常`}>
-      <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・7–10 號可做中大胎</small></p>
+      <p className="mon-sub">{ML_RANGE} 號硫化機可做中、大胎。點機台看溫度、壓力、水流。</p>
       <div className="presses" data-line="CURE">
         {presses.map((m) => (
           <button key={m.machine_id} className={`mdot press st-${m.status}${m.repaired ? ' repaired' : ''}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
@@ -366,35 +377,24 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
           </div>
         ))}
       </div>
-      <p className="muted small foot">點機台看溫度、壓力、時間、水流{bad.length > 0 && <>・<span className="dq-tag">資料</span> = 驗證層攔下壞資料</>}</p>
+      {bad.length > 0 && (
+        <p className="note dq-note" data-testid="bad-data-note"><span className="dq-tag">資料</span> 驗證層攔下 {bad.reduce((n, b) => n + b.count, 0)} 筆壞資料（近 30 分）：{bad.map((b) => `${machineLabel(b.machine_id)} ${b.count} 筆・${QUALITY_LABEL[b.last_quality] ?? b.last_quality}`).join('；')}。壞資料不進預測、不喚醒 AI。</p>
+      )}
     </Panel>
   )
 }
 
-/** Rebuild ③'s title and detail from the live event, so the panel never contradicts the tiles or the phone:
- *  the wake-time reading is labelled as such and the live value comes from the temperature tile.
- *  After a replan the round-2 approval title (e.g. 7 號機停用，重排中) leads. */
-function focusView(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[]): { title: string; detail: string } {
-  // Only the server-built panel freezes the wake-time anomaly message; a live-built detail (mock) is used as-is.
-  if (!ev || !ev.anomaly.message || !focus.detail.startsWith(ev.anomaly.message)) return { title: focus.title, detail: focus.detail }
-  const base = focus.detail.split('；原因：')[0]
-  const temp = focus.tiles.find((t) => t.label === '溫度')
-  const detail = `喚醒時（${fmtHM(ev.anomaly.ts)}）：${base}${temp && temp.value !== '—' ? `。現在：${temp.value}` : ''}`
+/** The event's title, rebuilt from the live event: while it is open after a replan the round-2 approval title (e.g.
+ *  7 號機停用，重排中) leads, so the heading never contradicts the phone. */
+function focusTitle(focus: FocusPanel, ev: Event | null, reqs: ApprovalRequest[]): string {
+  if (!ev) return focus.title
   const rejected = ev.hypotheses.filter((h) => h.status === 'rejected')
   const latestRound = reqs.filter((r) => r.event_id === ev.id).sort((a, b) => b.round - a.round || (a.created_at < b.created_at ? 1 : -1))[0]
-  const title = rejected.length > 0 && latestRound && latestRound.round > 1
-    ? `${machineLabel(ev.machine_id)}：${latestRound.title}`
-    : focus.title
-  return { title, detail }
+  const open = ev.state !== 'closed' && ev.state !== 'safe_stop'
+  return open && rejected.length > 0 && latestRound && latestRound.round > 1 ? `${machineLabel(ev.machine_id)}：${latestRound.title}` : focus.title
 }
 
 /** "supervisor" is the API default for a phone decision; show the role in Chinese. */
 function whoLabel(by: string): string {
   return !by || by === 'supervisor' ? '主管' : by
-}
-
-/** Presses cure for 24–34 h: show the server's minute count as hours. */
-function tileValue(label: string, value: string, machineId: string): string {
-  const m = label === '時間' && machineId.startsWith('CURE-') ? /^(\d+(?:\.\d+)?)分$/.exec(value) : null
-  return m ? `${(Number(m[1]) / 60).toFixed(1)} h` : value
 }

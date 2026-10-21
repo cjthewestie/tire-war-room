@@ -132,6 +132,7 @@ class Factory:
         self._t = t0
         self._rng = random.Random(self.seed)
         self._faults: list[_Fault] = []
+        self._recovery: dict[str, tuple] = {}      # fast repair ramp: machine -> (temp, pressure, flow, steam) at its start
         self._pending: list[tuple[datetime, ScenarioStep]] = sorted(
             ((t0 + timedelta(seconds=s.at_offset_s), s) for s in sc.steps if s.fault is not None),
             key=lambda x: x[0])
@@ -310,22 +311,42 @@ class Factory:
             self._pending = [(at, st) for at, st in self._pending if st.fault is None or st.fault.machine_id != machine_id]
 
     def snap_to_nominal(self, machine_id: str) -> None:
-        """Fast repair (Settings.repair_fast_s): the repaired machine's process values go straight back to nominal (no
-        cool-down / heat-up), and so does its current reading (tiles, VERIFY): the sim clock may be held while another
-        event's solver runs, so the fix must not wait for the next step. Only after its faults were cleared; the
-        status is untouched. The reading is noiseless so the plant's RNG stream stays as it was."""
+        """Fast repair with RECOVER_FAST_S=0: the repaired machine's process values go straight back to nominal (see
+        recover)."""
+        self.begin_recovery(machine_id)
+        self.recover(machine_id, 1.0)
+
+    def begin_recovery(self, machine_id: str) -> None:
+        """Fast repair (Settings.recover_fast_s, Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): remember where the repaired
+        machine's process values are; recover() then moves them back to nominal. Only after its faults were cleared."""
         m = self._m[machine_id]
-        m.temp, m.pressure = m.nominal.temp_c, m.nominal.pressure
+        self._recovery[machine_id] = (m.temp, m.pressure, m.flow, m.steam)
+
+    def recover(self, machine_id: str, frac: float) -> SensorReading | None:
+        """Put the repaired machine's process values `frac` (0–1) of the way from where begin_recovery found them to
+        nominal, and its current reading with them (tiles, VERIFY): the runtime drives it on the WALL clock, and the
+        sim clock may be held while another event's model call runs. 1 ends the ramp (exactly nominal). The status is
+        untouched; the reading is noiseless so the plant's RNG stream stays as it was. None: no ramp on it."""
+        start = self._recovery.get(machine_id)
+        if start is None:
+            return None
+        m, f = self._m[machine_id], min(1.0, max(0.0, frac))
+        nom = (m.nominal.temp_c, m.nominal.pressure, m.nominal.flow_lpm, P.STEAM_NOMINAL_KGF_CM2)
+        cur = [None if a is None else (b if f >= 1.0 or b is None else a + (b - a) * f) for a, b in zip(start, nom)]
+        m.temp, m.pressure = cur[0], cur[1]
         if m.flow is not None:
-            m.flow = m.nominal.flow_lpm
+            m.flow = cur[2]
         if m.steam is not None:
-            m.steam = P.STEAM_NOMINAL_KGF_CM2
+            m.steam = cur[3]
+        if f >= 1.0:
+            del self._recovery[machine_id]
         if m.hist:
             ts, *_, seq = m.hist[-1]
             row = (ts, round(m.temp, 2), round(m.pressure, 2), None if m.flow is None else round(m.flow, 2),
                    None if m.steam is None else round(m.steam, 3), seq)
             m.hist[-1] = row
             m.last = self._to_reading(machine_id, row)
+        return m.last
 
     def faults(self, active_only: bool = True) -> list[FaultSpec]:
         t = self._t
@@ -832,6 +853,22 @@ class Factory:
     def status_of(self, machine_id: str) -> MachineStatus:
         """The machine's current status (KeyError for an unknown id)."""
         return self._m[machine_id].status
+
+    def scrap_held_job(self, press_id: str) -> str | None:
+        """QC 報廢 of the tyre a CURE_HOLD kept in the mold (supervisor decision, warroom/api/resolve.py): the job
+        leaves the press, the order counts it as not made, and the press goes idle for the next mold-in after the usual
+        de-mold / mold-in time. Returns the scrapped job id (None: no job in the press)."""
+        ps = self._press.get(press_id)
+        if ps is None or ps.job is None:
+            return None
+        job = ps.job
+        if job.order_id in self._in_press:
+            self._in_press[job.order_id] = max(0, self._in_press[job.order_id] - 1)
+        ps.job = None
+        ps.idle_until = self._t + timedelta(minutes=DEMOLD_MOLDIN_MIN)
+        m = self._m[press_id]
+        m.status, m.note = MachineStatus.IDLE, f"QC 報廢 {job.order_id}，換模入模中"
+        return job.job_id
 
     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
         self._m[machine_id].active_event_id = event_id
