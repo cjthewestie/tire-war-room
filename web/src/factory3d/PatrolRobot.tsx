@@ -117,7 +117,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
   const s = useRef({
     path: [] as [number, number][], loopI: 1, stopDone: new Set<number>(), inspect: -1, inspectFor: '' as string,
     arm: [...FOLD] as [number, number], yaw: Math.PI / 2, light: 0, target: null as string | null,
-    show: -1, showFor: '' as string, bow: 0,
+    show: -1, showFor: '' as string, bow: 0, visiting: false, returnAfterShow: false,
   })
   const target = incident && PLACED_BY_ID[incident] ? incident : null
 
@@ -149,7 +149,16 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     let faceYaw: number | null = null
     let moving = false
 
-    // 0. the demo's robot beat: stop where it is and play the show, then carry on
+    // 0. the demo's robot beat: drive over to the lead first (first person: it comes to you), then the show
+    if (robot.visitReq) {
+      const [vx, vz] = robot.visitReq
+      robot.visitReq = null
+      st.path = route(robot.x, robot.z, vx, vz)
+      st.inspect = -1
+      st.visiting = true
+      robot.mode = 'divert'
+    }
+    if (st.visiting && !st.path.length) { st.visiting = false; robot.playReq = true; st.returnAfterShow = true }
     if (robot.playReq) {
       robot.playReq = false
       st.show = 0
@@ -163,7 +172,17 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
       showing = showStep(st.show)
       if (showing && robot.played[robot.played.length - 1] !== showing) robot.played.push(showing)
       robot.playing = showing
-      if (!showing) { st.show = -1; robot.playing = null }
+      if (!showing) {
+        st.show = -1; robot.playing = null
+        // after the visit, back to the loop (or on to the incident it was sent to)
+        if (st.returnAfterShow) {
+          st.returnAfterShow = false
+          if (!st.target) {
+            const back: [number, number] = Math.abs(robot.z - 3.2) < 0.05 ? [WEST_X, 3.2] : [EAST_X, 0.9]
+            st.path = route(robot.x, robot.z, back[0], back[1]); st.loopI = back[1] === 3.2 ? 0 : 2; robot.mode = 'return'
+          }
+        }
+      }
     }
     // 1. where to drive: an explicit path (divert / return) first, else the loop
     if (showing) {

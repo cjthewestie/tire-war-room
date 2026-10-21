@@ -11,8 +11,8 @@
 // Between cues, a cue that enters on a live event (the incident, its card, the crew finishing) waits for it; continue
 // cannot fake it, only its timeout can.
 //   auto      ends on its own after `min` seconds.
-// The story's 3:00 is a soft target: past it the card says 「該換 Pitch 了」; the pitch starts on continue at the robot
-// beat (⑦), or by itself there from 3:30.
+// The story's 3:00 is a soft target: past it the card says 「該換 Pitch 了」; the pitch starts on continue at the last story
+// beat (the Agent page, after the robot), or by itself there from 3:30.
 // Nothing here touches React or three.js, so e2e/demo-unit.mjs drives it with fake clocks and fake signals.
 
 /** The scenario the demo plays: 「一早訂單湧入」 (PR #107). One constant, so retiming is one edit. */
@@ -43,6 +43,8 @@ export interface DemoLoad { at: number; scenario: string; speed: number }
 export type Signal =
   | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'rejected' | 'approval2' | 'approved2'
   | 'worker' | 'workerDone' | 'closed'
+  /** the 3D's own: the walk / camera has arrived and framed the beat (false holds a checkpoint's 「按 A 繼續」) */
+  | 'arrived'
 export type Signals = Partial<Record<Signal, boolean>>
 /** What the camera frames (factory3d/demoCamera.ts). */
 export type Shot =
@@ -98,10 +100,10 @@ export const CUES: Cue[] = [
     hold: { wait: 'approval', approval: 'approved2', card: 'approval2' }, shot: { kind: 'incident', close: true } },
   { id: 'worker', at: 120, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
     hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
-  { id: 'agent', at: 135, title: '🧠 回頭看 Agent 頁面：H1 為什麼被推翻', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
-    hold: { wait: 'continue' }, shot: { kind: 'overview' } },
-  { id: 'robot', at: 158, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
+  { id: 'robot', at: 135, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
     hold: { wait: 'continue', min: 8 }, shot: { kind: 'robot' } },
+  { id: 'agent', at: 158, title: '🧠 回頭看 Agent 頁面：H1 為什麼被推翻', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
+    hold: { wait: 'continue' }, shot: { kind: 'overview' } },
   { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
     hold: { wait: 'continue', autoAfter: 8 }, shot: { kind: 'whiteboard' } },
   { id: 'warn', at: STORY_TARGET + 120, enter: { after: 120 }, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。',
@@ -110,10 +112,11 @@ export const CUES: Cue[] = [
     hold: { wait: 'continue', pauseSim: false }, shot: { kind: 'whiteboard' } },
 ]
 export const PITCH_INDEX = CUES.findIndex((c) => c.id === 'pitch')
-export const ROBOT_INDEX = CUES.findIndex((c) => c.id === 'robot')
+/** The last story beat (the Agent page): from 3:30 it hands over to the pitch by itself. */
+export const LAST_STORY_INDEX = PITCH_INDEX - 1
 /** The presenter checkpoints (CJ: 「關鍵處可以讓我按按鍵再繼續」), for the badge 「④ / 10」 (the 急單 approval is an
  *  extra stop between ① and ②). */
-export const CHECKPOINTS = ['start', 'console', 'event', 'h1', 'verify', 'h2', 'worker', 'agent', 'robot', 'pitch']
+export const CHECKPOINTS = ['start', 'console', 'event', 'h1', 'verify', 'h2', 'worker', 'robot', 'agent', 'pitch']
 
 export type Reason = 'time' | 'event' | 'continue' | 'auto' | 'skip'
 export interface Fired { id: string; t: number; reason: Reason; /** when its hold ended, and how */ out?: number; outBy?: Reason }
@@ -151,7 +154,7 @@ function release(tl: Timeline, t: number, by: Reason): Timeline {
 export function ready(tl: Timeline, t: number, sig: Signals): boolean {
   const h = CUES[tl.index].hold
   const e = t - tl.enteredAt
-  return e >= (h.min ?? ARRIVE) && (!h.until || !!sig[h.until] || e >= (h.untilTimeout ?? Infinity))
+  return e >= (h.min ?? ARRIVE) && sig.arrived !== false && (!h.until || !!sig[h.until] || e >= (h.untilTimeout ?? Infinity))
 }
 
 /** May continue end this hold now? (false at an approval checkpoint until the approval, with one exception: the card
@@ -167,9 +170,9 @@ export interface Step { tl: Timeline; refused?: boolean }
 
 /** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on). */
 export function advance(tl: Timeline, t: number, sig: Signals, cont = false): Step {
-  // the soft target: from 3:30 the robot beat (⑦) hands over to the pitch by itself; earlier beats only get the nudge
+  // the soft target: from 3:30 the last story beat (the Agent page) hands over to the pitch by itself; earlier beats only get the nudge
   // (CJ paces the story; a beat is never cut short)
-  if (tl.index === ROBOT_INDEX && t >= AUTO_PITCH) return { tl: enter(tl, PITCH_INDEX, t, 'time') }
+  if (tl.index === LAST_STORY_INDEX && t >= AUTO_PITCH) return { tl: enter(tl, PITCH_INDEX, t, 'time') }
   const cur = CUES[tl.index]
   if (!tl.released) {
     const h = cur.hold, e = t - tl.enteredAt

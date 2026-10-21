@@ -5,7 +5,9 @@
 import { useEffect, useRef } from 'react'
 import { embedSearch } from '../transport'
 
-export function DeskMonitor({ onClose }: { onClose: () => void }) {
+/** `hash`: the page to open on (the guided demo: #agent 主控台, #console Agent 頁面); `demo`: the guided demo drives it
+ *  (its keys stay with the demo, so the page does not take Esc / F). */
+export function DeskMonitor({ onClose, hash = '', demo = false }: { onClose: () => void; hash?: string; demo?: boolean }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const close = useRef(onClose)
   useEffect(() => { close.current = onClose }, [onClose])
@@ -13,7 +15,7 @@ export function DeskMonitor({ onClose }: { onClose: () => void }) {
   const hook = () => {
     try {
       const w = frame.current?.contentWindow
-      if (!w) return
+      if (!w || demo) return
       w.addEventListener('keydown', (e: KeyboardEvent) => {
         const t = e.target as HTMLElement | null
         const typing = !!t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)
@@ -27,12 +29,12 @@ export function DeskMonitor({ onClose }: { onClose: () => void }) {
     <div className="f3-monitor-wrap" data-testid="f3-monitor">
       <div className="f3-monitor" role="dialog" aria-label="戰情室電腦">
         <div className="f3-monitor-screen">
-          <iframe ref={frame} title="戰情室儀表板" src={`/${embedSearch()}`} onLoad={hook} />
+          <iframe ref={frame} title="戰情室儀表板" src={`/${embedSearch()}${hash}`} onLoad={hook} />
         </div>
         <div className="f3-monitor-chin">
           <span className="f3-monitor-led" />
           <b>戰情室電腦</b>
-          <button className="f3-monitor-up" onClick={onClose}>起身（Esc / F）</button>
+          {!demo && <button className="f3-monitor-up" onClick={onClose}>起身（Esc / F）</button>}
         </div>
       </div>
       <div className="f3-monitor-stand" aria-hidden />

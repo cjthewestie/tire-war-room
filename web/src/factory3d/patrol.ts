@@ -21,6 +21,8 @@ export const robot = {
   x: WEST_X, z: 0.9, yaw: 0, mode: 'patrol' as 'patrol' | 'divert' | 'parked' | 'return', target: null as string | null,
   /** the demo's robot beat (useGuidedDemo): set true to make it stop and play its little show (ROBOT_SHOW) */
   playReq: false,
+  /** the demo: drive over to this spot in the aisle (next to the lead), then play the show there */
+  visitReq: null as [number, number] | null,
   /** the show's current step (null = not playing) and the steps played so far, in order (the e2e checks the order) */
   playing: null as RobotStep | null,
   played: [] as RobotStep[],

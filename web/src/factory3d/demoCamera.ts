@@ -9,6 +9,7 @@ import * as THREE from 'three'
 import type { Shot } from '../demo/cues'
 import { PLACED_BY_ID, WHITEBOARD } from './layout'
 import { robot } from './patrol'
+import { player } from './pose'
 
 /** Orbit-style shot: look at (x, y, z) from yaw / pitch / dist (yaw 0 = camera south of the point looking north). */
 interface Frame { x: number; y: number; z: number; yaw: number; pitch: number; dist: number }
@@ -46,6 +47,10 @@ export function frameFor(shot: Shot, machine: string | null, s: number, reduced 
   }
   if (shot.kind === 'robot') {
     return { x: robot.x, y: 0.35, z: robot.z, yaw: Math.PI - 0.5 + drift(0.14, 0.25), pitch: 0.42, dist: 4.6 * (1 + drift(0.04, 0.2)) }
+  }
+  if ((shot as { kind: string }).kind === 'lead') {
+    // the hand-over to first person: framed on the lead, as the overview camera would, so the eyes can blend in
+    return { x: player.x, y: 0.55, z: player.z, yaw: Math.PI / 2 + 0.5, pitch: 0.62, dist: 6 }
   }
   if (shot.kind === 'whiteboard') {
     // locked on the board: the slide stays readable, only a breath of movement
