@@ -127,6 +127,22 @@ def test_press7_debounced_until_reset_then_leak_detected():
     assert "持續下降" in leak[0].message
 
 
+def _ramp_back(f: Factory, d: StreamDetector, mid: str, ramp_s: int, glitch=None) -> list:
+    """維修完成 then 回溫中 the way the runtime runs it (_apply_repairs, _begin_recovery, _advance_recoveries): the fault
+    cleared, the detector reset, the ramp started and moved to nominal over ramp_s readings, validation told where it
+    is. glitch(k, readings) may change the sensor readings of step k (the ramp itself stays as the sim runs it)."""
+    f.clear_faults(mid)
+    d.reset(mid, repaired=True)
+    f.begin_recovery(mid)
+    d.follow_recovery(mid, f.recover(mid, 0.0))
+    found = []
+    for k in range(1, ramp_s + 1):
+        d.follow_recovery(mid, f.recover(mid, k / ramp_s), done=k == ramp_s)
+        readings = f.step(1)
+        found += d.ingest(glitch(k, readings) if glitch else readings)
+    return found
+
+
 @pytest.mark.parametrize("scenario,mid,settle_s,nominal", [
     (ScenarioName.PRESS7_TEMP_DROP, "CURE-07", 600, 128.0),          # 02:22, stable at 122 °C
     (ScenarioName.OPEN_MILL_OVERHEAT, "A-BIGOPEN", 720, 100.0),      # cooling water failed: well over 100 °C
@@ -137,17 +153,12 @@ def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_
     and 240 sim seconds at 1x, 10x and 60x, or at once (1: another event's model call held the sim clock for the whole
     ramp, concurrent_3 at 60x). Validation read that as bad data: faster than a platen follows its steam (與比對值不符;
     concurrent_3 at 10x: 9 readings of 10 號 擋下 after its repair) or a step bigger than physics (跳值; the mill at
-    60x). A repaired machine on its way back to normal is the repair, not a sensor; once back it is checked again."""
+    60x). The runtime tells validation where its ramp is (follow_recovery): a reading on it is the repair, not a
+    sensor; once the ramp ended it is checked as before."""
     f, d = setup(scenario)
     assert mid in [a.machine_id for a in drive(f, d, settle_s)]
     assert not [k for k in d.quality_counts if k[0] == mid]
-    f.clear_faults(mid)                                                  # 維修完成 (runtime._apply_repairs)
-    d.reset(mid, repaired=True)
-    f.begin_recovery(mid)
-    found = []
-    for k in range(1, ramp_s + 1):
-        f.recover(mid, k / ramp_s)
-        found += d.ingest(f.step(1))
+    found = _ramp_back(f, d, mid, ramp_s)
     found += drive(f, d, 600)
     assert not [a for a in found if a.machine_id == mid]
     assert not {k: n for k, n in d.quality_counts.items() if k[0] == mid}, dict(d.quality_counts)
@@ -160,6 +171,52 @@ def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_
         f.inject_fault(FaultSpec(id="dr", machine_id=mid, kind=FaultKind.SENSOR_DRIFT, params={"rate_c_per_min": -0.3}))
         assert drive(f, d, 600) == []
         assert d.last_quality[mid] is DataQuality.NEIGHBOR_MISMATCH     # the steam model checks it again
+
+
+def _offset(mid: str, k0: int, per_step: float = 0.0, once: float = 0.0):
+    """A sensor glitch from ramp step k0 on: a thermometer drifting per_step °C a reading, or one reading off by once."""
+    def glitch(k: int, readings: list[SensorReading]) -> list[SensorReading]:
+        if k < k0:
+            return readings
+        bias = per_step * (k - k0 + 1) + (once if k == k0 else 0.0)
+        out = [r.model_copy(update={"temp_c": round(r.temp_c + bias, 2)}) if r.machine_id == mid else r
+               for r in readings]
+        glitch.ts.extend(r.ts for r in out if r.machine_id == mid)
+        return out
+    glitch.ts = []
+    return glitch
+
+
+@pytest.mark.parametrize("per_step", [-0.5, 0.5])
+def test_a_drifting_thermometer_during_the_way_back_is_still_bad_data(per_step):
+    """回溫中 is no blanket pass: the ramp stands in for the steam model, so a thermometer drifting off it (away from
+    normal or ahead of the ramp toward it, 0.5 °C a reading, never a jump) is 與比對值不符 within a few readings and the
+    model keeps following the ramp, not the bad sensor."""
+    f, d = setup(ScenarioName.PRESS7_TEMP_DROP)
+    drive(f, d, 600)
+    found = _ramp_back(f, d, "CURE-07", 40, glitch=_offset("CURE-07", 10, per_step=per_step))
+    assert not [a for a in found if a.machine_id == "CURE-07"]
+    bad = [q for _, mid, ch, q in d.bad_data_log if mid == "CURE-07"]
+    assert bad and set(bad) == {DataQuality.NEIGHBOR_MISMATCH}, bad
+    assert len(bad) >= 25                                                  # every reading once it is 1.5 °C off
+    assert abs(d._tracks["CURE-07"].expected_temp - f.machine("CURE-07").last_reading.temp_c) < 1.0
+
+
+@pytest.mark.parametrize("mid,scenario,settle_s,toward", [
+    ("CURE-07", ScenarioName.PRESS7_TEMP_DROP, 600, 6.0),        # 122 → 128 °C: a spike up to normal
+    ("A-BIGOPEN", ScenarioName.OPEN_MILL_OVERHEAT, 720, -15.0),  # well over 100 °C → 100: a spike down to normal
+])
+def test_a_spike_during_the_way_back_is_still_bad_data(mid, scenario, settle_s, toward):
+    """One reading during 回溫中 that jumps toward normal ahead of the ramp (Codex: the mill at 115 °C, one 100 °C sample)
+    is a glitch, not the repair: 跳值, one reading, and the next one on the ramp is fine again."""
+    f, d = setup(scenario)
+    assert mid in [a.machine_id for a in drive(f, d, settle_s)]
+    spike = _offset(mid, 10, once=toward)
+    found = _ramp_back(f, d, mid, 40, glitch=spike)
+    assert not [a for a in found if a.machine_id == mid]
+    bad = [(ts, ch, q) for ts, m, ch, q in d.bad_data_log if m == mid]
+    assert bad == [(spike.ts[0], Channel.TEMP, DataQuality.JUMP)], bad      # the spike itself, not the reading after
+    assert d.last_quality[mid] is DataQuality.OK
 
 
 def test_predict_api():

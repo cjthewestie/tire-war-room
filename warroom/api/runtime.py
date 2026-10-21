@@ -1044,10 +1044,13 @@ class Runtime:
         found them to nominal over Settings.recover_fast_s WALL seconds; at the end it is back to normal: audited
         「已恢復正常」 and the state machine is told (Event.recovered_at, VERIFY confirms, green)."""
         total = float(self.settings.recover_fast_s)
+        follow = getattr(self.c.detector, "follow_recovery", None)
         for mid, rec in list(self._recovering.items()):
             rec[1] += max(0.0, dt)
             frac = 1.0 if total <= 0 else min(1.0, rec[1] / total)
             r = self.sim.recover(mid, frac)
+            if callable(follow):
+                follow(mid, r, done=r is None or frac >= 1.0)     # validation: a reading on the ramp is no bad data
             if r is not None and frac < 1.0:
                 continue
             del self._recovering[mid]
@@ -1058,8 +1061,7 @@ class Runtime:
         if callable(begin):
             begin(mid)
             self._recovering[mid] = [eid, 0.0]
-            if self.settings.recover_fast_s <= 0:
-                self._advance_recoveries(0.0)
+            self._advance_recoveries(0.0)       # where the ramp starts (validation follows it), or back at once (0 s)
             return
         snap = getattr(self.sim, "snap_to_nominal", None)     # a sim without the ramp: back at once
         if callable(snap):

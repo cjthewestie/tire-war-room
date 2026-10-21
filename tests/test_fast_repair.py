@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import timedelta
 from types import SimpleNamespace
 
 import httpx
@@ -110,6 +111,8 @@ async def _fast_flow(tmp_path, scenario: str, speed: float, machine: str, check=
         assert warning, "no 回溫中 (warning) between 維修完成 and green"
         assert ev.outcome.startswith("已修復：") and "、恢復 " in ev.outcome, ev.outcome
         assert ev.repaired_at is not None and ev.recovered_at is not None and ev.repaired_at <= ev.recovered_at
+        bad = [x for x in rt.c.detector.bad_data_log if x[1] == machine and x[0] >= ev.repaired_at]
+        assert not bad, bad                         # 回溫中 is the repair, not bad data (detector.follow_recovery)
         assert ev.review is not None and ev.review.status == "pending" and ev.review.done_at is None and ev.review.by is None
         assert rt.sim.machine(machine).status is MachineStatus.RUNNING                  # green
         drawer = rt.machine_detail(machine).state                                      # the machine drawer's banner
@@ -268,6 +271,14 @@ async def test_approved_repair_and_ramp_run_on_the_wall_clock_while_another_even
         assert ev.outcome.startswith("已修復：") and ev.recovered_at is not None and ev.review.status == "pending"
         other = rt.state_machine.open_event_for(b)
         assert other is not None and other.state is EventState.PLAN             # still waiting for its model
+        # the whole ramp ran while the plant clock stood still: the first readings after it are on it, not bad data
+        held = rt.clock.now()
+        t0 = time.monotonic()
+        while (slow.ended is None or rt.clock.now() - held < timedelta(seconds=30)) and time.monotonic() - t0 < 40:
+            await asyncio.sleep(0.1)
+        assert rt.clock.now() - held >= timedelta(seconds=30)
+        bad = [x for x in rt.c.detector.bad_data_log if x[1] == a and x[0] >= ev.repaired_at]
+        assert not bad, bad
     finally:
         await rt.stop()
 
