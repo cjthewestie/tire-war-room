@@ -20,16 +20,17 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
   const [busy, setBusy] = useState(false)
   if (!transport) return null
   const paused = !!state.clock?.paused
-  const run = async (text: string, fn: () => Promise<unknown>) => {
+  // #85: only loading a scenario takes a moment (the first time; #79 reuses it after that); the rest is instant
+  const run = async (text: string, fn: () => Promise<unknown>, loading = false) => {
     setBusy(true)
     onOpen(false)
-    onNote(`${text}…（情境要載入幾十秒）`)
+    if (loading) onNote(`${text}…（載入中，第一次較久）`)
     try { await fn(); onNote(text) } catch (e) { console.warn(e); onNote(`${text}：沒有成功`) } finally { setBusy(false) }
   }
-  const control = (c: SimControl, text: string) => run(text, () => transport.control(c))
+  const control = (c: SimControl, text: string, loading = false) => run(text, () => transport.control(c), loading)
   const scenario = (n: ScenarioName) => {
     const s = SCENARIOS.find((x) => x.name === n)
-    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, `載入異常：${label(n)}`)
+    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, `載入異常：${label(n)}`, true)
   }
   return (
     <div className="f3-anom" data-testid="f3-anomaly">
