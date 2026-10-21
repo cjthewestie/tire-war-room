@@ -130,21 +130,17 @@ def open_events(r: Any) -> dict[str, Any]:
 
 
 def handled_today(r: Any) -> dict[str, Any]:
-    from warroom.api import daylog
-    sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
-               for ev in r.events()}
-    days = daylog.build(r.audit.tail(0, 1_000_000), sources)
-    if not days:
-        return {"total": 0, "items": []}
-    d = max(days.values(), key=lambda x: x["last_seq"])
-    runs = [x for x in d["runs"] if x["type"] != "main"]          # the chat turns themselves are not work done
-    outcomes: dict[str, int] = {}
-    for x in runs:
-        outcomes[STATE.get(x["outcome"], x["outcome"])] = outcomes.get(STATE.get(x["outcome"], x["outcome"]), 0) + 1
-    return {"day": d.get("label") or d["key"], "total": len(runs), "by_outcome": outcomes,
-            "items": [{"id": x["id"], "type": daylog.TYPE_LABEL.get(x["type"], x["type"]), "title": x.get("title"),
-                       "opened": _hm(x["opened_at"]) if x.get("opened_at") else None,
-                       "outcome": STATE.get(x["outcome"], x["outcome"])} for x in runs][-15:]}
+    """The same durable list the Agent page shows (warroom/api/tasklog.py): chat and page agree."""
+    day = r.tasklog.today()
+    rows = [x for g in day["groups"] for x in g["rows"]]
+    finals: dict[str, int] = {}
+    for x in rows:
+        finals[x["final"]] = finals.get(x["final"], 0) + 1
+    return {"day": day["date"], "total": len(rows), "by_final": finals,
+            "items": [{"id": x["id"], "opened": _hm(x["opened_at"]), "closed": _hm(x["closed_at"]),
+                       "what": (x["title"] or "")[:40], "machine": x["machine_id"], "order": x["order_id"],
+                       "final": x["final"], "loop": x["loop"], "scenario": x["scenario"],
+                       "approvals": [f"v{a['version']} {a['decision']}" for a in x["approvals"]][-2:]} for x in rows][-12:]}
 
 
 def audit_recent(r: Any) -> dict[str, Any]:

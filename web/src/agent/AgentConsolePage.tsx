@@ -25,6 +25,7 @@ import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import { ReportBlock } from './ReportBlock'
+import { TaskLog } from './TaskLog'
 import './agent.css'
 
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
@@ -109,6 +110,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           })}
           {!listed.length && <li className="muted small">{scope === 'open' ? '目前沒有進行中的事件。' : '沒有。'}</li>}
         </ul>
+        <TaskLog onPick={pick} />
       </aside>
       {main ? (
         <section className="panel trace-main main-thread" aria-label="Agent Nemo" data-testid="main-thread">
