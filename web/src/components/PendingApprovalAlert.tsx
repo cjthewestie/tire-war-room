@@ -39,7 +39,7 @@ export function PendingApprovalAlert({ variant = 'bar', onGo, newTab = false, st
     </>
   )
   return (
-    <div className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top } : undefined} data-testid="pending-alert"
+    <div className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top: `calc(${top}px + var(--demo-bar-h, 0px))` } : undefined} data-testid="pending-alert"
       data-event={m.oldest.event_id} data-level={m.red ? 'red' : 'amber'}>
       {onGo
         ? <button type="button" className={cls} aria-label={label} onClick={() => onGo(m.oldest.event_id)}>{body}</button>

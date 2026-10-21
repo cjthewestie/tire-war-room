@@ -54,6 +54,13 @@ try {
   await d.mouse.wheel(0, 2400); await d.waitForTimeout(400)
   const box = await bar.boundingBox()
   check('sticky under the header after scrolling', !!box && box.y >= 0 && box.y < 140, JSON.stringify(box))
+  // Demo mode (PR #121) sets html[data-demo]: the bar goes compact and steps below the 56 px cue bar
+  await d.evaluate(() => document.documentElement.setAttribute('data-demo', 'test'))
+  await d.waitForTimeout(300)
+  const db = await bar.boundingBox()
+  check('demo: compact, below the demo cue bar', !!db && db.height <= 32 && db.y >= 56 + 60, JSON.stringify(db))
+  await d.screenshot({ path: `${OUT}/demo-1440.png` })
+  await d.evaluate(() => document.documentElement.removeAttribute('data-demo'))
   // click → 主控台, oldest card selected
   await bar.locator('.paa').click()
   await d.waitForTimeout(800)

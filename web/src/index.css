@@ -162,9 +162,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 @keyframes paa-pulse { 50% { background: rgb(var(--alarm-rgb, 255 93 82) / .30); } }
 @media (prefers-reduced-motion: reduce) { .paa.pulse { animation: none; } }
 /* 主控台 (its 核准區 lists the cards) and the Demo spotlight: one short line, the title dropped */
-.paa-compact .paa, .demo-mode .paa, html[data-demo] .paa { min-height: 30px; padding-block: 3px; font-size: 13px; }
-.paa-compact .paa-t, .paa-compact .paa-w, .demo-mode .paa-t, .demo-mode .paa-w, html[data-demo] .paa-t, html[data-demo] .paa-w { display: none; }
-.paa-compact .paa-go, .demo-mode .paa-go, html[data-demo] .paa-go { padding: 1px 10px; }
+.paa-compact .paa, html[data-demo] .paa { min-height: 30px; padding-block: 3px; font-size: 13px; }
+.paa-compact .paa-t, .paa-compact .paa-w, html[data-demo] .paa-t, html[data-demo] .paa-w { display: none; }
+.paa-compact .paa-go, html[data-demo] .paa-go { padding: 1px 10px; }
+/* Demo mode (PR #121) sets html[data-demo]; its fixed cue bar (z 90, ~56 px, ~104 px on a phone) sits on top, so the bar steps below it */
+html[data-demo] { --demo-bar-h: 56px; }
 /* /report and /handover: inside their sticky header */
 .paa-wrap-inline { position: static; margin: 0; }
 .paa-wrap-inline .paa { border: 1px solid; border-radius: 10px; padding: 6px 12px; flex-wrap: wrap; }
@@ -183,7 +185,8 @@ button:disabled { cursor: not-allowed; opacity: .55; }
   .paa { padding-inline: 12px; flex-wrap: wrap; row-gap: 2px; }
   .paa-t { flex: 1 1 100%; order: 3; }
   .paa-go { order: 2; }
-  .paa-compact .paa, .demo-mode .paa, html[data-demo] .paa { flex-wrap: nowrap; }
+  .paa-compact .paa, html[data-demo] .paa { flex-wrap: nowrap; }
+  html[data-demo] { --demo-bar-h: 104px; }
   .paa-wrap-corner { top: auto; bottom: 150px; left: 12px; right: 12px; max-width: none; }
   .f3-root:has(.paa-wrap-corner) .f3-toast { top: auto; }
 }
