@@ -5,6 +5,11 @@
 .admin-h .seg button { padding: 6px 14px; font-size: 14px; }
 .admin-body { display: flex; flex-direction: column; gap: 12px; }
 .admin-err { border-left-color: var(--alarm); }
+/* the answer first: one sentence on top of a page (狀態, SOP 知識庫) */
+.admin-lead { margin: 0; padding: 10px 14px; background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: var(--radius); font-size: 16px; font-weight: 700; line-height: 1.5; }
+.admin-lead.t-warn { border-left-color: var(--warn); } .admin-lead.t-bad { border-left-color: var(--alarm); }
+.admin-reload { align-self: flex-start; }
+.sop-file { display: block; font-size: 12px; overflow-wrap: anywhere; }
 .admin-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 10px; }
 .admin-card { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 12px 16px; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .admin-card-k { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--ink-faint); }
@@ -20,8 +25,11 @@
 @keyframes admin-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
 @media (prefers-reduced-motion: reduce) { .admin-prog::after { animation: none; width: 100%; opacity: .5; } }
 .admin-upload { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--panel); border: 1px dashed var(--panel-3); border-radius: var(--radius); padding: 10px 14px; }
-.admin-file { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; }
-.admin-file input { font-size: 13px; max-width: 240px; }
+.admin-file { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; min-width: 0; }
+.admin-file > .small { font-weight: 400; overflow-wrap: anywhere; }
+.admin-pick { position: relative; cursor: pointer; font-weight: 600; }
+.admin-pick:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.admin-pick input { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; }
 .admin-check { display: inline-flex; align-items: center; gap: 5px; font-size: 13px; color: var(--ink-dim); }
 .admin-table-wrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
 .admin-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
@@ -31,7 +39,7 @@
 .admin-table code { font-size: 12.5px; }
 .admin-table a { color: var(--accent); text-decoration: none; }
 .admin-table a:hover { text-decoration: underline; }
-.admin-table.runs td:nth-child(6) { max-width: 360px; }
+.admin-table.runs td:nth-child(5) { max-width: 360px; }
 .btn-ghost.danger { color: var(--alarm); border-color: rgb(var(--alarm-rgb, 255 93 82) / .45); }
 .admin-team { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 14px; font-size: 13.5px; }
 .admin-team summary { cursor: pointer; font-weight: 600; }
@@ -67,12 +75,13 @@
   .admin-table[data-testid="sop-docs"] thead { display: none; }
   .admin-table[data-testid="sop-docs"] tr { display: grid; grid-template-columns: minmax(0, 1fr) auto; border-bottom: 1px solid var(--border); padding: 4px 0; }
   .admin-table[data-testid="sop-docs"] td { border: 0; padding: 2px 10px; }
-  .admin-table[data-testid="sop-docs"] td:nth-child(1) { grid-column: 1; }
-  .admin-table[data-testid="sop-docs"] td:nth-child(2) { grid-column: 1; }
-  .admin-table[data-testid="sop-docs"] td:nth-child(3), .admin-table[data-testid="sop-docs"] td:nth-child(4), .admin-table[data-testid="sop-docs"] td:nth-child(5) { display: none; }
-  .admin-table[data-testid="sop-docs"] td:nth-child(6) { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+  .admin-table[data-testid="sop-docs"] td:nth-child(1), .admin-table[data-testid="sop-docs"] td:nth-child(2) { grid-column: 1; }
+  .admin-table[data-testid="sop-docs"] td:nth-child(3) { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
   .admin-table[data-testid="sop-docs"] tr:last-child { border-bottom: 0; }
   .admin-table code { word-break: break-all; }
+  /* 執行紀錄 on a phone: the kind column goes (the content says what it is), the state stays on one line */
+  .admin-table.runs th:nth-child(2), .admin-table.runs td:nth-child(2) { display: none; }
+  .admin-table.runs td:nth-child(4) { white-space: nowrap; }
 }
 .plant-edit { display: flex; flex-direction: column; gap: 6px; }
 .plant-edit .sub { margin: 4px 0 0; display: flex; gap: 10px; align-items: baseline; }

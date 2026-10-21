@@ -1,7 +1,7 @@
 // Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 派人維修 →
 // 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 核准後約 N 秒維修完成 / 維修中 / 維修完成・溫度回降中 /
 // 已恢復正常｜Agent Nemo 異常報告已產生 / 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
-// page's task, 已恢復正常 and 報告 rows, and the report's 維修完成 / 恢復正常 / 主管已讀 lines. Built on
+// page's task, 已恢復正常 and 報告 rows, and the report's one-line head (發生 → 維修完成 → 恢復正常｜result). Built on
 // fixtures/status-cases.json (concurrent_3, B 線開煉機 overheat: ≤118°C) with the Event.repaired_at / recovered_at / review
 // fields of the shared contract patched in.
 // Run: cd web && node e2e/fastfix-unit.mjs
@@ -22,7 +22,8 @@ const { aiStatusParts } = await load('/src/aiStatus.ts')
 const { machineRing, ringRecoveries, recoveryKey } = await load('/src/factory3d/machineRing.ts')
 const { alertText, diffPending, repairNotices } = await load('/src/phone/alert.ts')
 const { fromAudit } = await load('/src/agent/transcript.ts')
-const { buildReport } = await load('/src/report/build.ts')
+const { buildReport, outcomeText } = await load('/src/report/build.ts')
+const { buildHandover } = await load('/src/handover/build.ts')
 
 const s = fx.c3_closed
 const T = (iso) => new Date(iso).getTime()
@@ -220,14 +221,55 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
 
 // ---------------------------------------------------------------- report
 {
-  const ev = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'done', requested_at: iso(now + 4000), done_at: iso(now + 60_000), by: 'supervisor' } }
-  const r = buildReport({ ev, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  const head = Object.fromEntries(r.head.map((h) => [h.k, h.text]))
-  check('report head: 維修完成 / 恢復正常 / 主管已讀 with seconds', /^10\/03 10:32:40$/.test(head['維修完成'] ?? '') && /^10\/03 10:32:44$/.test(head['恢復正常'] ?? '') && /^10\/03 10:33:40/.test(head['主管已讀'] ?? ''), JSON.stringify([head['維修完成'], head['恢復正常'], head['主管已讀']]))
-  const p = buildReport({ ev: { ...ev, review: { ...ev.review, status: 'pending', done_at: null, by: null } }, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  check('… unread → 尚未讀取', /^尚未讀取/.test(p.head.find((h) => h.k === '主管已讀')?.text ?? ''), p.head.find((h) => h.k === '主管已讀')?.text)
+  const ev = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), outcome: '已修復：B 線開煉機 膠溫回到 101°C（維修完成 10:32、恢復 10:32）',
+    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null },
+    timeline: [{ ts: base.opened_at, actor: '事件偵測', tag: 'tool', text: '[工具] B 線開煉機 膠溫 96°C → 喚醒指揮官' },
+      { ts: base.opened_at, actor: '指揮官', tag: 'decision', text: 'EV-20261003-100133-B-OPEN｜請核准：放慢生料投入（胎側膠組）。' }] }
+  const r = buildReport({ ev, approvals: [], tasks: s.tasks, chainOk: true, auditCount: 65 })
+  const head = r.head.map((h) => h.text).join(' / ')
+  check('report title: the alert card\'s title without 異常：', r.title === 'B 線開煉機 溫度過高', r.title)
+  check('report head: one line 發生 → 維修完成 → 恢復正常・共 N 分鐘｜已恢復正常 with the reading',
+    r.head.length === 1 && /^10\/03 10:01 發生 → 10:32 維修完成 → 10:32 恢復正常・共 \d+ 分鐘｜已恢復正常，膠溫回到 101°C$/.test(head), head)
+  check('… no 主管已讀 / 尚未讀取 on the report (the phone\'s 知道了 marks it read)', !/主管已讀|尚未讀取/.test(head))
+  const tl = r.parts.find((p) => p.id === 'timeline').rows
+  check('事件經過: 指揮官 shown as Agent Nemo, no [工具], no event id in front', tl[1].k === 'Agent Nemo' && tl[0].text === 'B 線開煉機 膠溫 96°C → 交給 Agent Nemo' && tl[1].text.startsWith('請核准'), tl.map((x) => `${x.k}：${x.text}`).join(' / '))
+  const audit = r.parts.find((p) => p.id === 'audit').rows.map((x) => x.text)
+  check('八、稽核: the record count and the event id', audit[1] === `這件事共 65 筆紀錄・事件編號 ${base.id}`, audit[1])
+  check('… without an Agent Nemo report it does not claim one', audit[2] === '一～六節由系統紀錄整理，不經 AI；七由主管填寫。', audit[2])
+  const ai = buildReport({ ev: { ...ev, ai_report: { text: '【異常報告】x\n摘要：y', summary: 'y', by: 'rules', drafted_ms: 1, at: iso(now), late_ms: null } }, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
+  check('… with one: written by Agent Nemo, 規則備援 by the rules', ai.parts.find((p) => p.id === 'audit').rows[2].text.startsWith('最上面的異常報告由 Agent Nemo 撰寫（標「規則備援」時由規則整理）') && ai.ai?.tag === '規則備援')
   const none = buildReport({ ev: base, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  check('… an event without the fields keeps the old head', !none.head.some((h) => h.k === '主管已讀' || h.k === '維修完成' || h.k === '恢復正常'))
+  check('… an event without the fields: no 維修完成 / 恢復正常 in the head', none.head.length === 1 && !/維修完成|恢復正常/.test(none.head[0].text), none.head[0].text)
+  const bare = buildReport({ ev: { ...s.events.find((e) => e.id.endsWith('CURE-03')), alert_card: null, state: 'classify' }, approvals: [], tasks: [], chainOk: null, auditCount: null })
+  check('… no alert card yet: a short title from the anomaly, the machine named once', bare.title === '3 號硫化機 溫度下降 128→123.3°C' || bare.title === '3 號硫化機 溫度下降 128→123°C', bare.title)
+  const stop = outcomeText('CURE-10', 'safe_stop', '安全中止：指揮官要求安全中止；維持原排程')
+  check('… a safe stop reads 安全停止 once, replan reads 重新判斷', stop === '安全停止：Agent Nemo 要求安全停止；維持原排程' && outcomeText('CURE-10', 'replan', null) === '處理中（重新判斷）', stop)
+}
+
+// ---------------------------------------------------------------- report + handover: 3 at once, the stale card
+{
+  const ev = s.events.find((e) => e.id.endsWith('CURE-10'))
+  const ap = (id, label, extra = {}) => ({
+    id, event_id: ev.id, round: 1, created_at: ev.opened_at, risk: 'R3', title: '10 號機溫度下降 128→122.4°C', reason: '', delivery_impact: '',
+    actions: [], gaps: [], done: [], version: 1, supersedes: null, status: 'approved',
+    options: [{ id: 'A', label, tool: 'confirm_schedule', args: {}, recommended: true }],
+    decision: { request_id: id, decision: 'approve', option_id: 'A', modified_args: null, reason: '', decided_by: 'supervisor', via: 'phone', decided_at: ev.opened_at },
+    ...extra,
+  })
+  // state_machine.py: the re-solve carried the same content over, recorded as 「<id>-rebased」 (supersedes stays null)
+  const old = ap('AP-X-1', '核准全部：排程 v2 生效（10 號機硫化 41.1 h）')
+  const reb = ap('AP-X-1-rebased', '核准全部：排程 v3 生效（10 號機硫化 41.1 h）')
+  reb.decision = { ...reb.decision, via: 'auto', reason: '沿用 AP-X-1：排程 v2 過期後依現行排程重解為 v3，內容相同' }
+  const dec = buildReport({ ev, approvals: [old, reb], tasks: [], chainOk: true, auditCount: null }).parts.find((p) => p.id === 'decisions').rows.map((x) => x.text)
+  check('report: the card a -rebased one carried over is marked 已重算, the carried one is not',
+    dec[0].endsWith('排程已先被更新，已重算') && !dec[0].includes('第 2 版排程生效') && !dec[1].includes('已重算'), dec.join(' / '))
+  check('… 第 3 版排程生效 in the option and the reason, no approval id', dec[1].includes('第 3 版排程生效') && dec[1].includes('理由：沿用原核准：第 2 版排程過期後') && !/排程（第|AP-/.test(dec.join()), dec[1])
+  const h = buildHandover({ now: s.now, hours: 8, events: [ev], approvals: [old, reb], world: null, chainOk: true })
+  const lines = h.sections.find((x) => x.id === 'approvals').lines.map((l) => l.text)
+  check('handover: the stale card never reads 第 2 版排程生效', !lines.some((l) => l.includes('第 2 版排程生效')) && lines[0].includes('排程已先被更新，已重算') && lines[1].includes('：第 3 版排程生效'), lines.join(' / '))
+  const world = { tasks: { items: [] }, materials: [{ key: 'cb', name: '碳黑', unit: 'kg', stock: 0, on_order: 0, status: 'out' }], goods: { orders: [{ order_id: 'SO-1', due: '10/05', done: 1, qty: 10, late: true }] } }
+  const h2 = buildHandover({ now: s.now, hours: 8, events: [], approvals: [], world, chainOk: true })
+  check('handover: a material out and a late order are things to hand over', h2.lead.text === '交班要交代 2 件：碳黑缺料；1 張單會晚交。', h2.lead.text)
 }
 
 await vite.close()

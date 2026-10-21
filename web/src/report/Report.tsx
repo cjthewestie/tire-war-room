@@ -3,11 +3,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getJSON } from '../api'
 import { API, apiPath, type ApprovalRequest, type AuditEntry, type Event } from '../contracts'
-import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { AiReport } from '../agent/AiReport'
-import { buildReport, reportText } from './build'
+import { buildReport, eventTitle, reportText } from './build'
 
 const POLL_MS = 5000
 const noteKey = (id: string) => `report-prevention:${id}`
@@ -83,11 +82,11 @@ export function Report() {
           <button type="button" className="primary" onClick={() => window.print()} disabled={!report}>列印／存 PDF</button>
         </div>
         <label className="rp-pick">
-          <span>事件</span>
+          <span>異常</span>
           <select value={current ?? ''} onChange={(e) => choose(e.target.value)} data-testid="rp-pick">
-            {sorted.length === 0 && <option value="">目前沒有事件</option>}
+            {sorted.length === 0 && <option value="">還沒有異常報告</option>}
             {sorted.map((e) => (
-              <option key={e.id} value={e.id}>{fmtMD(e.opened_at)} {fmtHM(e.opened_at)}・{machineLabel(e.machine_id)}・{e.alert_card?.title ?? e.anomaly.message}</option>
+              <option key={e.id} value={e.id}>{fmtMD(e.opened_at)} {fmtHM(e.opened_at)}・{eventTitle(e)}</option>
             ))}
           </select>
         </label>
@@ -95,21 +94,19 @@ export function Report() {
         {copied === 'manual' && <p className="rp-note" role="status">這個瀏覽器不讓網頁複製，請選取下方文字手動複製。</p>}
       </header>
 
-      {!report && <p className="rp-empty">{sorted.length ? '讀取事件中…' : '目前沒有事件。跑一個情境（例如 7 號硫化機溫降）結案後再回來。'}</p>}
+      {!report && <p className="rp-empty">{sorted.length ? '讀取中…' : '還沒有異常報告。異常處理完、機台恢復正常後，報告會出現在這裡。'}</p>}
       {report && (
         <article className="rp-doc" data-testid="rp-doc">
           <h2 className="rp-title">{report.title}</h2>
+          {report.head.map((h) => <p key={h.k} className={`rp-head${h.tone ? ` t-${h.tone}` : ''}`} data-testid="rp-head">{h.text}</p>)}
           {ev && <AiReport ev={ev} />}
-          <dl className="rp-head">
-            {report.head.map((h) => <div key={h.k} className={h.tone ? `t-${h.tone}` : ''}><dt>{h.k}</dt><dd>{h.text}</dd></div>)}
-          </dl>
           {report.parts.map((p) => (
             <section key={p.id} className="rp-part" data-testid={`rp-${p.id}`}>
               {p.id === 'audit' && (
                 <div className="rp-part rp-prevent">
                   <h3>七、預防措施</h3>
                   <textarea className="no-print" value={prevention} onChange={(e) => savePrevention(e.target.value)}
-                    placeholder="由主管填寫：例如 H2 蒸汽管線每週點檢、7 號機溫度計校正、夜班加開巡檢一次" data-testid="rp-prevent" />
+                    placeholder="由主管填寫，例如：蒸汽管線每週點檢、溫度計校正、夜班加一次巡檢" data-testid="rp-prevent" />
                   <p className="print-only">{prevention.trim() || '（未填）'}</p>
                 </div>
               )}

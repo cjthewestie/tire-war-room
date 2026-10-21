@@ -191,7 +191,7 @@ await p.waitForFunction(() => !document.querySelector('[data-testid="plant-test"
 check('PLANT.md: activate is locked before a test run', await p.locator('[data-testid="plant-activate"]').isDisabled())
 await p.click('[data-testid="plant-test"]')
 await p.waitForSelector('[data-testid="plant-test-result"]', { timeout: 120000 })
-check('PLANT.md: test run shows plan validity and the prompt diff', (await p.locator('[data-testid="plant-test-result"]').innerText()).includes('計劃有效'))
+check('PLANT.md: test run shows plan validity and the prompt diff', (await p.locator('[data-testid="plant-test-result"]').innerText()).includes('計畫有效'))
 p.once('dialog', (d) => d.accept())
 await p.click('[data-testid="plant-activate"]')
 await p.waitForFunction((s0) => document.querySelector('[data-testid="plant-active-sha"]')?.textContent !== s0, sha0, { timeout: 5000 })

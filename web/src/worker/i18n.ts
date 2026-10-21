@@ -14,12 +14,12 @@ export const LANGS: { id: Lang; label: string }[] = [
 type Tri = Record<Lang, string>
 
 export const UI = {
-  title: { zh: '現場任務', vi: 'Công việc tại xưởng', id: 'Tugas di lantai produksi' },
+  title: { zh: '現場工作', vi: 'Công việc tại xưởng', id: 'Tugas di lantai produksi' },
   who: { zh: '我是', vi: 'Tôi là', id: 'Saya' },
-  all: { zh: '全部任務', vi: 'Tất cả công việc', id: 'Semua tugas' },
-  none: { zh: '目前沒有任務', vi: 'Hiện chưa có việc', id: 'Belum ada tugas' },
+  all: { zh: '全部工作', vi: 'Tất cả công việc', id: 'Semua tugas' },
+  none: { zh: '目前沒有現場工作', vi: 'Hiện chưa có việc', id: 'Belum ada tugas' },
   noneHint: {
-    zh: '主管核准計劃後，派給你的工作會出現在這裡。',
+    zh: '主管核准計畫後，派給你的工作會出現在這裡。',
     vi: 'Khi quản lý duyệt kế hoạch, việc giao cho bạn sẽ hiện ở đây.',
     id: 'Setelah supervisor menyetujui rencana, tugas untuk Anda akan muncul di sini.',
   },
@@ -53,6 +53,9 @@ export const KIND: Record<string, Tri> = {
   暖機: { zh: '暖機', vi: 'Làm nóng máy', id: 'Pemanasan mesin' },
   補料: { zh: '補料', vi: 'Cấp liệu', id: 'Isi bahan' },
   盤點: { zh: '盤點', vi: 'Kiểm kê', id: 'Hitung stok' },
+  // added 10-22 for the open mill's feed tasks: not checked by a native speaker yet
+  放慢投料: { zh: '放慢投料', vi: 'Giảm tốc độ cấp liệu', id: 'Perlambat pemasukan bahan' },
+  暫停投料: { zh: '暫停投料', vi: 'Tạm dừng cấp liệu', id: 'Hentikan sementara pemasukan bahan' },
 }
 
 const TEAM: Record<TeamId, Tri> = {
@@ -166,6 +169,11 @@ export function taskText(t: WorkTask, lang: Lang): string | null {
       return vi ? `Làm nóng ${m} 30 phút khi bắt đầu ca (SOP-02).` : `Panaskan ${m} selama 30 menit di awal shift (SOP-02).`
     case '補料':
       return vi ? `Mang cao su hỗn hợp đến ${m}${o ? ` cho đơn ${o}` : ''}.` : `Bawa kompon karet ke ${m}${o ? ` untuk pesanan ${o}` : ''}.`
+    // added 10-22 (work.py: 「B 線開煉機放慢投料（現場人工調整）」): not checked by a native speaker yet
+    case '放慢投料':
+      return vi ? `Giảm tốc độ cấp liệu vào ${m} (chỉnh tay tại chỗ).` : `Perlambat pemasukan bahan ke ${m} (atur manual di tempat).`
+    case '暫停投料':
+      return vi ? `Tạm dừng cấp liệu vào ${m} (chỉnh tay tại chỗ).` : `Hentikan sementara pemasukan bahan ke ${m} (atur manual di tempat).`
     case '盤點':
       return vi ? 'Ra khu bốc dỡ hàng kiểm kê nguyên liệu đang thiếu, xác nhận giờ hàng về với nhà cung cấp.'
         : 'Ke dok bongkar muat, hitung stok bahan yang menipis, pastikan jadwal kedatangan dengan pemasok.'
@@ -174,7 +182,10 @@ export function taskText(t: WorkTask, lang: Lang): string | null {
   }
 }
 
-/** Where to go: the machine when there is one, else the zone. */
+// whole-team tasks: work.py gives them the team's home machine (宣達 about 3 號機 reads 「1 號硫化機」), so show its zone
+const TEAM_KINDS = new Set(['宣達', '加班補位', '調派支援'])
+
+/** Where to go: the machine when there is one, else the zone (always the zone for a whole-team task). */
 export function taskWhere(t: WorkTask, lang: Lang): string {
-  return t.machine_id && MACHINE_META[t.machine_id] ? machineName(t.machine_id, lang) : zoneName(t.zone, lang)
+  return t.machine_id && MACHINE_META[t.machine_id] && !TEAM_KINDS.has(t.kind) ? machineName(t.machine_id, lang) : zoneName(t.zone, lang)
 }

@@ -58,6 +58,7 @@ export function Handover() {
       </header>
 
       {!h && <p className="ho-empty">讀取工廠時間中…</p>}
+      {h && <p className={`ho-lead t-${h.lead.tone}`} data-testid="ho-lead">{h.lead.text}</p>}
       {h && h.sections.map((s) => (
         <section key={s.id} className="ho-sec" data-testid={`ho-${s.id}`}>
           <h2>{s.title}<span>{s.summary}</span></h2>
@@ -70,6 +71,7 @@ export function Handover() {
           )}
         </section>
       ))}
+      {h?.foot && <p className="ho-foot" data-testid="ho-audit">{h.foot}</p>}
       {h && (
         <details className="ho-raw" open={copied === 'manual'}>
           <summary>交班文字（純文字）</summary>
