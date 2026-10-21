@@ -141,3 +141,13 @@ async def test_an_xml_written_read_call_is_run():
     out = await MainAgent(_settings(), client=m).turn("3 號機現在怎樣", context={"abnormal": []}, waiting_plan=None,
                                                       run_tool=f.run_tool, propose=f.propose, discuss=None)
     assert f.tools and f.tools[0] == ("read_sensors", {"machine_ids": ["CURE-03"]}) and out["reply"] == "3 號機 122.3°C。"
+
+
+
+async def test_an_action_that_cannot_run_on_that_task_says_so_before_asking():
+    ctl = FakeControl()
+    ctl.blocked = lambda action, eid: "這件在等你核准，沒有「直接重新規劃」的現成做法。" if action == "replan_task" else None
+    m = Model(("tool", "replan_task", {"event_id": "EV-7"}), ("say", "好。"))
+    agent = MainAgent(_settings(), client=m)
+    out = await _say(agent, "7 號機那件重新規劃", ctl)
+    assert out["reply"].startswith("這件在等你核准") and "pending" not in agent.notes and not ctl.asked

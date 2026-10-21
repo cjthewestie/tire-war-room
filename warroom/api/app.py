@@ -1038,6 +1038,21 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 e = hit[0]
                 return e.id, (f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件")
 
+            @staticmethod
+            def blocked(action: str, eid: str) -> str | None:
+                """Why this action cannot run on this task now (asked before the confirmation, never after)."""
+                st = sm.get(eid).state.value
+                if action == "interrupt_task" and st in ("closed", "safe_stop"):
+                    return "這件已經結束了，不用中斷。"
+                if action == "replan_task" and st == "await_approval":
+                    return ("這件在等你核准，沒有「直接重新規劃」的現成做法。要換方案，直接說條件（例如「不要加班」「改選 A」），"
+                            "或先中斷它再重開一件。")
+                if action == "replan_task" and st not in ("closed", "safe_stop"):
+                    return "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
+                if action == "hand_to_field" and not (st == "safe_stop" and callable(getattr(r, "stop_handoff", None))):
+                    return "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有。"
+                return None
+
             def audit_request(self, action: str, eid: str) -> None:
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
                                                               "confirmed": False}, event_id=eid)
@@ -1050,17 +1065,27 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                         d = await r.orch.interrupt(eid, self.actor)
                         result = str(d.get("text") or "已中斷")
                     elif action == "replan_task":
-                        if state == "await_approval" and waiting_of(eid):
-                            out = await discuss(eid, DiscussRequest(text="請重新規劃這份計劃"), session)
-                            result = out.reply
+                        replan = getattr(r, "stop_replan", None)        # resolve-safety-paths: SAFE_STOP → 請 AI 重新規劃
+                        if state == "safe_stop" and callable(replan):
+                            nev = replan(eid, self.actor)
+                            result = f"已請 AI 重新規劃（新的一件 {nev.id}），計劃擬好會送你核准。"
                         elif state in ("closed", "safe_stop"):
                             what = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
                             nev = r.start_command(f"重新規劃：{what}", self.actor)
                             result = f"已重新開一件來規劃（{nev.id}），計劃擬好會送你核准。"
+                        elif state == "await_approval":
+                            # no existing path re-plans a waiting card without a condition (discuss needs one): say so
+                            result = ("這件在等你核准，沒有「直接重新規劃」的現成做法。要換方案，直接說條件（例如「不要加班」「改選 A」），"
+                                      "或先中斷它再重開一件。這次沒有執行。")
                         else:
                             result = "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
                     else:
-                        result = "「交給現場」目前沒有現成的按鈕路徑（resolve-safety-paths 合併後會有），這次沒有執行。"
+                        handoff = getattr(r, "stop_handoff", None)      # resolve-safety-paths: SAFE_STOP → 交給現場處理
+                        if state == "safe_stop" and callable(handoff):
+                            handoff(eid, self.actor)
+                            result = "已交給現場處理：依 SOP 派工，這件會顯示人工處理中。"
+                        else:
+                            result = "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有；這次沒有執行。"
                 except (KeyError, ValueError) as e:
                     result = f"沒有執行：{e}"
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": action, "confirmed": True,

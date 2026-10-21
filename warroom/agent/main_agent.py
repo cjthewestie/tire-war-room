@@ -762,6 +762,11 @@ class MainAgent:
             out["control_reply"] = f"找不到「{(args or {}).get('event_id')}」這件任務；請說事件編號，或在左邊點選那一件。"
             return out["control_reply"]
         eid, label = found
+        why = ctl.blocked(name, eid) if hasattr(ctl, "blocked") else None
+        if why:                                         # not possible on this task now: said before any confirmation
+            steps.append({"tool": name, "args": {"event_id": eid}, "ok": False, "summary": why, "label": f"{CONTROL[name]}：不能做"})
+            out["control_reply"] = why
+            return why
         self.notes["pending"] = {"action": name, "event_id": eid, "label": label}
         ctl.audit_request(name, eid)
         q = CONFIRM_Q.format(verb=CONTROL[name], label=label, eid=eid)
