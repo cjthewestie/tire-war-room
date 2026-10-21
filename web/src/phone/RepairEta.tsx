@@ -4,14 +4,39 @@
 // - 預計完成: the approval time (or now, before approval) + that window, or the latest field-task ETA if later
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
-import type { Event, Expectation } from '../contracts'
-import { CH_LABEL, repairEstimate, targetText } from '../aiStatus'
-import { fmtHM, fmtMD } from '../format'
+import type { ApprovalRequest, Event, Expectation, WorkTask } from '../contracts'
+import { CH_LABEL, expectationOf, repairEstimate, targetText } from '../aiStatus'
+import { fmtHM, fmtMD, ms } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
 
-function expectationText(x: Expectation): string {
+export function expectationText(x: Expectation): string {
   return `${x.within_min} 分內${CH_LABEL[x.channel]}回到 ${targetText(x)}`
+}
+
+export interface RepairWindow {
+  x: Expectation | null
+  tasks: WorkTask[]
+  open: WorkTask[]
+  lastEta: string | null
+  decided: string | null
+  doneBy: number | null
+}
+
+/** The 修復預估 numbers as plain data for the briefing (the card below uses aiStatus.repairEstimate): the verification window
+ *  from the approval (or now, before approval), or the latest open field-task ETA when that is later. */
+export function repairWindow(ev: Event | null, now: string | null, allTasks: WorkTask[], resolved: ApprovalRequest[]): RepairWindow {
+  const x = expectationOf(ev)
+  const tasks = ev ? allTasks.filter((t) => t.event_id === ev.id) : []
+  const open = tasks.filter((t) => t.status !== '完成')
+  const lastEta = open.map((t) => t.eta).filter((e): e is string => !!e).sort().at(-1) ?? null
+  // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
+  const decided = ev ? resolved.filter((r) => r.event_id === ev.id && r.status === 'approved' && r.decision?.decided_at)
+    .map((r) => r.decision!.decided_at as string).sort().at(-1) ?? null : null
+  const from = decided ?? now
+  const byWindow = x && from ? ms(from) + x.within_min * 60_000 : null
+  const doneBy = lastEta ? Math.max(ms(lastEta), byWindow ?? 0) : byWindow
+  return { x, tasks, open, lastEta, decided, doneBy }
 }
 
 export function RepairEta({ ev }: { ev: Event | null }) {

@@ -624,7 +624,7 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .ph-col-b { position: sticky; top: 12px; }
   .ph-approval .ph-info { margin-bottom: 0; }
   .phone { max-width: 760px; }
-  .ph-approval .ph-acts { position: static; margin: 12px 0 0; padding: 0; background: none; }
+  .ph-approval .ph-bar { position: static; margin: 12px 0 0; padding: 0; background: none; border: 0; }
 }
 /* iPhone Duo unfolded (inner screen, about 626 × 890 pt) and small tablets */
 @media (min-width: 600px) and (min-height: 561px) {
@@ -917,6 +917,68 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-eta dd { margin: 0; min-width: 0; }
 .ph-eta ol, .ph-eta ul { margin: 4px 0 0; padding-left: 18px; }
 .ph-eta li { margin: 2px 0; }
+
+/* ---- 主管摘要 (briefing.ts / BriefingView): phone card + desktop Agent panel ---- */
+.br { display: grid; gap: 12px; min-width: 0; font-size: 15px; line-height: 1.6; }
+.br-head { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; margin: 0; font-size: 17px; line-height: 1.4; }
+.br-name { font-weight: 700; }
+.br-sep { color: var(--ink-faint); }
+.br-st { font-weight: 700; }
+.br-dot { width: 10px; height: 10px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.br-pending .br-dot { background: var(--alarm); }
+.br-pending .br-st { color: var(--alarm); }
+.br-running .br-dot, .br-followup .br-dot { background: var(--warn-fill, var(--warn)); }
+.br-running .br-st, .br-followup .br-st { color: var(--warn); }
+.br-done .br-dot { background: var(--accent-bright, var(--accent)); }
+.br-done .br-st { color: var(--accent); }
+.br-stopped .br-st { color: var(--ink-dim); }
+.br-ask { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; }
+.nb { white-space: nowrap; }
+.br-more { border-top: 1px solid var(--border); padding-top: 8px; font-size: 14px; }
+.br-more summary { cursor: pointer; color: var(--ink-dim); font-weight: 600; }
+.br-more .br-ul { margin-top: 6px; }
+.ph-meta { margin: 0 0 10px; font-size: 13px; color: var(--ink-dim); }
+.ph-meta .ph-risk { background: none; padding: 0; color: inherit; font-weight: 400; }
+.ph-meta b { font-weight: 600; }
+.ph-bar { position: sticky; bottom: 0; z-index: 2; margin: 14px -16px 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--border); }
+.ph-bar .ph-scope { margin: 0 0 8px; }
+.ph-bar .ph-acts { position: static; margin: 0; padding: 0; background: none; border: 0; }
+.br-lead { margin: 0; color: var(--ink); }
+.br-sec { display: grid; gap: 4px; min-width: 0; }
+.br-h { font-weight: 700; color: var(--ink); }
+.br-ul { margin: 0; padding-left: 1.2em; font-weight: 400; }
+.br-ul li + li { margin-top: 4px; }
+.br-ul li, .br-p { overflow-wrap: break-word; font-weight: 400; }
+.br-p { margin: 0; }
+.br-hint { color: var(--ink-dim); font-size: 14px; }
+.br-tag { display: inline-block; background: #FFF3CD; color: #8A5700; border-radius: 8px; padding: 4px 10px; font-weight: 700; line-height: 1.3; }
+.br-dl { overflow-wrap: anywhere; }
+.ph-optc { display: grid; gap: 2px; min-height: 0; padding: 10px 14px; font-size: 16px; font-weight: 400; border-color: var(--border); }
+.ph-optc .ph-opt-t { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-weight: 700; }
+.ph-optc .ph-opt-t b { margin-right: 0; flex: none; }
+.ph-optc .ph-opt-e { display: block; font-size: 14px; line-height: 1.5; color: var(--ink-dim); padding-left: 34px; }
+.ph-optc.on .ph-opt-e { color: inherit; opacity: .92; }
+.ph-optc .ph-opt-risk { color: var(--warn); font-weight: 600; }
+.ph-optc.on .ph-opt-risk { color: inherit; }
+.ph-scope { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink); overflow-wrap: break-word; }
+.ph-scope b { font-weight: 700; }
+.ph-approval .ph-approve { white-space: normal; line-height: 1.3; }
+.ph-approval .br { margin-bottom: 12px; }
+/* the sticky 核准 bar must read as a bar: solid, with an edge, and a one-line label so it hides little */
+.ph-approval .ph-approve { font-size: 16px; padding: 8px 10px; min-height: 48px; }
+.ph-full { margin: 8px 0 0; font-size: 14px; }
+.ph-full ul { margin: 4px 0 0; padding-left: 1.2em; }
+.ph-full li { overflow-wrap: anywhere; margin: 2px 0; }
+
+.ph-col-a, .ph-col-b { display: grid; gap: 14px; min-width: 0; }
+.ph-col-a { margin-bottom: 14px; }
+.ph-col-b > * { margin-top: 0; margin-bottom: 0; }
+.ph-q { margin: 0; }
+.ph-optc .ph-opt-t small { flex-basis: 100%; margin: 0; padding-left: 34px; }
+.ph-approval .br { margin-bottom: 0; }
+.ph-bar { margin-top: 0; }
+.ph-none { margin: 12px 0 0; font-size: 13px; }
+.br-more { margin-top: 0; }
 
 /* 公版 AI 處理狀態 (aiStatus.tsx): 偵測到什麼｜交由誰｜階段｜預計完成, each part on its own line on narrow boxes */
 .ai-status { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; line-height: 1.45; }

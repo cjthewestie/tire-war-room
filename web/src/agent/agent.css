@@ -623,6 +623,15 @@ a.ov-row:hover { background: var(--panel-2); }
 .trace-chat .askbar { border-top: 0; }
 @media (min-width: 1024px) { .trace-chat { position: sticky; bottom: 8px; } }   /* phones: at the end of the transcript, like a chat */
 
+/* 主管摘要 in the Agent panel: one card that follows the event's state (待核准 / 執行中 / 處置完成) */
+.con-brief { margin: 8px 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--panel-2); border-left: 4px solid var(--ink-faint); min-width: 0; }
+.con-brief:has(.br-pending) { border-left-color: var(--alarm); }
+.con-brief:has(.br-running) { border-left-color: var(--warn); }
+.con-brief:has(.br-done) { border-left-color: var(--accent); }
+.con-brief .br { font-size: 14px; }
+.con-brief .br-head { font-size: 15px; }
+.br-link { color: var(--accent); font-size: 13.5px; width: fit-content; }
+
 /* ---------- issue #54: 主 agent rows and subagent tags ---------- */
 .r-chat.agent.main { border-left: 3px solid var(--line-c); }
 .r-chat.agent.main header b { color: var(--line-c); }

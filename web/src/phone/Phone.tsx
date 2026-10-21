@@ -3,7 +3,7 @@
 // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
 // Fast repair (Kyle 10-21): an event repaired and closed waits for 覆核 — a 「維修完成，請覆核」 card on top (ReviewCard),
 // one per event (3 件同時異常: one after another), ringing like a new approval; 「已覆核」 joins the history.
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ApprovalRequest, AskAnswer, Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
@@ -15,6 +15,9 @@ import { useWarRoom } from '../useWarRoom'
 import { reviewAlerts, useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
+import { BriefingView, BriefSections, BriefTop, Txt } from '../components/BriefingView'
+import { actionLines, buildBriefing, fullActionLines, optionBriefs } from '../briefing'
+import { useBriefCtx } from '../useBriefing'
 import { AiStatusLine } from '../AiStatusLine'
 import { OptionGuideNote } from '../OptionGuideNote'
 import { ReviewCard } from './ReviewCard'
@@ -56,6 +59,8 @@ export function Phone() {
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const alerts = useApprovalAlerts([...pending, ...reviewAlerts(reviews)], connected && !lanDown)
+  const bctx = useBriefCtx()
+  const idleBrief = useMemo(() => (pending.length === 0 ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [pending.length, ev, bctx])
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -65,13 +70,12 @@ export function Phone() {
           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
           <ThemeToggle className="ph-tog" />
         </div>
-        {top ? <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>
-          : reviews.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・維修完成，請覆核</b>{reviews.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
+        {!top && reviews.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・維修完成，請覆核</b>{reviews.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
           <div className="ph-armed muted" data-testid="phone-alerts">
-            <span>核准提醒已開啟{alerts.armed ? '' : '・點一下畫面啟用聲音'}{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</span>
+            <span>核准提醒已開啟{alerts.armed ? '' : '・點一下畫面啟用聲音'}{alerts.permission === 'granted' ? '・系統通知' : ''}</span>
             <button className="ph-arm-off" onClick={(e) => { e.stopPropagation(); alerts.setEnabled(false) }}>關閉</button>
           </div>
         )}
@@ -83,12 +87,16 @@ export function Phone() {
           onDone={(x) => setReviewed((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
         {pending.length === 0 ? (
           <div className="ph-card idle">
-            <h2>目前沒有待核准事項</h2>
-            {ev ? (
+            {idleBrief ? null : <h2>目前沒有待核准事項</h2>}
+            {idleBrief ? (
+              <><BriefingView b={idleBrief} /><p className="ph-none muted">目前沒有待核准事項</p></>
+            ) : ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
             {openEvs.length ? openEvs.map((e) => <AiStatusLine key={e.id} ev={e} className="ph-ai" />) : ev && <AiStatusLine ev={ev} className="ph-ai" />}
-            {openEvs[0] && <RepairEta ev={openEvs[0]} />}
+            {openEvs[0] && (
+              <details className="ph-why"><summary>查看處置依據</summary><RepairEta ev={openEvs[0]} /></details>
+            )}
             {history.map((h) => <p key={h.key} className="ph-hist">{fmtHMS(h.at)}・{h.node}</p>)}
           </div>
         ) : <>
@@ -164,6 +172,8 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [submitted, setSubmitted] = useState(false)   // 核准 went through: keep the button locked until the card leaves
+  const bctx = useBriefCtx()
   const base = (a.options.find((o) => o.recommended) ?? a.options[0])?.id ?? null
   const chosen = opt ?? base
   // 核准 executes the chosen option (the system's unless the supervisor picked another one)
@@ -173,6 +183,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     setBusy(true); setErr(null)
     try {
       await transport.decide({ request_id: a.id, decision: 'approve', option_id: chosen, reason: defaultReason(a, chosen), modified_args: null, decided_by: '主管', via: 'phone' })
+      setSubmitted(true)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   // 討論: changing or refusing the plan is said in words; the agent replans and the card comes back as a new version
@@ -181,16 +192,22 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     setBusy(true); setErr(null)
     try { const t = text.trim(); onSent(t); setText(''); setTalk(false); await transport.discuss(a.event_id, t) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
   }
+  const opts = optionBriefs(a, ev)
+  const staffing = opts.filter((o) => o.staffing)
+  const picked = opts.find((o) => o.id === chosen)
+  const brief = buildBriefing({ ev, req: a, chosen, ...bctx })
+  const locked = disabled || busy || submitted
+  // what 核准 will run: the schedule/cure actions plus the picked staffing option (named, not just a letter)
+  const scope = [...actionLines(a).filter(Boolean),
+    ...(picked && staffing.length ? [`人力${opts.length > 1 ? `方案 ${picked.id}` : ''}：${picked.label}`] : [])]
   return (
     <div className="ph-card ph-approval">
       <div className="ph-col-a">
-      <div className="ph-top">
-        <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>
-        <span className="ph-round">{ROUND[a.round] ?? `第${a.round}輪`}核准</span>
-        {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
-      </div>
-      <h2 className="ph-title">{plain(a.title)}</h2>
-      <p className="ph-problem">{plain(a.reason)}</p>
+      <p className="ph-meta" data-testid="phone-meta">
+        <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>・{ROUND[a.round] ?? `第${a.round}輪`}核准
+        {(a.version ?? 1) > 1 && <b data-testid="phone-version">・v{a.version}（最新）</b>}
+      </p>
+      {brief && <div className={`br br-${brief.state}`}><BriefTop b={brief} />{!staffing.length && <BriefSections b={brief} only={['advice']} />}</div>}
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">
           <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
@@ -198,45 +215,47 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
         </div>
       )}
       <AiStatusLine ev={ev} className="ph-ai" />
-      <dl className="ph-info">
-        {a.actions?.length ? (<>
-          <dt>建議</dt>
-          <dd><ul className="ph-acts-list">{a.actions.map((x, i) => <li key={i}>{plain(x)}</li>)}</ul></dd>
-        </>) : null}
-        <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
-        {a.gaps.length > 0 && <><dt>缺口</dt><dd>{a.gaps.map(plain).join('；')}</dd></>}
-      </dl>
-      <RepairEta ev={ev} />
-      <details className="ph-why">
-        <summary>為什麼</summary>
-        {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
-        {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
-        {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
-      </details>
       </div>
       <div className="ph-col-b">
-      {a.options.length > 1 && <>
-        <p className="ph-q">選一個人力方案</p>
-        <OptionGuideNote a={a} ev={ev} className="ph-guide" />
+      {staffing.length > 0 && <>
+        <p className="ph-q">{opts.length > 1 ? '選一個人力方案' : '建議人力方案'}</p>
+        {opts.length > 1 && <OptionGuideNote a={a} ev={ev} className="ph-guide" />}
         <div className="ph-opts" role="radiogroup" aria-label="方案">
-          {a.options.map((o) => (
-            <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}
-              className={`ph-opt ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
-              <b>{o.id}</b>　{o.label}{o.recommended ? <small>系統建議</small> : null}
+          {staffing.map((o) => (
+            <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={locked || opts.length < 2}
+              className={`ph-opt ph-optc ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
+              <span className="ph-opt-t"><b>{o.id}</b><span>{o.label}</span>{o.recommended ? <small>系統建議</small> : null}</span>
+              {o.effect.map((e, i) => <span key={i} className="ph-opt-e">{e}</span>)}
+              {o.high && <span className="ph-opt-e ph-opt-risk">高風險：需附理由</span>}
             </button>
           ))}
         </div>
       </>}
+      {brief && <div className={`br br-${brief.state}`}><BriefSections b={brief} only={['impact']} hide={staffing.length ? /^人力：/ : undefined} /></div>}
       {talk && (
         <textarea className="ph-reason" rows={2} maxLength={300} autoFocus value={text} onChange={(e) => setText(e.target.value)}
           placeholder="例如：不要加班／9 號機今晚要保養／這個不行，改用 B" aria-label="跟 AI 討論這個計劃" data-testid="phone-discuss-input" />
       )}
       {err && <p className="err">{err}</p>}
+      <div className="ph-bar">
+      {scope.length > 0 && <p className="ph-scope" data-testid="phone-scope"><b>核准範圍</b>：<Txt>{scope.join('；')}</Txt></p>}
       <div className="ph-acts">
-        <button className="ph-approve" disabled={disabled || busy || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>{busy ? '送出中…' : `核准${chosen && a.options.length > 1 ? `（${chosen}）` : ''}`}</button>
-        <button className="ph-sec" disabled={disabled || busy || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
+        <button className="ph-approve" disabled={locked || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>
+          {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label.replace(/（[^）]*）$/, '')}` : ''}`}
+        </button>
+        <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
+      </div>
       </div>
       <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
+      <details className="ph-why">
+        <summary>查看處置依據</summary>
+        <RepairEta ev={ev} />
+        {fullActionLines(a).length > 0 && <div className="ph-full"><b>完整處置內容</b><ul>{fullActionLines(a).map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+        {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
+        <p className="muted small">判斷依據：{plain(a.reason)}</p>
+        {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
+        {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
+      </details>
       </div>
     </div>
   )

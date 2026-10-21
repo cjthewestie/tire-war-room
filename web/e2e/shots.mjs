@@ -103,7 +103,8 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   const p = await page(390, 844, '/phone?mock=1&scenario=press7_temp_drop&at=02:31:15&speed=1')
   await p.waitForSelector('.ph-card')
   const t = await text(p)
-  check('phone card', t.includes('第二輪核准') && t.includes('7 號機停用，重排中') && t.includes('119.5°C') && t.includes('#A-311 改 9 號') && t.includes('夜班缺 1 名操作員') && t.includes('不受影響'))
+  // the briefing (briefing.ts) shows the decision first; the long action lines (119.5°C, #A-311 改 9 號) live in 查看處置依據
+  check('phone card', t.includes('第二輪核准') && t.includes('待核准') && t.includes('請核准') && t.includes('夜班缺 1 名操作員') && t.includes('不受影響'))
   check('phone options', t.includes('夜班加班') && t.includes('從 2 線調 1 人'))
   await p.click('.ph-opt >> nth=0')
   await p.screenshot({ path: `${OUT}/phone-p11-390.png`, fullPage: true })

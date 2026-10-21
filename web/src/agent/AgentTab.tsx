@@ -16,6 +16,8 @@ import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
 import { Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { useTranscript } from './useTranscript'
+import { BriefingView } from '../components/BriefingView'
+import { useEventBriefing } from '../useBriefing'
 import './agent.css'
 
 /** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
@@ -74,12 +76,21 @@ function Console({ planEv, asks, setAsks, focus, onFull }: {
   const talkEv = planEv
   const waiting = !!talkEv && talkEv.state === 'await_approval' && state.pending.some((p) => p.event_id === talkEv.id)
   const full = (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(talkEv?.id) } }
+  // 主管摘要 (issue #93): one briefing for the plan on screen, following its state (待核准 / 執行中 / 處置完成)
+  const brief = useEventBriefing(talkEv)
 
   return (
     <section className="console panel" aria-label="NemoClaw 對話">
       <header className="con-h">
         <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
       </header>
+      {talkEv && brief && (
+        <div className="con-brief" data-testid="con-brief">
+          <BriefingView b={brief} footer={brief.state !== 'pending' ? (
+            <a className="br-link" href={`#console?event=${encodeURIComponent(talkEv.id)}`} onClick={full} data-testid="see-record">查看處理紀錄</a>
+          ) : null} />
+        </div>
+      )}
       <Bubbles items={thread} empty="跟NemoClaw 說要做的事，或問工廠現在的狀況。" />
       <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
