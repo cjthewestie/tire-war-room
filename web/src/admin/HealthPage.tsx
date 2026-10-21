@@ -5,6 +5,7 @@ import { useState } from 'react'
 import { adminFetch } from '../transport'
 import { Err } from './adminCommon'
 import { useLoad, verifyText, type Verify } from './adminData'
+import { UsageCard } from './UsageCard'
 
 type Light = 'ok' | 'warn' | 'bad' | 'off'
 interface HealthCard { id: string; title: string; light: Light; headline: string; meaning: string; facts: string[]; fix: string; verify?: boolean; degraded?: { name: string; why: string }[] }
@@ -54,6 +55,7 @@ export function HealthPage() {
           </article>
         ))}
       </div>
+      <UsageCard />
       <button className="btn-ghost" onClick={reload}>重新整理</button>
     </section>
   )

@@ -96,6 +96,8 @@ function Dashboard() {
   const [moreOpen, setMoreOpen] = useState(false)   // phones: 狀態機 and 後台 live under 「更多」 (issue #52)
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const pendingN = state.pending.length
+  const [budgetSeen, setBudgetSeen] = useState<string | null>(null)
+  const budget = state.budgetAlert && state.budgetAlert.ts !== budgetSeen ? state.budgetAlert : null
   return (
     <DemoCtx.Provider value={demo}>
     <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''} ${demo.running ? 'demo-on' : ''}`}>
@@ -109,6 +111,12 @@ function Dashboard() {
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
       {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
+      {budget && (
+        <div className="banner budget-banner" role="status" data-testid="budget-alert">
+          {budget.text.startsWith('模型用量') ? budget.text : `模型用量：${budget.text}`}
+          <button className="x" onClick={() => setBudgetSeen(budget.ts)} aria-label="關閉模型用量提醒">✕</button>
+        </div>
+      )}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>

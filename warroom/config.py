@@ -71,6 +71,13 @@ class Settings(BaseSettings):
     # vLLM serves MAX_NUM_SEQS=4 (deploy/spark/vllm-serve.sh: 3 concurrent anomalies + 1 spare); with 1 slot the
     # 3 件同時異常 plans ran one after another (real model 10-21: last card 132 s after the load, 3 slots: same second).
     model_slots: int = 3
+    # Model usage caps (warroom/agent/budget.py has the degradation order and why these numbers, from
+    # bench/results/spark-lightning-20261021): BUDGET_DAILY_TOKENS, BUDGET_DAILY_MODEL_S, BUDGET_EVENT_TOKENS,
+    # BUDGET_CONVERSATION_TOKENS. Incident plans are never blocked by them.
+    budget_daily_tokens: int = 3_000_000
+    budget_daily_model_s: float = 7200.0
+    budget_event_tokens: int = 60_000
+    budget_conversation_tokens: int = 500_000
 
     @property
     def api_key_effective(self) -> str:

@@ -1315,6 +1315,9 @@ class StateMachine:
                             "cause": getattr(self.commander, "last_cause", None),
                             "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                             "raw_chars": len(raw), "raw_excerpt": raw[:600]})
+            if payload["cause"] == "budget":     # warroom/agent/budget.py: the supervisor sees why it is the rule plan
+                self._note(ev, "指揮官", f"{getattr(self.commander, 'last_error', '') or ''}".split(": ", 1)[-1]
+                           + "：這次改用規則計劃", "dynamic")
         else:
             payload.update({"plan_source": "commander", "hypothesis": plan.hypothesis.id,
                             "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],

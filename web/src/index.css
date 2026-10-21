@@ -1193,3 +1193,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
   .print-sheet table { width: 100%; border-collapse: collapse; } .print-sheet th, .print-sheet td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
   .print-sheet th { background: #eee; font-weight: 600; } .ps-info th { width: 16%; } .ps-stages th, .ps-stages td { text-align: center; }
 }
+/* 模型用量 cap crossing (warroom/agent/budget.py): a warning, not an alarm */
+.budget-banner { background: var(--warn-soft); color: var(--ink); border-color: var(--warn); display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.budget-banner .x { background: none; border: 0; color: inherit; cursor: pointer; font-size: 15px; }

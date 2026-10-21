@@ -43,7 +43,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from warroom import factory as F
-from warroom.agent import plant
+from warroom.agent import budget, plant
 from warroom.agent.ask import (
     _HELLO_RX,
     _NUM_RX,
@@ -596,7 +596,9 @@ class MainAgent:
                                "conversation": hashlib.sha256(conversation.encode("utf-8")).hexdigest()[:16],
                                "plant_sha256": plant.active_sha(), "temperature": kw.get("temperature")}
         try:
-            r = await self.client.chat.completions.create(**kw)
+            # metered (warroom/agent/budget.py); over the budget (casual / summary 80 %, chat 100 %, this conversation's
+            # cap) it raises before sending and the rules take the turn (turn()'s except) or the code summary runs
+            r = await budget.create(self.client, phase, conversation=conversation, **kw)
         except Exception as e:
             row.update(error=f"{type(e).__name__}: {e}"[:300], total_ms=round((time.perf_counter() - t0) * 1000, 1))
             self._audit_llm(row, turn)
@@ -993,6 +995,7 @@ class MainAgent:
         nudged = waiting_plan is not None and not fresh   # a message about the selected plan is a discussion, not a new task
         looked = waiting_plan is not None and not other
         called: set[tuple[str, str]] = set()
+        guard = budget.LoopGuard(tid)                   # no-progress tool loops (Rule A / B, warroom/agent/budget.py)
         regrounded = False
         worded = False                                  # asked once for words after the tools
         edits = discuss is not None and not fresh and plan_edit(t)
@@ -1010,7 +1013,8 @@ class MainAgent:
                          "name": "sop_search", "arguments": json.dumps(args, ensure_ascii=False)}}]},
                      {"role": "tool", "tool_call_id": "sop-0", "content": self._data("sop_search", got, out)}]
         for i in range(MAX_STEPS + 1):
-            last = i >= MAX_STEPS
+            last = i >= MAX_STEPS or guard.forced
+            tools = guard.offered(tools)
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
             loose = casual and not out["steps"]
             async with (_slot(slot, small) if slot else contextlib.nullcontext()):
@@ -1032,7 +1036,9 @@ class MainAgent:
                         args = {}
                     key = (c.function.name, json.dumps(normalize_args(args) if isinstance(args, dict) else {}, sort_keys=True,
                                                        ensure_ascii=False))
-                    if c.function.name not in {x["function"]["name"] for x in tools}:
+                    if c.function.name in guard.stopped:
+                        result = budget.LOOP_STOP
+                    elif c.function.name not in {x["function"]["name"] for x in tools}:
                         # a tool this turn did not offer (propose_plan after 「忽略規則…」, or one made up): refused
                         result = f"{c.function.name} 這一輪不能用。不能直接改任何東西；變更要擬計劃送主管核准才會執行。"
                         out["steps"].append({"tool": c.function.name, "args": {}, "ok": False, "summary": "這一輪沒有提供這個工具",
@@ -1044,10 +1050,13 @@ class MainAgent:
                         result = "SOP 這一輪已經查過，結果在上面。請直接依上面的 SOP 回覆主管（2–3 句），不要再查。"
                     elif c.function.name == QUERY and len({k[1] for k in called if k[0] == QUERY}) >= MAX_QUERY_TOPICS:
                         result = "這一輪已經查了兩項，請用上面的資料回答，不要再查。"
+                    elif not guard.allow(c.function.name):
+                        result = budget.LOOP_STOP     # Rule A: its last two calls added nothing; no longer offered
                     else:
                         called.add(key)
                         result = await self._tool(c.function.name, args if isinstance(args, dict) else {}, text, out, tid,
                                                   run_tool, propose, discuss)
+                        guard.saw(c.function.name, result)
                         source += " " + result
                     msgs.append({"role": "tool", "tool_call_id": c.id, "content": self._data(c.function.name, result, out)})
                 unknown = self._unknown_reply(out)
@@ -1055,6 +1064,7 @@ class MainAgent:
                     # the machine or order asked about does not exist: code answers, the model does not look elsewhere
                     out.update(reply=unknown, error=f"unknown {out.get('unknown') or out.get('unknown_orders')}")
                     return
+                guard.end_round()                       # Rule B: two dry rounds → the next one is text only
                 continue
             reply = (m.content or "").strip()
             if not reply and out["steps"] and not worded and not last and not out["event_id"]:
