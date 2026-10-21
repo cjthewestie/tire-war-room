@@ -75,7 +75,10 @@ class LoopFactory(TeamReplayFactory):
         ticks = day_ticks(QUIET_DAY, str(self._dataset_path) if self._dataset_path else "")
         shift = t0 - datetime.combine(QUIET_DAY, datetime.min.time(), tzinfo=t0.tzinfo)
         lead = timedelta(seconds=self.backfill_min * 60.0)
-        series = _shape_day(ticks)
+        key = (QUIET_DAY, str(self._dataset_path or ""), len(ticks))
+        series = _SHAPED.get(key)
+        if series is None:                       # the same dataset day every load: shape it once per process
+            series = _SHAPED[key] = _shape_day(ticks)
         rep: dict[datetime, list[SensorReading]] = {}
         for i, (ts, _) in enumerate(ticks):
             rows = [SensorReading(ts=ts + shift, machine_id=mid, **{ch: vals[i] for ch, vals in chans.items()})
@@ -190,6 +193,7 @@ class LoopFactory(TeamReplayFactory):
 
 SMOOTH_N = 7          # samples (70 s): the dataset's sample-to-sample noise over 10 s reads as a °C/min trend
 SEAM_N = 60           # samples (10 min): the day's last 10 minutes fade into its first sample
+_SHAPED: dict[tuple, dict[str, dict[str, list[float]]]] = {}   # read only once built (see _arm_day)
 # A03 大開煉機 wanders 91.3–98.7 °C over the recorded day (labelled normal, scenario 0). Our detector, tuned on the
 # sim's 1 Hz noise, reads its slowest 6 °C climb as an overheat (dev >= 4 °C from a baseline frozen at onset). The
 # loop keeps the day's level and shape but scales a temperature's swing round its daily mean to at most ±2 °C.
