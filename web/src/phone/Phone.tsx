@@ -14,6 +14,7 @@ import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
 import { AiStatusLine } from '../AiStatusLine'
+import { OptionGuideNote } from '../OptionGuideNote'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -190,6 +191,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
       <div className="ph-col-b">
       {a.options.length > 1 && <>
         <p className="ph-q">選一個人力方案</p>
+        <OptionGuideNote a={a} ev={ev} className="ph-guide" />
         <div className="ph-opts" role="radiogroup" aria-label="方案">
           {a.options.map((o) => (
             <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}

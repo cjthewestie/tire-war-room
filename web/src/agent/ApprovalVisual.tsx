@@ -13,6 +13,7 @@ import {
   type PlanNode, type ScheduleDiff, type ToolUse,
 } from './approvalView'
 import { ToolIcon } from './ToolIcon'
+import { OptionGuideNote } from '../OptionGuideNote'
 import { expectationText, type Item, type ToolItem } from './transcript'
 import { useTranscript, useVersions } from './useTranscript'
 import './agent.css'
@@ -92,6 +93,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   )
   const options = (n: number) => opts.length > 0 && (
     <Block key="opts" n={n} title="人力方案" hint="點選一個方案">
+      <OptionGuideNote a={req} ev={ev} />
       <div className="apv-opts" role="group" aria-label="人力方案">
         {opts.map((o) => {
           const on = chosen === o.opt.id
