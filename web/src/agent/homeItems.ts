@@ -7,7 +7,7 @@
 //   ⑤ AI 已自行處理 — closed events, Safety Core actions, rejected bad data (collapsed)
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
-import { machineLabel } from '../factory'
+import { ML_PRESSES, machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 
@@ -26,6 +26,7 @@ export interface HomeItem {
   req: ApprovalRequest | null
   ts: number
   progress?: number         // ④: share of the event's worker tasks done (0–1)
+  checked?: string          // ②: the pre-plan ran and found nothing to change (precheckLine)
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -75,8 +76,9 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     const due = /^\d{4}-\d{2}-\d{2}$/.test(o.due) ? ms(`${o.due}T23:59:00+08:00`) : ms(o.due)
     if (!(eta > due)) continue
     seen.add(o.id)
-    out.push({ key: `order:${o.id}`, rank: 2, tone: 'risk', pill: '交期預警', eventId: null, orderId: o.id, req: null, ts: eta,
-      title: `${o.id} 可能晚 ${Math.ceil((eta - due) / 3_600_000)} 小時交貨`, sub: `${o.customer}・排程最後一條 ${fmtMD(eta)} ${fmtHM(eta)} 出模・交期 ${fmtMD(o.due)}` })
+    const checked = precheckLine(o.id, o.size, o.due, events, now) ?? undefined
+    out.push({ key: `order:${o.id}`, rank: 2, tone: 'risk', pill: checked ? '已預先檢查' : '交期預警', eventId: null, orderId: o.id, req: null, ts: eta,
+      title: `${o.id} 可能晚 ${Math.ceil((eta - due) / 3_600_000)} 小時交貨`, sub: `${o.customer}・排程最後一條 ${fmtMD(eta)} ${fmtHM(eta)} 出模・交期 ${fmtMD(o.due)}`, checked })
   }
   for (const w of schedule?.schedule.warnings ?? []) {
     const [head, list] = w.includes('：') ? [w.slice(0, w.indexOf('：')), w.slice(w.indexOf('：') + 1)] : ['', w]
@@ -112,4 +114,19 @@ export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | 
   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
   if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
   return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+}
+
+const CURE_PRESSES = 11
+
+/** A pre-plan (Runtime._preplan_orders: 「<id> 可能晚交，請重排保交期」) that ended without a change to approve — the solver
+ *  could not bring the order forward. The ② item then shows what was checked and what to do instead of 「正在預先擬計劃」
+ *  (CJ, 2026-10-22: 「計劃已經先擬好，只等核准或討論」). null while it runs, when it produced a card, or never ran. */
+export function precheckLine(orderId: string, size: string, due: string, events: Event[], now: number): string | null {
+  const ev = events.filter((e) => e.source === 'supervisor' && (e.command ?? '').startsWith(`${orderId} `) && (e.command ?? '').includes('可能晚交'))
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0]
+  if (!ev || ev.state !== 'closed' || ev.steps.some((s) => s.gate?.risk === 'R2' || s.gate?.risk === 'R3')) return null
+  const days = Math.round((ms(`${due.slice(0, 10)}T00:00:00+08:00`) - ms(`${new Date(now + 8 * 3_600_000).toISOString().slice(0, 10)}T00:00:00+08:00`)) / 86_400_000)
+  const when = days <= 0 ? '今天' : days === 1 ? '明天' : `${fmtMD(due)} 前`
+  const [n, kind] = size === 'S' ? [CURE_PRESSES - ML_PRESSES.length, '小胎機'] : [ML_PRESSES.length, '中大胎機']
+  return `已預先檢查：${orderId} ${when}無法交齊（${n} 台${kind}都滿），建議聯絡客戶延交或分批`
 }
