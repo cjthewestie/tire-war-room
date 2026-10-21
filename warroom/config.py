@@ -54,6 +54,10 @@ class Settings(BaseSettings):
     # 暫停投料) is assigned at once and done this many WALL seconds after it was created, at any sim speed; the
     # machine's readings then go straight back to normal. 0 = the real task durations (work.WORK_MIN).
     repair_fast_s: float = 3.0
+    # MODEL_SLOTS: commander / main agent calls the local model may run at once (issue #54 ModelQueue). The Spark's
+    # vLLM serves MAX_NUM_SEQS=4 (deploy/spark/vllm-serve.sh: 3 concurrent anomalies + 1 spare); with 1 slot the
+    # 3 件同時異常 plans ran one after another (real model 10-21: last card 132 s after the load, 3 slots: same second).
+    model_slots: int = 3
 
     @property
     def api_key_effective(self) -> str:

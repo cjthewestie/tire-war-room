@@ -125,7 +125,8 @@ class ComponentBuilder:
         self.reopened_store = False
         # issue #54: one local model, one priority queue (safety > machine > orders/materials > staffing > questions)
         from warroom.agent.orchestrator import ModelQueue
-        self.model_queue = ModelQueue(audit=self.audit, clock=self.clock)
+        self.model_queue = ModelQueue(slots=max(1, int(getattr(self.s, "model_slots", 1))), audit=self.audit,
+                                      clock=self.clock)
 
     def _t(self, name: str, real: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
         if not self.use_real:
@@ -998,8 +999,15 @@ class Runtime:
         if not running or self._switching or self.settings.repair_fast_s <= 0 or \
                 not callable(getattr(board, "advance_fast", None)):
             return
-        board.advance_fast(self.clock.now(), dt)
+        board.advance_fast(self.clock.now(), dt, hold=self._awaits_decision)
         self._apply_repairs()
+
+    def _awaits_decision(self, event_id: str | None) -> bool:
+        """The event is still before the supervisor's decision (planning, gate, waiting card, replanning)."""
+        ev = self._event_obj(event_id)
+        return ev is not None and ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN,
+                                               EventState.SIMULATE, EventState.GATE, EventState.AWAIT_APPROVAL,
+                                               EventState.REPLAN)
 
     def _apply_repairs(self) -> None:
         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair

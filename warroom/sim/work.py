@@ -314,11 +314,15 @@ class TaskBoard:
                 t.status, t.done_at = "完成", t.started_at + timedelta(minutes=t.work_min)
                 self._emit(t, now, "done")
 
-    def advance_fast(self, now: datetime, wall_dt: float) -> bool:
+    def advance_fast(self, now: datetime, wall_dt: float, hold: Callable[[str | None], bool] | None = None) -> bool:
         """Fast repair: run every open fast task `wall_dt` wall seconds further (the runtime calls this every loop turn
-        and tick, never while paused). True while any is still open (the world view should be republished)."""
+        and tick, never while paused). `hold(event_id)` True = its event still waits for the supervisor's decision: the
+        task does not start yet (an R1 檢修 the gate let through before the card would otherwise be 完成 before 主管核准,
+        reviewers 10-21). True while any is still open (the world view should be republished)."""
         open_ = [t for t in self._tasks.values() if t.fast_s is not None and t.status != "完成"]
         for t in open_:
+            if hold is not None and hold(t.event_id):
+                continue
             self._advance_fast(t, now, wall_dt)
         if open_:
             self.w.rev += 1                  # the ring above the machine moves on the wall clock, not the world grid
