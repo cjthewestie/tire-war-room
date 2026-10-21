@@ -149,21 +149,24 @@ const dueText = (iso: string, now: string | null) => `${now && fmtMD(iso) !== fm
 const DOING: Record<string, string> = { 檢修: '維修' }
 
 /** What Agent Nemo proposes on the waiting card, as it really is (veteran audit: the 10 號 card has no staffing option):
- *  「Agent Nemo 判斷蒸汽壓不足，建議派人檢查蒸汽供應與溫度計，這一模硫化延長到 41.1 小時，人力用方案 B（從 2 線調 1 人）。」 */
+ *  「Agent Nemo 判斷蒸汽壓不足，建議派人檢查蒸汽供應與溫度計，這一模硫化延長到 41.1 小時，人力用方案 B（從 2 線調 1 人）。」
+ *  A recalculated card can come after the approved repair went ahead (concurrent_3: the schedule went stale): then it
+ *  says where the repair is and proposes only what this card still asks. */
 function proposal(ev: Event, card: ApprovalRequest, tasks: WorkTask[]): string {
   const hyp = (ev.plan?.hypothesis.statement ?? '').split('，')[0]
   const fix = tasks.find((t) => REPAIR_KINDS.has(t.kind))
   const ask = fix ? /請(.+)$/.exec(fix.title)?.[1] : null
+  const went = fix && fix.status !== '待派' ? (fix.status === '完成' ? '維修已完成' : `已派人${ask ?? '維修'}`) : null
   const cure = ev.steps.find((s) => s.step.tool === 'set_cure_time' && s.state === 'awaiting_approval')?.step.args.total_cure_h
   const opts = card.options
   const rec = opts.find((o) => o.recommended) ?? opts[0]
   const parts = [
-    ask && `派人${ask}`,
+    !went && ask && `派人${ask}`,
     typeof cure === 'number' && `這一模硫化延長到 ${Math.round(cure * 10) / 10} 小時`,
     opts.length > 1 ? `人力用方案 ${rec.id}（${rec.label}）` : opts.length === 1 && opts[0].tool === 'notify_teams' ? opts[0].label : null,
   ].filter(Boolean)
-  if (!hyp) return `Agent Nemo 擬好計畫：${plain(card.title)}${parts.length ? `，${parts.join('，')}` : ''}。`
-  return `Agent Nemo 判斷${hyp}${parts.length ? `，建議${parts.join('，')}` : ''}。`
+  if (!hyp) return `Agent Nemo 擬好計畫：${plain(card.title)}${went ? `，${went}` : ''}${parts.length ? `，${parts.join('，')}` : ''}。`
+  return `Agent Nemo 判斷${hyp}${went ? `，${went}` : ''}${parts.length ? `${went ? '；' : '，'}建議${parts.join('，')}` : ''}。`
 }
 
 /** Where the event stands, in one sentence, and the one thing to do (veteran audit, Agent Nemo 頁 結論區): 請核准 by when,
