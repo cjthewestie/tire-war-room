@@ -724,7 +724,8 @@ a.ov-row:hover { background: var(--panel-2); }
 .trace-h-r { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* 今天處理過的任務 (TaskLog): read-only, from the audit file */
-.tasklog { border-top: 1px solid var(--line, #ddd); padding-top: 8px; overflow-y: auto; min-height: 0; }
+.tasklog { border-top: 1px solid var(--line, #ddd); padding-top: 8px; overflow-y: auto; min-height: 0; flex: 1 1 55%; }
+.trace-side .trace-list { flex: 1 1 45%; min-height: 140px; }   /* the events list keeps its room next to the task log */
 .tasklog .tl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tasklog .tl-row { display: flex; align-items: flex-start; gap: 6px; }
 .tasklog .tl-row button { flex: 1; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--ink); }
