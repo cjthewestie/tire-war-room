@@ -103,6 +103,8 @@ await d.keyboard.press('Escape')
 
 await d.click('text=人力排程')
 await d.waitForTimeout(2500)
+await d.evaluate(() => { const p = document.querySelector('details.plan-panel'); if (p) p.open = true })   // ⑥ is folded by default (UX declutter)
+await d.waitForTimeout(200)
 const plan = await d.locator('.plan-panel').innerText()
 check('step plan has no JSON / key=value dumps', !/[{}]|=\S/.test(plan), plan.match(/.*[{}=].*/)?.[0] ?? '')
 check('step plan shows Chinese tool labels, no snake_case names', !/[a-z]+_[a-z_]+/.test(plan), plan.match(/.*[a-z]+_[a-z_]+.*/)?.[0] ?? '')
