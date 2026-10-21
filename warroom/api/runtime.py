@@ -60,6 +60,7 @@ from warroom.contracts import (
     MachineStatus,
     MachineTile,
     MetricTile,
+    NotifyKind,
     PendingAction,
     RiskLevel,
     SafetyAction,
@@ -446,6 +447,22 @@ def _is_revoke(step_id: str) -> bool:
     return "-revoke-" in step_id
 
 
+def _needs_approval(sr: Any) -> bool:
+    """A write step of a plan that needs 主管核准 (R2/R3): by its gate decision, or for a step the gate never saw (its
+    round stopped first), by what the gate would rule from the tool and the notice kind."""
+    if sr.gate is not None and sr.gate.risk is not None:
+        return sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+    if sr.step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+        return True
+    if sr.step.tool is not ToolName.NOTIFY_TEAMS:
+        return False
+    from warroom.agent.gate import NOTIFY_RISK
+    try:
+        return NOTIFY_RISK[NotifyKind(sr.step.args.get("kind"))] is not RiskLevel.R1_NOTIFY
+    except (KeyError, ValueError):
+        return True                         # not a valid notice: never an auto (R1) one
+
+
 class _NoLock:
     def __enter__(self):
         return self
@@ -504,6 +521,7 @@ class Runtime:
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self._orch: Any = None
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
         self._cases: Any = None                  # SafetyCases of the current components (warroom/api/resolve.py)
@@ -1019,7 +1037,9 @@ class Runtime:
 
     def _advance_fast_repairs(self, running: bool = True) -> None:
         """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
-        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+        at any sim speed, also while another event's model call holds the plant clock), apply a fix that just
+        finished, and ramp the repaired machines back to nominal (Settings.recover_fast_s). Paused time does not
+        count."""
         now = time.monotonic()
         dt, self._fast_wall = now - self._fast_wall, now
         board = getattr(getattr(self.sim, "world", None), "tasks", None)
@@ -1028,29 +1048,76 @@ class Runtime:
             return
         board.advance_fast(self.clock.now(), dt)
         self._apply_repairs()
+        self._advance_recoveries(dt)
+
+    def _advance_recoveries(self, dt: float) -> None:
+        """回溫中 (Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): every repaired machine's readings move from where the fix
+        found them to nominal over Settings.recover_fast_s WALL seconds; at the end it is back to normal: audited
+        「已恢復正常」 and the state machine is told (Event.recovered_at, VERIFY confirms, green)."""
+        total = float(self.settings.recover_fast_s)
+        for mid, rec in list(self._recovering.items()):
+            rec[1] += max(0.0, dt)
+            frac = 1.0 if total <= 0 else min(1.0, rec[1] / total)
+            r = self.sim.recover(mid, frac)
+            if r is not None and frac < 1.0:
+                continue
+            del self._recovering[mid]
+            self._recovered(mid, rec[0], r or self.sim.machine(mid).last_reading)
+
+    def _begin_recovery(self, mid: str, eid: str) -> None:
+        begin = getattr(self.sim, "begin_recovery", None)
+        if callable(begin):
+            begin(mid)
+            self._recovering[mid] = [eid, 0.0]
+            if self.settings.recover_fast_s <= 0:
+                self._advance_recoveries(0.0)
+            return
+        snap = getattr(self.sim, "snap_to_nominal", None)     # a sim without the ramp: back at once
+        if callable(snap):
+            snap(mid)
+        self._recovered(mid, eid, self.sim.machine(mid).last_reading)
+
+    def _recovered(self, mid: str, eid: str, reading: Any) -> None:
+        self.audit.append(AuditKind.SYSTEM, "world", {"msg": "已恢復正常", "machine_id": mid,
+                                                      "value": getattr(reading, "temp_c", None)}, eid)
+        on_recovered = getattr(self.state_machine, "on_recovered", None)
+        if callable(on_recovered):
+            on_recovered(eid, mid, self.clock.now(), reading)
 
     def _awaits_decision(self, event_id: str | None) -> bool:
         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
         auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
-        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
-        檢修 walked to 7 號 13 s before the card)."""
+        AWAIT_APPROVAL), while a write of that round waits for the card (Spark timing 10-21: the R1 檢修 walked to
+        7 號 13 s before the card) or its round stopped before its R2/R3 writes were gated — or an event that ended
+        (SAFE_STOP) with no decision while a round of its plan had, or would have had once gated, an R2/R3 write
+        (steam_low on an idle press: the solve was refused, the event stopped with no card and its R1 檢修 walked out
+        on its own). Only a plan of R1 writes repairs with no decision. Not while code re-solves an approved round
+        whose schedule another event's version made stale (StateMachine.approved_rebase): the approved repair goes on
+        meanwhile."""
         ev = self._event_obj(event_id)
-        if ev is None or ev.state in TERMINAL_STATES:
-            return False                     # nobody decides on an ended run (SAFE_STOP 交給現場處理 tasks run at once)
+        if ev is None:
+            return False
+        rebase = getattr(self.state_machine, "approved_rebase", None)
+        if callable(rebase) and rebase(ev.id):
+            return False
         if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
                         EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
             return True
-        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
-                    for sr in ev.steps)
-        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
-                      for r in self.approvals.all())
-        return needs and not decided
+        if any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+               for r in self.approvals.all()):
+            return False
+        if ev.state in TERMINAL_STATES:
+            return ev.state is not EventState.CLOSED and \
+                any(_needs_approval(sr) for sr in [*ev.steps, *(s for r in ev.prior_rounds for s in r.steps)])
+        # EXECUTE / VERIFY: a no-op confirm the gate dropped (gated, skipped) needed no card, so that plan repairs
+        return any(sr.state == "awaiting_approval" or (sr.gate is None and _needs_approval(sr)) for sr in ev.steps)
 
     def _apply_repairs(self) -> None:
         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
         (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
-        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
-        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the state
+        machine is told (Event.repaired_at, 回溫中) and the machine's readings ramp back to normal
+        (_advance_recoveries)."""
         fast = self.settings.repair_fast_s > 0
         board = getattr(getattr(self.sim, "world", None), "tasks", None)
         for mid, eid in list(self._repaired.items()):
@@ -1066,14 +1133,13 @@ class Runtime:
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
                 continue                        # nothing injected on it (a replayed or already-cleared fault)
             self.sim.clear_faults(mid)
-            snap = getattr(self.sim, "snap_to_nominal", None)
-            if fast and callable(snap):
-                snap(mid)                        # no slow cool-down: the next reading is normal
             self.c.detector.reset(mid, repaired=True)
             self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
             on_repaired = getattr(self.state_machine, "on_repaired", None)
             if fast and callable(on_repaired):
                 on_repaired(eid, mid, self.clock.now())
+            if fast:
+                self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
 
     # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
     @property
@@ -1427,6 +1493,7 @@ class Runtime:
                 self._baseline.clear()
                 self._oob_seen.clear()
                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+                self._recovering.clear()
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
                 self.audit.append(AuditKind.SYSTEM, "supervisor",
@@ -1711,6 +1778,17 @@ class Runtime:
         except Exception:  # noqa: BLE001
             return []
 
+    @property
+    def tasklog(self) -> Any:
+        """今天處理過的任務 from the audit file (warroom/api/tasklog.py), never cleared."""
+        tl = self.__dict__.get("_tasklog")
+        if tl is None:
+            from warroom.api.tasklog import TaskLog
+            path = getattr(self.audit, "path", None)
+            tl = TaskLog(path) if path is not None and str(path) else TaskLog(entries=lambda: self.audit.tail(0, 0))
+            self.__dict__["_tasklog"] = tl
+        return tl
+
     def _clear_ask_memory(self, why: str) -> None:
         """Forget every 問戰情室 conversation (issue #95); the audit log says how many and why."""
         try:
@@ -1754,8 +1832,8 @@ class Runtime:
         return sorted(seen.values(), key=lambda r: r.created_at)
 
     def _effective_status(self, m: MachineState) -> MachineStatus:
-        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE, MachineStatus.WARNING) and \
-                self._open_event_id(m.machine_id):
+        # WARNING with an open event = the fast repair's 回溫中 (amber, StateMachine.on_repaired), not the red alarm
+        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE) and self._open_event_id(m.machine_id):
             return MachineStatus.ALARM
         seen = self._oob_seen.get(m.machine_id)
         if m.status in NORMAL_STATUSES and seen is not None and \

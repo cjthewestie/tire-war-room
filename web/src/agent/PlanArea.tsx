@@ -9,12 +9,10 @@ import { OrderCard } from '../components/OrderCard'
 import { warningsFor } from '../components/orderModel'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
-import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
+import { TOOL_LABEL, stepLabel } from '../stepText'
 import { TaskList } from '../components/TaskList'
-import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
-import { currentRoundTools, planNodes } from './approvalView'
 import { useWarRoom } from '../useWarRoom'
-import { ApprovalVisual, PlanFlow } from './ApprovalVisual'
+import { ApprovalVisual } from './ApprovalVisual'
 import { ResultStrip } from './ResultStrip'
 import type { HomeItem } from './homeItems'
 import { expectationText, type Item } from './transcript'
@@ -88,13 +86,9 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
   }
   if (ev) {
     const steps = ev.steps
-    const ok = steps.filter((s) => s.state === 'ok').length
     const hyp = ev.plan?.hypothesis ?? null
     const exp = hyp ? expectationText(hyp) : null
     const closed = ev.state === 'closed' || ev.state === 'safe_stop'
-    const nodes = planNodes(ev, currentRoundTools(items))
-    const lines: Record<string, string> = {}
-    for (const sr of ev.steps) if (sr.result?.ok) { try { lines[sr.step.id] = plain(resultText(sr.step.tool, sr.step.args, sr.result.data)) } catch { /* purpose instead */ } }
     const tasks = (state.world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
     return (
       <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
@@ -103,20 +97,13 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
           <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
           <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}</h3>
           {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}
-          {ev.state === 'safe_stop' && <StopFollowUp ev={ev} />}
-          {nodes.length > 0 && (
-            <div className="apv-b">
-              <h4 className="apv-bh">計劃板<small>{ok}/{steps.length} 步完成</small></h4>
-              <PlanFlow nodes={nodes} board lines={lines} />
-            </div>
-          )}
           {tasks.length > 0 && (
             <div className="apv-b">
               <h4 className="apv-bh">人員執行（核准後由程式派工）<small>{tasks.filter((t) => t.status === '完成').length}/{tasks.length} 完成</small></h4>
               <TaskList tasks={tasks} eventId={ev.id} testId="event-tasks" />
             </div>
           )}
-          {steps.length > 0 && !nodes.length && (
+          {steps.length > 0 && (
             <ul className="who-list task-list" data-testid="plan-tasks">
               {steps.map((s) => (
                 <li key={s.step.id} className={`ts-${s.state}`}><b>{STEP_STATE[s.state] ?? s.state}</b><span>{stepLabel(s.step.id)} {TOOL_LABEL[s.step.tool] ?? s.step.tool}・{plain(s.step.purpose)}</span></li>
@@ -124,7 +111,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
             </ul>
           )}
           {!closed && exp && <div className="apv-b"><h4 className="apv-bh">怎麼確認做完</h4><p className="impact-line">程式比對讀值：{exp}；達標即自動結案，不達標換下一個假設。</p></div>}
-          {!steps.length && !closed && <p className="muted">AI 指揮官正在規劃；有需要你決定的會變成待核准。</p>}
+          {!steps.length && !closed && <p className="muted">Agent Nemo 正在規劃；有需要你決定的會變成待核准。</p>}
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>

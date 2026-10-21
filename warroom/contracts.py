@@ -979,7 +979,8 @@ class StepRound(_M):
 
 
 class EventReview(_M):
-    """主管覆核 of an event closed after a repair: pending (「請主管覆核」) until the supervisor confirms."""
+    """The incident report of an event closed after a repair (Kyle 10-21 晚: 「異常 report 回報」): pending =
+    「報告待讀」 from the close (「異常報告已產生」), done = 「主管已讀報告」. A notice, never a gate: nothing waits for it."""
     status: Literal["pending", "done"]
     requested_at: datetime
     done_at: datetime | None = None
@@ -1008,7 +1009,7 @@ class StopFollowUp(_M):
 
 
 class ReviewRequest(_M):
-    """POST /api/events/{event_id}/review (主管覆核)."""
+    """POST /api/events/{event_id}/review (主管已讀報告)."""
     note: str | None = Field(default=None, max_length=300)
 
 
@@ -1031,6 +1032,7 @@ class Event(_M):
     prior_rounds: list[StepRound] = Field(default_factory=list)   # earlier rounds' steps, oldest first
     closed_at: datetime | None = None
     outcome: str | None = None
+    ai_report: EventAiReport | None = None   # Agent Nemo 異常報告 (warroom/agent/reporter.py), set when it closes
     # issue #10: who opened it (the detector, or a task the supervisor typed) and what the supervisor
     # asked the agent to honour while discussing its plan
     source: Literal["detector", "supervisor", "plant"] = "detector"   # plant = issue #17 plant event
@@ -1038,8 +1040,11 @@ class Event(_M):
     constraints: list["PlanConstraint"] = Field(default_factory=list)
     discuss_replans: int = 0
     # fast repair (Kyle 10-21): every repair task of this event (檢修 / 停用檢修 / 放慢投料 / 暫停投料) finished and the
-    # machine's fault was cleared; review: 「請主管覆核」 once it closed after that repair, done when the supervisor confirms
+    # machine's fault was cleared (repaired_at, 「維修完成」); its readings then ramp back to nominal (回溫中) and
+    # recovered_at is when they are back (「已恢復正常」, green). review: the incident report, pending (「報告待讀」) from
+    # the close, done once the supervisor read it (「主管已讀報告」)
     repaired_at: datetime | None = None
+    recovered_at: datetime | None = None
     review: EventReview | None = None
     # SAFE_STOP → resolution (CJ, 2026-10-22: 「安全停止也要有可以走向解決的按鈕」)
     stop_reason: str | None = None            # why it safe-stopped (state machine reason)
@@ -1209,6 +1214,7 @@ class HealthStatus(_M):
     uptime_s: float
     agent_runtime: str | None = None   # WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」 when the app runs inside OpenShell
     repair_fast_s: float = 0.0         # REPAIR_FAST_S (read only): wall seconds a repair task takes; 0 = real durations
+    recover_fast_s: float = 0.0        # RECOVER_FAST_S (read only): wall seconds the readings take back to nominal
 
 
 # REST surface (warroom/api implements; web/src/contracts.ts mirrors). method, path, request, response
@@ -1238,7 +1244,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
-    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管覆核 (an event closed after a repair)
+    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管已讀報告 (an event closed after a repair)
     ("GET", "/api/safety/cases", None, "SafetyCase[]"),
     ("POST", "/api/safety/{case_id}/dispatch", None, "SafetyCase"),           # ① 派現場檢查
     ("POST", "/api/safety/{case_id}/release", "SafetyRelease", "SafetyCase"),  # ③ 確認恢復運轉 (human only)
@@ -1469,6 +1475,18 @@ class Bus(Protocol):
     """warroom/bus.py (implemented). In-process pub/sub that the API relays to WebSockets."""
     def publish(self, type: WsType, data: BaseModel | dict[str, Any]) -> None: ...
     def subscribe(self) -> AsyncIterator[WsMessage]: ...
+
+
+class EventAiReport(_M):
+    """Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+    (by "model"; mock mode or a model failure: the code-written draft, by "rules"), the result line appended by code when
+    the event closed. drafted_ms: approval -> draft ready; late_ms: close -> delivered when the draft was not ready yet."""
+    text: str
+    summary: str
+    by: Literal["model", "rules"]
+    drafted_ms: float | None = None
+    at: datetime
+    late_ms: float | None = None
 
 
 QueryOrdersShiftsData.model_rebuild()

@@ -4,6 +4,8 @@
 // Read-only: the agent is the main agent's subagent for this event (GET /api/subagents), the runtime label comes from
 // /api/health agent_runtime (WARROOM_AGENT_RUNTIME, only set when the app really runs inside OpenShell), the time is
 // the repair estimate of #73 (verification window from approval, or the last field task's ETA if later).
+// Fast repair (Kyle 10-21 flow): 專人維修中（n/m）→ 維修完成・溫度回升中 (Event.repaired_at, the readings ramp back) →
+// 已恢復正常・報告已產生 (closed, Event.review pending = the incident report unread) → 已恢復正常・主管已讀報告.
 import type { Channel, Event, Expectation, WorkTask } from './contracts'
 import { machineLabel } from './factory'
 import { fmtHM, fmtMD, ms } from './format'
@@ -80,6 +82,43 @@ export function repairEstimate(ev: Event, state: WarRoom) {
   return { now, x, tasks, open, lastEta, decided, doneBy }
 }
 
+/** The machine's normal value the readings ramp back to after a fast repair: the detector's baseline of the anomaly
+ *  (≈ the simulator's nominal: 7 號 128°C, B 線開煉機 94°C) when it is the expectation's channel; null otherwise (a
+ *  supervisor or plant event has no baseline). */
+export function normalOf(ev: Event, x: Expectation | null = expectationOf(ev)): number | null {
+  const a = ev.anomaly
+  return x && a && a.channel === x.channel && a.baseline > 0 ? a.baseline : null
+}
+
+/** 「溫度回升中」 / 「溫度回降中」: which way the reading goes, toward the normal value when known, else to meet the
+ *  expectation. */
+export function recoverWord(x: Expectation | null, now: number | null = null, normal: number | null = null): string {
+  if (!x) return '讀值恢復中'
+  const down = normal != null && now != null ? now > normal
+    : x.op === '<=' || (x.op === 'between' && now != null && now > (x.value_hi ?? x.value))
+  return `${CH_LABEL[x.channel]}${down ? '回降中' : '回升中'}`
+}
+
+/** 「溫度回升中 122.1°C → 128°C」: the reading toward the machine's normal value (the ramp ends there; Kyle: 恢復正常溫度
+ *  後轉綠燈), or toward the expectation's target (「→ ≥121°C」) when that is unknown; the reading left out while unknown.
+ *  Not the expectation when the normal value is known: a temperature drop 128 → 122°C already meets 「≥121°C」. */
+export function recoverText(x: Expectation | null, now: number | null, normal: number | null = null): string {
+  const to = x ? (normal != null ? readingText(x.channel, normal) : targetText(x)) : ''
+  return `${recoverWord(x, now, normal)}${x && now != null ? ` ${readingText(x.channel, now)} → ${to}` : ''}`
+}
+
+/** Where a fast repair stands: the crew working (after the supervisor's decision), the readings coming back after the
+ *  repair (repaired_at), back to normal (recovered_at), the report unread / read (closed, Event.review). */
+export type RepairStage = 'repairing' | 'recovering' | 'recovered' | 'report' | 'read'
+export function repairStage(ev: Event, items: WorkTask[]): RepairStage | null {
+  if (ev.state === 'closed') return ev.review?.status === 'done' ? 'read' : ev.review?.status === 'pending' ? 'report' : ev.repaired_at ? 'recovered' : null
+  if (ev.state === 'safe_stop') return null
+  if (ev.recovered_at) return 'recovered'
+  if (ev.repaired_at) return 'recovering'
+  if (BEFORE_APPROVAL.has(ev.state)) return null
+  return items.some((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind) && t.status !== '完成') ? 'repairing' : null
+}
+
 /** What the AI detected: the detector's own text (the event's anomaly), not the latest alert title, which a later round
  *  rewrites into its action (p.11 round 2: 「7 號機停用，重排中」); the same text on every screen for the whole event.
  *  A supervisor command or plant event has no detection: its alert title as before. */
@@ -93,11 +132,11 @@ const repairPhase = (repair: WorkTask[], open: WorkTask[]) => `專人維修中�
 
 /** A closed event is 「已修復」 only when a reading verified it: a repair task still running, a machine taken out
  *  (p.11 round 2: 「未驗證：已停用該機…」) or another unverified close says what really happened. A close after a repair
- *  waits for the supervisor's 覆核 (Event.review). */
+ *  comes with its incident report (Event.review: pending = unread, done = the supervisor read it; nothing waits for it). */
 function closedPhase(ev: Event, repair: WorkTask[], repairOpen: WorkTask[]): string {
   if (repairOpen.length) return repairPhase(repair, repairOpen)
-  if (ev.review?.status === 'pending') return '已修復，待主管覆核'
-  if (ev.review?.status === 'done') return '已修復・主管已覆核'
+  if (ev.review?.status === 'pending') return '已恢復正常・報告已產生'
+  if (ev.review?.status === 'done') return '已恢復正常・主管已讀報告'
   if (/停用/.test(ev.outcome ?? '')) return '已停用該機，排程已調整'
   if (/未驗證/.test(ev.outcome ?? '')) return '已處置，未以讀值驗證'
   return '已修復'
@@ -105,7 +144,9 @@ function closedPhase(ev: Event, repair: WorkTask[], repairOpen: WorkTask[]): str
 
 const BEFORE_APPROVAL = new Set(['detected', 'classify', 'plan', 'simulate', 'gate', 'replan', 'await_approval'])
 
-export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null) {
+/** `fastS`: REPAIR_FAST_S from /api/health. A fast repair runs on the wall clock, so while the crew works its ETA is the
+ *  wall seconds left (「預計約 8 秒後完成」), not factory time (at 10× a 12-second repair read 「約 2 分鐘」). */
+export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null, fastS: number | null = null) {
   const what = plain(firstDetection(ev)).replace(/^異常[：:]\s*/, '')
   // Kyle 10-21: the single agent is called Agent Nemo on screen; no typed sub-agent in brackets (CJ 2026-10-21: 「現在先不要派發」)
   const agent = 'Agent Nemo'
@@ -115,9 +156,12 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null)
   // any round's repair task counts: the machine is not fixed while maintenance is still on it
   const repair = (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind))
   const repairOpen = repair.filter((t) => t.status !== '完成')
+  // after the repair, until the event closes: the readings ramp back to normal (a few wall seconds)
+  const recovering = ev.state !== 'closed' && ev.state !== 'safe_stop' && !!ev.repaired_at
   const phase =
     ev.state === 'closed' ? closedPhase(ev, repair, repairOpen)
       : ev.state === 'safe_stop' ? '已安全停止'
+        : recovering ? (ev.recovered_at ? '已恢復正常' : `維修完成・${recoverWord(est.x)}`)
         : ev.state === 'await_approval' ? '等主管核准'
           : ev.state === 'execute' || ev.state === 'verify'
             ? (repairOpen.length ? repairPhase(repair, repairOpen) : est.open.length ? `現場修正中（${done}/${est.tasks.length}）` : '確認是否恢復')
@@ -126,9 +170,12 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null)
   // not the verification window)
   const repairing = ev.state === 'closed' || ((ev.state === 'execute' || ev.state === 'verify') && repairOpen.length > 0)
   const repairEta = repairing ? latestEta(repairOpen, est.now) : null
-  const doneBy = ev.state === 'safe_stop' ? null : repairEta ? ms(repairEta) : ev.state === 'closed' ? null : est.doneBy
+  const doneBy = ev.state === 'safe_stop' || recovering ? null : repairEta ? ms(repairEta) : ev.state === 'closed' ? null : est.doneBy
   let eta = ''
-  if (doneBy) {
+  if (fastS && fastS > 0 && ev.state !== 'closed' && !recovering && repairing && repairOpen.length) {
+    const left = Math.max(...repairOpen.map((t) => (1 - Math.min(1, Math.max(0, t.progress ?? 0))) * fastS))
+    eta = `預計約 ${Math.max(1, Math.round(left))} 秒後完成`
+  } else if (doneBy) {
     const s = est.now ? (doneBy - ms(est.now)) / 1000 : null
     const left = s == null ? '' : s <= 0 ? '即將完成' : s < 60 ? `約 ${Math.max(1, Math.round(s))} 秒` : `約 ${Math.round(s / 60)} 分鐘`
     eta = `預計 ${fmtMD(doneBy)} ${fmtHM(doneBy)} 完成${left ? `（${left}）` : ''}`

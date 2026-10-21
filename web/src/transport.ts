@@ -63,8 +63,8 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
-  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
-   *  approvals. 409 when the event has no pending review. */
+  /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no unread report. */
   review?(eventId: string, note?: string): Promise<Event>
   /** Live only: resolution paths (warroom/api/resolve.py), supervisor session like approvals. */
   safetyDispatch?(caseId: string): Promise<SafetyCase>

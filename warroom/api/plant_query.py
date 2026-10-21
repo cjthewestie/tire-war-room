@@ -130,21 +130,17 @@ def open_events(r: Any) -> dict[str, Any]:
 
 
 def handled_today(r: Any) -> dict[str, Any]:
-    from warroom.api import daylog
-    sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
-               for ev in r.events()}
-    days = daylog.build(r.audit.tail(0, 1_000_000), sources)
-    if not days:
-        return {"total": 0, "items": []}
-    d = max(days.values(), key=lambda x: x["last_seq"])
-    runs = [x for x in d["runs"] if x["type"] != "main"]          # the chat turns themselves are not work done
-    outcomes: dict[str, int] = {}
-    for x in runs:
-        outcomes[STATE.get(x["outcome"], x["outcome"])] = outcomes.get(STATE.get(x["outcome"], x["outcome"]), 0) + 1
-    return {"day": d.get("label") or d["key"], "total": len(runs), "by_outcome": outcomes,
-            "items": [{"id": x["id"], "type": daylog.TYPE_LABEL.get(x["type"], x["type"]), "title": x.get("title"),
-                       "opened": _hm(x["opened_at"]) if x.get("opened_at") else None,
-                       "outcome": STATE.get(x["outcome"], x["outcome"])} for x in runs][-15:]}
+    """The same durable list the Agent page shows (warroom/api/tasklog.py): chat and page agree."""
+    day = r.tasklog.today()
+    rows = [x for g in day["groups"] for x in g["rows"]]
+    finals: dict[str, int] = {}
+    for x in rows:
+        finals[x["final"]] = finals.get(x["final"], 0) + 1
+    return {"day": day["date"], "total": len(rows), "by_final": finals,
+            "items": [{"id": x["id"], "opened": _hm(x["opened_at"]), "closed": _hm(x["closed_at"]),
+                       "what": (x["title"] or "")[:40], "machine": x["machine_id"], "order": x["order_id"],
+                       "final": x["final"], "loop": x["loop"], "scenario": x["scenario"],
+                       "approvals": [f"v{a['version']} {a['decision']}" for a in x["approvals"]][-2:]} for x in rows][-12:]}
 
 
 def audit_recent(r: Any) -> dict[str, Any]:
@@ -231,10 +227,153 @@ def energy(r: Any) -> dict[str, Any]:
             "by_line": {k: round(v, 1) for k, v in e.by_line.items()}}
 
 
+# ---------------------------------------------------------------------------------- past orders (CJ 2026-10-22:
+# 「我有沒有地方可以詢問之前的訂單」): the World's order book (created / completed / shipped), its event feed, the imported
+# orders DB when there is one, the team dataset's order plan and daily output, and the events that named the order.
+def _world_obj(r: Any) -> Any:
+    return getattr(r.sim, "world", None)
+
+
+def _norm(oid: str) -> str:
+    return str(oid).upper().replace("#", "").replace("-", "")
+
+
+def _world_orders(r: Any) -> list[Any]:
+    """Every order the World shows (seed and world orders, WorldSnapshot.orders), with completed_at / start_at from
+    its own book where it keeps one."""
+    from types import SimpleNamespace
+    w, snap = _world_obj(r), _world(r)
+    book = getattr(w, "_orders", {}) if w is not None else {}
+    out = []
+    for o in (snap.orders.items if snap is not None else []):
+        mine = book.get(o.id)
+        out.append(SimpleNamespace(**o.model_dump(), completed_at=getattr(mine, "completed_at", None),
+                                   start_at=getattr(mine, "start_at", None)))
+    return out
+
+
+def _late(o: Any) -> bool | None:
+    done = getattr(o, "shipped_at", None) or getattr(o, "completed_at", None)
+    if done is None:
+        return None
+    return done.astimezone(F.TZ).date() > o.due
+
+
+def _dataset(name: str) -> list[dict[str, str]]:
+    try:
+        from warroom.data.team_dataset import load_table
+        return load_table(name)
+    except Exception:  # noqa: BLE001 - no dataset in this checkout: that source is left out
+        return []
+
+
+def orders_history(r: Any) -> dict[str, Any]:
+    done = [o for o in _world_orders(r) if o.status in ("完成", "待出貨", "已出貨") or getattr(o, "shipped_at", None)]
+    done.sort(key=lambda o: getattr(o, "shipped_at", None) or getattr(o, "completed_at", None) or r.clock.now(), reverse=True)
+    items = [{"id": o.id, "customer": o.customer, "qty": o.qty, "due": o.due.isoformat(), "status": o.status,
+              "completed": _hm(getattr(o, "completed_at", None)), "shipped": _hm(getattr(o, "shipped_at", None)),
+              "late": _late(o)} for o in done]
+    w = _world_obj(r)
+    shipped = [{"at": _hm(e.ts), "text": e.text, "on_time": e.on_time} for e in list(getattr(w, "events", []))
+               if e.kind in ("shipment_departed", "order_completed")][-8:]
+    plan = [{"id": x.get("order_id"), "customer": x.get("customer"), "qty": x.get("qty"), "due": x.get("due"),
+             "completion": x.get("completion"), "late": (x.get("completion") or "") > (x.get("due") or "~")}
+            for x in _dataset("orders")]
+    daily = [{"date": x.get("date"), "tires_done": x.get("tires_done"), "downtime_min": x.get("downtime_min")}
+             for x in _dataset("history_daily")][-7:]
+    return {"completed_or_shipped": items[:12], "late": [i["id"] for i in items if i["late"]],
+            "recent_feed": shipped,
+            # the dataset plan as a count and its late ids only: the full list made the answer slow and long
+            "team_dataset_plan": {"note": "團隊資料集的訂單計畫（原始日期）", "orders": len(plan),
+                                  "late": [p["id"] for p in plan if p["late"]]},
+            "daily_output": daily[-3:]}
+
+
+def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
+    if not order_id:
+        return {"error": "要給 order_id"}
+    key = _norm(order_id)
+    out: dict[str, Any] = {"order_id": order_id}
+    o = next((x for x in _world_orders(r) if _norm(x.id) == key), None)
+    if o is not None:
+        out["world"] = {"customer": o.customer, "qty": o.qty, "done": o.done, "due": o.due.isoformat(), "status": o.status,
+                        "rush": o.rush, "created": _hm(o.created_at), "started": _hm(getattr(o, "start_at", None)),
+                        "completed": _hm(getattr(o, "completed_at", None)), "shipped": _hm(getattr(o, "shipped_at", None)),
+                        "late": _late(o)}
+    w = _world_obj(r)
+    feed = [{"at": _hm(e.ts), "text": e.text} for e in list(getattr(w, "events", []))
+            if _norm(e.ref or "") == key or key in {_norm(x) for x in (e.order_ids or [])}]
+    if feed:
+        out["feed"] = feed[-8:]
+    db = getattr(r, "orders_db", None)
+    if db is not None:
+        try:
+            row = next((x for x in db.orders([order_id])), None)
+            if row is not None:
+                out["orders_db"] = {"qty": row.qty, "done": row.done, "due": row.due.isoformat(), "customer": row.customer}
+        except Exception:  # noqa: BLE001, S110 - the other sources still answer
+            pass
+    store = r.c.store
+    if store is not None:
+        try:
+            jobs = [j for j in store.current().schedule.jobs if _norm(j.order_id) == key]
+            if jobs:
+                out["schedule"] = {"jobs": len(jobs), "presses": sorted({j.press_id for j in jobs}),
+                                   "first_mold_in": _hm(min(j.mold_in for j in jobs)), "last_demold": _hm(max(j.demold for j in jobs))}
+        except Exception:  # noqa: BLE001, S110
+            pass
+    ds = next((x for x in _dataset("orders") if _norm(x.get("order_id", "")) == key), None)
+    units = [x for x in _dataset("tire_unit") if _norm(x.get("order_id", "")) == key or _norm(x.get("alias", "")) == key]
+    if ds or units:
+        out["team_dataset"] = {"note": "團隊資料集（原始日期）", "order": ds,
+                               "tyres": len(units), "cure_first": min((u["cure_start"] for u in units), default=None),
+                               "cure_last": max((u["cure_end"] for u in units), default=None)}
+    evs = [e for e in r.events() if order_id in (e.command or "") or order_id in (e.alert_card.title if e.alert_card else "")
+           or order_id in (e.anomaly.message or "")]
+    if evs:
+        out["events"] = [{"id": e.id, "opened": _hm(e.opened_at), "state": STATE.get(e.state.value, e.state.value),
+                          "what": (e.command or (e.alert_card.title if e.alert_card else e.anomaly.message))[:40]} for e in evs][-6:]
+    if len(out) == 1:
+        out["note"] = "沒有找到這張訂單的任何紀錄"
+    return out
+
+
+def tasks(r: Any) -> dict[str, Any]:
+    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long."""
+    now = r.clock.now()
+    subs = {x["id"]: x for x in r.orch.subagents()}
+    pending = {a.event_id: a for a in r.approvals.pending()} if r.approvals is not None else {}
+    pre = getattr(r.orch, "preplan_ids", set())
+    items = []
+    for e in sorted(_open_events(r), key=lambda e: e.opened_at):
+        sa = subs.get(e.id, {})
+        card = pending.get(e.id)
+        st = e.state.value
+        if card is not None:
+            label, waits = f"待核准 v{card.version}", "等主管核准"
+        elif st in ("execute", "verify") and sa.get("tasks_total"):
+            label = f"執行中 {sa['tasks_done']}/{sa['tasks_total']}" if st == "execute" else "驗證中"
+            waits = "等現場完成" if st == "execute" else "等讀值驗證"
+        elif st == "verify":
+            label, waits = "驗證中", "等讀值驗證"
+        elif st == "execute":
+            label, waits = "執行中", "執行核准的步驟"
+        elif st in ("detected", "classify", "plan", "simulate", "gate", "replan"):
+            label, waits = "規劃中", "等 AI 擬計劃" + ("（模型排隊中）" if sa.get("status") == "waiting_model" else "")
+        else:
+            label, waits = STATE.get(st, st), ""
+        last = e.timeline[-1].ts if e.timeline else e.opened_at
+        items.append({"id": e.id, "what": (e.command or (e.alert_card.title if e.alert_card else e.anomaly.message))[:40],
+                      "machine": e.machine_id, "state": label, "waits_on": waits, "preplan": e.id in pre,
+                      "open_min": round((now - e.opened_at).total_seconds() / 60, 1),
+                      "in_state_min": round((now - last).total_seconds() / 60, 1), "round": len(e.prior_rounds) + 1})
+    return {"count": len(items), "tasks": items}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
-          "maintenance": maintenance, "energy": energy}
+          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -245,9 +384,9 @@ def _shrink(d: Any, n: int) -> Any:
     return d
 
 
-def query(r: Any, topic: str) -> dict[str, Any]:
+def query(r: Any, topic: str, order_id: str | None = None) -> dict[str, Any]:
     """{topic: data} for one topic, at most MAX_CHARS as JSON; KeyError for an unknown topic."""
-    data = TOPICS[topic](r)
+    data = TOPICS[topic](r, order_id) if topic == "order_lookup" else TOPICS[topic](r)
     n = 20
     while len(json.dumps(data, ensure_ascii=False, default=str)) > MAX_CHARS and n > 1:
         n //= 2

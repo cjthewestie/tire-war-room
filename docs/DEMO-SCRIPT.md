@@ -1,43 +1,98 @@
-# 決賽 3 分鐘展示腳本 — 實心胎智慧製造戰情室
+# 決賽 2 分鐘展示腳本 — 實心胎智慧製造戰情室
 
-Follows proposal page 11 (7 號硫化機溫降) and page 9 (unplug). Times on the left are wall-clock seconds into the talk; times in brackets are factory (sim) time shown in the header.
+新流程（Kyle 10-21 定）：觸發異常 → 異常發生 → 主管手機收到核准通知、按核准 → Agent Nemo 派人進廠維修（約 12 秒，機台上方的圈填滿）→ 維修完成通知 → 溫度約 4 秒回到正常（琥珀色「回溫中」）→ 轉綠 → Agent Nemo 異常報告。主管不用再審，「知道了」可按可不按。
 
-## Before you go on stage (5 min)
+改的原因：GitHub 版的機台上方圈圈轉了一分多鐘，人才走到機台。
 
-1. Start the stack.
-   - Mac, no model: `./start.sh`
-   - Mac, real model: `./start.sh ollama` (Nemotron 3.5 Lightning NVFP4 on a project Ollama, :11435). Do not set `PORT` with this mode: `deploy/mac/dev.sh` reuses `PORT` for the Ollama port, so `PORT=8772 ./start.sh ollama` puts the app on :11435 instead of :8772. For another app port, run `deploy/mac/dev.sh ollama`, then `LLM_MODE=llm BASE_URL=http://127.0.0.1:11435/v1 MODEL=nemotron-3.5-lightning:30b-a3b-nvfp4 PORT=8772 uv run python -m warroom.api serve`.
-   - Real model: warm it up before you go on. The first call after the project Ollama starts loads 22 GB and took 82 s on the Mac (rehearsal 2026-10-04); after that each plan takes about 10 s. Either run the 7 號硫化機溫降 scenario once end to end, or `curl -s 127.0.0.1:11435/api/generate -d '{"model":"nemotron-3.5-lightning:30b-a3b-nvfp4","prompt":"hi","stream":false,"options":{"num_predict":5}}'`. The model then stays loaded for 24 h.
-   - DGX Spark: it boots by itself (`warroom-stack.service`); check `curl -s 127.0.0.1:8000/api/health`.
-2. Laptop/touchscreen: open `http://localhost:8000` full screen (1440 wide or larger). Header must show the `即時・規則模式指揮官` chip (mock) or `即時・LLM 指揮官` (model).
-3. Supervisor phone on the factory Wi-Fi: open `http://<host LAN IP>:8000/phone`, enter the supervisor PIN (`WARROOM_SUPERVISOR_PIN`), tap 開啟核准提醒. The on-box screen at 127.0.0.1 needs no PIN.
-4. In the 展示 strip, click 正常運轉, then 1×. The network buttons sit on ● 在線.
-5. If the unplug segment is live on the Spark: know which cable is the uplink (WAN) and which is the factory LAN switch. Run `sudo -E bench/py.sh -m bench.unplug_test --unplug <wan-iface> --app-url http://127.0.0.1:8000 --watch 120` from a second terminal only if you want the counted verdict on screen.
+表格裡的秒數是目標值（REPAIR_FAST_S=12、RECOVER_FAST_S=4、真模型出卡約 13 秒），彩排時用碼表對過再改這裡。舊的 3 分鐘 p.11 兩輪版本在 git 歷史裡。
 
-## The walkthrough
+## 上台前（10 分鐘）
 
-| Wall time | Click / do | Say |
-|---|---|---|
-| 0:00 | Dashboard on 產線監控, normal running. Point at the four panels. | 「這是一個畫面看完整座工廠：訂單、四條產線、28 台機台、11 台硫化機。以前靠每 2 小時人工巡檢，現在 1 分鐘內偵測。」 |
-| 0:15 | Point at ① 訂單進度 (小 21/100 · 中 9/100 · 大 7/100) and ④ 機台狀態. | 「硫化機是瓶頸，中大胎只有 4 台能做。我們的排程從硫化機出模時刻往回推，所以每個異常都要先問：會不會讓大胎遲交？」 |
-| 0:25 | In the 展示 strip click **7 號硫化機溫降（p.11）**, then **10×**. | 「現在凌晨兩點，只有夜班。7 號機正在硫化小胎，已經 14.4 小時。」 |
-| 0:35 | [02:14:00] Header count chip turns red (正常 27 台・異常 1 台); press 7 tile red; orange ⚡ 首張告警卡：7 號機異常 line appears (about 12 s after the click). | 「事件偵測（不是 LLM，常駐的時序模型）看到 128 掉到 122°C，預測穩定在 122±1，才喚醒指揮官。安全核心檢查：還在 120–130，不停機。」 |
-| 0:50 | In ③ 目前事件, click the collapsed **事件時間軸（4）** line to open it. Point at H1 and the 拆步驟 row (S1..S5). With the model warm they are there about 25 s after the click. | 「唯一的 LLM 是事件指揮官。它只回一份 JSON 步驟計畫：假設 H1 蒸汽壓不足會穩定；S1 硫化公式、S2 訂單班表，S3 排程等 S1、S2 都完成。」 |
-| 1:05 | Point at 28.5 h (+4.5 h) and the line 排程影響：待核准 v2：7 號硫化 28.5 h；#A-311 改 6 號. | 「28.5 小時是 Arrhenius 公式算的，換模是 OR-Tools 求解器排的 —— 物理和排程數字從不讓 AI 猜。下一模 #A-311 移到 6 號機，夜班缺 1 人，交期全部滿足。」 |
-| 1:20 | [02:14:26] Phone buzzes (the card is usually up by 0:55; it waits). Show the phone card (R3, 第一輪核准). Pick **B 從 2 線調 1 人**, tap **核准 B**. | 「寫入動作要過動作把關：白名單、四級風險、格式、模擬可行。這是 R3，必須主管核准。主管在手機上按一下，決定回到狀態機，寫進稽核日誌。」 |
-| 1:35 | Click **60×**. | 「狀態機說好 30 分鐘內要回到 121°C 以上，驗證是程式做的，不是 AI。」 |
-| 1:50 | [02:28:50] Safety core line: 119.9°C < 120°C → 扣模 (about 8 s after 60×). | 「掉破 120 的那一刻，安全核心直接處置。它是確定性規則，LLM 不能呼叫、不能推翻，也不等 LLM。」 |
-| 2:00 | [02:31:00] Timeline: 驗證 119.5°C → H1 不成立 → H2. | 「預期沒達成 → H1 被推翻。指揮官換假設 H2：持續洩壓或感測器漂移，對照同一條蒸汽管的 6、8 號機，查 SOP〈硫化中斷處置〉→ 7 號機停用、重排。」 |
-| 2:15 | [02:31:22] Phone card 第二輪核准「CURE-07溫度下降，需重排」, 將做：7 號機停用 (it arrives at about 1:55; it waits). Pick **A 夜班加班**, tap **核准 A** (the reason 否決「從 2 線調 1 人」，改選「夜班加班」 is written for you; tap 修改 instead to type your own). | 「這次主管不同意跨組調人，選夜班加班。決定和理由都進稽核日誌，系統照主管的決定執行，排程舊版保留，可一鍵回復。」 |
-| 2:30 | Pull the WAN cable (Spark) — or click **WAN 斷**, then **LAN 斷** on the Mac. | 「拔掉對外網路：模型、知識庫、求解器全在這台 DGX Spark 上，戰情室照常運作，手機走廠內 LAN。連 LAN 都斷了，現場觸控螢幕加警示燈接手。」 |
-| 2:45 | Click the 人力排程 tab: Gantt v3 生效, press 7 停用・扣模待 QC, #A-311 on 6, 回復上一版 button top right. | 「這就是重排後的排程。偵測 2 小時變 1 分鐘；中大胎交期 13.3 週降到 9.3 週。全部在一台 240 W 的邊緣主機上。」 |
-| 3:00 | Click 產線監控 to end on the dashboard. Click ● 在線 off stage before the next run. | 「謝謝。」 |
+1. **在 DGX Spark 上啟動**，用平常的啟動方式，前面加三個變數：
 
-## If something goes wrong
+   ```bash
+   REPAIR_FAST_S=12 RECOVER_FAST_S=4 MODEL_SLOTS=3 <平常的啟動指令>
+   ```
 
-- No approval card after 30 s at 10x: click 7 號硫化機溫降 again. Loading a scenario starts it fresh with a new schedule store.
-- Real model slow or down: with `LLM_FALLBACK_TO_MOCK` on (the default) the commander falls back to the rule-based plan and the audit log records it. The demo still runs end to end; say so honestly. For a guaranteed run, start in mock mode (`./start.sh`). Each model call waits up to `LLM_TIMEOUT_S` (default 60 s). A commander plan may use up to `COMMANDER_MAX_TOKENS` (default 4096; the live p.11 plan is ~1.3k); a plan cut at that cap is logged with cause `truncated` (strict reason 「模型輸出超過長度上限」). With `--strict` there is no rule fallback: a model timeout or failure ends the event in 安全中止 with the reason 「模型逾時，未產生計劃（strict 模式不使用規則備援）」, and `/api/health` shows `strict: true`.
-- Real model, different order: in 1 of 3 rehearsal runs (2026-10-04) the model set its H1 expectation to ≥123°C instead of ≥121°C. The reading of 122°C misses it at once, so H1 fails at about 02:19, the second phone card comes before the 02:28:50 扣模, and S3 moved #A-311 to another press than the usual one (that rehearsal ran on the pre-#20 order book where the usual one was 9 號; re-rehearse on the dataset book). Everything still runs; tell it in the order the screen shows. For the exact page-11 order every time, use mock mode.
-- Times above are from rehearsals against the real model on the Mac at 10× then 60×. Factory time keeps running while you talk, so at 1:20 the header shows about 02:18 and at 2:15 about 02:51.
-- Phone says PIN wrong: use the on-box screen (127.0.0.1) to approve; it needs no PIN.
-- Page-2 backup demo: 展示 → 大開煉機過熱 (p.2). A-BIGOPEN 112°C rising, ✓ 已自動 通知維修冷卻水路, ☐ 待核准 放慢生料投入, 排程影響 「無，大胎 #07 仍 17:00 入硫化機」.
+   - 真的跑在 OpenShell 沙箱裡時，再加 `WARROOM_AGENT_RUNTIME="NemoClaw 沙箱"`；沒有用沙箱就不要設。
+   - `deploy/spark/docker-compose.yml` 的 app 和 `deploy/openshell/run_sandboxed.sh` 只傳它們自己列出的變數，上面三個傳不進去，會用程式預設值。不管用哪一種，都用下一步的健康檢查確認。
+   - 10-21 決賽機的沙箱版在 :8090。以當天實際的埠號為準，下面寫成 `<埠>`。
+
+2. **健康檢查**：`curl -s 127.0.0.1:<埠>/api/health`，要看到：
+   - `llm_mode` 是 `llm`、`llm_reachable` 是 `true`
+   - `qdrant_ok` 是 `true`（SOP 索引開機後在背景建，剛開要等一下）
+   - `repair_fast_s` 是 `12`、`recover_fast_s` 是 `4`
+   - `strict` 是 `false`（這樣模型慢時才有規則備援）
+   - `agent_runtime`：有「NemoClaw 沙箱」就講沙箱版台詞，沒有就講一般版（見〈怎麼講 Agent Nemo〉）
+
+3. **暖機**：完整跑一次 7 號硫化機溫降（觸發 → 核准 → 轉綠 → 有報告）。模型、提示快取、SOP 搜尋都會熱起來，手機分頁也會記住 PIN。跑完按 `6`（正常運轉）回到平靜狀態。
+
+4. **開畫面**（`<Spark>` 是 Spark 在廠內 Wi-Fi 的位址）：
+   - 投影筆電：`http://<Spark>:<埠>/factory?demo=1` 全螢幕。按 Enter 進入，按 `V` 切俯瞰，看得到整排硫化機。下方鍵列有 `1` 7 號機溫降、`5` 3 件同時、`6` 正常運轉、`2`／`3` 10×／60×、`0` 暫停／播放；`T` 開 ⚡ 觸發異常選單，`P` 拿手機。
+   - 同一台筆電另開一個視窗：`http://<Spark>:<埠>/?demo=1`，點「Agent」分頁（網址後面加 `#console` 也可以）。兩個視窗用 Cmd+Tab 切。
+   - 主管手機（連廠內 Wi-Fi）：`http://<Spark>:<埠>/phone`，點「開啟核准提醒」，再點一下畫面讓聲音能響。第一次按核准會問主管 PIN，輸入後這個分頁就不再問：暖機時先輸入，不要關分頁、不要用無痕。PIN 不念出來、不投影。
+
+5. 要做斷網那段的話：先認清哪一條是 Spark 對外上網的線、哪一條是手機走的廠內網路。
+
+## 2 分鐘流程
+
+### A 段：單一異常（約 40 秒）
+
+| 時間 | 做什麼 | 畫面 | 說什麼 |
+|---|---|---|---|
+| 0:00 | 3D 俯瞰，正常運轉。按 `T`（或點 ⚡ 觸發異常）→ 點「7 號硫化機溫降」。也可以直接按 `1`。 | 上方提示「載入異常：7 號硫化機溫降」，幾秒後 7 號機燈轉紅，HUD 出 AI 狀態句「AI 偵測到：…｜建議交由 Agent Nemo 修正」。 | 「凌晨兩點，只有夜班。7 號硫化機蒸汽壓不足，溫度從 128 度往下掉。偵測是常駐程式在看，不用等 AI。」 |
+| ≈0:13 | 手機響了，拿起手機（備案：在 3D 按 `P`）。 | 手機核准卡：做什麼、風險、修復預估；3D 出「📱 … 按 P 拿起手機核准」。 | 「Agent Nemo 用本機的 Nemotron 模型寫好處理計劃。硫化要延長多久是公式算的，排程是 OR-Tools 排的，數字不讓 AI 猜。」 |
+| ≈0:16 | 推薦方案已經選好，直接點「核准」。 | 一位員工走向 7 號機，機台上方的圈開始填；HUD「維修中 1 件」。 | 「會改動工廠的事一定要主管點頭。主管按下核准，Agent Nemo 馬上派人進廠維修。」 |
+| ≈0:28 | 不用按。 | 手機「維修完成：7 號硫化機，溫度回升中 … → ≥121°C」；圈變琥珀色「回溫中」。 | 「維修完成，故障排除，溫度正在回升。」 |
+| ≈0:32 | 不用按。 | 7 號機轉綠，圈變綠色「已恢復」；手機「已恢復正常・異常報告已產生」，有「看報告」。 | 「回到正常，機台轉綠。」 |
+| ≈0:35 | Cmd+Tab 到儀表板 → Agent 分頁，選 7 號機這件，按「看處理報告 ↓」（或在手機點「看報告」）。 | 處理歷程最後是「Agent Nemo 異常報告」：原因、做了什麼、維修完成和恢復的時間、最後讀值。 | 「報告是 Agent Nemo 在維修的時候就寫好的，恢復那一刻程式再補上最後讀值和時間。主管不用再審，想看就點開。」 |
+
+### B 段：3 件同時異常（約 60 秒）
+
+| 時間 | 做什麼 | 畫面 | 說什麼 |
+|---|---|---|---|
+| 0:40 | 回 3D，按 `5`（或 `T` →「3 件同時異常」）。 | 提示「載入情境：3 件同時異常」。 | 「工廠不會一次只壞一台。現在同時三件：3 號、10 號硫化機蒸汽壓不足，B 線開煉機冷卻水不足。」 |
+| ≈1:00 | 手機響，三張卡幾乎同時到。 | 手機最上面一張，下面「還有 2 件待核准」；HUD「待核准 3 件」。 | 「模型一次可以同時處理三件，不用排隊，三張卡一起到。」 |
+| ≈1:03 | 點「核准」三次（每點一次換下一張）。 | 三台機台上方三個圈一起填；HUD「維修中 3 件」。 | 「三件各派一組人，各自計時。」 |
+| ≈1:15 | 不用按。 | 三則「維修完成」通知依序出；圈變琥珀色（開煉機那台顯示它自己的讀值，水流或溫度）。 | 「三台都修好了，讀值在回來。」 |
+| ≈1:20 | 不用按。 | 三台轉綠；手機三則「已恢復正常・異常報告已產生」。 | 「三台都回到綠燈。」 |
+| ≈1:25 | Cmd+Tab 到 Agent 分頁，左邊依序選三件。 | 三份 Agent Nemo 異常報告，各自的處理歷程。 | 「每件事誰核准、誰去修、幾點恢復，都寫進稽核紀錄，報告自動產生。」 |
+
+### C 段（可省略，約 20 秒）：斷網
+
+| 時間 | 做什麼 | 畫面 | 說什麼 |
+|---|---|---|---|
+| 1:40 | 拔掉 Spark 對外上網那條線（不是手機走的那條），再到儀表板點展示列「WAN 斷」。 | 頂欄「WAN 中斷・手機走廠內 LAN」。 | 「把對外網路拔掉。模型、SOP 知識庫、排程求解器都在這台 DGX Spark 上，戰情室照常運作，手機走廠內網路。」 |
+| 1:55 | 點「● 在線」。下台後再插回網路線。 | 頂欄回到網路正常。 | 「資料不出廠，異常不過夜。謝謝。」 |
+
+「WAN 斷」按鈕只是讓畫面顯示斷網狀態，真正的證明是拔線。時間不夠就跳過 C 段，只講最後那句。
+
+## 怎麼講 Agent Nemo（照實說）
+
+先看 `/api/health` 的 `agent_runtime`，或 AI 狀態句裡有沒有「（NemoClaw 沙箱）」。
+
+- **有（沙箱版）**：「Agent Nemo 是我們的 agent。整個戰情室跑在這台 DGX Spark 的 OpenShell 沙箱裡，也就是 NVIDIA NemoClaw 底層的執行環境：網路、檔案、程序都被沙箱管住，模型和知識庫只有沙箱連得到。」
+- **沒有（一般版）**：「Agent Nemo 是我們這個 agent 在畫面上的名字，它跑在這台 DGX Spark 上，資料不出廠。」這時不要說「沙箱」。
+
+兩種都要講清楚分工：
+
+- 處理計劃和異常報告：本機 Nemotron 模型寫的。
+- 硫化時間、排程數字：公式和 OR-Tools 求解器算的。
+- 停機、扣模：安全核心決定，模型叫不到、也推翻不了。
+- 會動到工廠的動作：先過我們自己程式的動作把關，再等主管核准。
+
+不要說：「NemoClaw 內建的 agent」「沙箱管住 AI 能用哪些工具」（工具白名單是我們自己的程式管的，不是沙箱）「這些數字是 AI 算的」。
+
+## 出狀況時
+
+- **模型慢或沒回應**：系統自動改用規則備援，畫面會標「規則模式」或「規則備援」，報告也會記下是模型還是規則寫的。照實說：「這次模型比較慢，系統自動改用規則備援，畫面上有標。」每次呼叫模型最多等 60 秒（`LLM_TIMEOUT_S`）。
+- **第一次載入慢**：3D 頁第一次開要載幾秒，所有頁面上台前就開好。Spark 重開後模型要幾分鐘才就緒，第一次呼叫也比較慢，所以一定要先暖機。
+- **30 秒還沒有卡片**：再按一次同一個情境（`1`、`5` 或 ⚡ 選單），會從頭重新載入。還是不行就按 `6` 正常運轉，再按一次情境。
+- **按 `5` 時跳出「已疊加：3 件同時異常」**：A 段那件還沒處理完，三件會疊加上去，照樣進行。
+- **p.11 沒有第二輪**：修好就在第一輪結束，第二輪核准不會出現（Kyle 已同意）。不要講「假設被推翻、第二輪核准」那段。
+- **圈圈填很久、人很久才到**：`/api/health` 的 `repair_fast_s` 不是 12，用 `REPAIR_FAST_S=12` 重新啟動。
+- **3 件同時的卡一張一張慢慢來**：`MODEL_SLOTS` 不是 3，三件在排隊。照樣等完，照實講「模型在排隊」。
+- **手機問 PIN 或說 PIN 錯**：重新輸入主管 PIN。現場螢幕（127.0.0.1）不用 PIN；沙箱版經過轉送，每個畫面都會被當成遠端，都要 PIN。
+- **手機沒響**：沒點「開啟核准提醒」，或還沒點畫面啟用聲音。卡片照樣會出現，直接看畫面。
+- **3D 按鍵沒反應**：點一下 3D 畫面再按。打字欄位有游標時快捷鍵不作用；`Esc` 關掉選單或手機。
+- **斷網**：只拔對外的線，或只關對外那張網卡。不要在 Spark 上用 `nmcli networking off`：它會拿掉 docker0 和 OpenShell 橋接網路的位址，模型連不到，而且不會自己恢復。
