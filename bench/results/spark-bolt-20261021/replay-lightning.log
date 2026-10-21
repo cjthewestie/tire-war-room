@@ -1,0 +1,14 @@
+[lightning] health model=lightning reachable=True
+[lightning]   4.8s by=model fb=False tools=['query_orders_shifts', 'memory_read'] Q=SO-004 什摸時候完成 | A='SO-004（小胎 20 條）交期是 2026-11-09 17:00，依目前進度預計 2026-11-05 09:00 前完成，餘裕約 104 小時，屬於正常工時完成。'
+[lightning]   2.4s by=model fb=False tools=['memory_read'] Q=之前大開煉機出過什麼事？ | A='A03 大開煉機曾因膠溫偏高導致，降低轉速並檢查水路，停機 15 分鐘，部分胎延長硫化後放行。'
+[lightning]   2.0s by=model fb=False tools=['memory_read'] Q=今天排程改了幾版？ | A='今天的作業計劃一共 1 版，目前生效中的是 v1（初始版本，65 個模次）。'
+[lightning]   5.9s by=model fb=False tools=['recall_today', 'recall_today', 'recall_today', 'query_orders_shifts', 'memory_read'] Q=現在有什麼在等我核准？ | A='現在沒有任何卡片在等你核准，今日卡的「等主管核准」區是空的。'
+[lightning]   7.1s by=model fb=False tools=['recall_today', 'memory_read'] Q=我筆記寫了什麼？ | A='筆記檔（notes.md）目前是空的，主管還沒寫任何內容。如果是想看其他檔案（如 today.md、schedule-today.md 等），請告訴具體是哪一本，我可以再讀一遍。'
+[lightning]   1.3s by=model fb=False tools=[] Q=哈摟 | A='哈！我是戰情室的 agent，平常負貫查機台、查 SOP、擬送核准的計畫。今天有什麼事要跟我提？'
+[lightning]   2.9s by=model fb=False tools=['recall_today', 'memory_read'] Q=有啥要處理的 | A='沒有等核准的卡，今天開案 0 件，限制也沒有。'
+[lightning]   5.2s by=model fb=False tools=['memory_read'] Q=不市一個 代理一個畫面媽 | A='是想問「你是哪個代理嗎？」這類的自我介紹。我是實心胎工廠戰情室的 agent，能查狀況、查 SOP、擬送核准的計畫，還有看今天的任務紀錄。'
+[lightning]   6.2s by=model fb=False tools=['query_orders_shifts', 'propose_plan'] Q=#M-201 可能晚交，請重排保交期 | A='好，已擬計劃送你核准（AI 指揮官正在排），核准後才執行。'
+[lightning]   9.0s by=model fb=False tools=['read_sensors'] Q=看一下目前有哪些風險 | A='目前硫化機溫度都在 127.8~128.2°C 範圍內，蒸汽壓都穩在 4.9~5 kgf/cm²，沒有異常溫度波動或壓力不足的情形。今天只開 1 張排程（EV-20261021-000119-CMD，7 號機重排），其餘機台都在正常運作中。'
+[lightning]   2.8s by=model fb=False tools=['recall_today'] Q=交期預警呢 | A='目前沒有任何交期預警卡在等核准（waiting_approval 為空），今天只有一張開啟中的重排任務（EV-20261021-000119-CMD，7 號機 #M-201 訂單，明天早上 08:00 前出模）。其他的風險或限制目前都還沒被標記。'
+[lightning]   6.0s by=model fb=False tools=['memory_read'] Q=狀態機頁在看什麼？ | A='狀態機頁顯示今天開著一件任務：7 號機的重排，目標明天早上 08:00 前出模，以保 M-201 訂單的交期。目前沒有等核准的卡，也沒有其他開中任務。'
+[lightning] REPLAY_DONE

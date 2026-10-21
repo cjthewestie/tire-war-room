@@ -1,0 +1,114 @@
+{
+  "bench": "decode",
+  "recorded_at": "2026-10-21T20:21:20.884917+08:00",
+  "host": {
+    "hostname": "aitopatom-3ef3",
+    "platform": "Linux-7.0.0-1019-nvidia-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "ram_gb": 121.6,
+    "cpu_count": 20
+  },
+  "code": {
+    "git_sha": "afb2553cfdd2",
+    "deps": [
+      "decode.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "f93930d1f41a985e"
+  },
+  "host_load_avg_1_5_15": [
+    2.97,
+    2.42,
+    2.24
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8001/v1",
+    "model": "bolt",
+    "kind": "vllm"
+  },
+  "config": null,
+  "batch": 1,
+  "target_band_tps": [
+    95.0,
+    108.0
+  ],
+  "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), full plan stream, plan + replan rounds, unique event per call",
+  "calls": [
+    {
+      "phase": "plan",
+      "ok": false,
+      "error": "APIConnectionError: Connection error.",
+      "ttft_any_s": null,
+      "total_s": 0.0009,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "decode_tps": null,
+      "counted": false
+    },
+    {
+      "phase": "plan",
+      "ok": false,
+      "error": "APIConnectionError: Connection error.",
+      "ttft_any_s": null,
+      "total_s": 0.0007,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "decode_tps": null,
+      "counted": false
+    },
+    {
+      "phase": "plan",
+      "ok": false,
+      "error": "APIConnectionError: Connection error.",
+      "ttft_any_s": null,
+      "total_s": 0.0008,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "decode_tps": null,
+      "counted": false
+    },
+    {
+      "phase": "replan",
+      "ok": false,
+      "error": "APIConnectionError: Connection error.",
+      "ttft_any_s": null,
+      "total_s": 0.0007,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "decode_tps": null,
+      "counted": false
+    },
+    {
+      "phase": "plan",
+      "ok": false,
+      "error": "APIConnectionError: Connection error.",
+      "ttft_any_s": null,
+      "total_s": 0.0007,
+      "completion_tokens": null,
+      "prompt_tokens": null,
+      "decode_tps": null,
+      "counted": false
+    }
+  ],
+  "n_counted": 0,
+  "n_errors": 5,
+  "decode_tps": {
+    "n": 0
+  },
+  "completion_tokens": {
+    "n": 0
+  },
+  "verdicts": [
+    {
+      "name": "decode_tps_p50",
+      "target": "≥ 95 tok/s (slide 95–108)",
+      "measured": null,
+      "passed": null,
+      "note": "no call produced enough tokens to time decode",
+      "extra": {}
+    }
+  ]
+}
