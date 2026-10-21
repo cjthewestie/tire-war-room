@@ -111,7 +111,7 @@ async def test_page11_timeline(tmp_path):
 
     assert ev.state is EventState.CLOSED
     # page-11 rows, in order
-    i = _find(tl, "事件偵測", "128 → 122°C", "預測穩定在 122±1°C", "喚醒指揮官")
+    i = _find(tl, "事件偵測", "128 → 122°C", "預測穩定在 122±1°C", "交給 Agent Nemo")
     assert tl[i].ts == at("02:14:00")
     i = _find(tl, "安全核心", "仍在 120–130°C", "不停機", start=i)
     assert tl[i].ts == at("02:14:01")

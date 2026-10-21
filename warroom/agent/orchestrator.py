@@ -95,6 +95,20 @@ def route(ev_or_kind: Event | str, severity: Severity | str | None = None) -> tu
     return t, p
 
 
+_NUMISH = re.compile(r"[0-9A-Za-z.±°%+\-]")
+
+
+def _clip(text: str, n: int) -> str:
+    """At most n characters (then 「…」), cut where a number or a word is not split: 「12…」 never stands for 122°C."""
+    text = text.strip()
+    if len(text) <= n:
+        return text
+    i = n
+    while i > 0 and _NUMISH.match(text[i - 1]) and _NUMISH.match(text[i]):
+        i -= 1
+    return text[:i].rstrip(" ・，、→") + "…"
+
+
 def rule_dispatch(text: str) -> tuple[str, str]:
     """Keyword fallback for a supervisor task: (dispatch name, reason)."""
     for t, rx in _RULES:
@@ -334,7 +348,7 @@ class Orchestrator:
         self._audit({"orch": "dispatch", "phase": "plan", "type": t, "type_label": TYPES[t], "priority": p, "by": via,
                      "reason": why, "machine_id": ev.machine_id,
                      # plain event words, no dispatch (CJ 2026-10-21: 「現在先不要派發，主要就是一個 agent 做 tool calling」)
-                     "text": f"{self._what(ev).strip('「」')}：開始處理，計劃擬好會送你核准", **extra}, ev.id)
+                     "text": f"{self._what(ev).strip('「」')}：開始處理，計畫擬好會送主管核准", **extra}, ev.id)
         self.publish()
 
     async def dispatch_command(self, text: str, actor: str, start: Callable[[str, str], Event]) -> tuple[Event, dict[str, Any]]:
@@ -358,13 +372,23 @@ class Orchestrator:
 
     @staticmethod
     def _what(ev: Event) -> str:
+        """「7 號機・128 → 122°C」: the machine once, then the alarm's first clause (no forecast), cut on a boundary,
+        never in the middle of a number (the old [:24] read 「預測穩定在 12」)."""
         if ev.source == "supervisor":
-            return f"「{(ev.command or '')[:24]}」"
+            return f"「{_clip(ev.command or '', 24)}」"
+        msg = re.split(r"[，。；：（(]", ev.anomaly.message.strip(), maxsplit=1)[0].strip()
         from warroom.agent.narrate import machine_label
         try:
-            return f"{machine_label(ev.machine_id)}・{ev.anomaly.message[:24]}" if ev.source == "detector" else ev.anomaly.message[:28]
+            if ev.source != "detector":
+                return _clip(msg, 28)
+            name = machine_label(ev.machine_id)
+            for p in (name, machine_label(ev.machine_id, short=True)):     # 「B 線開煉機 膠溫…」, 「7 號 128 → …」
+                if msg.startswith(p + " "):
+                    msg = msg[len(p):].strip()
+                    break
+            return f"{name}・{_clip(msg, 24)}"
         except Exception:  # noqa: BLE001
-            return ev.anomaly.message[:28]
+            return _clip(msg, 28)
 
     @staticmethod
     def _name(ev: Event | None) -> str:
@@ -400,9 +424,9 @@ class Orchestrator:
         gap = " " if name[:1].isascii() and name[:1].isalnum() else ""
         # plain event words (「已核准 7 號機方案 A，執行中」), never a dispatch to a typed agent (CJ 2026-10-21: 「好改」)
         if kind in ("approve", "modify"):
-            text = f"已核准{gap}{name}{'方案 ' + d.option_id if d.option_id else '的計劃'}，執行中"
+            text = f"已核准{gap}{name}{'方案 ' + d.option_id if d.option_id else '的計畫'}，執行中"
         elif kind == "reject":
-            text = f"已駁回{gap}{name}{'的' if name else ''}計劃，不執行"
+            text = f"已駁回{gap}{name}{'的' if name else ''}計畫，不執行"
         else:
             return
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
@@ -449,10 +473,13 @@ class Orchestrator:
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
         repaired = ev.source == "detector" and ev.state is EventState.CLOSED and not sub.interrupted
         head = "已中斷" if sub.interrupted else "已修復" if repaired else "完成" if ev.state is EventState.CLOSED else "已停止"
-        outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
+        # never 「安全中止：安全中止：…」 or 「7 號機已修復：已修復：7 號機 溫度回到…」
+        outcome = re.sub(r"^(安全中止|已中斷|已修復)[：:]\s*", "", (ev.outcome or "").strip())
         name = self._name(ev)
         if ev.source == "supervisor" and (ev.command or "").strip()[:10] in outcome:
             name = ""                                       # the outcome already quotes the command
+        elif name and outcome.startswith(name + " "):
+            outcome = outcome[len(name):].strip()           # the machine is named once, in front
         done_at = f"（{ev.closed_at.astimezone(TZ):%H:%M} 結案）" if ev.closed_at and ev.state is EventState.CLOSED else ""
         parts = [f"{name or '任務'}{head}：{outcome or '無需動作'}{done_at}"]   # 「7 號機已修復：溫度回到 128°C（02:14 結案）」
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")

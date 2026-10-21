@@ -59,6 +59,8 @@ async def test_unoffered_transfer_is_not_put_in_force(tmp_path):
     card = approvals.all()[0]
     # one short line of what approving changes: no 「核准全部：」, no 「（公式 …）」, the cure time said once
     assert [o.label for o in card.options] == ["第 2 版排程生效，7 號機這一模硫化 36.5 小時，#A-311 改 9 號"]
+    # the plan summary: the event id at most, then what to approve (Kyle 10-21), the schedule version said once
+    assert f"{ev.id}｜請核准：第 2 版排程（7 號硫化 36.5 h；#A-311 改 9 號）。" in [t.text for t in ev.timeline]
     assert any("本次不含人力調動" in a and "從 2 線調 1 人" in a for a in card.actions), card.actions
     assert ev.state is EventState.CLOSED and store.active == 2
     assert store.current().schedule.staffing_changes == []          # transfer not in force
