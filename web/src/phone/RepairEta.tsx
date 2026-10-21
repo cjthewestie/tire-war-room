@@ -11,7 +11,7 @@ import type { Event, Expectation } from '../contracts'
 import { CH_LABEL, repairEstimate, targetText } from '../aiStatus'
 import { fmtHM, fmtMD } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
-import { useHealth } from '../useHealth'
+import { useHealth } from '../health'
 import { useWarRoom } from '../useWarRoom'
 import { fastApplies, fastDoneText, fastRepairOf, fastWindowText, isRepairTask, secText, taskLeftS } from './fastEta'
 
