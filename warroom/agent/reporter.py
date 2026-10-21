@@ -155,10 +155,19 @@ def report_facts(ev: Event, req: Any = None, tasks: list[Any] | None = None, sop
               "說明": d.reason or None}
         f["主管核准"] = {k: v for k, v in ok.items() if v}
     if tasks:
-        f["派工"] = [f"{t.kind} {t.worker_name or '待派'}｜{str(t.title)[:36]}" for t in tasks][:4]
+        f["派工"] = [f"{t.kind} {_who(t.worker_name)}｜{str(t.title)[:36]}" for t in tasks][:4]
     if sops:
         f["SOP"] = sops
     return f
+
+
+def _who(name: str | None) -> str:
+    """Who took a task, as the report names them: a dataset worker has only a staff id (「S18（胎側膠組）」), so the report
+    names the team, never the id (veteran 10-22: no staff ids on a supervisor screen); 待派 while nobody took it."""
+    if not name:
+        return "待派"
+    m = re.match(r"^[A-Z]+\d+（(.+)）$", name)
+    return m.group(1) if m else name
 
 
 def final_facts(ev: Event, sim: Any = None) -> dict[str, Any]:

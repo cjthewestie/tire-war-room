@@ -107,7 +107,7 @@ class _FakeLLM:
 
 GOOD = {"title": "A 線大開煉機膠溫過高", "summary": "膠溫 102°C 持續上升，判斷冷卻水流偏低，主管核准放慢生料投入並派員檢修。",
         "cause": "冷卻能力不足：水流 18 L/min，低於基準 40。",
-        "actions": ["自動通知維修組檢修冷卻水路", "主管核准方案 A：放慢生料投入", "派工：陳志明檢修、S05 放慢投料"]}
+        "actions": ["自動通知維修組檢修冷卻水路", "主管核准方案 A：放慢生料投入", "派工：陳志明檢修、成形組放慢投料"]}
 
 
 # ---------------------------------------------------------------- the reporter
@@ -128,7 +128,7 @@ async def test_model_json_is_the_draft_and_the_request_matches_the_commander():
     text = rep.finalize(d, {"機台": "A 線大開煉機", "讀值": "膠溫", "值": "100°C", "維修完成": "14:32", "恢復正常": "14:33"})
     lines = text.split("\n")
     assert lines[0] == "【異常報告】A 線大開煉機膠溫過高" and lines[1].startswith("摘要：膠溫 102°C") and lines[2].startswith("原因：")
-    assert lines[3] == "處置：自動通知維修組檢修冷卻水路；主管核准方案 A：放慢生料投入；派工：陳志明檢修、S05 放慢投料"
+    assert lines[3] == "處置：自動通知維修組檢修冷卻水路；主管核准方案 A：放慢生料投入；派工：陳志明檢修、成形組放慢投料"
     assert lines[4] == "結果：A 線大開煉機膠溫回到 100°C（14:32 維修完成、14:33 恢復正常）" and len(lines) <= 6
 
 

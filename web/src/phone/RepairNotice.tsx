@@ -17,6 +17,7 @@ import { useMachineDetail } from '../useMachineDetail'
 import { useWarRoom } from '../useWarRoom'
 import { isRepairTask } from './fastEta'
 import { taskWhat } from './cardText'
+import { workerName } from '../agent/subagents'
 
 /** 「溫度回到 128°C（02:17 維修完成）」 from the server's 「已修復：7 號機 溫度回到 128°C（維修完成 02:17、恢復 02:17）」; an
  *  unverified close keeps its own outcome, without the 「已修復：」 head. */
@@ -70,7 +71,7 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
       )}
       <p className="ph-lead">回到正常才轉綠，異常報告會自動產生。</p>
       <p className="ph-did muted" data-testid="phone-repaired-tasks">{repairs.length
-        ? repairs.map((t) => [t.worker_name ?? t.team_label, taskWhat(t.title), t.status === '完成' && t.done_at ? `${fmtHM(t.done_at)} 完成` : t.status].join('・')).join('；')
+        ? repairs.map((t) => [t.worker_name ? workerName(t.worker_name) : t.team_label, taskWhat(t.title), t.status === '完成' && t.done_at ? `${fmtHM(t.done_at)} 完成` : t.status].join('・')).join('；')
         : '現場維修已完成'}</p>
     </div>
   )

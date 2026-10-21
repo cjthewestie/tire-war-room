@@ -17,7 +17,8 @@ export function TaskList({ tasks, eventId, limit, compact, testId = 'task-list' 
   return (
     <ul className={`tasks ${compact ? 'compact' : ''}`} data-testid={testId}>
       {rows.map((t) => {
-        // 「S16・硫化機組・1 號硫化機」: the machine by its name, the team as every screen says it (TEAM_LABELS)
+        // 「黃建宏・硫化機組・1 號硫化機」 (a staff-id worker: 「硫化機組・1 號硫化機」): the machine by its name, the team as
+        // every screen says it (TEAM_LABELS)
         const team = TEAM_LABELS[t.team] ?? t.team_label, where = t.machine_id ? machineLabel(t.machine_id) : t.where
         return (
           <li key={t.id} className={`task st-${t.status}`} data-testid="task-row" data-status={t.status} data-task={t.id}>
@@ -28,7 +29,7 @@ export function TaskList({ tasks, eventId, limit, compact, testId = 'task-list' 
                 <span className="muted small">{t.status === '完成' ? `${fmtHM(t.done_at)} 完成` : t.eta ? `預計 ${fmtHM(t.eta)}` : ''}</span>
               </div>
               <div className="muted small">
-                {t.worker_name ? `${workerName(t.worker_name)}・${team}` : `待派：${team}`}・{where}
+                {t.worker_name ? (workerName(t.worker_name) === team ? team : `${workerName(t.worker_name)}・${team}`) : `待派：${team}`}・{where}
                 {!compact && t.after && t.status === '待派' ? `・等 ${t.after} 完成` : ''}
               </div>
             </div>

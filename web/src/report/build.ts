@@ -4,6 +4,7 @@
 // 異常報告 (Event.ai_report) sits on top of it on /report and goes into the copied text.
 import type { AnomalyKind, ApprovalRequest, Event, EventState, StepRun, WorkTask } from '../contracts'
 import { repairStage } from '../aiStatus'
+import { workerName } from '../agent/subagents'
 import { STATE_LABEL } from '../components/common'
 import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
@@ -192,7 +193,7 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
   const evTasks = tasks.filter((x) => x.event_id === ev.id)
   parts.push({
     id: 'tasks', title: '六、現場工作',
-    rows: evTasks.map((x) => ({ time: fmtHM(x.done_at ?? x.created_at), k: `${x.kind}・${x.status}`, text: `${x.title}；${x.worker_name ?? '還沒派人'}`, tone: x.status === '完成' ? 'ok' : 'warn' })),
+    rows: evTasks.map((x) => ({ time: fmtHM(x.done_at ?? x.created_at), k: `${x.kind}・${x.status}`, text: `${x.title}；${x.worker_name ? workerName(x.worker_name) : '還沒派人'}`, tone: x.status === '完成' ? 'ok' : 'warn' })),
     empty: '沒有現場工作',
   })
 

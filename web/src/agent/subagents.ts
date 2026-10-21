@@ -79,7 +79,12 @@ export function whatOf(sa: Subagent, ev?: Event | null): string {
 /** 「128°C」 out of the outcome 「已修復：3 號機 溫度回到 128°C（維修完成 10:10、恢復 10:11）」. */
 export const backTo = (outcome: string | null) => /回到 ?([\d.]+ ?(?:°C|kgf\/cm²|L\/min)?)/.exec(outcome ?? '')?.[1] ?? null
 
-/** 「S16（加硫組）」 → 「S16」: the runtime adds the dataset's group name to a person; screens name the task's own team. */
-export const workerName = (who: string | null | undefined) => (who ?? '').replace(/（[^）]*）$/, '')
+/** The person as the supervisor reads it (veteran 10-22: no staff ids on screen): 「黃建宏」, or, for a dataset worker who
+ *  only has a staff id, the team the runtime wrote with it (warroom/sim/world.py worker_name: 「S16（硫化機組）」 →
+ *  「硫化機組」). */
+export const workerName = (who: string | null | undefined) => {
+  const s = who ?? ''
+  return /^[A-Z]+\d+（([^）]+)）$/.exec(s)?.[1] ?? s.replace(/（[^）]*）$/, '')
+}
 
 export const isOpen = (sa: Subagent) => !['done', 'failed', 'interrupted'].includes(sa.status)

@@ -14,6 +14,7 @@ import { fmtHM, fmtMD, ms } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useHealth } from '../health'
 import { useWarRoom } from '../useWarRoom'
+import { workerName } from '../agent/subagents'
 import { fastApplies, fastDoneText, fastRepairOf, fastWindowText, isRepairTask, secText, taskLeftS } from './fastEta'
 
 export function expectationText(x: Expectation): string {
@@ -87,7 +88,7 @@ export function RepairEta({ ev }: { ev: Event | null }) {
         {tasks.length > 0 && <>
           <dt>現場工作</dt>
           <dd data-testid="phone-eta-tasks"><ul>{tasks.map((t) => (
-            <li key={t.id}>{t.title}・{t.worker_name ?? t.team_label}・{t.status}{t.status !== '完成' ? (fast && isRepairTask(t) ? `・${secText(taskLeftS(t, fast))}` : t.eta ? `・預計 ${fmtHM(t.eta)}` : '') : ''}{t.status === '完成' && t.done_at ? `・${fmtHM(t.done_at)} 完成` : ''}</li>
+            <li key={t.id}>{t.title}・{t.worker_name ? workerName(t.worker_name) : t.team_label}・{t.status}{t.status !== '完成' ? (fast && isRepairTask(t) ? `・${secText(taskLeftS(t, fast))}` : t.eta ? `・預計 ${fmtHM(t.eta)}` : '') : ''}{t.status === '完成' && t.done_at ? `・${fmtHM(t.done_at)} 完成` : ''}</li>
           ))}</ul></dd>
         </>}
       </dl>

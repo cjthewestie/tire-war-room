@@ -4,6 +4,7 @@
 import type { ApprovalRequest, Event, WorldSnapshot } from '../contracts'
 import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
+import { workerName } from '../agent/subagents'
 import { VIA, eventTitle, headline, openPhase, outcomeText, staleCards, tidy, who } from '../report/build'
 
 export interface HandoverInput {
@@ -97,7 +98,7 @@ export function buildHandover(inp: HandoverInput): Handover {
     id: 'tasks', title: '現場工作',
     summary: !doneIn.length && !openTasks.length ? '這段時間沒有派工' : !openTasks.length ? `${doneIn.length} 件都完成`
       : counts([['完成', doneIn.length], ['在做', active], ['待派', queued]], ' 件'),
-    lines: openTasks.map((x) => ({ time: fmtHM(x.created_at), text: `${x.kind}：${x.title}｜${x.worker_name ?? '還沒派人'}（${x.status}）`, tone: 'warn' as const })),
+    lines: openTasks.map((x) => ({ time: fmtHM(x.created_at), text: `${x.kind}：${x.title}｜${x.worker_name ? workerName(x.worker_name) : '還沒派人'}（${x.status}）`, tone: 'warn' as const })),
   })
 
   // materials and orders

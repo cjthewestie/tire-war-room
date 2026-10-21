@@ -13,6 +13,7 @@ import type { Event, MetricTile, WorkTask } from '../contracts'
 import { fmtHM } from '../format'
 import { loadSopSteps, openEventFor, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
+import { workerName } from '../agent/subagents'
 
 const ticks = new Map<string, Set<number>>()        // event (or machine) id -> ticked step indexes
 const reported = new Map<string, string>()          // same key -> factory time the fix was reported
@@ -39,7 +40,7 @@ function OutOfService({ machineId }: { machineId: string }) {
       {ev && <AiStatusLine ev={ev} className="small" />}
       <p className="small" data-testid="field-sop-out">
         {task
-          ? <>停用檢修：{task.title}・{task.worker_name ?? task.team_label}・{task.status}{task.status === '完成' ? (task.done_at ? `・${fmtHM(task.done_at)} 完成` : '') : task.eta ? `・預計 ${fmtHM(task.eta)}` : ''}</>
+          ? <>停用檢修：{task.title}・{task.worker_name ? workerName(task.worker_name) : task.team_label}・{task.status}{task.status === '完成' ? (task.done_at ? `・${fmtHM(task.done_at)} 完成` : '') : task.eta ? `・預計 ${fmtHM(task.eta)}` : ''}</>
           : '已停用，等維修排除。'}
       </p>
       <p className="muted small">{machineId.startsWith('CURE-') ? '停用的硫化機要維修簽回並試溫穩定後才恢復排程（SOP-CP-01）；' : ''}這裡不用勾選回報。</p>
