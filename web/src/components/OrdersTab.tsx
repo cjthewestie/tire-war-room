@@ -50,6 +50,13 @@ export function OrdersTab() {
   const [sort, setSort] = useState<Sort>('risk')
   const [picked, setPicked] = useState<string | null>(null)
   const [day, setDay] = useState<string | null>(null)   // 未來 7 日交貨計畫: picked due day (factory date) filters the table
+  // 客戶選單的張數 (issue #171): only the main tab and the due day narrow it -- not the search text or the picked customer --
+  // so every option says how many orders that customer has under the tab the person is looking at.
+  const custCount = useMemo(() => {
+    const m = new Map<string, number>()
+    for (const v of views) if (inShowOf(v, show) && (!day || dueKey(v.o.due) === day)) m.set(v.o.customer, (m.get(v.o.customer) ?? 0) + 1)
+    return m
+  }, [views, show, day])
   const query = q.trim().toLowerCase().replace(/^#/, '')
   const match = (v: OrderView) => !query || `${v.o.id} ${v.o.customer} ${SIZE_LABEL[v.o.size]}`.toLowerCase().replace(/#/g, '').includes(query)
   const filtered = views.filter((v) => match(v) && inShowOf(v, show) && (!cust || v.o.customer === cust) && (!day || dueKey(v.o.due) === day))
@@ -61,15 +68,21 @@ export function OrdersTab() {
   const dueSoon = views.filter((v) => v.o.status !== '已出貨' && v.due - now < 3 * DAY)
   const narrowed = !!(query || show !== 'all' || cust || day)
   const clearAll = () => { setQ(''); setShow('all'); setCust(''); setDay(null); setPicked(null) }
+  // 目前生效的條件 (issue #172): one chip per active filter, each can be taken off on its own
+  const chips: { key: string; label: string; testid?: string; off: () => void }[] = []
+  if (query) chips.push({ key: 'q', label: `搜尋：${q.trim()}`, off: () => { setQ(''); setPicked(null) } })
+  if (show !== 'all') chips.push({ key: 'show', label: `分頁：${SHOW.find((s) => s.id === show)?.label}`, off: () => { setShow('all'); setPicked(null) } })
+  if (cust) chips.push({ key: 'cust', label: `客戶：${cust}`, off: () => { setCust(''); setPicked(null) } })
+  if (day) chips.push({ key: 'day', label: `交貨日：${fmtMD(`${day}T12:00:00+08:00`)}`, testid: 'due-filter', off: () => { setDay(null); setPicked(null) } })
   return (
     <div className="orders-tab" data-testid="orders-tab">
       <DueWeekPlan views={views} now={now} day={day} onPick={(k) => { setDay(k); setPicked(null) }} />
       <section className="kpis" aria-label="訂單重點">
         <div className="kpi"><span className="kpi-l">全部訂單</span><span className="kpi-v">{views.length}<small> 張</small></span>
           <span className="kpi-s">進行 {count('open')}・完成 {count('done')}・出貨 {count('shipped')}</span></div>
-        <div className={`kpi ${atRisk.length ? 'is-alarm' : ''}`}><span className="kpi-l">有風險</span><span className="kpi-v" data-testid="kpi-risk">{atRisk.length}<small> 張</small></span>
+        <div className={`kpi ${atRisk.length ? 'is-alarm' : ''}`}><span className="kpi-l">有風險</span><span className="kpi-hint">依目前排程，可能無法準時交貨</span><span className="kpi-v" data-testid="kpi-risk">{atRisk.length}<small> 張</small></span>
           <span className="kpi-s">{atRisk.length ? `${atRisk.slice(0, 2).map((v) => v.o.id).join('、')}${atRisk.length > 2 ? ' 等' : ''}` : '全部預估準時'}</span></div>
-        <div className={`kpi ${w.orders.rush_open ? 'is-warn' : ''}`}><span className="kpi-l">急單</span><span className="kpi-v">{count('rush')}<small> 張</small></span>
+        <div className={`kpi ${w.orders.rush_open ? 'is-warn' : ''}`}><span className="kpi-l">急單</span><span className="kpi-hint">客戶要求優先處理</span><span className="kpi-v">{count('rush')}<small> 張</small></span>
           <span className="kpi-s">未完成 {w.orders.rush_open}</span></div>
         <div className="kpi"><span className="kpi-l">3 天內到期</span><span className="kpi-v">{dueSoon.length}<small> 張</small></span>
           <span className="kpi-s">今日新單 {w.orders.new_today}</span></div>
@@ -85,22 +98,26 @@ export function OrdersTab() {
           </button>
         </form>
         <div className="seg sm" role="group" aria-label="篩選訂單">
-          {SHOW.map((s) => <button key={s.id} className={show === s.id ? 'on' : ''} aria-pressed={show === s.id} onClick={() => setShow(s.id)}>{s.label}<small> {count(s.id)}</small></button>)}
+          {SHOW.map((s) => <button key={s.id} className={show === s.id ? 'on' : ''} aria-pressed={show === s.id} onClick={() => { if (s.id !== show) { setShow(s.id); setCust('') } }}>{s.label}<small> {count(s.id)}</small></button>)}
         </div>
         <select value={cust} onChange={(e) => { setCust(e.target.value); setPicked(null) }} aria-label="依客戶篩選" data-testid="order-customer">
           <option value="">全部客戶</option>
-          {customers.map((c) => <option key={c} value={c}>{c}（{views.filter((v) => v.o.customer === c).length} 張）</option>)}
+          {customers.map((c) => { const n = custCount.get(c) ?? 0; return <option key={c} value={c}>{n ? `${c}（${n} 張）` : `${c}（0 張／無符合訂單）`}</option> })}
         </select>
         <select value={sort} onChange={(e) => setSort(e.target.value as Sort)} aria-label="排序" data-testid="order-sort">
           {SORT.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
         </select>
       </div>
+      {chips.length > 0 && (
+        <div className="order-chips" role="group" aria-label="目前生效的篩選條件" data-testid="order-filters">
+          <span className="muted small">目前條件：</span>
+          {chips.map((c) => <button key={c.key} type="button" className="order-chip" data-testid={c.testid} aria-label={`取消${c.label}`} onClick={c.off}>{c.label}<span aria-hidden> ×</span></button>)}
+        </div>
+      )}
       {sel && <OrderCard o={sel.o} jobs={jobs} now={now} warnings={warningsFor(sel.o.id, warnings)} actions />}
       <section className="panel order-table" aria-label="訂單清單">
         <header className="panel-h"><h2>{narrowed ? `符合的訂單（${list.length}）` : `全部訂單（${views.length}）`}</h2><span className="muted small">{sort === 'risk' ? '有風險的排最前' : '依交期排序'}・點一列看明細</span></header>
-        {day && <p className="dw-filter" data-testid="due-filter">日期篩選：<b>{fmtMD(`${day}T12:00:00+08:00`)}</b> 應交貨
-          <button type="button" className="btn-ghost" onClick={() => { setDay(null); setPicked(null) }}>清除日期篩選</button></p>}
-        {!list.length && <p className="note">{query ? `找不到「${q}」。請確認訂單號，` : '沒有符合目前條件的訂單。'}<button type="button" className="btn-ghost" onClick={clearAll}>清除所有條件</button></p>}
+        {!list.length && <p className="note" data-testid="order-empty">{narrowed ? '目前條件沒有符合的訂單。' : '目前沒有訂單。'}{narrowed && <button type="button" className="btn-ghost" onClick={clearAll}>清除所有條件</button>}</p>}
         <div className="ot-head" aria-hidden><span>訂單／客戶</span><span>產品／數量</span><span>生產進度</span><span>交期</span><span>狀態</span><span /></div>
         <ul className="ot-list" role="list" data-testid="order-list">
           {list.map((v) => {
