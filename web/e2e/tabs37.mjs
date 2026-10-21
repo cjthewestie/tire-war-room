@@ -133,6 +133,10 @@ await p.locator('[data-testid="state-diagram"] .sm-n[data-state="simulate"]').cl
 
 // (h) 狀態機 page
 await p.click('[data-testid="tab-sm"]')
+await p.waitForSelector('[data-testid="sm-rows"] [data-testid="sm-row"]', { timeout: 15000 }).catch(() => {})
+check('狀態機: 4 plain stages', (await p.locator('[data-testid="sm-stage"]').count()) === 4)
+check('狀態機: one row per open event', (await p.locator('[data-testid="sm-row"]').count()) >= 1)
+await p.click('[data-testid="sm-detail-toggle"]')  // the 11-state board sits behind 看細節
 await p.waitForSelector('[data-testid="sm-board"] [data-testid="sm-card"]', { timeout: 15000 }).catch(() => {})
 check('狀態機: header counts', (await p.locator('[data-testid="sm-counts"] .kpi').count()) === 5)
 check('狀態機: 11 state columns', await p.locator('[data-testid="sm-board"] .sm-col').count() === 11)
