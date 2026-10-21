@@ -106,3 +106,23 @@ async def test_return_to_service_from_chat_only_after_repair(tmp_path, monkeypat
     assert rt.sim.machine(mid).status is MachineStatus.RUNNING
     row = next(e for e in rt.audit.tail(0, 100_000) if e.payload.get("msg") == "恢復運轉")
     assert row.actor.endswith("via Agent Nemo") and row.event_id == "EV-test"
+
+
+async def test_an_out_of_service_press_with_a_core_case_uses_return_to_service(tmp_path, monkeypatch):
+    """Press 7 after H2: OUT_OF_SERVICE and repaired, with the core's cure hold still open. Its way back is 恢復運轉,
+    not the core release (live run 10-22 asked for the core's field check instead)."""
+    from warroom.contracts import SafetyAction, SafetyActionKind
+    rt = _rt(tmp_path)
+    mid = "CURE-07"
+    a = SafetyAction(id="SA-test-7", ts=rt.now(), machine_id=mid, rule_id="SR-CURE-LOW-120",
+                     action=SafetyActionKind.CURE_HOLD, value=119.0, threshold=120.0, message="test", latency_ms=0.1)
+    rt.sim.apply_safety_action(a)
+    rt.cases.on_action(a, None)
+    rt.sim.set_machine_status(mid, MachineStatus.OUT_OF_SERVICE, "停用檢修")
+    rt._repaired_out[mid] = "EV-test"
+    _agent(monkeypatch, ("tool", "release_safety_stop", {"event_id": "7 號機"}), ("say", "好。"))
+    async with _client(rt) as local:
+        _, out = await _say(local, "恢復 7 號機運轉")
+        assert "檢修已經完成" in out["reply"]
+        _, out = await _say(local, "好")
+    assert rt.sim.machine(mid).status is MachineStatus.RUNNING
