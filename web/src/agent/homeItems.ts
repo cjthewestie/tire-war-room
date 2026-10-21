@@ -8,8 +8,9 @@
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { ML_PRESSES, machineLabel } from '../factory'
-import { fmtHM, fmtMD, ms } from '../format'
+import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
+import { caseTitle } from '../resolveText'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
 export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
@@ -27,6 +28,9 @@ export interface HomeItem {
   ts: number
   progress?: number         // ④: share of the event's worker tasks done (0–1)
   checked?: string          // ②: the pre-plan ran and found nothing to change (precheckLine)
+  caseId?: string           // ①: an open Safety Core case (key `safety:<id>`, components/Resolve.tsx)
+  /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
+  machine?: string; desc?: string
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -46,10 +50,22 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
     if (req) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
+      out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
     } else if (ev.state === 'safe_stop') {
-      out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
+      // CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」: stays in ① until replanned or 確認結案 (buttons in the plan area)
+      const fu = ev.follow_up ?? null
+      const why = ev.stop_reason_text ?? plain(ev.outcome ?? '')
+      const title = `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`
+      if (!fu || fu.status === 'manual') {
+        const fuDone = fu ? fu.task_ids.filter((id) => (tasks.find((t) => t.id === id)?.status ?? '完成') === '完成').length : 0
+        out.push({ ...base, rank: 1, tone: 'bad', pill: fu ? '人工處理中' : '安全停止', title,
+          sub: `原因：${why}${fu ? `・現場任務 ${fuDone}/${fu.task_ids.length}` : '・可請 AI 重新規劃、交給現場或確認結案'}`,
+          ...(fu && fu.task_ids.length ? { progress: fuDone / fu.task_ids.length } : {}) })
+      } else {
+        out.push({ ...base, rank: 5, tone: 'done', pill: fu.status === 'replanned' ? '已重新規劃' : '已結案', title,
+          sub: `安全停止（${why}）・${fu.status === 'replanned' ? `已請 AI 重新規劃 → ${fu.new_event_id ?? ''}` : `主管確認結案${fu.closed_at ? `・${fmtHM(fu.closed_at)}` : ''}`}` })
+      }
     } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
       // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
@@ -59,7 +75,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
+        sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
     } else {
       out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
@@ -90,6 +106,13 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
         title: `${id} 預估晚於交期`, sub: `${plain(seg.trim())}${head ? `・${plain(head)}` : ''}` })
     }
   }
+  // ① a Safety Core stop / hold still open: its checklist is the way back (components/Resolve.tsx)
+  for (const c of (snap?.safety_cases ?? []).filter((x) => x.status === 'open')) {
+    const done = c.tasks_done
+    out.push({ key: `safety:${c.id}`, rank: 1, tone: 'bad', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(c.ts), caseId: c.id,
+      title: caseTitle(c),
+      sub: `${c.task_ids.length ? `① 現場檢查 ${done}/${c.task_ids.length}` : '① 待派現場檢查'}・${c.reading_ok ? '② 讀值已回到安全範圍' : `② 讀值 ${c.safe_samples}/${c.safe_needed}`}・③ 待主管確認` })
+  }
   // ⑤ the Safety Core and the validation layer acted without the AI
   for (const a of (snap?.safety_actions ?? []).slice(-5)) {
     out.push({ key: `fyi:${a.id}`, rank: 5, tone: 'done', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(a.ts),
@@ -106,14 +129,15 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
 export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
   const out: { t: number; s: string }[] = []
   const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
-  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
+  if (dm) out.push({ t: dm.t, s: `${fmtHM12(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
   const dep = world?.dock.next_departure
-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
+  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM12(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
   const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
+  if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
-  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
+  const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
+  return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
 }
 
 const CURE_PRESSES = 11

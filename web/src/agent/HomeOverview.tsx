@@ -5,10 +5,10 @@
 // 今日進度, 機台摘要, 接下來, 今天處理過的事 (history.ts, kept across scenario switches) and, live only, 人力・出貨・品質.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Shift } from '../contracts'
-import { factoryMidnight, fmtHM, fmtMD, fmtNum, fmtWeekday, ms } from '../format'
+import { factoryMidnight, fmtHM, fmtMD, fmtNum, fmtWeekdayShort, ms } from '../format'
 import { useHistory, type HistRow } from '../history'
 import { useWarRoom } from '../useWarRoom'
-import { machineSummary, upcoming, when } from './overviewModel'
+import { machineKpi, upcoming, when } from './overviewModel'
 import { ResultStrip } from './ResultStrip'
 
 const H = 3_600_000
@@ -25,7 +25,7 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
   useEffect(() => { transport?.shifts().then(setShifts).catch(() => {}) }, [transport, day])
   const minute = isNaN(now) ? NaN : Math.floor(now / 60_000) * 60_000
   const next = useMemo(() => upcoming(state.schedule, state.world, shifts, minute), [state.schedule, state.world, shifts, minute])
-  const sum = useMemo(() => machineSummary(snap?.machines ?? []), [snap?.machines])
+  const kpi = useMemo(() => machineKpi(snap?.machines ?? []), [snap?.machines])
   const events = useMemo(() => snap?.events ?? [], [snap?.events])
   const d0 = isNaN(now) ? 0 : factoryMidnight(now)
   const today = hist.rows.filter((r) => r.run === hist.run && ms(r.at) >= d0)
@@ -41,7 +41,12 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
       <div className="po-body">
         <header className="ov-head">
           <h2>今日工廠概況</h2>
-          {!isNaN(now) && <span className="muted small">{fmtMD(now)}（{fmtWeekday(now)}）{fmtHM(now)}</span>}
+          {!isNaN(now) && (
+            <span className="ov-sim" data-testid="ov-sim-time" title="畫面資料使用的模擬工廠時間（展示用；右上角是現在的系統時間）">
+              <span className="muted small">{fmtMD(now)}（{fmtWeekdayShort(now)}）{fmtHM(now)}</span>
+              <small>模擬工廠時間</small>
+            </span>
+          )}
         </header>
         {stripEv && <ResultStrip ev={stripEv} subject={last?.subject} onFull={onFull} />}
 
@@ -67,35 +72,41 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
 
         <Sec title="機台摘要" testId="ov-machines"
           link={<a className="panel-link" href="#monitor" onClick={(e) => { if (onMonitor) { e.preventDefault(); onMonitor() } }} data-testid="ov-monitor">看產線監控 →</a>}>
-          {sum.press || sum.other
-            ? <p className={`ov-line ${sum.bad ? 'has-bad' : ''}`}>{sum.press && <span>{sum.press}</span>}{sum.other && <span>{sum.other}</span>}</p>
-            : <p className="muted ov-empty">還沒收到機台資料</p>}
+          {kpi.pressTotal || kpi.otherTotal ? (
+            <div className="ov-kpis">
+              <div className="ov-kpi" data-testid="kpi-press"><span className="k-l">硫化機</span><span className="k-v"><b>{kpi.pressRun}</b> 運轉　<b>{kpi.pressIdle}</b> 待機</span></div>
+              <div className="ov-kpi" data-testid="kpi-other"><span className="k-l">其他機台</span><span className="k-v"><b>{kpi.otherOk}</b> 正常　<b>{kpi.otherBad}</b> 異常</span></div>
+              <div className={`ov-kpi ${kpi.bad ? 'bad' : ''}`} data-testid="kpi-bad"><span className="k-l">設備異常</span><span className="k-v"><b>{kpi.bad}</b> 台</span>{kpi.bad > 0 && <span className="k-s">{kpi.badNames.join('、')}</span>}</div>
+            </div>
+          ) : <p className="muted ov-empty">還沒收到機台資料</p>}
         </Sec>
 
         <Sec title="接下來" testId="ov-next">
           {next.length ? (
-            <ul className="ov-list">{next.map((u) => <li key={u.key}><span className="ov-time">{u.when}</span><span>{u.text}</span></li>)}</ul>
-          ) : <p className="muted ov-empty">排程裡接下來沒有出模或入模；有新排程會出現在這裡</p>}
+            <ul className="ov-list ov-next">{next.map((u) => <li key={u.key}><span className="ov-time">{u.when}</span><span className={`ov-cat cat-${u.tag}`}>{u.tag}</span><span>{u.text}</span></li>)}</ul>
+          ) : <p className="muted ov-empty">今天接下來沒有排定的事</p>}
         </Sec>
 
         <Sec title="今天處理過的事" testId="ov-done">
           {today.length || before.length ? (
             <ul className="ov-list ov-hist">
               {today.map((r) => <HistLine key={r.key} r={r} now={now} href={events.some((e) => e.id === r.eventId) ? r.eventId : null} onClick={full} />)}
-              {!today.length && <li className="muted ov-empty">今天還沒有處理過的事</li>}
+              {!today.length && <li className="muted ov-empty">目前沒有處理紀錄</li>}
               {before.length > 0 && <li className="ov-sub" aria-hidden="true">上一輪（切換情境前）</li>}
               {before.map((r) => <HistLine key={r.key} r={r} now={now} href={null} old onClick={full} />)}
             </ul>
-          ) : <p className="muted ov-empty">今天還沒有處理過的事；事件結案或你做了決定，會記在這裡</p>}
+          ) : <p className="muted ov-empty">目前沒有處理紀錄</p>}
         </Sec>
 
         {w && (
           <Sec title="人力・出貨・品質" testId="ov-world">
-            <p className="ov-line">
-              <span>在廠 <b>{w.people.on_duty}</b>/{w.people.total} 人</span>
-              <span>待出貨 <b>{w.finished_goods.waiting_ship}</b> 條{w.dock.next_departure && ms(w.dock.next_departure) > now ? `・下一車 ${when(ms(w.dock.next_departure), now)}` : ''}</span>
-              <span>良率 <b>{w.quality.yield_pct != null ? `${fmtNum(w.quality.yield_pct)}%` : '—'}</b>・今日不良 {w.quality.defects_today} 條（已檢 {w.quality.inspected_today}）</span>
-            </p>
+            <div className="ov-kpis">
+              <div className="ov-kpi" data-testid="kpi-people"><span className="k-l">在廠人力</span><span className="k-v"><b>{w.people.on_duty}</b> / {w.people.total} 人</span></div>
+              <div className="ov-kpi" data-testid="kpi-ship"><span className="k-l">待出貨</span><span className="k-v"><b>{w.finished_goods.waiting_ship}</b> 條</span>
+                {w.dock.next_departure && ms(w.dock.next_departure) > now && <span className="k-s">下一車 {when(ms(w.dock.next_departure), now)}</span>}</div>
+              <div className="ov-kpi" data-testid="kpi-quality"><span className="k-l">今日不良</span><span className="k-v"><b>{w.quality.defects_today}</b> 條</span>
+                <span className="k-s">已檢 {w.quality.inspected_today} 條{w.quality.yield_pct != null ? `・良率 ${fmtNum(w.quality.yield_pct)}%` : ''}</span></div>
+            </div>
           </Sec>
         )}
       </div>
@@ -117,7 +128,7 @@ function HistLine({ r, now, href, old = false, onClick }: { r: HistRow; now: num
   const body = <>
     <span className="ov-time">{old ? when(ms(r.at), now) : fmtHM(r.at)}</span>
     <span className="ov-what">{r.subject && <b>{r.subject}・</b>}{r.text}{r.detail && <span className="muted">：{r.detail}</span>}</span>
-    <span className="ov-tags"><span className={`ov-tag t-${r.tone}`}>{r.tag}</span>{old && <span className="ov-tag t-old">上一輪</span>}</span>
+    <span className="ov-tags"><span className={`ov-tag t-${r.tone}`}>{r.tag}</span>{old && <span className="ov-tag t-old">上一輪</span>}{href && <span className="ov-view">查看紀錄 →</span>}</span>
   </>
   return (
     <li className={old ? 'old' : ''} data-testid="ov-done-row" data-run={old ? 'prev' : 'cur'}>

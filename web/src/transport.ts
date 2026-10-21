@@ -4,7 +4,7 @@ import type { OrdersToday } from './components/ordersToday'
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
-  type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+  type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
@@ -63,11 +63,17 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
-  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
-   *  approvals. 409 when the event has no pending review. */
+  /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no unread report. */
   review?(eventId: string, note?: string): Promise<Event>
   /** Live only (#104): 恢復運轉, the supervisor puts a machine whose 檢修 is done back in service. PIN like approvals. */
   returnToService?(machineId: string): Promise<{ machine_id: string; status: string }>
+  /** Live only: resolution paths (warroom/api/resolve.py), supervisor session like approvals. */
+  safetyDispatch?(caseId: string): Promise<SafetyCase>
+  safetyRelease?(caseId: string, body: SafetyRelease): Promise<SafetyCase>
+  stopReplan?(eventId: string): Promise<Event>
+  stopHandoff?(eventId: string): Promise<Event>
+  stopClose?(eventId: string, note?: string): Promise<Event>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
@@ -145,6 +151,28 @@ export async function adminFetch<T>(path: string, init: { method?: string; body?
   return (await r.json()) as T
 }
 
+/** 後台 稽核紀錄 匯出: the same PIN rule as adminFetch, but the body is a file the browser saves. Returns the row count. */
+export async function adminDownload(path: string, retried = false): Promise<number> {
+  const pin = supervisorPin()
+  const r = await fetch(path, { headers: pin ? { 'X-Supervisor-Pin': pin } : {} })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('後台需要主管 PIN')
+    if (p) {
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return adminDownload(path, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+  const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') ?? '')?.[1] ?? 'audit.jsonl'
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a')
+  a.href = url; a.download = name
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return Number(r.headers.get('X-Rows') ?? 0)
+}
+
 export class LiveTransport implements Transport {
   mode: Mode = 'live'
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void) {
@@ -202,6 +230,11 @@ export class LiveTransport implements Transport {
   returnToService(machineId: string) { return postJSON<{ machine_id: string; status: string }>(apiPath(API.returnToService, { machine_id: machineId }), {}) }
   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
+  safetyDispatch(caseId: string) { return postJSON<SafetyCase>(apiPath(API.safetyDispatch, { case_id: caseId }), {}) }
+  safetyRelease(caseId: string, body: SafetyRelease) { return postJSON<SafetyCase>(apiPath(API.safetyRelease, { case_id: caseId }), body) }
+  stopReplan(eventId: string) { return postJSON<Event>(apiPath(API.stopReplan, { event_id: eventId }), {}) }
+  stopHandoff(eventId: string) { return postJSON<Event>(apiPath(API.stopHandoff, { event_id: eventId }), {}) }
+  stopClose(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.stopClose, { event_id: eventId }), note ? { note } : {}) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {

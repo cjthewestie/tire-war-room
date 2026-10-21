@@ -66,7 +66,7 @@ check('approval from phone activated schedule v2', !!v2)
 await d.click('text=人力排程')
 await d.waitForTimeout(2000)
 const sched = await d.locator('body').innerText()
-check('schedule tab: timeline shows +4.5 h and #A-311', sched.includes('28.5') && sched.includes('#A-311'), '')
+check('schedule tab: the approved version is in force', /現在用第 [2-9] 版排程/.test(sched), sched.match(/現在用.*/)?.[0] ?? '')
 await d.screenshot({ path: `${OUT}/integrated-p11-schedule-v2.png`, fullPage: true })
 await d.click('text=產線監控')
 

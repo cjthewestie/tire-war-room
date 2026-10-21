@@ -9,10 +9,9 @@ import { COMPOUND_STOP_C, CURATIVE_STOP_C, LINES, LINE_SHORT, machineLabel } fro
 import { fmtHM, fmtHMS, fmtMD, ms } from '../format'
 import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
-import { STATE_CODE } from '../agent/stateGraph'
 import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
-import { BOARD, CATEGORY_LABEL, categoryOf, enteredAt, waitingOn, type Category, type Day, type DayRun } from './runs'
+import { BOARD, CATEGORY_LABEL, STAGES, categoryOf, enteredAt, stageOf, statusText, waitingOn, type Category, type Day, type DayRun } from './runs'
 import '../admin/admin.css'
 import './statemachine.css'
 
@@ -38,7 +37,6 @@ export function StateMachinePage() {
           <button className={view === 'live' ? 'on' : ''} aria-pressed={view === 'live'} onClick={() => go('live')} data-testid="sm-view-live">即時看板</button>
           <button className={view === 'day' ? 'on' : ''} aria-pressed={view === 'day'} onClick={() => go('day')} data-testid="sm-view-day">每日事件紀錄</button>
         </nav>
-        <span className="muted small">唯讀・狀態名稱同 warroom/contracts.py（EventState）</span>
       </header>
       {transport?.mode === 'mock' && view === 'day' ? <p className="note">每日事件紀錄來自稽核紀錄，需要連線後端。</p> : view === 'live' ? <Live /> : <DayLog />}
     </div>
@@ -102,8 +100,37 @@ function Live() {
     closed: events.filter((e) => e.state === 'closed' && isToday(e)).length,
     stopped: events.filter((e) => e.state === 'safe_stop' && isToday(e)).length,
   }
+  const [detail, setDetail] = useState(false)
+  const stageCount = (k: (typeof STAGES)[number]['key']) => events.filter((e) => stageOf(e.state) === k && (k !== 'end' || isToday(e))).length
+  const ended = { closed: head.closed, stopped: head.stopped }
+  const rows = [...open].sort((a, b) => Number(b.state === 'await_approval') - Number(a.state === 'await_approval') || a.opened_at.localeCompare(b.opened_at))
   return (
     <>
+      <section className="sm-stages" aria-label="事件走到哪一步" data-testid="sm-stages">
+        {STAGES.map((g) => {
+          const n = stageCount(g.key)
+          return (
+            <div key={g.key} className={`sm-stage st-${g.key} ${g.key === 'you' && n ? 'hot' : ''}`} data-stage={g.key} data-testid="sm-stage">
+              <span className="sm-stage-l">{g.label}</span>
+              <span className="sm-stage-v">{n}</span>
+              {g.key === 'end'
+                ? <span className="sm-stage-s">結案 {ended.closed}・{STATE_LABEL.safe_stop} {ended.stopped}<small>（今天）</small></span>
+                : <span className="sm-stage-s">{g.meaning}</span>}
+            </div>
+          )
+        })}
+      </section>
+      <p className="sm-pitch">只有「規劃」和「換假設」會叫 AI；其他都是程式</p>
+      <section className="panel sm-rows-p" aria-label="每件事走到哪一步">
+        <header className="panel-h"><h2>處理中的事件</h2><span className="muted small">點一列看完整過程</span></header>
+        {rows.length ? (
+          <ul className="sm-rows" data-testid="sm-rows">
+            {rows.map((e) => <Row key={e.id} ev={e} run={runOf.get(e.id)} now={now} />)}
+          </ul>
+        ) : <p className="muted sm-none" data-testid="sm-empty">目前沒有事件。有事件時，這裡會顯示每件事走到哪一步。</p>}
+      </section>
+      <button className="btn-ghost sm-detail-t" aria-expanded={detail} onClick={() => setDetail((x) => !x)} data-testid="sm-detail-toggle">{detail ? '收起細節' : '看細節'}<small>（11 個內部狀態）</small></button>
+      {detail && <>
       <section className="kpis sm-kpis" aria-label="狀態機重點" data-testid="sm-counts">
         <div className={`kpi ${head.running ? 'is-live' : ''}`}><span className="kpi-l">處理中</span><span className="kpi-v">{head.running}</span><span className="kpi-s">AI 規劃、工具、驗證</span></div>
         <div className={`kpi ${head.approval ? 'is-warn' : ''}`}><span className="kpi-l">等主管核准</span><span className="kpi-v">{head.approval}</span><span className="kpi-s">待核准卡</span></div>
@@ -123,7 +150,7 @@ function Live() {
             const cards = onBoard(s)
             return (
               <section key={s} className={`sm-col ${cards.length ? '' : 'empty'} ${done ? 'done' : ''}`} data-state={s} aria-label={`${STATE_LABEL[s]} ${cards.length} 件`}>
-                <header><b>{STATE_LABEL[s]}</b><small>{STATE_CODE[s]}</small><span className="sm-n">{cards.length}</span></header>
+                <header><b>{STATE_LABEL[s]}</b><span className="sm-n">{cards.length}</span></header>
                 {(!done || showDone) && cards.map((e) => <Card key={e.id} ev={e} run={runOf.get(e.id)} now={now} />)}
                 {done && !showDone && cards.length > 0 && <button className="btn-ghost sm-more" onClick={() => setShowDone(true)}>顯示 {cards.length} 件</button>}
               </section>
@@ -133,9 +160,27 @@ function Live() {
         </div>
       )}
       <p className="muted small">每張卡點進去是 Agent 頁的完整過程與狀態機圖。結案／安全停止只列今天（{day?.label ?? '目前這一天'}）。</p>
+      </>}
       <Detection events={events} today={events.filter(isToday).length} />
       <PreClassPanel />
     </>
+  )
+}
+
+function Row({ ev, run, now }: { ev: Event; run: DayRun | undefined; now: number }) {
+  const { state } = useWarRoom()
+  const mins = Math.max(0, Math.round((now - ms(enteredAt(ev, run))) / 60_000))
+  const st = stageOf(ev.state)
+  const who = ev.source === 'supervisor' ? '主管指令' : ev.source === 'plant' ? '工廠事件' : machineLabel(ev.machine_id)
+  return (
+    <li>
+      <a className={`sm-row st-${st}`} href={`#console?event=${encodeURIComponent(ev.id)}`} data-testid="sm-row" data-event={ev.id} data-state={ev.state}>
+        <b className="sm-row-who">{who}</b>
+        <span className={`sm-pill st-${st}`}>{STAGES.find((g) => g.key === st)?.label}</span>
+        <span className="sm-row-s">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}：{statusText(ev, state.world?.tasks?.items ?? [], mins)}</span>
+        <small className="muted sm-row-t">{STATE_LABEL[ev.state]}{ev.state === 'await_approval' ? '' : `・${mins} 分`}</small>
+      </a>
+    </li>
   )
 }
 
@@ -154,7 +199,6 @@ function Card({ ev, run, now }: { ev: Event; run: DayRun | undefined; now: numbe
         <span>第 {(ev.prior_rounds?.length ?? 0) + 1} 輪</span>
         {wait !== '—' && <span className="sm-wait">等{wait}</span>}
       </span>
-      <small className="muted sm-id">{ev.id}</small>
     </a>
   )
 }
@@ -264,7 +308,7 @@ function DayLog() {
         <div className="admin-cards" data-testid="day-summary">
           <div className="admin-card"><span className="admin-card-k">件數</span><b>{s.runs} 件</b><span>{Object.entries(s.by_type).map(([t, n]) => `${TYPE[t] ?? t} ${n}`).join('・')}</span></div>
           <div className="admin-card"><span className="admin-card-k">結果</span><b>{Object.entries(s.by_outcome).map(([o, n]) => `${OUTCOME[o] ?? o} ${n}`).join('・')}</b><span>&nbsp;</span></div>
-          <div className="admin-card"><span className="admin-card-k">平均結案時間</span><b>{s.avg_close_min != null ? `${s.avg_close_min} 分` : '—'}</b><span>從開事件到結案／安全停止</span></div>
+          <div className="admin-card"><span className="admin-card-k">平均耗時</span><b>{s.avg_close_min != null ? `${s.avg_close_min} 分` : '—'}</b><span>從開事件到結案／安全停止</span></div>
           <div className="admin-card"><span className="admin-card-k">核准</span><b>已決定 {s.approvals_decided}・待核准 {s.approvals_pending}</b><span>&nbsp;</span></div>
         </div>
       )}
@@ -280,7 +324,7 @@ function DayLog() {
                 <td className="day-path">{r.path.map((p, i) => <span key={i} className={`pp st-${p.state}`} title={fmtHMS(p.ts)}>{STATE_LABEL[p.state as EventState] ?? p.state}</span>)}</td>
                 <td>{r.type === 'ask' ? '—' : r.rounds}</td>
                 <td className={`o-${r.outcome}`}>{OUTCOME[r.outcome] ?? r.outcome}</td>
-                <td>{r.approvals.map((a) => `${a.decision === 'approve' ? '核准' : a.decision === 'reject' ? '駁回' : a.decision}・${a.by === 'supervisor' ? '主管' : a.by}${a.via ? `（${a.via}）` : ''}`).join('；') || (r.pending_approvals ? `待核准 ${r.pending_approvals}` : '—')}</td>
+                <td>{r.approvals.map((a) => `${a.decision === 'approve' ? '核准' : a.decision === 'reject' ? '駁回' : a.decision === 'expired' ? '逾時未決定' : a.decision}・${a.by === 'supervisor' ? '主管' : a.by === 'system' ? '系統' : a.by}${a.via ? `（${a.via}）` : ''}`).join('；') || (r.pending_approvals ? `待核准 ${r.pending_approvals}` : '—')}</td>
                 <td>{r.duration_min != null ? `${r.duration_min} 分` : '—'}</td>
               </tr>
             ))}</tbody>
@@ -321,7 +365,7 @@ function PreClassPanel() {
             </div>
             <div className="pre-grid">
               <div><h4>規則</h4><code>{a.preclass?.rule ?? a.kind}</code><ul>{(a.preclass?.checks ?? []).map((c, i) => <li key={i}>{c}</li>)}</ul></div>
-              <div><h4>訊號</h4><p>{CHANNEL[a.channel] ?? a.channel} {a.value} ／ 基準 {a.baseline}{a.preclass ? `（雜訊 σ ${a.preclass.sigma}）` : ''}</p>{a.preclass?.limit != null && <p className="muted small">上限 {a.preclass.limit}°C</p>}</div>
+              <div><h4>訊號</h4><p>{CHANNEL[a.channel] ?? a.channel} {a.value} ／ 基準 {a.baseline}{a.preclass ? `（雜訊 ±${a.preclass.sigma}）` : ''}</p>{a.preclass?.limit != null && <p className="muted small">上限 {a.preclass.limit}°C</p>}</div>
               <div><h4>驗證</h4><ul>{Object.entries(a.preclass?.validation ?? {}).map(([k, v]) => <li key={k}>{VAL_LABEL[k] ?? k}：{QUALITY[v] ?? (v === 'ok' ? '通過' : v)}</li>)}</ul></div>
               <div><h4>預測</h4>{a.preclass?.forecast ? <p>{a.preclass.forecast.horizon_min} 分後 {a.preclass.forecast.predicted}°C（{a.preclass.forecast.band[0]}–{a.preclass.forecast.band[1]}）<br /><small className="muted">模型 {FIT[a.preclass.forecast.model] ?? a.preclass.forecast.model}・斜率 {a.preclass.forecast.trend_per_min}°C/分</small></p> : <p className="muted">—</p>}</div>
             </div>

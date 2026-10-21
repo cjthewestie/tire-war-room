@@ -6,7 +6,9 @@ import { API, apiPath, type ApprovalRequest, type AuditEntry, type Event } from 
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useWarRoom } from '../useWarRoom'
+import { AiReport } from '../agent/AiReport'
 import { buildReport, reportText } from './build'
+import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
 const POLL_MS = 5000
 const noteKey = (id: string) => `report-prevention:${id}`
@@ -76,6 +78,7 @@ export function Report() {
   return (
     <div className="rp">
       <header className="rp-top no-print">
+        <PendingApprovalAlert variant="inline" newTab />
         <div className="rp-row">
           <h1>異常處理報告</h1>
           <button type="button" onClick={copy} disabled={!report} data-testid="rp-copy">複製報告文字</button>
@@ -98,6 +101,7 @@ export function Report() {
       {report && (
         <article className="rp-doc" data-testid="rp-doc">
           <h2 className="rp-title">{report.title}</h2>
+          {ev && <AiReport ev={ev} />}
           <dl className="rp-head">
             {report.head.map((h) => <div key={h.k} className={h.tone ? `t-${h.tone}` : ''}><dt>{h.k}</dt><dd>{h.text}</dd></div>)}
           </dl>
