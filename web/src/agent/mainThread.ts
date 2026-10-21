@@ -32,6 +32,8 @@ function fromAudit(e: AuditEntry): Bubble[] {
   }
   // an event the scenario switch (or the day loop) cancelled is not news for the supervisor
   if (o === 'report' && /事件處理被取消/.test(String(p.outcome ?? p.text ?? ''))) return []
+  // Agent Nemo 異常報告 (warroom/agent/reporter.py): the whole report, one bubble
+  if (o === 'ai_report') return [{ key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.text ?? '') }]
   if (o === 'report' || o === 'interrupt' || (o === 'dispatch' && p.phase === 'execute')) {
     return [{ key: `a${e.seq}`, ts: e.ts, who: 'agent', text: shortText(String(p.text ?? '')) }]
   }

@@ -6,6 +6,7 @@ import { API, apiPath, type ApprovalRequest, type AuditEntry, type Event } from 
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useWarRoom } from '../useWarRoom'
+import { AiReport } from '../agent/AiReport'
 import { buildReport, reportText } from './build'
 
 const POLL_MS = 5000
@@ -98,6 +99,7 @@ export function Report() {
       {report && (
         <article className="rp-doc" data-testid="rp-doc">
           <h2 className="rp-title">{report.title}</h2>
+          {ev && <AiReport ev={ev} />}
           <dl className="rp-head">
             {report.head.map((h) => <div key={h.k} className={h.tone ? `t-${h.tone}` : ''}><dt>{h.k}</dt><dd>{h.text}</dd></div>)}
           </dl>

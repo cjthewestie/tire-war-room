@@ -1,7 +1,7 @@
 // Group D demo walk, headless (phone, approval card, AI status line, 3D field panel, 狀態機 forecast):
 //  p.11 (press7_temp_drop): round 1 approved B over the API; on the round-2 card 「7 號機停用」 the phone's 修復預估 shows
 //  SOP-CP-01 and no round-1 tasks / 預計完成, 「怎麼選」 names the remedy; 產線監控's folded card picks A without 展開 and
-//  核准並派發（A） sends option A; after close the status line says 專人維修中 while 停用檢修 runs and the 3D panel on 7 號
+//  核准（A） sends option A; after close the status line says 專人維修中 while 停用檢修 runs and the 3D panel on 7 號
 //  shows the 停用檢修 task, not a checklist. concurrent_3: the phone's idle card lists one status line per open event and
 //  狀態機 shows 「約 N 分後達上限 120°C」 for B 線開煉機 instead of the 229.7°C extrapolation.
 // Run against a live server: PORT=8010 ./start.sh & node web/e2e/demo-d.mjs http://localhost:8010
@@ -68,12 +68,12 @@ await until(() => dash.$('[data-testid=apv-fold-opt-A]'), 30000)
 await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440-folded-B.png` })
 await dash.click('[data-testid=apv-fold-opt-A]')
 const label = await text(dash, '[data-testid=visual-approve]')
-check('folded card: A toggle → 核准並派發（A）', label === '核准並派發（A）', label)
+check('folded card: A toggle → 核准（A）', label === '核准（A）', label)
 check('folded card: grid stays folded', !(await dash.$eval('.apv-compact', (el) => el.classList.contains('is-open'))))
 await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440-folded-A.png` })
 await dash.click('[data-testid=visual-approve]')
 const decided = await until(async () => (await api('/api/approvals')).find((a) => a.id === r2.id && a.status !== 'pending'), 15000)
-check('核准並派發（A） sends option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
+check('核准（A） sends option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
 await ctl({ action: 'play' })
 const closed = await until(async () => (await api('/api/events')).find((e) => e.machine_id === 'CURE-07' && e.state === 'closed'), 60000, 1000)
 check('p.11 event closed', !!closed, closed?.outcome)

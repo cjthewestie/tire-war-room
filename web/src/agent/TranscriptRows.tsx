@@ -58,12 +58,12 @@ function TaskRow({ it }: { it: TaskItem }) {
   )
 }
 
-/** 維修完成，故障排除 → 請主管覆核 → 主管覆核. */
+/** 維修完成，故障排除 → 已恢復正常 → 異常報告已產生 → 主管已讀報告. */
 function ReviewRow({ it }: { it: ReviewItem }) {
   return (
     <div className={`r-line r-review rv-${it.phase}`} data-kind="review" data-phase={it.phase} data-testid={`review-${it.phase}`}>
-      <ToolIcon name={it.phase === 'requested' ? 'human' : 'confirm_schedule'} />
-      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'requested' && <small>已送到主管手機</small>}</span>
+      <ToolIcon name={it.phase === 'read' ? 'human' : 'confirm_schedule'} />
+      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'report' && <small>已通知主管手機</small>}</span>
       <time>{fmtHMS(it.ts)}</time></div>
   )
 }
@@ -76,13 +76,14 @@ function ChatRow({ it }: { it: ChatItem }) {
       </div>
     )
   }
-  const head = it.kind === 'dispatch' ? 'NemoClaw・派發' : it.kind === 'report' ? 'NemoClaw・回報' : it.kind === 'interrupt' ? 'NemoClaw・中斷'
-    : it.by === 'main_agent' ? 'NemoClaw'
-    : it.kind === 'summary' ? `NemoClaw${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'NemoClaw・無法執行' : 'NemoClaw・回覆'
+  // plain event lines, no dispatch to a typed agent (CJ 2026-10-21: 「現在先不要派發，主要就是一個 agent 做 tool calling」)
+  const head = it.kind === 'dispatch' ? '事件' : it.kind === 'report' ? '事件・結果' : it.kind === 'interrupt' ? '事件・中斷'
+    : it.by === 'main_agent' ? 'Agent Nemo'
+    : it.kind === 'summary' ? `Agent Nemo${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'Agent Nemo・無法執行' : 'Agent Nemo・回覆'
   return (
     <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
-        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : it.classifiedBy === 'supervisor' ? '主管核准後' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        {it.classifiedBy && it.kind !== 'dispatch' && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
       {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
@@ -110,7 +111,7 @@ function VersionRow({ it }: { it: VersionItem }) {
 
 function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: number }) {
   const { hyp, steps } = thinkContext(ev, it, nth)
-  const who = it.mode === 'llm' ? `Nemotron${it.model ? `（${it.model}）` : ''}` : it.mode === 'mock' ? '規則模式指揮官' : 'AI 指揮官'
+  const who = it.mode === 'llm' ? `Nemotron${it.model ? `（${it.model}）` : ''}` : it.mode === 'mock' ? 'Agent Nemo（規則模式）' : 'Agent Nemo'
   const exp = expectationText(hyp)
   return (
     <article className="r-think" data-kind="think" data-testid="think-block">
@@ -135,7 +136,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
         </ol>
       )}
       {it.rationale && <p className="r-sub">理由：{plain(it.rationale)}</p>}
-      {it.safeStop && <p className="r-warn">指揮官建議安全停止</p>}
+      {it.safeStop && <p className="r-warn">Agent Nemo 建議安全停止</p>}
     </article>
   )
 }
@@ -144,7 +145,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
 function thinkNote(it: ThinkItem): string {
   if (it.mode === 'llm' && it.source === 'mock_fallback') return '模型輸出未採用：以下計畫由規則備援產生，不是模型的思考過程。'
   if (it.mode === 'llm') return '推理模式關閉：以下是模型回傳的計畫與假設，不是隱藏的思考過程。'
-  if (it.mode === 'mock') return '規則模式：沒有呼叫模型，以下計畫與假設由規則式指揮官產生。'
+  if (it.mode === 'mock') return '規則模式：沒有呼叫模型，以下計畫與假設由 Agent Nemo 的規則備援產生。'
   return '以下是這一輪的計畫與假設（依事件紀錄重建），不是隱藏的思考過程。'
 }
 
@@ -203,7 +204,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
     <div className="r-ask" data-kind="ask">
       <div className="r-q"><span>{it.question}</span><small>主管・{fmtHMS(it.ts)}</small></div>
       <div className="r-a" data-testid={a ? 'ask-answer' : undefined}>
-        <header><ToolIcon name="think" /><b>NemoClaw</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
+        <header><ToolIcon name="think" /><b>Agent Nemo</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
         {!a && !it.error && <p className="muted"><i className="spin" />查詢中…</p>}
         {it.error && <p className="err">{it.error}</p>}
         {a && !brief && a.steps.map((s, i) => (
@@ -220,7 +221,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
 }
 
 const REASON: Record<string, string> = {
-  'detector wake-up': '事件偵測喚醒', 'gather sensor window, prediction and SOP': '讀感測器、預測與 SOP', 'ask commander': '請指揮官規劃',
+  'detector wake-up': '事件偵測喚醒', 'gather sensor window, prediction and SOP': '讀感測器、預測與 SOP', 'ask commander': '請 Agent Nemo 規劃',
   'run read/compute steps': '執行讀取／計算步驟', 'check write steps': '檢查會改變現場的步驟', 'approved by supervisor': '主管已核准',
   'compare expectation with readings (code)': '程式比對預期與讀值', 'rejected by supervisor': '主管已駁回',
 }

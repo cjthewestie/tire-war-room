@@ -56,10 +56,13 @@ class Settings(BaseSettings):
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))
     approval_timeout_s: float = 600.0
-    # REPAIR_FAST_S: demo fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒). A repair task (檢修 / 停用檢修 / 放慢投料 /
-    # 暫停投料) is assigned at once and done this many WALL seconds after it was created, at any sim speed; the
-    # machine's readings then go straight back to normal. 0 = the real task durations (work.WORK_MIN).
-    repair_fast_s: float = 3.0
+    # REPAIR_FAST_S: demo fast repair (Kyle 10-21 晚: 「Agent 進廠維修（還是需要執行時間，壓在 10-15 秒完成）」). A repair task
+    # (檢修 / 停用檢修 / 放慢投料 / 暫停投料) starts after 主管核准 and is done this many WALL seconds later, at any sim
+    # speed. 0 = the real task durations (work.WORK_MIN).
+    repair_fast_s: float = 12.0
+    # RECOVER_FAST_S: after that repair the machine's readings ramp back to nominal over this many WALL seconds
+    # (「機台恢復正常溫度後轉回綠燈」: 回溫中, amber); the light turns green once they are back. 0 = at once.
+    recover_fast_s: float = 4.0
     # MODEL_SLOTS: commander / main agent calls the local model may run at once (issue #54 ModelQueue). The Spark's
     # vLLM serves MAX_NUM_SEQS=4 (deploy/spark/vllm-serve.sh: 3 concurrent anomalies + 1 spare); with 1 slot the
     # 3 件同時異常 plans ran one after another (real model 10-21: last card 132 s after the load, 3 slots: same second).

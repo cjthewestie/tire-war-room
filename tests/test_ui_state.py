@@ -48,7 +48,9 @@ async def test_header_bad_data_is_zero_when_normal(tmp_path):
 
 
 async def test_page11_close_summary_is_final_state_only(tmp_path):
-    rt, client = await _start(tmp_path, "press7_temp_drop")
+    # the page-11 story needs round 2: with the demo's fast repair (wall-clock 3 s) the machine was fixed before it
+    # whenever the box was busy, so the test failed or passed by load (main a20416b too). Real repair durations here.
+    rt, client = await _start(tmp_path, "press7_temp_drop", repair_fast_s=0.0)
     try:
         await _run_until(rt, "02:16:40")
         req = (await _pending(client))[0]
