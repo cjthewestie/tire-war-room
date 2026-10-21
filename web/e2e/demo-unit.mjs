@@ -107,8 +107,8 @@ function story(times) {
   check('before 3:00: no nudge', !D.overTarget(tl, 179))
   check('at 3:00 in the story: 「該換 Pitch 了」', D.overTarget(tl, 180))
   check('3:30: a story stuck at an approval does not jump by itself', r.at(215).cue === 'rush', JSON.stringify(r.at(215)))
-  const c = drive({ 1: { cont: true }, 2: { sig: { rushCard: true } }, 205: { cont: true }, 212: { cont: true } }, 213)
-  check('before 3:30 continue cannot pass the approval; after 3:30 it goes straight to the pitch', c.at(205).cue === 'rush' && c.at(212).cue === 'pitch', JSON.stringify([c.at(205), c.at(212)]))
+  const c = drive({ 1: { cont: true }, 2: { sig: { rushCard: true } }, 212: { cont: true } }, 213)
+  check('after 3:30 continue still cannot pass the approval (no cutting the story)', c.at(212).cue === 'rush' && c.at(212).refused)
   const rb = drive({ 1: { cont: true }, 2: { sig: { rushApproved: true, preplan: true, event: true, approval: true, approved: true, workerDone: true } }, 20: { cont: true }, 30: { cont: true }, 50: { cont: true }, 60: { cont: true } }, 211)
   check('at the robot beat, 3:30 starts the pitch by itself', rb.at(209.75).cue === 'robot' && rb.at(210).cue === 'pitch', JSON.stringify([rb.at(209.75), rb.at(210)]))
   tl = { ...tl, index: D.PITCH_INDEX }

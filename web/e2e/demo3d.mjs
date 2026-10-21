@@ -149,24 +149,36 @@ if (!FULL) {
 } else {
   // the whole story: CJ simulated (continue 3 s after each checkpoint is ready, approve 4 s after a card shows)
   const seenAt = new Map(), approved = new Set()
-  let readyAt = null, lastShot = 0, n = 0, lastCue = ''
+  let readyAt = null, n = 0, lastCue = '', seqOn = true
+  // a screenshot every 2 s, on its own loop so the simulated presenter is never held up by it
+  // (one screenshot at a time: a cue's own shot is queued into the same loop)
+  const queued = []
+  const cueShot = (name) => queued.push(name)
+  const seq = (async () => {
+    while (seqOn) {
+      const t1 = Date.now()
+      while (queued.length) await page.screenshot({ path: resolve(OUT, `${queued.shift()}.png`), timeout: 90000 }).catch((e) => console.warn('shot', e.message))
+      await page.screenshot({ path: resolve(OUT, `seq-${String(n++).padStart(3, '0')}.jpg`), type: 'jpeg', quality: 55, timeout: 90000 }).catch(() => {})
+      await sleep(Math.max(0, 2000 - (Date.now() - t1)))
+    }
+  })()
   const cueShots = new Set()
   while (Date.now() - t0 < 9 * 60 * 1000) {
     const d = await demo()
     if (!d?.running) break
     const now = Date.now()
-    if (now - lastShot >= 2000) { lastShot = now; await page.screenshot({ path: resolve(OUT, `seq-${String(n++).padStart(3, '0')}.jpg`), type: 'jpeg', quality: 55 }) }
     if (d.cue !== lastCue) { lastCue = d.cue; readyAt = null }
-    if (!cueShots.has(d.cue) && !d.flying && d.waiting !== null) { cueShots.add(d.cue); await shot(`cue-${d.index.toString().padStart(2, '0')}-${d.cue}`) }
-    if (d.cue === 'robot' && !cueShots.has('robot-mid') && (await bot())?.playing === 'wave') { cueShots.add('robot-mid'); await shot('cue-07b-robot-wave') }
-    if (d.cue === 'robot' && !cueShots.has('robot-scan') && (await bot())?.playing === 'scan') { cueShots.add('robot-scan'); await shot('cue-07c-robot-scan') }
-    if (d.cue === 'end') { await sleep(1500); await shot('cue-10-end'); break }
+    if (!cueShots.has(d.cue) && !d.flying && d.waiting !== null) { cueShots.add(d.cue); cueShot(`cue-${d.index.toString().padStart(2, '0')}-${d.cue}`) }
+    if (d.cue === 'robot' && !cueShots.has('robot-mid') && (await bot())?.playing === 'wave') { cueShots.add('robot-mid'); cueShot('cue-07b-robot-wave') }
+    if (d.cue === 'robot' && !cueShots.has('robot-scan') && (await bot())?.playing === 'scan') { cueShots.add('robot-scan'); cueShot('cue-07c-robot-scan') }
+    if (d.cue === 'end') { await sleep(1500); cueShot('cue-10-end'); await sleep(4000); break }
     // checkpoints: continue 3 s after ready; in the pitch, page through the slides on their seconds (sped up 8×)
     if (d.waiting === 'continue') {
       readyAt ??= now
-      if (now - readyAt > 2500) { await page.keyboard.press(d.cue === 'pitch' ? 'Space' : 'KeyN'); readyAt = null }
+      // CJ talks a little at each stop; longer where the picture is the point (the worker, the robot's show)
+      if (now - readyAt > (d.cue === 'worker' || d.cue === 'robot' ? 12000 : 4000)) { await page.keyboard.press(d.cue === 'pitch' ? 'Space' : 'KeyN'); readyAt = null }
     } else readyAt = null
-    if (d.cue === 'warn' || (d.cue === 'pitch' && d.released)) { if (n % 4 === 0) await page.keyboard.press('ArrowRight') }
+    if ((d.cue === 'warn' || (d.cue === 'pitch' && d.released)) && now - (globalThis.lastSlide ?? 0) > 9000) { globalThis.lastSlide = now; await page.keyboard.press('ArrowRight') }
     const pend = await getJSON('/api/approvals?status=pending')
     for (const a of Array.isArray(pend) ? pend : []) {
       if (approved.has(a.id)) continue
@@ -179,6 +191,8 @@ if (!FULL) {
     }
     await sleep(150)
   }
+  seqOn = false
+  await seq
   await camCheck()
   const d = await demo()
   const rows = (d.log ?? []).map((r) => ({ cue: r.id, planned: r.planned, in: r.t, inBy: r.reason, out: r.out ?? null, outBy: r.outBy ?? null }))

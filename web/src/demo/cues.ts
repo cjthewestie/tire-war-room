@@ -11,8 +11,8 @@
 // Between cues, a cue that enters on a live event (the incident, its card, the crew finishing) waits for it; continue
 // cannot fake it, only its timeout can.
 //   auto      ends on its own after `min` seconds.
-// The story's 3:00 is a soft target: past it the card says 「該換 Pitch 了」; from 3:30 the robot beat moves on to the
-// pitch by itself, and a continue anywhere in the story goes straight to the pitch.
+// The story's 3:00 is a soft target: past it the card says 「該換 Pitch 了」; the pitch starts on continue at the robot
+// beat (⑦), or by itself there from 3:30.
 // Nothing here touches React or three.js, so e2e/demo-unit.mjs drives it with fake clocks and fake signals.
 
 /** The scenario the demo plays: 「一早訂單湧入」 (PR #107). One constant, so retiming is one edit. */
@@ -89,7 +89,7 @@ export const CUES: Cue[] = [
   { id: 'event', at: 75, enter: { on: 'event', timeout: 60 }, title: '⚠ 事件：7 號機溫降', body: '偵測器（不是 AI）先從讀值發現溫度往下掉，才喚醒 AI 規劃。巡檢車也開過去了。',
     hold: { wait: 'continue' }, shot: { kind: 'incident' } },
   { id: 'phone', at: 95, enter: { on: 'approval', timeout: 40 }, title: '📱 拿起手機，核准', body: 'AI 的修正計劃要主管核准（R2 以上一定要人）。手機看方案、按核准。', links: ['phone'],
-    hold: { wait: 'approval', approval: 'approved' }, shot: { kind: 'incident', close: true } },
+    hold: { wait: 'approval', approval: 'approved', card: 'approval' }, shot: { kind: 'incident', close: true } },
   { id: 'worker', at: 115, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機處理完，程式驗證讀值回來了：圈圈轉綠。',
     hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
   { id: 'agent', at: 130, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼這樣做，全部記在稽核鏈上。', links: ['agent'],
@@ -161,12 +161,9 @@ export interface Step { tl: Timeline; refused?: boolean }
 
 /** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on). */
 export function advance(tl: Timeline, t: number, sig: Signals, cont = false): Step {
-  // the soft target: past 3:30 the robot beat (⑦) hands over to the pitch by itself, and from any other beat a
-  // continue goes straight to the pitch (the story is cut short, not skipped: the approval still never moves on alone)
-  if (tl.index < PITCH_INDEX && t >= AUTO_PITCH) {
-    if (tl.index >= ROBOT_INDEX) return { tl: enter(tl, PITCH_INDEX, t, 'time') }
-    if (cont) return { tl: enter(tl, PITCH_INDEX, t, 'continue') }
-  }
+  // the soft target: from 3:30 the robot beat (⑦) hands over to the pitch by itself; earlier beats only get the nudge
+  // (CJ paces the story; a beat is never cut short)
+  if (tl.index === ROBOT_INDEX && t >= AUTO_PITCH) return { tl: enter(tl, PITCH_INDEX, t, 'time') }
   const cur = CUES[tl.index]
   if (!tl.released) {
     const h = cur.hold, e = t - tl.enteredAt

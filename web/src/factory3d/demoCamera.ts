@@ -38,7 +38,7 @@ export function frameFor(shot: Shot, machine: string | null, s: number, reduced 
       const close = shot.close ? 1 : 0
       return {
         // look above the machine, so it sits low in the frame and its beacon pillar rises up through the shot
-        x: p.x, y: lerp(2.1, 1.0, close), z: p.z + (north ? -0.5 : 0.5),
+        x: p.x, y: lerp(2.1, 1.5, close), z: p.z + (north ? -0.5 : 0.5),
         yaw: (north ? Math.PI : 0) - 0.42 + drift(0.12, 0.23), pitch: lerp(0.5, 0.45, close) + drift(0.02, 0.31),
         dist: lerp(10.5, 6.2, close) * (1 + drift(0.03, 0.17)),
       }

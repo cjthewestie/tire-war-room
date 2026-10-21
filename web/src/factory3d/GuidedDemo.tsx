@@ -70,7 +70,7 @@ export function DemoOverlay({ demo, deck, onPhone, pad }: {
         </div>
       )}
       {demo.overTarget && !pitch && (
-        <div className="f3-pitch-nudge" data-testid="demo-pitch-nudge">🎤 該換 Pitch 了・{demo.autoPitchIn > 0 ? `${Math.ceil(demo.autoPitchIn)} 秒後按 ${pad ? 'A' : 'Space'} 直接換` : `按 ${pad ? 'A' : 'Space'} 直接換 Pitch`}</div>
+        <div className="f3-pitch-nudge" data-testid="demo-pitch-nudge">🎤 該換 Pitch 了・{demo.cue.id === 'robot' ? (demo.autoPitchIn > 0 ? `${Math.ceil(demo.autoPitchIn)} 秒後自動換` : '換了') : '講快一點，機器人之後就換'}</div>
       )}
       {pitch && <div className={`f3-pitch-clock ${left <= 60 ? 'warn' : ''}`} data-testid="demo-pitch-clock">{left > 0 ? <>Pitch 剩 <b>{mss(left)}</b></> : <b>時間到</b>}</div>}
       <div className="f3-demo-bar" data-testid="demo-bar">
