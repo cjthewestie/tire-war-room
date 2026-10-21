@@ -176,6 +176,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         st["health"] = AP.health(st)
         return st
 
+    @app.get(P + "/metrics")
+    async def metrics(request: Request, _: Any = ADMIN) -> dict[str, Any]:
+        """Live machine + model numbers for 狀態 (warroom/api/metrics.py); the page polls it every few seconds."""
+        from warroom.api.metrics import metrics_view
+        return await metrics_view(request.app, rt)
+
     # ------------------------------------------------------------------ 稽核紀錄 (read-only) and 系統參數
     def audit_filter(kind: str, actor: str, event: str, q: str, t_from: str, t_to: str) -> AA.Filter:
         if kind and kind not in {k.value for k in AuditKind}:

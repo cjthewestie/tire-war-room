@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { adminFetch } from '../transport'
 import { Err } from './adminCommon'
+import { MetricsPanel } from './MetricsPanel'
 import { useLoad, verifyText, type Verify } from './adminData'
 import { UsageCard } from './UsageCard'
 
@@ -24,6 +25,7 @@ export function HealthPage() {
   const warn = cards.filter((c) => c.light === 'warn').length
   return (
     <section className="admin-body">
+      <MetricsPanel />
       <Err err={err} />
       {data && (
         <p className={`health-sum ${bad ? 'bad' : warn ? 'warn' : 'ok'}`} role="status">
