@@ -40,6 +40,7 @@ import { SPACES, arrival } from './spaces'
 import { TiltShift } from './TiltShift'
 import { TouchControls } from './TouchControls'
 import { DRAWN_LIGHT, Lights, World } from './World'
+import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
 type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
@@ -332,6 +333,8 @@ export function FactoryApp() {
       {fp && !overlay && !locked && (TOUCH_DEVICE
         ? <div className="f3-look-hint">拖曳畫面看四周</div>
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
+
+      <PendingApprovalAlert variant="corner" newTab />
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
