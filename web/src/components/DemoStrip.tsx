@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { HeaderStatus, ScenarioName } from '../contracts'
 import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
+import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
 
 const SPEEDS = [1, 5, 10, 60]
@@ -28,29 +29,45 @@ export function DemoStrip() {
   const [scenario, setScenario] = useState<ScenarioName | null>(null)
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
+  const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
   if (!transport) return null
   const clock = state.clock
   const net = state.snapshot?.header.network ?? 'online'
   const mock = transport.mode === 'mock'
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
-  const current = scenario ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : (state.clock?.scenario as ScenarioName | undefined) ?? null)
+  const current = scenario ?? (state.clock?.scenario as ScenarioName | undefined) ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : null)
   const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
+  // 情境疊加: a different overlayable scenario while an event or approval is open adds on top; otherwise load as before
+  const pick = (s: (typeof SCENARIOS)[number]) => {
+    if (scenarioClick(s.name, state, current) === 'overlay') {
+      setLoading(`疊加 ${s.label}`)
+      run(async () => {
+        try { setOverlaid(overlayNote(s.label, await transport.overlay(s.name))) } catch (e) { setOverlaid(`疊加沒有成功：${s.label}`); throw e }
+      }).finally(() => setLoading(null))
+      return
+    }
+    setScenario(s.name); setOverlaid(null); setLoading(s.label)
+    run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null))
+  }
+  const overlays = runningScenarios(state).overlays
   return (
     <div className="demo" aria-label="展示控制">
       <span className="demo-k">展示</span>
       <div className="seg" role="group" aria-label="情境（注入故障）">
         {SCENARIOS.filter((s) => !DEMO_MODE || DEMO_SCENARIOS.includes(s.name)).map((s) => (
-          <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''}
-            onClick={() => { setScenario(s.name); setLoading(s.label); run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null)) }}>{s.label}</button>
+          <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''} onClick={() => pick(s)}>{s.label}</button>
         ))}
       </div>
-      {loading && <span className="demo-loading" role="status" data-testid="demo-loading">載入情境…（{loading}）</span>}
+      {loading && <span className="demo-loading" role="status" data-testid="demo-loading">{loading.startsWith('疊加 ') ? `${loading}…` : `載入情境…（${loading}）`}</span>}
+      {overlaid && (overlays.length > 0 || overlaid.startsWith('疊加沒有成功')) && !loading && (
+        <span className="demo-overlay" role="status" data-testid="demo-overlay" title={overlaid}>{overlaid}</span>
+      )}
       <div className="seg" role="group" aria-label="播放">
         <button disabled={busy} onClick={() => run(() => transport.control({ action: clock?.paused ? 'play' : 'pause' }))}>{clock?.paused ? '▶ 播放' : '❚❚ 暫停'}</button>
         {SPEEDS.map((s) => (
           <button key={s} disabled={busy} className={clock?.speed === s ? 'on' : ''} onClick={() => run(() => transport.control({ action: 'speed', speed: s }))}>{s}×</button>
         ))}
-        <button disabled={busy} onClick={() => run(() => transport.control({ action: 'reset' }))}>↺ 重來</button>
+        <button disabled={busy} onClick={() => { setOverlaid(null); run(() => transport.control({ action: 'reset' })) }}>↺ 重來</button>
       </div>
       {!mock && !DEMO_MODE && state.clock?.day_loop && (
         <div className="seg" role="group" aria-label="跳到時間（一日循環）" data-testid="day-jumps">

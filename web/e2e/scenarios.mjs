@@ -220,8 +220,15 @@ try {
     const names = await desk.locator('.demo button').allInnerTexts()
     check('desk console lists the new scenarios', ['早班開工', '插單', '人力調度'].every((n) => names.some((x) => x.includes(n))), names.slice(0, 9).join(' / '))
     await desk.locator('.demo button:has-text("插單")').first().click()
-    const started = await until(async () => { const h = await api('/api/health'); return h.factory_time.startsWith('2026-10-07') ? h.factory_time : null }, 20000)
-    check('插單 started from the 3D desk console', !!started, started ?? 'clock not on 10/07')
+    // 情境疊加: while 早班開工's event is still open the click overlays 插單 (a rush-order plant event, clock kept);
+    // with nothing open it loads 插單 (clock on 10/07)
+    const started = await until(async () => {
+      const h = await api('/api/health')
+      if (h.factory_time.startsWith('2026-10-07')) return `loaded ${h.factory_time}`
+      const rush = (await api('/api/events')).find((e) => e.source === 'plant' && e.anomaly.kind === 'order_rush')
+      return rush ? `overlaid ${rush.id}` : null
+    }, 20000)
+    check('插單 started from the 3D desk console', !!started, started ?? 'clock not on 10/07 and no rush-order event')
     await w3.screenshot({ path: `${OUT}/factory-rings-desk.png` })
   }
   const real = errors.filter((e) => !/WebSocket|ERR_CONNECTION|favicon|Failed to load resource/.test(e))

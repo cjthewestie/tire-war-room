@@ -6,7 +6,8 @@
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 2 / 3 run at 10× / 60×, 0 pauses
 // or plays, so the demo never has to leave the 3D view; ?demo=1 also lists them in the key strip and turns key 4
 // (隨機事件) off, matching the demo strip's presenter mode. #71: the ⚡ 觸發異常 button (or T) does the same with a
-// click, for presenters and touch devices.
+// click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
+// is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -14,6 +15,7 @@ import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
+import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
 import { STATE_LABEL } from '../components/common'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
@@ -109,7 +111,7 @@ export function FactoryApp() {
   const [toast, setToast] = useState<{ title: string; body: string; at: number } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
-  const [demoNote, setDemoNote] = useState<{ text: string; at: number } | null>(null)
+  const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
   const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
   const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
@@ -167,9 +169,11 @@ export function FactoryApp() {
 
   useEffect(() => {
     if (!demoNote) return
-    const t = setTimeout(() => setDemoNote(null), 2500)
+    const t = setTimeout(() => setDemoNote(null), demoNote.ms ?? 2500)
     return () => clearTimeout(t)
   }, [demoNote])
+  const stateRef = useRef(state)          // 情境疊加: the key handler decides overlay / load on the latest state
+  useEffect(() => { stateRef.current = state }, [state])
 
   useEffect(() => {
     const f = () => setLocked(!!document.pointerLockElement)
@@ -216,6 +220,14 @@ export function FactoryApp() {
       if (demo) {
         if (!transport || e.repeat) return
         const { c, label } = demo(paused)
+        // 情境疊加: 1 / 5 while an event or approval is open on another scenario add on top (the demo strip's rule)
+        if (c.action === 'scenario' && c.scenario && scenarioClick(c.scenario, stateRef.current) === 'overlay') {
+          const name = c.scenario
+          const lab = SCENARIOS.find((s) => s.name === name)?.label ?? name
+          transport.overlay(name).then((r) => setDemoNote({ text: overlayNote(lab, r), at: Date.now(), ms: OVERLAY_NOTE_MS }),
+            (err) => { console.warn(err); setDemoNote({ text: `疊加：${lab}：沒有成功`, at: Date.now() }) })
+          return
+        }
         transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
@@ -326,7 +338,7 @@ export function FactoryApp() {
           {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
-        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text) => setDemoNote({ text, at: Date.now() })} />}
+        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
