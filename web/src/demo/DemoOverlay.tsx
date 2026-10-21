@@ -9,21 +9,32 @@ import './demo.css'
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-/** The first selector whose element is on screen. */
-function findAnchor(sel: string[]): HTMLElement | null {
+const BAR_H = 64
+
+/** The first anchor on screen: one selector, or `a & b` (every part must be on screen, each gets a hole). */
+function findAnchor(sel: string[]): HTMLElement[] {
   for (const s of sel) {
-    let el: HTMLElement | null = null
-    try { el = document.querySelector<HTMLElement>(s) } catch { /* a bad selector: next */ }
-    if (el && el.getBoundingClientRect().height > 0) return el
+    const els = s.split(' & ').map((part) => {
+      try { return document.querySelector<HTMLElement>(part) } catch { return null }   // a bad selector: next
+    })
+    if (els.every((el) => el && el.getBoundingClientRect().height > 0)) return els as HTMLElement[]
   }
-  return null
+  return []
+}
+
+/** An element's box, padded and clipped to the visible page under the demo bar (a long Agent trace stays inside). */
+function clip(el: HTMLElement, pad = 8): Rect | null {
+  const r = el.getBoundingClientRect()
+  const top = Math.max(r.top - pad, BAR_H + 6), bottom = Math.min(r.bottom + pad, window.innerHeight - 6)
+  const left = Math.max(r.left - pad, 6), right = Math.min(r.right + pad, window.innerWidth - 6)
+  return bottom - top < 24 || right - left < 24 ? null : { x: left, y: top, w: right - left, h: bottom - top }
 }
 
 const WAIT_TEXT = { approval: '等主管核准（手機或核准卡）', event: '等工廠事件發生…', continue: '按 Space／N（或手把 A）繼續' } as const
 
 export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: string[]; caption: string }) {
   const { demo, cue, beat } = d
-  const [rect, setRect] = useState<Rect | null>(null)
+  const [rects, setRects] = useState<Rect[]>([])
   const [hit, setHit] = useState<string | null>(null)
   const [t, setT] = useState(demo?.elapsed_s ?? 0)
   const key = anchors.join('|')
@@ -40,15 +51,22 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
 
   // the spotlight follows its element (late renders, scrolling, resizing); scrolled into view once per anchor
   useLayoutEffect(() => {
-    if (!anchors.length) { setRect(null); setHit(null); return }
+    if (!anchors.length) { setRects([]); setHit(null); return }
     let scrolled: HTMLElement | null = null
     const tick = () => {
-      const el = findAnchor(anchors)
-      if (!el) { setRect(null); setHit(null); return }
-      if (el !== scrolled) { scrolled = el; el.scrollIntoView({ block: 'center', behavior: 'smooth' }) }
-      const r = el.getBoundingClientRect()
-      setHit(el.dataset.testid ?? el.dataset.demoAnchor ?? el.className)
-      setRect((p) => (p && p.x === r.x && p.y === r.y && p.w === r.width && p.h === r.height ? p : { x: r.x, y: r.y, w: r.width, h: r.height }))
+      const els = findAnchor(anchors)
+      if (!els.length) { setRects([]); setHit(null); return }
+      const el = els[0]
+      if (el !== scrolled) {
+        // a tall element starts at the top (under the bar), a short one is centred
+        scrolled = el
+        const tall = el.getBoundingClientRect().height > window.innerHeight - BAR_H - 40
+        if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - BAR_H - 12, behavior: 'smooth' })
+        else el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+      setHit(els.map((e) => e.dataset.testid ?? e.dataset.demoAnchor ?? e.className).join(' & '))
+      const next = els.map((e) => clip(e)).filter((r): r is Rect => !!r)
+      setRects((p) => (JSON.stringify(p) === JSON.stringify(next) ? p : next))
     }
     tick()
     const id = setInterval(tick, 200)
@@ -59,13 +77,12 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
   // test hook (headless e2e only)
   useEffect(() => {
     const w = window as unknown as Record<string, unknown>
-    w.__demoWarroom = () => ({ cue: demo?.cue_id, caption, anchors, hit, rect, paused: demo?.paused, waiting: demo?.waiting_for, pitch: !!beat?.pitch })
+    w.__demoWarroom = () => ({ cue: demo?.cue_id, caption, anchors, hit, rects, paused: demo?.paused, waiting: demo?.waiting_for, pitch: !!beat?.pitch })
     return () => { delete w.__demoWarroom }
-  }, [demo?.cue_id, demo?.paused, demo?.waiting_for, caption, anchors, hit, rect, beat?.pitch])
+  }, [demo?.cue_id, demo?.paused, demo?.waiting_for, caption, anchors, hit, rects, beat?.pitch])
 
   if (!demo?.running) return null
-  const pad = 8
-  const r = rect && { x: rect.x - pad, y: rect.y - pad, w: rect.w + pad * 2, h: rect.h + pad * 2 }
+  const r = rects[0] ?? null
   const below = r ? r.y + r.h + 64 < window.innerHeight : true
   const wait = demo.waiting_for ? WAIT_TEXT[demo.waiting_for] : null
   return (
@@ -96,7 +113,17 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
         </div>
       ) : r ? (
         <>
-          <div className="dm-spot" style={{ left: r.x, top: r.y, width: r.w, height: r.h }} data-testid="demo-spot" aria-hidden />
+          {/* the dim layer with a hole per anchor (an SVG mask, so two holes do not dim each other), then the glow */}
+          <svg className="dm-dim" aria-hidden width="100%" height="100%">
+            <defs>
+              <mask id="dm-holes">
+                <rect width="100%" height="100%" fill="white" />
+                {rects.map((h, i) => <rect key={i} x={h.x} y={h.y} width={h.w} height={h.h} rx="14" fill="black" />)}
+              </mask>
+            </defs>
+            <rect width="100%" height="100%" mask="url(#dm-holes)" />
+          </svg>
+          {rects.map((h, i) => <div key={i} className="dm-spot" style={{ left: h.x, top: h.y, width: h.w, height: h.h }} data-testid="demo-spot" aria-hidden />)}
           {caption && (
             <div className={`dm-cap ${below ? 'below' : 'above'}`} data-testid="demo-caption"
               style={{ left: Math.max(12, Math.min(r.x, window.innerWidth - 420)), top: below ? r.y + r.h + 12 : r.y - 12 }}>{caption}</div>

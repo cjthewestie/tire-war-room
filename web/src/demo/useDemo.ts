@@ -5,8 +5,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { ScenarioName } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
 import {
-  CUES, DEMO_TOTAL, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, clockPause, clockRead, clockResume, clockSet, clockStart,
-  skip, step, type DemoClock, type DemoLoad, type Timeline,
+  CUES, DEMO_TOTAL, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, clockPause, latch, clockRead, clockResume, clockSet, clockStart,
+  skip, step, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
 import { beatFor, waitingFor } from './beats'
 import { freshSeen, signals } from './signals'
@@ -50,6 +50,7 @@ export function useDemo() {
   const tl = useRef<Timeline | null>(null)
   const clock = useRef<DemoClock>({ base: 0, since: null })
   const seen = useRef(freshSeen())
+  const latched = useRef<Signals>({})
   const loaded = useRef(new Set<number>())
   const loads = useRef<DemoLoad[]>(MAIN_LOADS)
   const armedAt = useRef(Infinity)
@@ -62,6 +63,7 @@ export function useDemo() {
     if (!transport) return
     armedAt.current = Infinity
     seen.current = freshSeen()
+    latched.current = {}
     await transport.control({ action: 'scenario', scenario: l.scenario as ScenarioName, speed: l.speed, preroll: true })
     await transport.control({ action: 'play' })
     armedAt.current = performance.now() + 1500     // the new plant's snapshot replaces the old one's events
@@ -101,7 +103,8 @@ export function useDemo() {
       loads.current.forEach((l, i) => {
         if (i > 0 && t >= l.at && !loaded.current.has(i)) { loaded.current.add(i); void load(l).catch((e) => console.warn(e)) }
       })
-      const sig = now >= armedAt.current ? signals(stateRef.current, seen.current) : {}
+      // latched: the approval card is gone once approved, the cue still follows it (cues.ts latch)
+      const sig = now >= armedAt.current ? (latched.current = latch(latched.current, signals(stateRef.current, seen.current))) : {}
       let n = step(cur, t, sig)
       // the approval beat never moves on by the clock: only the real approval (worker on the way) ends it
       if (n !== cur && waitOf(cur.index) === 'approval' && n.fired[n.fired.length - 1].reason === 'time' && !sig.worker) n = cur

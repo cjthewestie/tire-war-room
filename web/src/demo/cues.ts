@@ -1,3 +1,5 @@
+// Shared by the 3D factory (factory3d/useGuidedDemo.ts) and the war room (demo/useDemo.ts): one cue list, so both
+// screens show the same beat (GET/POST /api/demo/state carries the current cue between them).
 // The 6-minute guided demo (CJ, 2026-10-22: 「我的3d 工廠要有一個demo鍵 是一個六分鐘的demo流程…大概三分鐘的時候要換到
 // Pitch階段提醒我該Pitch嚕」). Pure timeline: the cues in order, when each one shows, and why (a real event, or its time
 // fallback). FactoryApp feeds it the elapsed demo time and the live signals; nothing here touches React or three.js,
@@ -10,8 +12,8 @@ export const FALLBACK_LOADS: DemoLoad[] = [
   { at: 0, scenario: 'normal', speed: 10 },
   { at: 62, scenario: 'press7_temp_drop', speed: 10 },
 ]
-/** Demo speed for morning_rush: the story's first half (07:00 → event closed) in about 3 real minutes. */
-export const DEMO_SPEED = 30
+/** Demo speed for morning_rush (faster than its 30× default: the sim also waits while the model plans, so at 30× the 7 號機 card came at ~2:30 real). */
+export const DEMO_SPEED = 40
 export const MAIN_LOADS: DemoLoad[] = [{ at: 0, scenario: DEMO_SCENARIO, speed: DEMO_SPEED }]
 
 export const DEMO_TOTAL = 360
@@ -42,13 +44,18 @@ export interface Cue {
   big?: boolean
 }
 
+// Timed against two real runs on :8170 (Nemotron 3.5 Lightning, morning_rush at 40×, 2026-10-22): the 7 號機 event at
+// 1:25 / 1:43, its approval card 1:42 / 2:15, crew on it 1:49 / 2:22, closed 1:51 / 2:25 — the sim waits while the model
+// plans, so the beats move by half a minute between runs. Hence the story cues follow the signals (each up ≥ 10 s, see
+// MIN_DWELL), `at + wait` is only the fallback, and the signals are latched (latch()): a card the presenter already
+// approved still moves the 手機 cue on.
 export const CUES: Cue[] = [
   { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有急單、也有趕不上的單。', shot: { kind: 'overview' } },
-  { id: 'console', at: 30, title: '👉 去看主控台', body: '訂單、AI 預先擬好的計劃：趕不上的單已先排好方案。', links: ['console'], shot: { kind: 'overview' } },
-  { id: 'event', at: 75, on: 'event', minAt: 50, wait: 10, title: '⚠ 事件：7 號機溫降', body: '偵測器先發現溫度往下掉，才喚醒 AI。巡檢車正開過去。', shot: { kind: 'incident' } },
-  { id: 'phone', at: 100, on: 'approval', minAt: 85, wait: 10, title: '📱 手機響了：去核准', body: 'AI 的計劃要主管核准（R2）。拿起手機看方案、按核准。', links: ['phone'], shot: { kind: 'incident', close: true } },
-  { id: 'worker', at: 130, on: 'worker', minAt: 112, wait: 8, title: '👷 看員工到現場解決', body: '核准後維修人員走到 7 號機處理，圈圈轉綠就是好了。', shot: { kind: 'incident', close: true } },
-  { id: 'agent', at: 160, on: 'closed', minAt: 142, wait: 6, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼換假設，全部記在稽核裡。', links: ['agent'], shot: { kind: 'overview' } },
+  { id: 'console', at: 30, title: '👉 去看主控台', body: '訂單、AI 預先擬好的計劃：開工計劃、急單重排，趕不上的單已先擬好方案。在主控台核准。', links: ['console'], shot: { kind: 'overview' } },
+  { id: 'event', at: 100, on: 'event', minAt: 50, wait: 15, title: '⚠ 事件：7 號機溫降', body: '偵測器先發現溫度往下掉，才喚醒 AI。巡檢車正開過去。', shot: { kind: 'incident' } },
+  { id: 'phone', at: 130, on: 'approval', minAt: 60, wait: 15, title: '📱 手機響了：去核准', body: 'AI 的計劃要主管核准（R2）。拿起手機看方案、按核准。', links: ['phone'], shot: { kind: 'incident', close: true } },
+  { id: 'worker', at: 150, on: 'worker', minAt: 70, wait: 8, title: '👷 看員工到現場解決', body: '核准後維修人員走到 7 號機處理，圈圈轉綠就是好了。', shot: { kind: 'incident', close: true } },
+  { id: 'agent', at: 165, on: 'closed', minAt: 80, wait: 6, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼換假設，全部記在稽核裡。', links: ['agent'], shot: { kind: 'overview' } },
   { id: 'pitch', at: PITCH_AT, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。←／→ 換頁，點白板全螢幕。', big: true, shot: { kind: 'whiteboard' } },
   { id: 'warn', at: WARN_AT, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。', shot: { kind: 'whiteboard' } },
   { id: 'end', at: DEMO_TOTAL, title: '結束', body: '謝謝！', big: true, shot: { kind: 'whiteboard' } },
@@ -59,6 +66,13 @@ export interface Fired { id: string; t: number; reason: Reason }
 export interface Timeline { index: number; fired: Fired[] }
 export const startTimeline = (): Timeline => ({ index: 0, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] })
 
+/** Signals stay true once seen (the approval card is gone once approved; the cue should still follow it). */
+export function latch(seen: Signals, now: Signals): Signals {
+  const out: Signals = { ...seen }
+  for (const k of Object.keys(now) as Signal[]) if (now[k]) out[k] = true
+  return out
+}
+
 /** A cue stays up at least this long before an event can replace it. */
 const MIN_DWELL = 10
 
@@ -68,7 +82,9 @@ function due(tl: Timeline, t: number, sig: Signals): Reason | null {
   if (!next) return null
   const prevAt = tl.fired[tl.fired.length - 1]?.t ?? 0
   if (next.on && sig[next.on] && t >= (next.minAt ?? 0) && t >= prevAt + MIN_DWELL) return 'event'
-  if (t >= next.at + (next.on ? next.wait ?? 0 : 0)) return 'time'
+  // the clock fallback also leaves the current cue up for MIN_DWELL (an approval at 2:45 fired 👷 and, 250 ms later, the
+  // overdue 🧠 Agent cue); the big cues (the pitch switch, the end) keep their time
+  if (t >= next.at + (next.on ? next.wait ?? 0 : 0) && (next.big || t >= prevAt + MIN_DWELL)) return 'time'
   return null
 }
 

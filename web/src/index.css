@@ -492,6 +492,12 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-conn.ok { background: var(--accent-soft); color: var(--accent); }
 .ph-conn.bad { background: var(--alarm-soft); color: var(--alarm); }
 .ph-arm { background: var(--panel-2); color: var(--ink); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; font-size: 15px; font-weight: 700; cursor: pointer; min-height: 48px; }
+.ph-demo { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--ink); font-size: 14px; font-weight: 600; }
+.ph-demo button { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 8px; padding: 8px 14px; font: inherit; font-weight: 700; min-height: 40px; cursor: pointer; }
+.ph-demo-arm { border-width: 2px; }
+.ph-demo-now { text-align: center; padding: 14px; border-radius: 14px; background: var(--warn); color: #1a1200; font-size: 30px; font-weight: 800; letter-spacing: .08em; animation: ph-now 1.2s ease-in-out infinite; }
+@keyframes ph-now { 50% { transform: scale(1.03); } }
+@media (prefers-reduced-motion: reduce) { .ph-demo-now { animation: none; } }
 .ph-armed { font-size: 13px; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .ph-arm-off { background: none; border: 1px solid var(--border); color: var(--ink-dim); border-radius: 8px; padding: 4px 10px; font-size: 12px; cursor: pointer; min-height: 32px; flex: none; }
 .ph-blocked { margin: 0; color: var(--warn); font-size: 12px; }

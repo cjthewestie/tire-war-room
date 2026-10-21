@@ -20,15 +20,17 @@
 .dm-ctl button:disabled { opacity: .45; cursor: not-allowed; }
 .dm-ctl .dm-exit { color: var(--ink-dim); }
 
-/* the spotlight: one box whose huge shadow dims the rest; it takes no clicks, so 核准 under it still works */
+/* the spotlight: a dim layer with holes (SVG mask) and a glowing ring per hole; neither takes clicks, so 核准 under
+   it still works */
+.dm-dim { position: fixed; inset: 0; z-index: 79; pointer-events: none; }
+.dm-dim > rect { fill: rgb(0 0 0 / .58); }
 .dm-spot {
   position: fixed; z-index: 80; pointer-events: none; border-radius: 14px;
-  box-shadow: 0 0 0 3px var(--accent), 0 0 28px 6px rgb(118 185 0 / .55), 0 0 0 200vmax rgb(0 0 0 / .58);
-  transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease;
+  box-shadow: 0 0 0 3px var(--accent), 0 0 28px 6px rgb(118 185 0 / .55);
   animation: dm-glow 2.4s ease-in-out infinite;
 }
 @keyframes dm-glow {
-  50% { box-shadow: 0 0 0 3px var(--accent), 0 0 40px 12px rgb(118 185 0 / .7), 0 0 0 200vmax rgb(0 0 0 / .58); }
+  50% { box-shadow: 0 0 0 3px var(--accent), 0 0 40px 12px rgb(118 185 0 / .7); }
 }
 @media (prefers-reduced-motion: reduce) { .dm-spot { animation: none; transition: none; } }
 .dm-cap {
