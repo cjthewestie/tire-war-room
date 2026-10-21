@@ -863,7 +863,7 @@ export interface SubagentsView { items: Subagent[]; queue: { slots: number; runn
 
 /** POST /api/main/message: one 主 agent turn (issue #54, warroom/agent/main_agent.py). */
 export interface MainReply {
-  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string; ids?: string[] }[]
   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
   /** overview mode only: links to task boards, made by code from event ids that exist (warroom/api/overview.py) */
   mode?: ChatMode; links?: TaskLink[]

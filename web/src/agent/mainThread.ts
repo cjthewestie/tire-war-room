@@ -10,7 +10,7 @@ import type { LocalItem } from './transcript'
 
 export interface Bubble {
   key: string; ts: string; who: 'me' | 'agent'; text: string; pending?: boolean
-  steps?: { label: string; summary: string; ok: boolean }[]; fellBack?: boolean; error?: string | null
+  steps?: { label: string; summary: string; ok: boolean; ids?: string[] }[]; fellBack?: boolean; error?: string | null
   /** the waiting plan (event id) the message was about */
   about?: string | null
   /** 總覽 replies: the task boards it names (code-made from real event ids) */
@@ -29,7 +29,7 @@ function fromAudit(e: AuditEntry, scope: ChatMode): Bubble[] {
   const o = String(p.orch ?? '')
   if ((o === 'chat' && p.mode === 'overview') !== (scope === 'overview')) return []
   if (o === 'chat') {
-    const steps = Array.isArray(p.steps) ? (p.steps as D[]).map((s) => ({ label: String(s.label ?? s.tool ?? ''), summary: String(s.summary ?? ''), ok: s.ok !== false })) : []
+    const steps = Array.isArray(p.steps) ? (p.steps as D[]).map((s) => ({ label: String(s.label ?? s.tool ?? ''), summary: String(s.summary ?? ''), ok: s.ok !== false, ids: Array.isArray(s.ids) ? (s.ids as string[]) : undefined })) : []
     const about = (p.selected as string) ?? null
     return [{ key: `a${e.seq}-me`, ts: e.ts, who: 'me', text: String(p.text ?? ''), about },
       { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null, about,

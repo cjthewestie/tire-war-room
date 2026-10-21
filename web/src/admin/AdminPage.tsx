@@ -16,6 +16,7 @@ import { Err } from './adminCommon'
 import { useLoad, type Job } from './adminData'
 import { AuditPage } from './AuditPage'
 import { HealthPage } from './HealthPage'
+import { MemoryTimeline } from './MemoryTimeline'
 import { ParamsPage } from './ParamsPage'
 import './admin.css'
 
@@ -225,6 +226,7 @@ function MemoryPage() {
   }, [m, query, mid])
   return (
     <section className="admin-body">
+      <MemoryTimeline />
       <Err err={err} />
       {m?.agent_reads_notes
         ? <p className="note" data-testid="memory-agent-reads"><b>{m.agent_uses ?? 'Agent 規劃時會參考：機台筆記、最近 3 件過去事件'}</b>。某台機台出事時，指揮官擬計劃會帶上那台的筆記（最新 5 則）和最近 3 件過去事件（結案事件＋團隊資料集），Agent Nemo 問到那台也查得到；只供參考假設，數字仍以工具結果為準。唯讀，不會改任何東西。</p>

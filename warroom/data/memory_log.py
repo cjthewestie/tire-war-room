@@ -506,6 +506,45 @@ class ObservationStore:
         with self._lock, self._db() as db:
             return [r[0] for r in db.execute("SELECT day FROM obs GROUP BY day ORDER BY MAX(seq)")]
 
+    def page(self, before: int | None = None, after: int | None = None, limit: int = 50,
+             types: list[str] | None = None, machine: str | None = None) -> list[dict[str, Any]]:
+        """Newest first (the 後台 記憶時間軸): `before` a seq pages back, `after` a seq gives only what is newer."""
+        where, args = [], []
+        if before:
+            where.append("seq < ?")
+            args.append(before)
+        if after:
+            where.append("seq > ?")
+            args.append(after)
+        if types:
+            where.append(f"type IN ({','.join('?' * len(types))})")
+            args += types
+        if machine:
+            where.append("machines LIKE ?")
+            args.append(f'%"{machine}"%')
+        q = "SELECT * FROM obs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY seq DESC LIMIT ?"
+        with self._lock, self._db() as db:
+            return [self._row(r) for r in db.execute(q, [*args, limit])]
+
+
+def summary_card(doc: dict[str, Any]) -> dict[str, Any]:
+    """A daily summary as a claude-mem session card: 處理了 / 學到 / 完成 / 待辦, from its facts (code; empty parts left
+    out), plus the summary sentences as written."""
+    f = doc.get("facts") or {}
+    handled = (f"{f.get('tasks', 0)} 件任務" + ("：" + "、".join(f"{k} {v}" for k, v in (f.get("by_final") or {}).items())
+                                                if f.get("by_final") else "")) if f.get("tasks") else ""
+    learned = [f"{machine_label(e['machine_id'])}{h}" for e in f.get("events") or [] for h in e.get("hypotheses") or []
+               if "確認" in h or "推翻" in h]
+    o = f.get("orders") or {}
+    done = [f"結案 {f['by_final']['結案']} 件"] if (f.get("by_final") or {}).get("結案") else []
+    done += [f"訂單完成 {len(o['completed'])} 張"] if o.get("completed") else []
+    done += [f"出貨 {len(o['shipped'])} 張"] if o.get("shipped") else []
+    todo = [f"轉到下一天：{'、'.join(f['carried_over'][:5])}"] if f.get("carried_over") else []
+    todo += [f"遲交或有風險：{'、'.join(o['late'][:5])}"] if o.get("late") else []
+    parts = {"handled": handled, "learned": "；".join(learned[:4]), "completed": "・".join(done), "todo": "；".join(todo)}
+    return {"name": doc["name"], "label": doc.get("label") or doc["name"], "sentences": doc.get("sentences") or [],
+            "source": doc.get("source"), "written_at": doc.get("written_at"), **{k: v for k, v in parts.items() if v}}
+
 
 def index_line(o: dict[str, Any]) -> str:
     return f"{o['id']} · {_ts(o['ts']).astimezone(F.TZ):%H:%M} · {ICON[o['type']]} · {o['title']}"

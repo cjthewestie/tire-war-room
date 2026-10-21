@@ -47,7 +47,7 @@ export interface ChatItem extends Base {
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
   /** issue #54: a 主 agent turn — its id, the tool calls behind the reply (one grey line), a rule-fallback note */
-  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean }[]; error?: string | null
+  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean; ids?: string[] }[]; error?: string | null
   /** the waiting plan (event id) this message was about; null = a new message to the 主 agent */
   about?: string | null
   /** sent in the Agent page's 總覽 conversation; links: its reply's task boards */

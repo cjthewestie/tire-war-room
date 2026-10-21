@@ -29,6 +29,7 @@ from warroom import factory as F
 from warroom.api import admin_audit as AA
 from warroom.api import admin_params as AP
 from warroom.contracts import AuditKind
+from warroom.data import memory_log as ML
 
 ALLOWED_EXT = (".md", ".txt", ".pdf")
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
@@ -417,6 +418,35 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         block = await asyncio.to_thread(r.machine_memory, machine_id) if hasattr(r, "machine_memory") else \
             await asyncio.to_thread(MM.for_machine, machine_id, notes(), r.audit, r.events())
         return {"machine_id": machine_id, "machine_memory": block}
+
+    # 記憶時間軸 (CJ, 2026-10-22: 「不是說要跟claudemem一樣」): the observations newest first, read-only
+    @app.get(P + "/memory/observations")
+    async def observations(before: int | None = Query(None, ge=1), after: int | None = Query(None, ge=0),
+                           limit: int = Query(60, ge=1, le=200), types: str = Query("", max_length=80),
+                           machine: str = Query("", max_length=20), _: Any = ADMIN) -> dict[str, Any]:
+        desk = rt().memory_desk
+        kinds = [t for t in types.split(",") if t in ML.ICON]
+
+        def run() -> dict[str, Any]:
+            desk.sync()
+            items = desk.obs.page(before, after, limit, kinds, machine or None)
+            days = {o["day"] for o in items}
+            cards = {d["name"]: ML.summary_card(d) for d in desk.files.all("daily") if d["name"] in days}
+            return {"items": items, "summaries": cards, "next": items[-1]["seq"] if len(items) == limit else None,
+                    "last_seq": desk.obs.last_seq(), "types": {k: [ML.ICON[k], ML.TYPE_LABEL[k]] for k in ML.ICON}}
+        return await asyncio.to_thread(run)
+
+    @app.get(P + "/memory/observations/get")
+    async def observations_get(ids: str = Query(..., max_length=200), _: Any = ADMIN) -> dict[str, Any]:
+        """memory_get: full observations by id (OB-0042,OB-0043), at most 20."""
+        want = [x.strip().upper() for x in ids.split(",") if x.strip()][:20]
+        return {"items": await asyncio.to_thread(rt().memory_desk.obs.get, want)}
+
+    @app.get(P + "/memory/search")
+    async def memory_search(q: str = Query(..., min_length=1, max_length=80), type: str = Query("", max_length=10),
+                            _: Any = ADMIN) -> dict[str, Any]:
+        """memory_search with its no-answer gate: a weak best match is 「找不到」 (found false)."""
+        return await asyncio.to_thread(rt().memory_desk.search, q, None, type if type in ML.ICON else None)
 
     @app.post(P + "/memory/notes")
     async def add_note(body: NoteBody, session: Any = ADMIN) -> dict[str, Any]:
