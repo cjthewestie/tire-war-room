@@ -8,6 +8,7 @@ import { buildHandover } from './build'
 import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
 const HOURS = [8, 12, 24]
+interface Daily { name: string; label: string; sentences: string[]; source: 'model' | 'code'; tasks: number; carried_over: string[] }
 const POLL_MS = 5000
 
 export function Handover() {
@@ -16,6 +17,7 @@ export function Handover() {
   const [events, setEvents] = useState<Event[]>([])
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [chainOk, setChainOk] = useState<boolean | null>(null)
+  const [daily, setDaily] = useState<Daily[]>([])
   const [copied, setCopied] = useState<'ok' | 'manual' | null>(null)
 
   useEffect(() => {
@@ -24,6 +26,7 @@ export function Handover() {
       getJSON<Event[]>(API.events).then((v) => live && setEvents(v)).catch(() => {})
       getJSON<ApprovalRequest[]>(API.approvals).then((v) => live && setApprovals(v)).catch(() => {})
       getJSON<{ audit_chain_ok?: boolean }>('/api/health/components').then((v) => live && setChainOk(v.audit_chain_ok ?? null)).catch(() => {})
+      getJSON<{ daily: Daily[] }>('/api/memory/daily?limit=2').then((v) => live && setDaily(v.daily)).catch(() => {})
     }
     pull()
     const id = setInterval(pull, POLL_MS)
@@ -72,6 +75,12 @@ export function Handover() {
           )}
         </section>
       ))}
+      {daily.length > 0 && (
+        <section className="ho-sec" data-testid="ho-daily">
+          <h2>前一天的每日摘要<span>{daily[0].label}・{daily[0].tasks} 件任務{daily[0].carried_over.length ? `・${daily[0].carried_over.length} 件沒結` : ''}</span></h2>
+          <ul><li><span>{daily[0].sentences.join('')}<small className="ho-src">{daily[0].source === 'model' ? 'AI 依程式整理的事實寫成' : '程式整理'}・由稽核紀錄產生</small></span></li></ul>
+        </section>
+      )}
       {h && (
         <details className="ho-raw" open={copied === 'manual'}>
           <summary>交班文字（純文字）</summary>

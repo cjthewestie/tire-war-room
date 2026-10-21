@@ -20,6 +20,7 @@ NOTE_LIMIT = 5
 NOTE_CHARS = 120
 PAST_LIMIT = 3
 FIELD_CHARS = 60
+MAX_BLOCK_CHARS = 2000      # the whole block as JSON: the commander's per-event context stays small however much is remembered
 # one line in the block itself (the user message, never the system prompt: that stays byte-identical)
 USE = "機台筆記與過去事件只供參考假設，數字仍以工具結果為準"
 TERMINAL = ("closed", "safe_stop")
@@ -130,15 +131,32 @@ def notes_for(machine_id: str, notes: Any, limit: int = NOTE_LIMIT) -> list[dict
             for n in mine[:limit]]
 
 
-def for_machine(machine_id: str, notes: Any, audit: Any, events: list[Any], exclude: str | None = None
-                ) -> dict[str, Any] | None:
-    """{machine_id, use, notes, past} for one machine, or None when there is nothing to remember."""
+def for_machine(machine_id: str, notes: Any, audit: Any, events: list[Any], exclude: str | None = None,
+                files: Any = None, levels: tuple[str, ...] = ("daily",)) -> dict[str, Any] | None:
+    """{machine_id, use, notes, past, days} for one machine, or None when there is nothing to remember. `days` is that
+    machine's line from the last 3 daily summaries (`files`: warroom/data/memory_log.py MemoryFiles; the levels
+    weekly / monthly add the longer timeline for query_plant machine_history). At most MAX_BLOCK_CHARS as JSON."""
+    import json
     if machine_id not in F.MACHINE_BY_ID:
         return None
     n, past = notes_for(machine_id, notes), past_for(machine_id, audit, events, exclude)
-    if not n and not past:
+    days = []
+    if files is not None:
+        try:
+            days = [{"from": f"{x['level']} {x['label']}", "line": x["line"]} for x in files.machine_lines(machine_id, levels)]
+        except Exception:  # noqa: BLE001 - summaries are optional
+            days = []
+    if not n and not past and not days:
         return None
-    return {"machine_id": machine_id, "use": USE, "notes": n, "past": past}
+    block = {"machine_id": machine_id, "use": USE, "notes": n, "past": past, **({"days": days} if days else {})}
+    size = lambda b: len(json.dumps(b, ensure_ascii=False))
+    while size(block) > MAX_BLOCK_CHARS and block.get("days"):
+        block["days"] = block["days"][:-1] or None
+        if block["days"] is None:
+            del block["days"]
+    while size(block) > MAX_BLOCK_CHARS and len(block["notes"]) > 1:
+        block["notes"] = block["notes"][:-1]
+    return block
 
 
 def attached(block: dict[str, Any] | None) -> dict[str, Any]:

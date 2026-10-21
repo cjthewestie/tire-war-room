@@ -35,7 +35,7 @@ interface Closed { id: string; machine_id: string | null; closed_at: string; sta
 interface Note { id: string; machine_id: string; text: string; author: string; created_at: string }
 interface Memory { incidents: Incident[]; closed_events: Closed[]; notes: Note[]; agent_reads_notes: boolean; agent_uses?: string }
 interface PastItem { id: string; date: string; symptom?: string; cause?: string; action?: string; outcome?: string; source: string }
-interface MachineMemory { machine_id: string; use: string; notes: { id: string; date: string; by: string; text: string }[]; past: PastItem[] }
+interface MachineMemory { machine_id: string; use: string; notes: { id: string; date: string; by: string; text: string }[]; past: PastItem[]; days?: { from: string; line: string }[] }
 interface Run { id: string; kind: 'event' | 'command' | 'ask' | 'chat'; ts: string; by?: string; machine_id?: string; state?: string; title?: string | null; question?: string | null; answer?: string | null; outcome?: string | null; tools?: number; replans?: number }
 
 export function AdminPage() {
@@ -231,6 +231,7 @@ function MemoryPage() {
         : <p className="note">這裡是給人看的「事件記憶」——團隊資料集的歷史異常、稽核紀錄裡已結案的事件，加上主管寫的機台筆記。</p>}
       <NoteForm onDone={reload} />
       {m?.agent_reads_notes && <MemoryPreview stamp={m.notes.length} />}
+      <DailyList />
       <div className="order-tools">
         <form className="order-search" role="search" onSubmit={(e) => e.preventDefault()}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋症狀、處置、結果，例如 蒸汽、溫度" aria-label="搜尋記憶" data-testid="memory-q" />
@@ -258,6 +259,26 @@ function MemoryPage() {
   )
 }
 
+// 每日摘要 (「加每日摘要」): one per day or 一日循環 cycle, rolled up weekly / monthly; all rebuilt from the audit
+interface DailyDoc { name: string; label: string; sentences: string[]; source: 'model' | 'code'; tasks: number; by_final: Record<string, number>; carried_over: string[]; machines: Record<string, string> }
+function DailyList() {
+  const { data, err } = useLoad<{ daily: DailyDoc[]; weekly: string[]; monthly: string[] }>('/api/memory/daily?limit=7')
+  return (
+    <section className="panel mem-g" data-testid="memory-daily">
+      <header className="panel-h"><h2>每日摘要</h2>
+        <span className="muted small">每週 {data?.weekly.length ?? 0} 份・每月 {data?.monthly.length ?? 0} 份・原始稽核紀錄不刪不壓縮，可重建</span></header>
+      <Err err={err} />
+      {data && !data.daily.length && <p className="muted small">還沒有每日摘要：一天結束（或一日循環換日）時自動產生。</p>}
+      <ul className="mem-list">
+        {(data?.daily ?? []).map((d) => (
+          <li key={d.name} className="k-ev"><span className="mem-k">{d.label}</span>
+            <span>{d.sentences.join('')}<small className="muted">{d.tasks} 件任務・{Object.entries(d.by_final).map(([k, v]) => `${k} ${v}`).join('・')}・{d.source === 'model' ? 'AI 依事實寫成' : '程式整理'}</small></span></li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
 // what the commander would get as context.machine_memory for one machine, right now
 function MemoryPreview({ stamp }: { stamp: number }) {
   const [mid, setMid] = useState('CURE-07')
@@ -273,6 +294,7 @@ function MemoryPreview({ stamp }: { stamp: number }) {
       {mm && (
         <ul className="mem-list">
           {mm.notes.map((n) => <li key={n.id} className="k-note"><span className="mem-k">筆記</span><span>{n.text}<small className="muted">{n.date}・{n.by}</small></span></li>)}
+          {(mm.days ?? []).map((d) => <li key={d.from} className="k-inc"><span className="mem-k">每日摘要</span><span>{plain(d.line)}<small className="muted">{d.from}</small></span></li>)}
           {mm.past.map((p) => <li key={p.id} className="k-ev"><span className="mem-k">過去事件</span><span>{p.date}・{plain(p.symptom ?? p.id)}{p.cause ? `；原因 ${plain(p.cause)}` : ''}{p.action ? `；處置 ${plain(p.action)}` : ''}{p.outcome ? `；結果 ${plain(p.outcome)}` : ''}<small className="muted">{p.id}・{p.source === 'team_dataset' ? '團隊資料集' : '稽核紀錄'}</small></span></li>)}
         </ul>
       )}

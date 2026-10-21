@@ -414,7 +414,8 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
             raise HTTPException(status_code=400, detail=f"沒有這台機台：{machine_id}")
         from warroom.data import machine_memory as MM
         r = rt()
-        block = await asyncio.to_thread(MM.for_machine, machine_id, notes(), r.audit, r.events())
+        block = await asyncio.to_thread(r.machine_memory, machine_id) if hasattr(r, "machine_memory") else \
+            await asyncio.to_thread(MM.for_machine, machine_id, notes(), r.audit, r.events())
         return {"machine_id": machine_id, "machine_memory": block}
 
     @app.post(P + "/memory/notes")
