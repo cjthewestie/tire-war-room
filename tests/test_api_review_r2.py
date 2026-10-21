@@ -27,13 +27,13 @@ REAL_NEEDED = ("sim", "detector", "safety", "approvals", "audit", "tools", "gate
                "store")
 
 
-def _settings(tmp_path, scenario="normal") -> Settings:
+def _settings(tmp_path, scenario="normal", **over) -> Settings:
     return Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched",
-                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock")
+                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock", **over)
 
 
-def _real(tmp_path, scenario="normal", **kw) -> Runtime:
-    rt = Runtime(_settings(tmp_path, scenario), run_loop=False, **kw)
+def _real(tmp_path, scenario="normal", settings_over: dict | None = None, **kw) -> Runtime:
+    rt = Runtime(_settings(tmp_path, scenario, **(settings_over or {})), run_loop=False, **kw)
     missing = {k: v for k, v in rt.degraded.items() if k in REAL_NEEDED}
     if missing:
         pytest.skip(f"sibling modules not ready: {missing}")
@@ -203,7 +203,9 @@ async def test_failed_scenario_switch_keeps_previous_scenario(tmp_path, monkeypa
 
 # ---------------------------------------------------------------- 4 + 5. page-2 after closing
 async def test_page2_closed_event_one_forecast_and_still_abnormal(tmp_path):
-    rt = _real(tmp_path, ScenarioName.OPEN_MILL_OVERHEAT.value)
+    # real repair durations (REPAIR_FAST_S=0): the event closes while the crew is still on the cooling water; with fast
+    # repair it closes 「已修復」 instead (tests/test_fast_repair.py)
+    rt = _real(tmp_path, ScenarioName.OPEN_MILL_OVERHEAT.value, settings_over={"repair_fast_s": 0.0})
     await rt.start()
     try:
         ev = await _run_until(rt, "A-BIGOPEN", lambda e: e.state in TERMINAL_STATES, 3 * 3600)

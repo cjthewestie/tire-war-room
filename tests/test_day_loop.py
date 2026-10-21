@@ -20,7 +20,7 @@ import pytest
 
 from warroom.api import Runtime, create_app
 from warroom.config import Settings
-from warroom.contracts import ScenarioName
+from warroom.contracts import ScenarioName, WsType
 from warroom.sim import Factory
 from warroom.sim.day_loop import LoopFactory
 
@@ -170,4 +170,47 @@ async def test_scenario_switch_keeps_the_event_loop_responsive(tmp_path):
         assert rt.scenario is ScenarioName.RUSH_ORDER and rt.now() - rt.sim.scenario.start_at < timedelta(seconds=5)
     finally:
         await client.aclose()
+        await rt.stop()
+
+
+# ------------------------------------------------------------------ the dashboard's schedule follows a switch / a wrap
+def _schedule_msgs(rt) -> list[dict]:
+    return [m.data for m in rt.bus.history if m.type is WsType.SCHEDULE]
+
+
+def _put_v2_in_force(rt) -> None:
+    """What an approved event leaves behind: a second schedule version active."""
+    store = rt.c.store
+    store.activate(store.propose(store.current().schedule, "test: approved change").version)
+    assert store.current().version == 2
+
+
+async def test_scenario_switch_publishes_the_new_schedule(tmp_path):
+    """The dashboard reads GET /api/schedule only at page load: a switch that swaps the store without a WS "schedule"
+    left the previous scenario's version on screen (「SO-004 可能晚 253 小時」, 「10 號機 硫化延長中」)."""
+    rt = Runtime(_settings(tmp_path, "concurrent_3"), allow_fallback=False, run_loop=False)
+    await rt.start()
+    try:
+        _put_v2_in_force(rt)
+        n = len(_schedule_msgs(rt))
+        await rt.load_scenario(ScenarioName.PRESS7_TEMP_DROP)
+        sent = _schedule_msgs(rt)[n:]
+        assert sent and sent[-1] == rt.c.store.current().model_dump(mode="json")
+        assert sent[-1]["version"] == 1
+    finally:
+        await rt.stop()
+
+
+async def test_day_wrap_publishes_the_first_version(tmp_path):
+    rt = Runtime(_settings(tmp_path, "day_loop"), allow_fallback=False, run_loop=False)
+    await rt.start()
+    try:
+        await rt.tick(1.0, publish=False)                  # 00:00 snapshot of the day
+        _put_v2_in_force(rt)
+        n = len(_schedule_msgs(rt))
+        await rt._wrap_day()
+        sent = _schedule_msgs(rt)[n:]
+        assert rt.c.store.current().version == 1
+        assert sent and sent[-1] == rt.c.store.current().model_dump(mode="json")
+    finally:
         await rt.stop()

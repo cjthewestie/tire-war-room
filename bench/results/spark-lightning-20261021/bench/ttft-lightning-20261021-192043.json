@@ -1,0 +1,672 @@
+{
+  "bench": "ttft",
+  "recorded_at": "2026-10-21T19:20:43.361066+08:00",
+  "host": {
+    "hostname": "aitopatom-3ef3",
+    "platform": "Linux-7.0.0-1019-nvidia-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "ram_gb": 121.6,
+    "cpu_count": 20
+  },
+  "code": {
+    "git_sha": "afb2553cfdd2",
+    "deps": [
+      "ttft.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "c84b943d54569b9b"
+  },
+  "host_load_avg_1_5_15": [
+    2.25,
+    1.78,
+    1.54
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "lightning",
+    "kind": "vllm",
+    "vllm_version": "0.27.1"
+  },
+  "targets": {
+    "ttft_s": 0.5,
+    "first_alert_s": 2.0
+  },
+  "alert_card": {
+    "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), card = alert_card field of the CommanderPlan stream",
+    "commander_prompt_tokens": 6877,
+    "micro": {
+      "label": "MICRO-BENCHMARK: short standalone alert-card prompt, not the app's call",
+      "calls": [
+        {
+          "ok": true,
+          "ttft_s": 0.5817720699997153,
+          "ttft_any_s": 0.5817720699997153,
+          "total_s": 1.607691060002253,
+          "prompt_tokens": 2541,
+          "completion_tokens": 94,
+          "text": "{\n  \"title\": \"硫化溫度驟降警示\",\n  \"summary\": \"CURE-07 中胎溫度從 128°C 降至 122°C，已硫化 10h/28h，溫度呈穩定下降趨勢，需檢查蒸汽管線與控制系統。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 40,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": 91.63,
+          "card_s": 1.6077,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 0.5546704049993423,
+          "ttft_any_s": 0.5546704049993423,
+          "total_s": 1.3123752219980815,
+          "prompt_tokens": 2508,
+          "completion_tokens": 71,
+          "text": "{\n  \"title\": \"大開煉機過熱警告\",\n  \"summary\": \"A-BIGOPEN 膠溫 111.9°C 持續上升，水流偏低，已逾越 120°C 上限，需緊急處理。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 29,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": 93.7,
+          "card_s": 1.3124,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 0.5158136090030894,
+          "ttft_any_s": 0.5158136090030894,
+          "total_s": 1.5118674100012868,
+          "prompt_tokens": 2541,
+          "completion_tokens": 97,
+          "text": "{\n  \"title\": \"硫化溫度驟降警示\",\n  \"summary\": \"CURE-07 中胎溫度從 128°C 降至 122°C，已硫化 10h/28h，蒸汽壓 4.40 kgf/cm²，需檢查蒸汽管線與硫化參數。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 39,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": 97.38,
+          "card_s": 1.5119,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 0.5103237150033237,
+          "ttft_any_s": 0.5103237150033237,
+          "total_s": 1.235210877006466,
+          "prompt_tokens": 2508,
+          "completion_tokens": 71,
+          "text": "{\n  \"title\": \"大開煉機過熱警告\",\n  \"summary\": \"A-BIGOPEN 膠溫 112.4°C 持續上升，水流偏低，已逾越 120°C 上限，需緊急處理。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 27,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": 97.95,
+          "card_s": 1.2352,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 0.511198175001482,
+          "ttft_any_s": 0.511198175001482,
+          "total_s": 1.4286802140049986,
+          "prompt_tokens": 2542,
+          "completion_tokens": 89,
+          "text": "{\n  \"title\": \"硫化溫度驟降警示\",\n  \"summary\": \"CURE-07 中胎溫度從 128°C 降至 121.7°C，已硫化 10/28 h，蒸汽壓 4.40 kgf/cm²，有降溫風險。\"\n}",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 34,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": 97.0,
+          "card_s": 1.4287,
+          "valid_card": true
+        }
+      ],
+      "card_s": {
+        "n": 5,
+        "min": 1.2352,
+        "p50": 1.4287,
+        "p90": 1.5694,
+        "max": 1.6077,
+        "mean": 1.4192
+      },
+      "ttft_s": {
+        "n": 5,
+        "min": 0.5103,
+        "p50": 0.5158,
+        "p90": 0.5709,
+        "max": 0.5818,
+        "mean": 0.5348
+      },
+      "prompt_tokens": {
+        "n": 5,
+        "min": 2508,
+        "p50": 2541.0,
+        "p90": 2541.6,
+        "max": 2542,
+        "mean": 2528.0
+      },
+      "valid_card_rate": 1.0
+    },
+    "prime": {
+      "ok": true,
+      "ttft_s": 1.293140775997017,
+      "ttft_any_s": 1.293140775997017,
+      "total_s": 1.2933366150027723,
+      "prompt_tokens": 6877,
+      "completion_tokens": 1,
+      "text": "{\"",
+      "reasoning_chars": 0,
+      "error": null,
+      "chunks": 3,
+      "alert_card_s": null,
+      "alert_card": null,
+      "stopped_early": false,
+      "decode_tps": 5106.24
+    },
+    "cold_event_ids": [
+      "EVT-014f7b73dbbd",
+      "EVT-a552e6f64091",
+      "EVT-f199cd2b803b",
+      "EVT-c0e8dfad74e0",
+      "EVT-3004cfe6e2d3"
+    ],
+    "cold": {
+      "calls": [
+        {
+          "ok": true,
+          "ttft_s": 1.248293944998295,
+          "ttft_any_s": 1.248293944998295,
+          "total_s": 1.9601121809973847,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號硫化機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化\"\n  },\n  \"",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 28,
+          "alert_card_s": 1.9597414620002382,
+          "alert_card": {
+            "title": "7 號硫化機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 1.9597,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.212772013997892,
+          "ttft_any_s": 1.212772013997892,
+          "total_s": 1.917513066000538,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"A 線大開煉機膠溫 112°C 持續上升\",\n    \"summary\": \"膠溫 112°C 且持續上升，水流 21.5 L/min，上限 120°C 安全核心未觸發\"\n  },\n",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 27,
+          "alert_card_s": 1.9171175160008715,
+          "alert_card": {
+            "title": "A 線大開煉機膠溫 112°C 持續上升",
+            "summary": "膠溫 112°C 且持續上升，水流 21.5 L/min，上限 120°C 安全核心未觸發"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 1.9171,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.2446079769943026,
+          "ttft_any_s": 1.2446079769943026,
+          "total_s": 2.0571615179942455,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，蒸汽管線 H2\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 27,
+          "alert_card_s": 2.0532056329975603,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，蒸汽管線 H2"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.0532,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.3360393260009005,
+          "ttft_any_s": 1.3360393260009005,
+          "total_s": 2.0471651000043494,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN膠溫 112°C 持續上升\",\n    \"summary\": \"膠溫 112°C 且持續上升，水流偏低，未加硫上限 120°C\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 28,
+          "alert_card_s": 2.0468801890019677,
+          "alert_card": {
+            "title": "A-BIGOPEN膠溫 112°C 持續上升",
+            "summary": "膠溫 112°C 且持續上升，水流偏低，未加硫上限 120°C"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.0469,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.3560682719980832,
+          "ttft_any_s": 1.3560682719980832,
+          "total_s": 2.153707849996863,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化時間\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 28,
+          "alert_card_s": 2.153207867995661,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化時間"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.1532,
+          "valid_card": true
+        }
+      ],
+      "card_s": {
+        "n": 5,
+        "min": 1.9171,
+        "p50": 2.0469,
+        "p90": 2.1132,
+        "max": 2.1532,
+        "mean": 2.026
+      },
+      "ttft_s": {
+        "n": 5,
+        "min": 1.2128,
+        "p50": 1.2483,
+        "p90": 1.3481,
+        "max": 1.3561,
+        "mean": 1.2796
+      },
+      "prompt_tokens": {
+        "n": 0
+      },
+      "valid_card_rate": 1.0
+    },
+    "warm": {
+      "calls": [
+        {
+          "ok": true,
+          "ttft_s": 1.365863953004009,
+          "ttft_any_s": 1.365863953004009,
+          "total_s": 2.1381786890051444,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化\"\n  },\n  \"",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 27,
+          "alert_card_s": 2.1378354580010637,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.1378,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.3457748139990144,
+          "ttft_any_s": 1.3457748139990144,
+          "total_s": 1.9998490439975285,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C；中胎，已硫化 10 h／28 h。\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 24,
+          "alert_card_s": 1.9997012370004086,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C；中胎，已硫化 10 h／28 h。"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 1.9997,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.338767884997651,
+          "ttft_any_s": 1.338767884997651,
+          "total_s": 2.015296457997465,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C；中胎，已硫化 10 h／28 h。\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 24,
+          "alert_card_s": 2.015097194998816,
+          "alert_card": {
+            "title": "7 號機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C；中胎，已硫化 10 h／28 h。"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.0151,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.4859257429998252,
+          "ttft_any_s": 1.4859257429998252,
+          "total_s": 2.5975684619988897,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號硫化機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C；中胎，已硫化 10 h／28 h\"\n  },\n  \"",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 25,
+          "alert_card_s": 2.597392878997198,
+          "alert_card": {
+            "title": "7 號硫化機溫度下降 128→122°C",
+            "summary": "預測穩定在 122±1°C；中胎，已硫化 10 h／28 h"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.5974,
+          "valid_card": true
+        },
+        {
+          "ok": true,
+          "ttft_s": 1.3942349690041738,
+          "ttft_any_s": 1.3942349690041738,
+          "total_s": 2.2675545279998914,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號硫化機溫度下降\",\n    \"summary\": \"溫度 128→122°C，預測穩定在 122±1°C（中胎，已硫化 10 h／28 h），符合 SOP-CP-02 處置條件。\"\n  },\n  \"goal",
+          "reasoning_chars": 0,
+          "error": null,
+          "chunks": 31,
+          "alert_card_s": 2.26712681799836,
+          "alert_card": {
+            "title": "7 號硫化機溫度下降",
+            "summary": "溫度 128→122°C，預測穩定在 122±1°C（中胎，已硫化 10 h／28 h），符合 SOP-CP-02 處置條件。"
+          },
+          "stopped_early": true,
+          "decode_tps": null,
+          "card_s": 2.2671,
+          "valid_card": true
+        }
+      ],
+      "card_s": {
+        "n": 5,
+        "min": 1.9997,
+        "p50": 2.1378,
+        "p90": 2.4653,
+        "max": 2.5974,
+        "mean": 2.2034
+      },
+      "ttft_s": {
+        "n": 5,
+        "min": 1.3388,
+        "p50": 1.3659,
+        "p90": 1.4492,
+        "max": 1.4859,
+        "mean": 1.3861
+      },
+      "prompt_tokens": {
+        "n": 0
+      },
+      "valid_card_rate": 1.0
+    },
+    "card_s": {
+      "n": 5,
+      "min": 1.9171,
+      "p50": 2.0469,
+      "p90": 2.1132,
+      "max": 2.1532,
+      "mean": 2.026
+    },
+    "ttft_s": {
+      "n": 5,
+      "min": 1.2128,
+      "p50": 1.2483,
+      "p90": 1.3481,
+      "max": 1.3561,
+      "mean": 1.2796
+    },
+    "valid_card_rate": 1.0
+  },
+  "long_context": {
+    "chars_per_token": 1.382,
+    "commander_base_prompt_tokens": 6856,
+    "prompt_tokens_measured": 32357,
+    "cold": [
+      {
+        "ok": true,
+        "ttft_s": 6.712158157999511,
+        "ttft_any_s": 6.712158157999511,
+        "total_s": 6.783711856005539,
+        "prompt_tokens": 32357,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 111.8
+      },
+      {
+        "ok": true,
+        "ttft_s": 6.688935935002519,
+        "ttft_any_s": 6.688935935002519,
+        "total_s": 6.759795956000744,
+        "prompt_tokens": 32355,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 112.9
+      },
+      {
+        "ok": true,
+        "ttft_s": 6.718039468003553,
+        "ttft_any_s": 6.718039468003553,
+        "total_s": 6.798908243006736,
+        "prompt_tokens": 32357,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 98.93
+      }
+    ],
+    "warm": [
+      {
+        "ok": true,
+        "ttft_s": 1.6327022100012982,
+        "ttft_any_s": 1.6327022100012982,
+        "total_s": 1.707841057999758,
+        "prompt_tokens": 32339,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 106.47
+      },
+      {
+        "ok": true,
+        "ttft_s": 1.6183435720013222,
+        "ttft_any_s": 1.6183435720013222,
+        "total_s": 1.6947131190026994,
+        "prompt_tokens": 32339,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 104.75
+      },
+      {
+        "ok": true,
+        "ttft_s": 1.6319134599980316,
+        "ttft_any_s": 1.6319134599980316,
+        "total_s": 1.708468509998056,
+        "prompt_tokens": 32339,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 104.5
+      },
+      {
+        "ok": true,
+        "ttft_s": 1.6261139979978907,
+        "ttft_any_s": 1.6261139979978907,
+        "total_s": 1.7109393459977582,
+        "prompt_tokens": 32339,
+        "completion_tokens": 8,
+        "text": "{\"alert_card\":{\"title\":\"7",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 7,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 94.31
+      },
+      {
+        "ok": true,
+        "ttft_s": 1.6344754630044918,
+        "ttft_any_s": 1.6344754630044918,
+        "total_s": 1.6633748160020332,
+        "prompt_tokens": 32339,
+        "completion_tokens": 8,
+        "text": "{\n  \"alert_card\": {\n   ",
+        "reasoning_chars": 0,
+        "error": null,
+        "chunks": 5,
+        "alert_card_s": null,
+        "alert_card": null,
+        "stopped_early": false,
+        "decode_tps": 276.82
+      }
+    ],
+    "cold_ttft_s": {
+      "n": 3,
+      "min": 6.6889,
+      "p50": 6.7122,
+      "p90": 6.7169,
+      "max": 6.718,
+      "mean": 6.7064
+    },
+    "warm_ttft_s": {
+      "n": 5,
+      "min": 1.6183,
+      "p50": 1.6319,
+      "p90": 1.6338,
+      "max": 1.6345,
+      "mean": 1.6287
+    }
+  },
+  "verdicts": [
+    {
+      "name": "first_alert_card_p90",
+      "target": "≤ 2.0 s",
+      "measured": 2.1132,
+      "passed": false,
+      "note": "commander plan stream, alert_card complete; cold: unique event per call, n=5, prompt_tokens≈6877",
+      "extra": {}
+    },
+    {
+      "name": "first_alert_card_warm_p90",
+      "target": "info (target judged cold)",
+      "measured": 2.4653,
+      "passed": null,
+      "note": "warm: identical commander request repeated, full prefix-cache hit",
+      "extra": {}
+    },
+    {
+      "name": "micro_alert_card_p90",
+      "target": "info (micro-benchmark, not the app's call)",
+      "measured": 1.5694,
+      "passed": null,
+      "note": "short standalone alert-card prompt",
+      "extra": {}
+    },
+    {
+      "name": "ttft_warm_32k_p90",
+      "target": "≤ 0.5 s",
+      "measured": 1.6338,
+      "passed": false,
+      "note": "prefix-cache hit, n=5, p50=1.6319, max=1.6345, prompt_tokens=32357",
+      "extra": {
+        "warm": {
+          "n": 5,
+          "min": 1.6183,
+          "p50": 1.6319,
+          "p90": 1.6338,
+          "max": 1.6345,
+          "mean": 1.6287
+        }
+      }
+    },
+    {
+      "name": "ttft_cold_32k_p50",
+      "target": "info (target judged warm, prefix cache)",
+      "measured": 6.7122,
+      "passed": null,
+      "note": "no prefix cache: full 32k prefill, n=3, max=6.718",
+      "extra": {
+        "cold": {
+          "n": 3,
+          "min": 6.6889,
+          "p50": 6.7122,
+          "p90": 6.7169,
+          "max": 6.718,
+          "mean": 6.7064
+        }
+      }
+    }
+  ]
+}

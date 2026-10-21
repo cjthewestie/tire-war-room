@@ -1,29 +1,24 @@
-// Home 主控台's Agent panel (issue #8 → #37): only the final dialogue — what the supervisor typed or asked and
-// the agent's replies and plan summaries. Every step behind it (state changes, the plan, tool calls, data read,
-// gates, approvals) is on the Agent page (#console), linked from 「看完整過程」. The input bar keeps three modes
-// (issue #10): 討論這個計劃 (POST /api/events/{id}/discuss), 下新任務 (POST /api/command), 只查不改 (POST /api/ask).
-// CJ, 2026-10-20: 「對話台裡面的 agent 對話台這邊不用太多他思考工具使用的東西就是給最後的對話就可以了」.
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import type { Event, Line } from '../contracts'
-import { machineLabel } from '../factory'
-import { fmtHM, ms } from '../format'
-import { RISK_PLAIN } from '../plain'
+// Home 主控台: the 核准區 list, the plan of the selected item (核准並派發 / 討論), and the conversation with the 主 agent
+// (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
+// Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
+import { useEffect, useMemo, useState } from 'react'
+import type { ApprovalRequest, Event, Line } from '../contracts'
+import { ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { STATE_LABEL } from '../components/common'
 import { ApprovalList } from './ApprovalList'
 import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
 import { useHomeSelection } from './homeSelection'
 import { PlanArea } from './PlanArea'
-import { asksOf, isDialogue, withAsks, type Item, type LocalItem } from './transcript'
-import { Row } from './TranscriptRows'
+import { isDialogue, type Item, type LocalItem } from './transcript'
+import { PendingNotice } from './PendingNotice'
 import { setReplan, useReplans } from './replanStore'
 import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
+import { Bubbles } from './SimpleChat'
+import { useMainThread } from './mainThread'
 import { useTranscript } from './useTranscript'
 import { BriefingView } from '../components/BriefingView'
 import { useEventBriefing } from '../useBriefing'
-import type { ApprovalRequest } from '../contracts'
-import { PendingNotice } from './PendingNotice'
 import './agent.css'
 
 /** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
@@ -38,17 +33,18 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   const { state } = useWarRoom()
   const { events, list, sel, ev } = useHomeSelection(picked)
   const { items } = useTranscript(ev)
-  const [all, setAll] = useState(false)
   const [focus, setFocus] = useState<BarFocus | null>(null)
-  const chat = (mode?: BarMode, text?: string, send?: boolean) => { setAll(false); setFocus((f) => ({ mode, text, send, n: (f?.n ?? 0) + 1 })) }
+  const chat = (mode?: BarMode, text?: string, send?: boolean) => { setFocus((f) => ({ mode, text, send, n: (f?.n ?? 0) + 1 })) }
   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
   const replans = useReplans()
   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
+  // switch only while the supervisor is still looking at that order (never pull the screen away from something else)
+  const looking = sel && picked === sel.key ? sel.orderId : null        // the supervisor opened it (not the default pick)
   useEffect(() => {
     if (!arrived?.eventId) return
     setReplan(arrived.orderId, { state: 'ready' })
-    setPicked(arrived.eventId)
-  }, [arrived?.eventId, arrived?.orderId, setPicked])
+    if (looking === arrived.orderId) setPicked(arrived.eventId)
+  }, [arrived?.eventId, arrived?.orderId, looking, setPicked])
   // the task ended without a card (nothing to change, or a safe stop): say so on the item instead of planning forever
   const ended = Object.values(replans).map((r) => ({ r, ev: r.state === 'planning' ? events.find((e) => e.id === r.eventId) : undefined }))
     .find((x) => x.ev && (x.ev.state === 'closed' || x.ev.state === 'safe_stop'))
@@ -61,8 +57,8 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <div className="home">
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
-      <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
-      <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)} />
+      <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
+      <Console planEv={ev} items={items} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)} />
     </div>
     </>
   )
@@ -74,142 +70,69 @@ function latestReq(pending: ApprovalRequest[], evId: string | undefined): Approv
   return [...pending].filter((p) => p.event_id === evId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null
 }
 
-/** Split the messages around a time: those at or before it, and those after (stable; no time = all before). */
-function splitAt(rows: Item[], t: number): [Item[], Item[]] {
-  if (isNaN(t)) return [rows, []]
-  let i = rows.length
-  while (i > 0 && ms(rows[i - 1].ts) > t) i--
-  return [rows.slice(0, i), rows.slice(i)]
-}
-
 const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
 
-function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAll, focus, onFull, onGuide }: {
-  ev: Event | null; events: Event[]; onPick: (id: string) => void; items: Item[]
-  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
-  all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null; onFull?: (eventId?: string) => void; onGuide: (text: string) => void
+/** The 主控台 conversation panel: the one NemoClaw (主 agent) thread (CJ, 2026-10-21: 「我不要長這樣」 about the
+ *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed; issue #100: the 此事項／全部 switcher is gone too). The plan on
+ *  screen sits in the thread as a short 待核准 notice (or the briefing of its state), placed by its own time. Each
+ *  subagent's progress is on the Agent page, via 看完整過程. */
+function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide }: {
+  planEv: Event | null; items: Item[]
+  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
+  onGuide: (text: string) => void
 }) {
   const { state, transport, connected } = useWarRoom()
-  const brief = useEventBriefing(ev)
-  const req = useMemo(() => latestReq(state.pending, ev?.id), [state.pending, ev?.id])
-  // local rows (asks, a message being sent) belong to the event that was selected when they were sent; 全部 keeps all
-  const mine = useMemo(() => {
-    const own = asksOf(asks, ev?.id ?? null, allView)
-    // a message still shown as "sending" is hidden once the record already carries the same message (no twin bubbles)
-    return own.filter((a) => !(a.k === 'chat' && a.pending && items.some((i) => i.k === 'chat' && i.role === 'me' && i.text === a.text)))
-  }, [asks, ev?.id, allView, items])
-  // the plan-summary chat rows are replaced by ONE briefing that follows the event's state; the rest of the dialogue stays
-  const talk = useMemo(() => withAsks(items.filter(isDialogue), mine).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary')), [items, mine, brief])
-  // the briefing sits among the messages by its own time: a 待核准 card by its created_at (so a v2 comes after the 討論
-  // that asked for it), any other state by the latest step of the record. No time → it stays last, as before.
+  const thread = useMainThread(asks)
+  // the input talks about the plan on screen
+  const talkEv = planEv
+  const waiting = !!talkEv && talkEv.state === 'await_approval' && state.pending.some((p) => p.event_id === talkEv.id)
+  const full = (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(talkEv?.id) } }
+  // 主管摘要 (issue #93): one briefing for the plan on screen, following its state (待核准 / 執行中 / 處置完成)
+  const brief = useEventBriefing(talkEv)
+  const req = useMemo(() => latestReq(state.pending, talkEv?.id), [state.pending, talkEv?.id])
+  // the briefing sits among the messages by its own time: a 待核准 notice by its card's created_at (so a v2 comes after the
+  // 討論 that asked for it), any other state by the latest step of the record. No time → it stays last.
   const briefAt = useMemo(() => {
     if (!brief) return NaN
     if (brief.state === 'pending' && req) return ms(req.created_at)
     const stepTs = items.filter((i) => !isDialogue(i)).map((i) => ms(i.ts)).filter((t) => !isNaN(t))
     return stepTs.length ? Math.max(...stepTs) : NaN
   }, [brief, req, items])
-  const [before, after] = useMemo(() => splitAt(talk, briefAt), [talk, briefAt])
-  const askReady = !!transport?.ask && (transport.mode !== 'live' || connected)
-  const steps = items.length - items.filter(isDialogue).length
-  const scroller = useRef<HTMLDivElement>(null)
-  const briefBox = useRef<HTMLDivElement>(null)
-  const [pinned, setPinned] = useState(true)
-  const onScroll = () => {
-    const el = scroller.current
-    if (el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-  }
-  const last = talk[talk.length - 1]
-  const tail = `${allView}:${ev?.id}:${events.length}:${talk.length}:${last?.key}:${last?.k === 'ask' ? !!last.answer : ''}:${last?.k === 'chat' ? last.pending : ''}:${brief?.state ?? ''}:${req?.id ?? ''}`
-  useLayoutEffect(() => {
-    const el = scroller.current
-    if (!el || !pinned) return
-    // newest message at the bottom. A long briefing (not the short 待核准 notice) that is the last thing is shown from its heading.
-    const box = briefBox.current
-    if (box && !allView && !after.length) el.scrollTop += box.getBoundingClientRect().top - el.getBoundingClientRect().top - 8
-    else el.scrollTop = el.scrollHeight
-  }, [tail, pinned, allView, after.length])
-  const jump = () => { const el = scroller.current; if (el) { el.scrollTop = el.scrollHeight; setPinned(true) } }
-  const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
-  const waiting = open && ev.state === 'await_approval'
-  const running = items.some((i) => i.k === 'tool' && i.status === 'running')
-  const full = (id?: string) => (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(id) } }
+  const toPlan = () => (document.querySelector('[data-testid=plan-area] [data-testid=approval-visual]') ?? document.querySelector('[data-testid=plan-area]'))?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const extra = talkEv && brief ? {
+    at: briefAt, alignTop: !(brief.state === 'pending' && req),
+    node: brief.state === 'pending' && req
+      ? <PendingNotice ev={talkEv} req={req} onPlan={toPlan} />
+      : (
+        <div className="con-brief" data-testid="con-brief">
+          <BriefingView b={brief} footer={(
+            <a className="br-link" href={`#console?event=${encodeURIComponent(talkEv.id)}`} onClick={full} data-testid="see-record">查看處理紀錄</a>
+          )} />
+        </div>
+      ),
+  } : null
+  const askReady = !!transport?.message && (transport.mode !== 'live' || connected)
+  const guide = (
+    <div className="con-guide" data-testid="con-guide">
+      <h3>我是 NemoClaw</h3>
+      <p className="muted small">戰情室的主 agent。我可以幫你：</p>
+      <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
+      <p className="muted small">試試這些問題：</p>
+      {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
+      {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 NemoClaw 問答</p>}
+    </div>
+  )
+
   return (
-    <section className="console panel" aria-label="Agent 對話">
+    <section className="console panel" aria-label="NemoClaw 對話">
       <header className="con-h">
         <div className="con-title">
-          <h2>Agent 對話</h2>
-          <div className="seg sm con-view" role="group" aria-label="對話範圍">
-            <button className={!allView ? 'on' : ''} aria-pressed={!allView} onClick={() => setAll(false)} disabled={!ev} data-testid="con-follow">
-              {ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・${fmtHM(ev.opened_at)}` : '此事項'}</button>
-            <button className={allView ? 'on' : ''} aria-pressed={allView} onClick={() => setAll(true)} data-testid="con-all">全部</button>
-          </div>
-          {ev && !allView && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
-          <a className="con-full" href={`#console${ev && !allView ? `?event=${encodeURIComponent(ev.id)}` : ''}`} onClick={full(allView ? undefined : ev?.id)} data-testid="see-full">看完整過程 →</a>
+          <h2>NemoClaw 對話</h2>
+          <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
         </div>
       </header>
-      <div className="con-body" ref={scroller} onScroll={onScroll} data-testid="transcript">
-        {allView && events.slice().reverse().map((e) => <EventFeed key={e.id} ev={e} onPick={onPick} />)}
-        {allView && !events.length && <p className="muted con-empty">目前沒有事件。下方可直接提問。</p>}
-        {!allView && ev && (steps > 0 || talk.length > 0 || !!brief) && (
-          <p className="con-steps con-order small">
-            舊訊息在上 ↓ 新訊息在下
-            {steps > 0 && <a href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-analysis">查看分析過程</a>}
-          </p>
-        )}
-        {!allView && !talk.length && !brief && (ev
-          ? <p className="muted con-empty">這件事還沒有對話。下方可以討論計劃或提問。</p>
-          : (
-            <div className="con-guide" data-testid="con-guide">
-              <h3>我是戰情室 Agent</h3>
-              <p className="muted small">只查不改。我可以幫你：</p>
-              <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
-              <p className="muted small">試試這些問題：</p>
-              {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
-              {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent 問答</p>}
-            </div>
-          ))}
-        {allView
-          ? talk.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)).map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)
-          : (
-            <>
-              {before.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
-              {ev && brief && (brief.state === 'pending' && req
-                ? <PendingNotice ev={ev} req={req} onPlan={() => { onPick(ev.id); (document.querySelector('[data-testid=plan-area] [data-testid=approval-visual]') ?? document.querySelector('[data-testid=plan-area]'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
-                : (
-                  <div className="con-brief" data-testid="con-brief" ref={briefBox}>
-                    <BriefingView b={brief} footer={brief.state !== 'pending' ? (
-                      <a className="br-link" href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-record">查看處理紀錄</a>
-                    ) : null} />
-                  </div>
-                ))}
-              {after.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
-            </>
-          )}
-        {!allView && open && !brief && (
-          <div className={`con-live ${waiting ? 'wait' : ''}`} role="status" aria-live="polite">
-            {waiting ? <><i className="pulse" />等待主管核准…（{state.pending.filter((p) => p.event_id === ev.id).map((p) => RISK_PLAIN[p.risk]).join('、') || '核准卡在中間'}）</>
-              : <><i className="spin" />AI 指揮官{STATE_LABEL[ev.state]}中{running ? '・工具執行中' : ''}…</>}
-          </div>
-        )}
-      </div>
-      {!pinned && <button className="con-jump" onClick={jump}>↓ 跳到最新</button>}
-      <ChatBar ev={ev} waiting={!!waiting && state.pending.some((p) => p.event_id === ev?.id)} setAsks={setAsks} onPick={onPick} focus={focus} />
+      <Bubbles items={thread} empty="跟 NemoClaw 說要做的事，或問工廠現在的狀況。" extra={extra} guide={guide} follow />
+      <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
-  )
-}
-
-/** 全部: every event's dialogue in one feed, oldest first, each under a heading that selects it. */
-function EventFeed({ ev, onPick }: { ev: Event; onPick: (id: string) => void }) {
-  const { items } = useTranscript(ev)
-  const brief = useEventBriefing(ev)
-  const rows = items.filter(isDialogue).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary'))
-  return (
-    <div className="feed-ev">
-      <button type="button" className="feed-ev-h" onClick={() => onPick(ev.id)}>
-        {ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・{fmtHM(ev.opened_at)}・{STATE_LABEL[ev.state]}
-      </button>
-      {rows.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
-      {brief && <div className="con-brief"><BriefingView b={brief} testId="feed-brief" /></div>}
-    </div>
   )
 }

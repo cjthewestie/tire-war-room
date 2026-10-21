@@ -23,8 +23,8 @@ const errors = []
 // every chat bubble (question and answer) ends inside the transcript box
 const askFits = (page) => page.evaluate(() => {
   const box = document.querySelector('[data-testid=transcript]')?.getBoundingClientRect()
-  const q = [...document.querySelectorAll('.r-q')].at(-1)?.getBoundingClientRect()
-  const a = [...document.querySelectorAll('[data-testid=ask-answer] .r-answer')].at(-1)?.getBoundingClientRect()
+  const q = [...document.querySelectorAll('[data-testid=sc-me] .sc-b')].at(-1)?.getBoundingClientRect()
+  const a = [...document.querySelectorAll('[data-testid=sc-agent] .sc-b')].at(-1)?.getBoundingClientRect()
   const body = document.querySelector('[data-testid=transcript]')
   if (!box || !q || !a) return { ok: false, why: 'missing' }
   return { ok: q.right <= box.right + 0.5 && a.right <= box.right + 0.5 && body.scrollWidth <= body.clientWidth + 1,
@@ -39,7 +39,7 @@ try {
   d.on('pageerror', (e) => errors.push(e.message))
   await d.goto(BASE + '/#agent', { waitUntil: 'networkidle' })
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
-  check('agent tab opens on the live backend', (await d.locator('[aria-label="Agent 對話"]').count()) === 1)
+  check('agent tab opens on the live backend', (await d.locator('[aria-label="NemoClaw 對話"]').count()) === 1)
 
   const r = [await sim(d, { action: 'scenario', scenario: 'press7_temp_drop' }), await sim(d, { action: 'speed', speed: 30 }), await sim(d, { action: 'play' })]
   check('press-7 scenario started (POST /api/sim/control)', r.every((s) => s === 200), r.join(','))
@@ -89,20 +89,19 @@ try {
   // 討論 puts the caret in the docked conversation in 討論這個計劃 mode
   await apv.locator('[data-testid=visual-discuss]').click()
   await d.waitForTimeout(300)
-  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.locator('form.askbar[data-mode=discuss]').count()) === 1 && (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
+  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
   check('no duplicate element ids', (await d.evaluate(() => { const ids = [...document.querySelectorAll('[id]')].map((e) => e.id); return ids.length === new Set(ids).size })))
   await d.screenshot({ path: `${OUT}/console-agent-1440.png` })
 
   // 問戰情室: a read-only question gets an answer with its read steps
-  await d.locator('[data-testid=mode-ask]').click()       // a plan waits: the bar defaults to 討論這個計劃
   await d.locator('.askbar textarea').fill('7 號機現在怎樣？')
   await d.locator('.askbar textarea').press('Enter')
   let answered = ''
-  for (let i = 0; i < 60 && !answered; i++) { await d.waitForTimeout(500); answered = await d.locator('[data-testid=ask-answer] .r-answer').last().innerText().catch(() => '') }
+  for (let i = 0; i < 60 && !answered; i++) { await d.waitForTimeout(500); const t = await d.locator('[data-testid=sc-agent]').last().innerText().catch(() => ''); answered = t.includes('思考中') ? '' : t }
   check('chat question answered', answered.length > 0, answered.slice(0, 80))
   const fit = await askFits(d)
   check('1440: question and answer stay inside the transcript', fit.ok, fit.why)
-  check('answer labelled 只查不改 (its read steps are on the Agent page)', (await d.locator('[data-testid=ask-answer] .ro').count()) > 0 && (await d.locator('[data-testid=ask-answer] [data-kind=tool]').count()) === 0)
+  check('plain answer: the tools collapse to one grey line (no tool rows, no labels)', (await d.locator('[data-testid=transcript] [data-kind=tool]').count()) === 0 && (await d.locator('[data-testid=sc-tools]').count()) >= 1)
   await d.screenshot({ path: `${OUT}/console-agent-ask-1440.png` })
 
   // dashboard tab carries the same visual card
@@ -134,11 +133,10 @@ try {
   const overflow = await p.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   check('390: no horizontal page scroll', overflow <= 1, `${overflow}px`)
   await p.screenshot({ path: `${OUT}/console-agent-390.png`, fullPage: true })
-  await p.locator('[data-testid=mode-ask]').click()
   await p.locator('.askbar textarea').fill('今晚夜班缺誰？')
   await p.locator('.askbar textarea').press('Enter')
   let ans390 = ''
-  for (let i = 0; i < 60 && !ans390; i++) { await p.waitForTimeout(500); ans390 = await p.locator('[data-testid=ask-answer] .r-answer').last().innerText().catch(() => '') }
+  for (let i = 0; i < 60 && !ans390; i++) { await p.waitForTimeout(500); const t = await p.locator('[data-testid=sc-agent]').last().innerText().catch(() => ''); ans390 = t.includes('思考中') ? '' : t }
   const fit390 = await askFits(p)
   check('390: question and answer stay inside the transcript', !!ans390 && fit390.ok, fit390.why)
   await p.locator('[data-testid=transcript]').scrollIntoViewIfNeeded()
@@ -150,7 +148,8 @@ try {
   await m.close()
 
   // approve from the visual card (option B), confirm via GET /api/approvals
-  const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => a[0]?.id))
+  // the press-7 card (a delivery-risk plan the 主 agent drafted on its own may also be waiting: issue #54)
+  const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => (a.find((r) => r.event_id.includes('CURE-07')) ?? a[0])?.id))
   const fold = d.locator('.monitor-wrap [data-testid=apv-expand]').first()
   if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click()   // the options sit behind 展開
   await d.locator('.monitor-wrap [data-testid=option-B]').first().click()

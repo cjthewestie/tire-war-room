@@ -1,0 +1,222 @@
+{
+  "bench": "ttft",
+  "recorded_at": "2026-10-21T20:21:21.311495+08:00",
+  "host": {
+    "hostname": "aitopatom-3ef3",
+    "platform": "Linux-7.0.0-1019-nvidia-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "ram_gb": 121.6,
+    "cpu_count": 20
+  },
+  "code": {
+    "git_sha": "afb2553cfdd2",
+    "deps": [
+      "ttft.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "c84b943d54569b9b"
+  },
+  "host_load_avg_1_5_15": [
+    2.97,
+    2.42,
+    2.24
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8001/v1",
+    "model": "bolt",
+    "kind": "vllm"
+  },
+  "targets": {
+    "ttft_s": 0.5,
+    "first_alert_s": 2.0
+  },
+  "alert_card": {
+    "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), card = alert_card field of the CommanderPlan stream",
+    "commander_prompt_tokens": null,
+    "prime": {
+      "ok": false,
+      "ttft_s": null,
+      "ttft_any_s": null,
+      "total_s": 0.0010158670047530904,
+      "prompt_tokens": null,
+      "completion_tokens": null,
+      "text": "",
+      "reasoning_chars": 0,
+      "error": "APIConnectionError: Connection error.",
+      "chunks": 0,
+      "alert_card_s": null,
+      "alert_card": null,
+      "stopped_early": false,
+      "decode_tps": null
+    },
+    "cold_event_ids": [
+      "EVT-fd7dd6e2c221",
+      "EVT-77720cd6de78",
+      "EVT-1b9c7d68de77"
+    ],
+    "cold": {
+      "calls": [
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.0007175159989856184,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        },
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.000677452000672929,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        },
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.0006592760037165135,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        }
+      ],
+      "card_s": {
+        "n": 0
+      },
+      "ttft_s": {
+        "n": 0
+      },
+      "prompt_tokens": {
+        "n": 0
+      },
+      "valid_card_rate": 0.0
+    },
+    "warm": {
+      "calls": [
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.0006244930045795627,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        },
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.0006200599964358844,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        },
+        {
+          "ok": false,
+          "ttft_s": null,
+          "ttft_any_s": null,
+          "total_s": 0.0006002680020174012,
+          "prompt_tokens": null,
+          "completion_tokens": null,
+          "text": "",
+          "reasoning_chars": 0,
+          "error": "APIConnectionError: Connection error.",
+          "chunks": 0,
+          "alert_card_s": null,
+          "alert_card": null,
+          "stopped_early": false,
+          "decode_tps": null,
+          "card_s": null,
+          "valid_card": false
+        }
+      ],
+      "card_s": {
+        "n": 0
+      },
+      "ttft_s": {
+        "n": 0
+      },
+      "prompt_tokens": {
+        "n": 0
+      },
+      "valid_card_rate": 0.0
+    },
+    "card_s": {
+      "n": 0
+    },
+    "ttft_s": {
+      "n": 0
+    },
+    "valid_card_rate": 0.0
+  },
+  "verdicts": [
+    {
+      "name": "first_alert_card_p90",
+      "target": "≤ 2.0 s",
+      "measured": null,
+      "passed": null,
+      "note": "commander plan stream, alert_card complete; cold: unique event per call, n=0, prompt_tokens≈None",
+      "extra": {}
+    },
+    {
+      "name": "first_alert_card_warm_p90",
+      "target": "info (target judged cold)",
+      "measured": null,
+      "passed": null,
+      "note": "warm: identical commander request repeated, full prefix-cache hit",
+      "extra": {}
+    }
+  ]
+}

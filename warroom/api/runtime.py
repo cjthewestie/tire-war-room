@@ -48,6 +48,7 @@ from warroom.contracts import (
     CompoundStage,
     DashboardSnapshot,
     Event,
+    EventState,
     FaultKind,
     FaultSpec,
     FocusPanel,
@@ -69,6 +70,7 @@ from warroom.contracts import (
     ToolName,
     WsType,
 )
+from warroom.sim.work import REPAIR_KINDS
 
 log = logging.getLogger("warroom.runtime")
 
@@ -123,6 +125,10 @@ class ComponentBuilder:
         self.capacity = self._capacity()
         self.orders_db = self._orders_db()
         self.reopened_store = False
+        # issue #54: one local model, one priority queue (safety > machine > orders/materials > staffing > questions)
+        from warroom.agent.orchestrator import ModelQueue
+        self.model_queue = ModelQueue(slots=max(1, int(getattr(self.s, "model_slots", 1))), audit=self.audit,
+                                      clock=self.clock)
 
     def _t(self, name: str, real: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
         if not self.use_real:
@@ -265,8 +271,9 @@ class ComponentBuilder:
             extra = {"store": store, "sleep": sleep, "approval_timeout_s": self.s.approval_timeout_s}
             params = inspect.signature(StateMachine).parameters
             extra = {k: v for k, v in extra.items() if k in params and v is not None}
-            return StateMachine(self.commander, tools, gate, approvals, self.audit, sim=sim, bus=bus, clock=clock,
-                                **extra)
+            from warroom.agent.orchestrator import QueuedCommander
+            return StateMachine(QueuedCommander(self.commander, self.model_queue), tools, gate, approvals, self.audit,
+                                sim=sim, bus=bus, clock=clock, **extra)
         sm = self._t("state_machine", sm_real,
                      lambda: FB.MinimalStateMachine(audit=self.audit, bus=bus, clock=clock))
 
@@ -494,6 +501,10 @@ class Runtime:
                                                               fresh_store=not want_resume)
         from warroom.api.ingest import IngestPipeline
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
+        self._orch: Any = None
+        self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
+        self._orch_c: Any = None
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -504,11 +515,13 @@ class Runtime:
         self.safety_log: list[SafetyAction] = []
         self.anomalies: list[Anomaly] = []
         self._tasks: dict[str, asyncio.Task] = {}
+        _ = self.orch                          # issue #54: hook the main agent onto the state machine now
         self._loop_task: asyncio.Task | None = None
         self._baseline: dict[str, dict[str, float]] = {}
         self._last_machines_pub = 0.0
         self._last_snapshot_pub = 0.0
         self._last_world_pub = 0.0
+        self._fast_world_until = 0.0             # fast repair running: WORLD deltas every 0.25 s until then
         self._world_obj: Any = None              # the sim's World the last WORLD message described
         self._world_rev = -1
         self._world_sent: dict[str, str] = {}    # section -> JSON last published (WORLD deltas)
@@ -717,6 +730,7 @@ class Runtime:
             await asyncio.sleep(self.tick_wall_s)
             now = time.monotonic()
             wall, last = now - last, now
+            self._advance_fast_repairs(running=not self.paused)
             if self.paused:
                 continue
             if self.speed > 1 and self.compute_busy():
@@ -766,6 +780,20 @@ class Runtime:
             self._last_snapshot_pub = now
             self.bus.publish(WsType.SNAPSHOT, self.snapshot())
 
+    def _publish_schedule(self) -> None:
+        """WS "schedule" with the active version after the store was swapped (scenario load) or rolled back to v1 (24:00
+        wrap). The dashboard reads GET /api/schedule only at page load, so without it the previous scenario's schedule
+        stayed on screen (「SO-004 可能晚 253 小時」, 「10 號機 硫化延長中」 before anything was approved)."""
+        store = self.c.store
+        if store is None:
+            return
+        try:
+            v = store.current()
+        except Exception:  # noqa: BLE001 - a store without an ACTIVE version has nothing to show
+            log.exception("schedule publish")
+            return
+        self.bus.publish(WsType.SCHEDULE, v)
+
     # ------------------------------------------------------------------ the whole plant (issue #11)
     def world_snapshot(self) -> Any:
         """WorldSnapshot of the sim's World (orders, materials, dock, people, energy, quality, maintenance),
@@ -782,7 +810,9 @@ class Runtime:
         w = getattr(self.sim, "world", None)
         if w is None or (w is self._world_obj and w.rev == self._world_rev):
             return
-        if not force and now - self._last_world_pub < 1.0:
+        if callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open():
+            self._fast_world_until = now + 1.0   # a fast repair's ring fills smoothly, up to its 完成
+        if not force and now - self._last_world_pub < (0.25 if now < self._fast_world_until else 1.0):
             return
         from warroom.sim.world import WORLD_SECTIONS
         data = w.snapshot().model_dump(mode="json")
@@ -813,6 +843,8 @@ class Runtime:
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
             self.clock.advance(dt_s)
+        self._advance_fast_repairs()
+        self._apply_repairs()
         self.ticks += 1
         self.safety_pass(readings)              # RED path first: nothing below can delay it
         self._random_event()                    # issue #36: off by default
@@ -946,6 +978,9 @@ class Runtime:
         if board is None or getattr(board, "_audited", False):
             return
         board._audited = True
+        board.fast_s = float(self.settings.repair_fast_s)    # fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒)
+        board.speed = lambda: self.speed
+        board.hold = self._awaits_decision                    # fast repair starts after 主管核准, not at the card
 
         def on_task(what: str, t: Any, now: datetime) -> None:
             if what == "created":
@@ -954,7 +989,85 @@ class Runtime:
                               {"task_id": t.id, "status": t.status, "change": what, "kind": t.kind, "title": t.title,
                                "worker_id": t.worker_id, "worker": t.worker_name, "where": t.where,
                                "at": now.isoformat()}, t.event_id)
+            # Kyle 10-21: 「已經兩個人去修理…但沒有修好，這樣不行」. The crew finished every repair task of this
+            # event on this machine: the fault is fixed (applied after this sim step, see _apply_repairs).
+            if t.status == "完成" and t.kind in REPAIR_KINDS and t.machine_id and t.event_id:
+                same = [x for x in board.for_event(t.event_id) if x.kind in REPAIR_KINDS and x.machine_id == t.machine_id]
+                if same and all(x.status == "完成" for x in same):
+                    self._repaired[t.machine_id] = t.event_id
         board.add_listener(on_task)
+
+    def _advance_fast_repairs(self, running: bool = True) -> None:
+        """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
+        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+        now = time.monotonic()
+        dt, self._fast_wall = now - self._fast_wall, now
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        if not running or self._switching or self.settings.repair_fast_s <= 0 or \
+                not callable(getattr(board, "advance_fast", None)):
+            return
+        board.advance_fast(self.clock.now(), dt)
+        self._apply_repairs()
+
+    def _awaits_decision(self, event_id: str | None) -> bool:
+        """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
+        auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
+        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
+        檢修 walked to 7 號 13 s before the card)."""
+        ev = self._event_obj(event_id)
+        if ev is None:
+            return False
+        if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
+                        EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
+            return True
+        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+                    for sr in ev.steps)
+        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+                      for r in self.approvals.all())
+        return needs and not decided
+
+    def _apply_repairs(self) -> None:
+        """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
+        (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
+        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
+        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+        fast = self.settings.repair_fast_s > 0
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        for mid, eid in list(self._repaired.items()):
+            same = [x for x in board.for_event(eid) if x.kind in REPAIR_KINDS and x.machine_id == mid] \
+                if board is not None else []
+            if not all(x.status == "完成" for x in same):
+                del self._repaired[mid]          # another repair task of this event started since: wait for that one
+                continue
+            ev = self._event_obj(eid)
+            if fast and ev is not None and ev.state not in TERMINAL_STATES and ev.state is not EventState.VERIFY:
+                continue                         # 主管核准 first: the approved round's tasks run, then the fix lands
+            del self._repaired[mid]
+            if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
+                continue                        # nothing injected on it (a replayed or already-cleared fault)
+            self.sim.clear_faults(mid)
+            snap = getattr(self.sim, "snap_to_nominal", None)
+            if fast and callable(snap):
+                snap(mid)                        # no slow cool-down: the next reading is normal
+            self.c.detector.reset(mid, repaired=True)
+            self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
+            on_repaired = getattr(self.state_machine, "on_repaired", None)
+            if fast and callable(on_repaired):
+                on_repaired(eid, mid, self.clock.now())
+
+    @property
+    def orch(self) -> Any:
+        """Issue #54: the main agent (orchestrator) over the current state machine (rebuilt with the components)."""
+        if self._orch is None or self._orch_c is not self.c:
+            from warroom.agent.orchestrator import Dispatcher, Orchestrator
+            q = getattr(self.builder, "model_queue", None)
+            self._orch = Orchestrator(self.c.state_machine, self.audit, approvals=self.c.approvals, bus=self.c.bus,
+                                      clock=self.clock, queue=q, tasks=lambda: self._tasks,
+                                      board=lambda: getattr(getattr(self.sim, "world", None), "tasks", None),
+                                      dispatcher=Dispatcher(self.settings))
+            self._orch.queue.on_change = self._orch.publish
+            self._orch_c = self.c
+        return self._orch
 
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
         """Issue #10: open a supervisor-command event now and run it as a tracked task (cancelled on a
@@ -1084,11 +1197,13 @@ class Runtime:
                 self.overlays = []
                 self._clear_ask_memory("scenario loaded")
                 self.c = comps
+                _ = self.orch                      # the main agent hooks the new state machine at once
                 self.ingest.reset()
                 self.safety_log.clear()
                 self.anomalies.clear()
                 self._baseline.clear()
                 self._oob_seen.clear()
+                self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
                 self.audit.append(AuditKind.SYSTEM, "supervisor",
@@ -1099,6 +1214,7 @@ class Runtime:
                 if was_running and self.run_loop and not self.running:
                     self._loop_task = asyncio.create_task(self._loop(), name="warroom-loop")
             self._publish_periodic(force=True)
+            self._publish_schedule()
 
     async def reset(self) -> None:
         await self.load_scenario(self.scenario)
@@ -1136,6 +1252,7 @@ class Runtime:
                                                          "ended_at": ended.isoformat(),
                                                          "factory_time": self.clock.now().isoformat()})
         self._publish_periodic(force=True)
+        self._publish_schedule()
 
     def day_loop_info(self) -> dict[str, Any] | None:
         sim = self.sim
@@ -1348,7 +1465,7 @@ class Runtime:
 
     def clear_faults(self, machine_id: str | None = None) -> None:
         self.sim.clear_faults(machine_id)
-        self.c.detector.reset(machine_id)
+        self.c.detector.reset(machine_id, repaired=machine_id is not None)
         self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "faults cleared", "machine_id": machine_id})
 
     def clock_info(self) -> dict[str, Any]:
@@ -1731,6 +1848,14 @@ class Runtime:
             # an approval carried over after a stale schedule (state machine: "<id>-rebased") ran in a
             # later round than the one it carries over
             start = ri + 1 if "-rebased" in req.id and req.id.split("-rebased")[0] in done_ids else ri
+            # card n is raised in plan round n or later (a discussion or a card-less replan adds plan rounds, never
+            # cards), so the search starts at its own round: from the previous card's round, round 2's card (gated
+            # step "S4" again) matched round 1, whose confirm went stale, and read 「未生效」 while its v4 was in force
+            start = max(start, req.round - 1)
+            # v2 of an approved card whose confirm went stale (group B 10-21: same round, 「另一事件的排程先生效」) ran in
+            # the plan round after v1's, not in v1's own
+            if getattr(req, "supersedes", None) and req.supersedes in done_ids:
+                start = max(start, ri + 1)
             done_ids.add(req.id)
             j = next((k for k in range(start, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
             ran: list[Any] = []

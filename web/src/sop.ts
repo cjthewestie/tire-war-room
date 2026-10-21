@@ -1,15 +1,17 @@
 // 現場處置 SOP (#72, #73): which SOP fits a machine's open event, and its 處置步驟 as a list.
-// Read-only: the SOP is the one the event's sop_search step found, else GET /api/sop/search; its steps come from the
-// same SOP markdown the knowledge base indexes (warroom/kb/sop/*.md, bundled at build time), because the search
-// returns one chunk per SOP and a long 處置步驟 section is split over several chunks.
+// Read-only: the SOP is the one the event's plan names (「依 SOP「硫化中斷處置」」), else SOP-CP-01 when a press is
+// taken out or its hypothesis was rejected, else the one the event's sop_search step found, else GET /api/sop/search;
+// its steps come from the same SOP markdown the knowledge base indexes (warroom/kb/sop/*.md, bundled at build time),
+// because the search returns one chunk per SOP and a long 處置步驟 section is split over several chunks.
 import { API, type Event, type SopHit } from './contracts'
 import { machineLabel } from './factory'
 
 const SOP_FILES = import.meta.glob('../../warroom/kb/sop/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
-const SOP_TEXT: Record<string, string> = Object.fromEntries(Object.values(SOP_FILES).flatMap((t) => {
-  const m = t.split('\n', 1)[0].match(/^#\s*(SOP-\w+-\d+)\s/)
-  return m ? [[m[1], t]] : []
-}))
+const SOP_HEAD = Object.values(SOP_FILES).flatMap((t) => {
+  const m = t.split('\n', 1)[0].match(/^#\s*(SOP-\w+-\d+)\s+(.+)$/)
+  return m ? [{ id: m[1], title: m[2].trim(), text: t }] : []
+})
+const SOP_TEXT: Record<string, string> = Object.fromEntries(SOP_HEAD.map((h) => [h.id, h.text]))
 
 /** The 處置步驟 section of a house SOP, from the bundled markdown. */
 export function sopStepsFromFile(sopId: string): string[] | null {
@@ -39,6 +41,31 @@ function sopFromEvent(ev: Event | null): { sop_id: string; title: string } | nul
     if (h) return { sop_id: h.sop_id!, title: h.title! }
   }
   return null
+}
+
+/** A bundled SOP the event's own plan names: an id (SOP-CP-01) or a title in 「」 (「硫化中斷處置」, p.11 H2's evidence). */
+function sopNamedByPlan(ev: Event | null): { sop_id: string; title: string } | null {
+  const p = ev?.plan
+  if (!p) return null
+  const texts = [p.hypothesis.statement, ...p.hypothesis.evidence, p.rationale,
+    ...p.steps.flatMap((s) => [s.args.message, s.args.reason].filter((x): x is string => typeof x === 'string'))]
+  for (const t of texts) {
+    const byId = [...t.matchAll(/SOP-\w+-\d+/g)].map((m) => SOP_HEAD.find((h) => h.id === m[0])).find(Boolean)
+    const byTitle = [...t.matchAll(/「([^」]+)」/g)].map((m) => SOP_HEAD.find((h) => h.title === m[1] || h.title.startsWith(`${m[1]}（`))).find(Boolean)
+    const h = byId ?? byTitle
+    if (h) return { sop_id: h.id, title: h.title }
+  }
+  return null
+}
+
+/** A press taken out of service, or whose hypothesis was rejected, follows SOP-CP-01 硫化中斷處置 (SOP-CP-02 step 6:
+ *  「未達預期即推翻假設並改走 SOP-CP-01」), not the full-text search's CP-02 that wins on 「7 號機停用，重排中」. */
+function sopForInterrupt(machineId: string, ev: Event | null): { sop_id: string; title: string } | null {
+  if (!ev?.plan || !machineId.startsWith('CURE-')) return null
+  const out = ev.plan.steps.some((s) => s.tool === 'notify_teams' && s.args.kind === 'machine_out')
+  if (!out && !ev.plan.rejected_hypothesis_ids.length) return null
+  const h = SOP_HEAD.find((x) => x.id === 'SOP-CP-01')
+  return h ? { sop_id: h.id, title: h.title } : null
 }
 
 type Reading = { label: string; value: string; status: string }
@@ -72,7 +99,8 @@ export function parseSteps(text: string): string[] {
 
 /** Find the SOP for a machine's anomaly and return its 處置步驟. */
 export async function loadSopSteps(machineId: string, ev: Event | null, readings: Reading[] = []): Promise<SopSteps | null> {
-  const pick = sopFromEvent(ev) ?? (await search(sopQuery(machineId, ev, readings), 3).then((h) => h[0] ?? null))
+  const pick = sopNamedByPlan(ev) ?? sopForInterrupt(machineId, ev) ?? sopFromEvent(ev)
+    ?? (await search(sopQuery(machineId, ev, readings), 3).then((h) => h[0] ?? null))
   if (!pick) return null
   const fromFile = sopStepsFromFile(pick.sop_id)
   if (fromFile) return { sop_id: pick.sop_id, title: pick.title, steps: fromFile }

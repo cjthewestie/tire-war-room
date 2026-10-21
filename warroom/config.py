@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # COMMANDER_MAX_TOKENS: completion cap for a commander plan. 1200 cut the live p.11 plan mid-JSON
     # (Nemotron pretty-prints, ~1.2-1.5k tokens for a full plan); a cut plan is audited as "truncated"
     commander_max_tokens: int = 4096
+    # LLM_CONTEXT_TOKENS: the serving model's context window (vLLM --max-model-len, Ollama num_ctx). The commander
+    # keeps system + user prompt within it minus commander_max_tokens, trimming per-event context first (#33)
+    llm_context_tokens: int = 32768
+    # PROMPT_TOKEN_FACTOR: serving-tokenizer tokens per approx_tokens() unit. 2.0 stays on the safe side until it is
+    # measured against the server's prompt_tokens (every commander LLM_CALL audit entry carries both numbers)
+    prompt_token_factor: float = 2.0
     llm_fallback_to_mock: bool = True     # invalid JSON / unreachable -> mock plan, logged
     guided_json: bool = True              # vLLM extra_body guided_json; else response_format json_schema
 
@@ -50,6 +56,14 @@ class Settings(BaseSettings):
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))
     approval_timeout_s: float = 600.0
+    # REPAIR_FAST_S: demo fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒). A repair task (檢修 / 停用檢修 / 放慢投料 /
+    # 暫停投料) is assigned at once and done this many WALL seconds after it was created, at any sim speed; the
+    # machine's readings then go straight back to normal. 0 = the real task durations (work.WORK_MIN).
+    repair_fast_s: float = 3.0
+    # MODEL_SLOTS: commander / main agent calls the local model may run at once (issue #54 ModelQueue). The Spark's
+    # vLLM serves MAX_NUM_SEQS=4 (deploy/spark/vllm-serve.sh: 3 concurrent anomalies + 1 spare); with 1 slot the
+    # 3 件同時異常 plans ran one after another (real model 10-21: last card 132 s after the load, 3 slots: same second).
+    model_slots: int = 3
 
     @property
     def api_key_effective(self) -> str:

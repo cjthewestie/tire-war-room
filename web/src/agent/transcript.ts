@@ -6,6 +6,8 @@
 import type {
   AskAnswer, AuditEntry, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, ToolName, ToolResult,
 } from '../contracts'
+import { REPAIR_KINDS } from '../aiStatus'
+import { machineLabel } from '../factory'
 import { hypName } from '../plain'
 
 export type Filter = 'all' | 'tool' | 'think' | 'gate'
@@ -37,27 +39,35 @@ export interface ApprovalItem extends Base {
 export interface SafetyItem extends Base { k: 'safety'; message: string; machine: string | null }
 export interface AnomalyItem extends Base { k: 'anomaly'; message: string }
 export interface NoteItem extends Base { k: 'note'; text: string; tone: 'verify' | 'warn' | 'plain' }
-/** `eventId`: the event that was selected when the message was sent (null = none, a general question). Local rows only —
- *  the server's own rows are fetched per event. */
-export interface AskItem extends Base { k: 'ask'; question: string; answer: AskAnswer | null; error: string | null; eventId?: string | null }
+export interface AskItem extends Base { k: 'ask'; question: string; answer: AskAnswer | null; error: string | null }
 /** Issue #10: the conversation about a plan. me = what the supervisor typed (a discussion message or a
  *  task); agent = the agent's reply or its plain summary of a plan at the gate. */
 export interface ChatItem extends Base {
-  k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused'; text: string; by: string
+  k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused' | 'dispatch' | 'report' | 'interrupt'; text: string; by: string
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
-  eventId?: string | null
+  /** issue #54: a 主 agent turn — its id, the tool calls behind the reply (one grey line), a rule-fallback note */
+  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean }[]; error?: string | null
+  /** the waiting plan (event id) this message was about; null = a new message to the 主 agent */
+  about?: string | null
 }
 /** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }
 /** A new card version replaced the discussed one (v1 → v2) and what changed. */
 export interface VersionItem extends Base { k: 'version'; to: number; from: number; approvalId: string; changes: string[] }
+/** A worker task (issue #17, AuditKind.TASK): 派工, then 前往中 → 執行中 → 完成 by whom; 取消; the verifier's count. */
+export interface TaskItem extends Base {
+  k: 'task'; phase: 'created' | 'assigned' | 'started' | 'done' | 'cancelled' | 'count'; text: string; who: string | null; repair: boolean
+  taskId: string | null
+}
+/** Fast repair (Kyle 10-21): 「維修完成，故障排除」, 「請主管覆核」 and 「主管覆核」 (SYSTEM rows with msg). */
+export interface ReviewItem extends Base { k: 'review'; phase: 'repaired' | 'requested' | 'done'; text: string; note: string | null }
 
 /** Rows the console keeps locally until the server's audit carries them (asks; a message being sent). */
 export type LocalItem = AskItem | ChatItem
 
 export type Item = StateItem | ThinkItem | ToolItem | GateItem | BlockedItem | ApprovalItem | SafetyItem | AnomalyItem | NoteItem | AskItem
-  | ChatItem | ChipsItem | VersionItem
+  | ChatItem | ChipsItem | VersionItem | TaskItem | ReviewItem
 
 /** The final dialogue of a transcript: messages and answers, no steps (the home 主控台 panel). */
 export const isDialogue = (i: Item) => i.k === 'chat' || i.k === 'ask'
@@ -66,7 +76,46 @@ export function inFilter(it: Item, f: Filter): boolean {
   if (f === 'all') return true
   if (f === 'tool') return it.k === 'tool' || it.k === 'ask'
   if (f === 'think') return it.k === 'think' || it.k === 'state' || it.k === 'chat' || (it.k === 'note' && it.tone === 'verify')
-  return it.k === 'gate' || it.k === 'blocked' || it.k === 'approval' || it.k === 'safety' || it.k === 'chips' || it.k === 'version'
+  return it.k === 'gate' || it.k === 'blocked' || it.k === 'approval' || it.k === 'safety' || it.k === 'chips' || it.k === 'version' || it.k === 'review'
+}
+
+const CHANGE: Record<string, TaskItem['phase']> = { assigned: 'assigned', started: 'started', done: 'done', cancelled: 'cancelled' }
+
+/** AuditKind.TASK rows → one row per task change (the state machine's 派工 lists every task it made). */
+function taskItems(e: AuditEntry, base: { key: string; ts: string; seq: number }): TaskItem[] {
+  const p = (e.payload ?? {}) as D
+  const one = (n: number, phase: TaskItem['phase'], text: string, who: string | null, kind: unknown, id: unknown = null): TaskItem =>
+    ({ ...base, key: `${base.key}.${n}`, k: 'task', phase, text, who, repair: REPAIR_KINDS.has(String(kind ?? '')), taskId: str(id) })
+  if (Array.isArray(p.created)) {
+    return (p.created as D[]).map((t, i) => {
+      const title = String(t.title ?? t.kind ?? ''), where = t.machine_id ? machineLabel(String(t.machine_id)) : ''
+      return one(i, 'created', where && !title.includes(where) ? `${title}（${where}）` : title, null, t.kind, t.id)
+    })
+  }
+  if (typeof p.change === 'string' && CHANGE[p.change]) return [one(0, CHANGE[p.change], String(p.title ?? p.kind ?? ''), str(p.worker), p.kind, p.task_id)]
+  if (Array.isArray(p.cancelled)) return [one(0, 'cancelled', `${p.cancelled.length} 項任務（撤回 ${String(p.revoked_step ?? '')}）`, null, null)]
+  if (typeof p.tasks === 'number') return [one(0, 'count', `${String(p.done ?? 0)}/${p.tasks} 完成${p.ok ? '' : '（逾時）'}`, null, null)]
+  return []
+}
+
+/** The world assigns a task the moment it is made, so its 前往中 row is written before the state machine's 派工 row:
+ *  put each 派工 before the first other row of the same task. */
+function createdFirst(out: Item[]): void {
+  for (let i = 0; i < out.length; i++) {
+    const it = out[i]
+    if (it.k !== 'task' || it.phase !== 'created' || !it.taskId) continue
+    const j = out.findIndex((x, n) => n < i && x.k === 'task' && x.taskId === it.taskId)
+    if (j >= 0) { out.splice(i, 1); out.splice(j, 0, it) }
+  }
+}
+
+/** Fast repair rows (SYSTEM, payload.msg); the runtime's older wording 「現場處置完成，故障排除」 counts as 維修完成. */
+function reviewItem(p: D, base: { key: string; ts: string; seq: number }): ReviewItem | null {
+  const msg = String(p.msg ?? '')
+  if (/故障排除$/.test(msg)) return { ...base, k: 'review', phase: 'repaired', text: `維修完成，故障排除${p.machine_id ? `・${machineLabel(String(p.machine_id))}` : ''}`, note: null }
+  if (msg === '請主管覆核') return { ...base, k: 'review', phase: 'requested', text: msg, note: null }
+  if (msg === '主管覆核') return { ...base, k: 'review', phase: 'done', text: msg, note: str(p.note) || null }
+  return null
 }
 
 const INTENT: Record<string, string> = { question: '問題（只查不改）', change: '要改計劃', unsupported: '無法用程式保證的要求', other: '其他' }
@@ -78,6 +127,18 @@ function talkItem(e: AuditEntry, base: { key: string; ts: string; seq: number })
   const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, x: Partial<ChatItem> = {}): ChatItem => ({
     ...base, k: 'chat', role, kind, text, by: e.actor, intent: null, version: null, changes: [], constraints: [], classifiedBy: null, fellBack: false, ...x,
   })
+  // issue #54: the main agent's own rows — dispatch, report back, interrupt (dialogue) and model-queue waits (a step)
+  if (e.kind === 'system' && e.actor === 'main_agent') {
+    const o = String(p.orch ?? '')
+    if (o === 'dispatch' || o === 'report' || o === 'interrupt') {
+      return chat('agent', o, String(p.text ?? ''), { by: 'main_agent', classifiedBy: o === 'dispatch' ? str(p.by) : null, fellBack: p.fell_back === true })
+    }
+    if (o === 'queue') {
+      const ms = numOr(p.waited_ms) ?? 0
+      return { ...base, k: 'note', tone: 'plain', text: `等模型 ${ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms)} ms`}（優先：${String(p.priority_label ?? p.priority)}${Number(p.ahead) ? `・前面 ${String(p.ahead)} 個` : ''}）` }
+    }
+    return null
+  }
   if (e.kind === 'system') {
     const d = obj(p.discuss)
     if (d.text != null) return chat('me', 'discuss', String(d.text))
@@ -213,7 +274,12 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
       case 'anomaly':
         out.push({ ...base, k: 'anomaly', message: String(p.message ?? '') })
         break
+      case 'task':
+        out.push(...taskItems(e, base))
+        break
       case 'system': {
+        const rv = reviewItem(p, base)
+        if (rv) { out.push(rv); break }
         const text = systemText(e.actor, p)
         if (text) out.push({ ...base, k: 'note', text: text.text, tone: text.tone })
         break
@@ -222,6 +288,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
         break
     }
   }
+  createdFirst(out)
   return out
 }
 
@@ -281,12 +348,6 @@ export function fromEvent(ev: Event): Item[] {
 }
 function pushGate(push: (it: Omit<GateItem, 'seq' | 'key' | 'ts'>) => void, step: PlanStep, g: GateDecision) {
   push({ k: 'gate', stepId: step.id, tool: step.tool, risk: g.risk, verdict: g.verdict, reasons: g.reasons, checks: g.checks, dropped: null })
-}
-
-/** The local rows that belong in one view: those sent while `eventId` was selected (null = no event selected).
- *  `all` (the 全部 view and the page's 問戰情室 list) keeps every row. */
-export function asksOf(asks: LocalItem[], eventId: string | null | undefined, all = false): LocalItem[] {
-  return all ? asks : asks.filter((a) => (a.eventId ?? null) === (eventId ?? null))
 }
 
 /** Merge the 問戰情室 conversation into the event transcript by factory time. */

@@ -1,0 +1,14 @@
+[bolt] health model=bolt reachable=True
+[bolt]   6.0s by=model fb=False tools=['recall_today', 'memory_read'] Q=SO-004 什摸時候完成 | A='SO-004（客戶D，小胎 20 條）預計 2026-11-05 09:00 完成，交期是 2026-11-09 17:00，目前餘裕 104 小時，不需加班。'
+[bolt]   7.1s by=model fb=False tools=['memory_read'] Q=之前大開煉機出過什麼事？ | A='大開煉機（A03）在 9/23 出過膠溫偏高的事，後來降低轉速並檢查水路，停機 15 分，部分胎延長硫化後放行。另外 A04 也有過冷卻水流量偏低的事故，清洗過濾網後恢復，無報廢。你想看詳細的時間或後續處理嗎？'
+[bolt]   5.4s by=model fb=False tools=['memory_read'] Q=今天排程改了幾版？ | A='今天排程只改了一版，現在生效的是 v1，是 00:00 初始排程，共 65 個模次。'
+[bolt]   2.3s by=model fb=False tools=[] Q=現在有什麼在等我核准？ | A='現在沒有任何任務在等你核准。'
+[bolt]   7.9s by=model fb=False tools=['memory_read'] Q=我筆記寫了什麼？ | A='你的筆記檔目前是空的，還沒寫任何內容。你想先記什麼？'
+[bolt]   2.2s by=model fb=False tools=[] Q=哈摟 | A='哈摟，有什麼事？'
+[bolt]   3.2s by=model fb=False tools=[] Q=有啥要處理的 | A='沒有在等核准的事，也沒有進行中的任務。你想看什麼？可以問我訂單、班表、機台狀況，或是今天的排程改了幾版。'
+[bolt]   9.1s by=model fb=False tools=['memory_read'] Q=不市一個 代理一個畫面媽 | A='你是想看哪個畫面？我可以幫你查記憶檔、看任務列表或查機台狀況，你說要看什麼。'
+[bolt]  14.9s by=model fb=False tools=['query_orders_shifts', 'read_sensors', 'propose_plan'] Q=#M-201 可能晚交，請重排保交期 | A='好，已擬計劃送你核准（AI 指揮官正在排），核准後才執行。'
+[bolt]  18.4s by=model fb=False tools=['read_sensors', 'query_orders_shifts'] Q=看一下目前有哪些風險 | A='目前沒有異常。11 號硫化機溫度 127.8–128.1°C、蒸汽壓 4.9–5 kgf/cm²，趨勢平穩；A 線大開煉機 93.7°C、水流 37.9 L/分，也正常。人力缺口為零，下一模 6 號 #S-101 03:00、9 號 #M-201 04:30、5 號 #S-101 06:00 入模，最近交期 #A-31'
+[bolt]   9.0s by=model fb=False tools=['read_sensors', 'query_orders_shifts', 'recall_today'] Q=交期預警呢 | A='目前 #M-201 交期 11-11，下一模是 9 號 04:30 入模，8 號 22:15 入模，9 號 10-22 08:30 入模，人力沒缺口。全廠機台溫度都在 127.7–128.1°C，蒸汽壓 4.9–5 kgf/cm²，沒有異常。唯一開放的任務是「重排 #M-201 硫化排程，提前入模以保交期 11-11」'
+[bolt]  10.0s by=model fb=False tools=['memory_read'] Q=狀態機頁在看什麼？ | A='狀態機頁是每個任務的進度看板，顯示這件事走到哪一步（偵測、分類、計劃、模擬、核准、執行、驗證、結案），也會標出異常的預分類。你想看哪一件事的進度？'
+[bolt] REPLAY_DONE

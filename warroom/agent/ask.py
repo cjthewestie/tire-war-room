@@ -104,6 +104,21 @@ _STATUS_RX = re.compile(r"狀況|狀態|怎樣|怎麼樣|如何|溫度|異常|�
 
 
 # ------------------------------------------------------------------ mock planner (no model)
+ORDER_RX = re.compile(r"#\s?[A-Z]-?\d{2,4}", re.IGNORECASE)
+
+
+def orders_in(text: str) -> list[str]:
+    """Order ids named in a text, written the way the plant writes them: '#A-311', '#a311', '# A-311' -> '#A-311'."""
+    out: list[str] = []
+    for m in ORDER_RX.findall(text):
+        s = re.sub(r"\s", "", m).upper()
+        if "-" not in s:
+            s = f"{s[:2]}-{s[2:]}"
+        if s not in out:
+            out.append(s)
+    return out
+
+
 _CHANGE_RX = re.compile(r"停掉|停機|關掉|重排|調人|調 ?\d* ?人|加班|核准|改成|設定|通知")
 _PRESS_RX = re.compile(r"(\d{1,2})\s*號(?:硫化)?機?")
 _ID_RX = re.compile(r"\b(?:CURE-\d{2}|[A-D]-[A-Z]+|BOND-01)\b")
@@ -141,20 +156,24 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
     """Keyword rules: what a supervisor asks on the night shift."""
     q = question
     named = machines_in(q)
-    orders = re.search(r"訂單|交期|班|人力|缺|排程|下一模|延誤|遲交", q)
+    # 「#A-311 會不會晚交？」 was answered 查不到 with no tool: the order words and the order ids it names
+    orders = re.search(r"訂單|交期|班|人力|缺|排程|下一模|延誤|遲交|晚交|會不會晚|出貨|交貨", q)
+    order_ids = orders_in(q)
     sop = re.search(r"SOP|sop|怎麼處理|處置|怎麼辦|步驟|程序", q)
     # no machine named: the abnormal ones, but only for a status question (not staffing or SOP). Text
     # that is not a factory question names nothing: no machine is guessed (the plan stays empty)
     status = bool(_STATUS_RX.search(q))
-    mids = named or ([] if orders or sop or not status else list(context.get("abnormal", []))[:3])
+    mids = named or ([] if orders or order_ids or sop or not status else list(context.get("abnormal", []))[:3])
     presses = [m for m in mids if m.startswith("CURE-")]
     steps: list[AskStep] = []
     if mids:
         steps.append(AskStep(tool=ToolName.READ_SENSORS.value, args={"machine_ids": mids, "minutes": 30}))
     if mids and re.search(r"預測|會不會|接下來|之後|趨勢|多久", q):
         steps.append(AskStep(tool=ToolName.PREDICT_ANOMALY.value, args={"machine_id": mids[0], "horizon_min": 30}))
-    if orders:
+    if orders or order_ids:
         args: dict[str, Any] = {"press_ids": presses} if presses else {}
+        if order_ids:
+            args["order_ids"] = order_ids
         steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args=args))
     if sop:
         steps.append(AskStep(tool=ToolName.SOP_SEARCH.value, args={"query": q, "k": 2}))
@@ -165,9 +184,12 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
 
 
 # ------------------------------------------------------------------ result -> one line
-def summarize(tool: ToolName, data: dict[str, Any]) -> str:
-    """One Chinese line per tool result; the answer is built only from these lines."""
+def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None = None) -> str:
+    """One Chinese line per tool result; the answer is built only from these lines. `args` lets an order
+    question get its own orders' line (「#A-311 會不會晚交？」) instead of the nearest due date."""
     try:
+        if tool is ToolName.QUERY_ORDERS_SHIFTS and (args or {}).get("order_ids"):
+            return _orders_line(data, list(args["order_ids"]))
         if tool is ToolName.READ_SENSORS:
             parts = []
             for mid, s in (data.get("summary") or {}).items():
@@ -222,6 +244,24 @@ def summarize(tool: ToolName, data: dict[str, Any]) -> str:
     except (KeyError, TypeError, ValueError):
         pass
     return json.dumps(_brief(data, 300), ensure_ascii=False, default=str)[:300]
+
+
+def _orders_line(data: dict[str, Any], want: list[str]) -> str:
+    """The asked orders: done/qty, due date and their next mold-in / de-mold; an id the plant does not have
+    says 沒有這張訂單 (never another order's due date)."""
+    have = {str(o.get("id")): o for o in data.get("orders") or []}
+    bits = []
+    for oid in want:
+        o = have.get(oid)
+        if o is None:
+            bits.append(f"沒有這張訂單：{oid}")
+            continue
+        jobs = [j for j in data.get("next_jobs") or [] if j.get("order_id") == oid][:2]
+        when = "、".join(f"{machine_label(j['press_id'], short=True)} {str(j['mold_in'])[5:16].replace('T', ' ')} 入模"
+                         f"・{str(j['demold'])[5:16].replace('T', ' ')} 出模" for j in jobs if j.get("demold"))
+        bits.append(f"{oid}（{o.get('size', '')}，{o.get('done', 0)}/{o.get('qty', '')}，交期 {o.get('due')}）"
+                    + (f"：{when}" if when else "：排程裡還沒有它的下一模"))
+    return "；".join(bits)
 
 
 _NUM_RX = re.compile(r"\d+(?:\.\d+)?")
@@ -404,7 +444,7 @@ class AskAgent:
                 continue
             res = await self._run(tools, audit, ask_id, i, tool, step.args)
             results.append(AskStepResult(tool=tool.value, args=step.args, ok=res.ok, error=res.error,
-                                         summary=summarize(tool, res.data) if res.ok else ""))
+                                         summary=summarize(tool, res.data, step.args) if res.ok else ""))
 
         if not plan.steps and not intercepted:
             # nothing to look up: say so (or that the model is still loading), never guess a machine

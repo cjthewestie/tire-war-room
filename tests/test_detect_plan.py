@@ -76,6 +76,36 @@ def test_late_mold_in_needs_press_empty_since_T():
     assert w3.check(T + timedelta(minutes=40), sched, [m.model_copy(update={"active_event_id": "EV-1"})]) == []
 
 
+def test_mold_in_done_before_the_schedule_took_effect_is_not_a_slip():
+    """Page 11, round 2 approved late: v3 (solved at 02:31) moves a tire to press 3 that v2 had already loaded on
+    press 1 at 04:00. Once v3 is in force, press 1 holding it is not 「偏離排程」 and press 3 standing empty at
+    04:00 is not a late mold-in: both happened under v2. A mold loaded after v3 took effect still is."""
+    from warroom.contracts import CureJobState
+    f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+    presses = [m for m in f.machines() if m.machine_id.startswith("CURE-")]
+    p1 = presses[0].machine_id
+    empty = presses[1].model_copy(update={"cure_job": None, "status": MachineStatus.IDLE})
+    T = T0 + timedelta(hours=2)
+    v2 = _sched([back_propagate("J-311", "#A-311", TireSize.S, p1, T)])
+    v3 = Schedule(id="S3", created_at=T0 - timedelta(minutes=90), horizon_start=T0, horizon_end=T0 + timedelta(days=7),
+                  jobs=[back_propagate("J-311", "#A-311", TireSize.S, empty.machine_id, T)], solver=SolverName.CP_SAT)
+    loaded = presses[0].model_copy(update={"cure_job": CureJobState(
+        job_id="J-311", order_id="#A-311", size=TireSize.S, mold_id="M", mold_in_at=T, planned_demold_at=T + timedelta(hours=24),
+        setpoint_c=128.0, cure_required_h=24.0, cure_elapsed_h=0.0)})
+    idle1 = presses[0].model_copy(update={"cure_job": None, "status": MachineStatus.IDLE})
+    w = PlanWatcher()
+    assert w.check(T - timedelta(minutes=10), v2, [idle1, empty]) == []
+    assert w.check(T + timedelta(minutes=5), v2, [loaded, empty]) == []
+    # v3 takes effect at T+60: nothing it planned before then, nothing loaded before then, is a slip of v3
+    assert w.check(T + timedelta(minutes=60), v3, [loaded, empty]) == []
+    assert w.check(T + timedelta(minutes=120), v3, [loaded, empty]) == []
+    # a mold loaded on press 1 after v3 took effect is off plan
+    late = loaded.model_copy(update={"cure_job": loaded.cure_job.model_copy(
+        update={"job_id": "J-999", "order_id": "#Z-1", "mold_in_at": T + timedelta(minutes=130)})})
+    out = w.check(T + timedelta(minutes=140), v3, [late, empty])
+    assert [a.id.split("-SLIP-")[1] for a in out] == ["off_plan"] and out[0].machine_id == p1
+
+
 def test_wip_behind_back_propagated_T():
     T = T0 + timedelta(hours=9)       # 17:00
     parts = [SemiFinishedPart(part="A", label="A 胎體／胎面膠", status_text="", state="waiting", machine_id="A-BIGOPEN"),

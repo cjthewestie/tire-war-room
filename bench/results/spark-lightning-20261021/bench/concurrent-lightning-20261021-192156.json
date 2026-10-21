@@ -1,0 +1,428 @@
+{
+  "bench": "concurrent",
+  "recorded_at": "2026-10-21T19:21:56.147178+08:00",
+  "host": {
+    "hostname": "aitopatom-3ef3",
+    "platform": "Linux-7.0.0-1019-nvidia-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "ram_gb": 121.6,
+    "cpu_count": 20
+  },
+  "code": {
+    "git_sha": "afb2553cfdd2",
+    "deps": [
+      "concurrent.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "811d35ecceaadb0a"
+  },
+  "host_load_avg_1_5_15": [
+    2.71,
+    2.03,
+    1.65
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "lightning",
+    "kind": "vllm",
+    "vllm_version": "0.27.1"
+  },
+  "target_each_s": 4.0,
+  "n": 3,
+  "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest); alert = alert_card field of the CommanderPlan stream, stream runs to the end of the plan",
+  "sequential_each_s": [
+    1.9676,
+    2.4715,
+    2.1665
+  ],
+  "rounds": [
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "event_id": "EVT-0a27e8ed4cde",
+          "alert": {
+            "ok": true,
+            "ttft_s": 3.9058502570042037,
+            "ttft_any_s": 3.9058502570042037,
+            "total_s": 20.274394993000897,
+            "prompt_tokens": 6873,
+            "completion_tokens": 1071,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化\"\n  },\n  \"goal\": \"7 號機溫度穩定，中胎不延誤交期\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定在 122°C\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121.4,\n      \"within_min\": 30\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"溫度 128→122°C，預測穩定在 122±1°C\",\n      \"仍在 120–130°C 窗內，安全核心未觸發\",\n      \"單機下降，多半是加熱板、蒸汽閥或疏水閥問題\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"M\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 122.0,\n        \"elapsed_h\": 10.0,\n        \"ref_cure_h\": 28.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 計算降溫後所需總硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-07\"]\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查下一模訂單交期與班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-07\": \"$S1.total_cure_h\"\n        },\n        \"time_limit_s\": 10.0\n      },\n      \"depends_on\": [\"S1\", \"S2\"],\n      \"purpose\": \"延長硫化後重排，保中胎交期\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S3.schedule_version\",\n        \"reason\": \"7 號機溫度下降，延長硫化至 ${S1.total_cure_h} h 後重排\"\n      },\n      \"depends_on\": [\"S3\"],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    },\n    {\n      \"id\": \"S4b\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\n        \"press_id\": \"CURE-07\",\n        \"total_cure_h\": \"$S1.total_cure_h\",\n        \"reason\": \"7 號機降溫至 122°C，Arrhenius 等效硫化\"\n      },\n      \"depends_on\": [\"S1\", \"S3\"],\n      \"purpose\": \"設定7 號機硫化時間為公式值（需主管核准）\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"notify_teams\",\n      \"args\": ",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 307,
+            "alert_card_s": 5.187345173006179,
+            "alert_card": {
+              "title": "7 號機溫度下降 128→122°C",
+              "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，需延長硫化"
+            },
+            "stopped_early": false,
+            "decode_tps": 65.43
+          },
+          "send_off_s": 0.0001,
+          "first_token_off_s": 3.906,
+          "card_off_s": 5.1874,
+          "end_off_s": 5.1874,
+          "alert_wall_s": 5.1874,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6873,
+            "completion_tokens": 1071
+          },
+          "plan_wall_s": 20.2745
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "event_id": "EVT-2eb92ef728fd",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.4812061589982477,
+            "ttft_any_s": 1.4812061589982477,
+            "total_s": 16.938702625004225,
+            "prompt_tokens": 6734,
+            "completion_tokens": 810,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"A 線大開煉機膠溫 112°C 持續上升\",\n    \"summary\": \"膠溫 112°C 超過 100°C 且持續上升，水流偏低，已觸發過熱事件\"\n  },\n  \"goal\": \"A 線大開煉機降溫，避免膠料提早硬化\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"冷卻水流不足導致膠溫持續上升\",\n    \"cause_code\": \"water_flow_low\",\n    \"expectation\": {\n      \"machine_id\": \"A-BIGOPEN\",\n      \"channel\": \"temp_c\",\n      \"op\": \"<=\",\n      \"value\": 118.0,\n      \"within_min\": 20.0\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"膠溫 112°C 且持續上升（上限 120°C）\",\n      \"水流 21.5 LPM，低於正常值 70% 觸發點\",\n      \"溫度預測 band_lo 111°C，band_hi 113°C，trend 0.567°C/分\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\n        \"machine_ids\": [\"A-BIGOPEN\"],\n        \"minutes\": 30.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"讀 A-BIGOPEN 膠溫與水流 30 分鐘趨勢\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {},\n      \"depends_on\": [],\n      \"purpose\": \"確認對大胎 #07 入硫化時間的影響\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"maintenance\"],\n        \"kind\": \"maintenance\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A 線大開煉機膠溫偏高，請檢查冷卻系統\"\n      },\n      \"depends_on\": [\"S1\"],\n      \"purpose\": \"通知維修檢查冷卻系統（自動 R1）\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"side\"],\n        \"kind\": \"slow_feed\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A 線大開煉機膠溫偏高，請放慢生料投入直到冷卻恢復\"\n      },\n      \"depends_on\": [\"S1\", \"S2\"],\n      \"purpose\": \"放慢生料投入（需主管核准 R3）\"\n    }\n  ],\n  \"safe_stop\": false,\n  \"rationale\": \"水流偏低，先通知維修檢查冷卻水路；膠溫 112°C 低於 120°C 安全核心停機門檻，但需防止提早硬化。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 242,
+            "alert_card_s": 4.801573841999925,
+            "alert_card": {
+              "title": "A 線大開煉機膠溫 112°C 持續上升",
+              "summary": "膠溫 112°C 超過 100°C 且持續上升，水流偏低，已觸發過熱事件"
+            },
+            "stopped_early": false,
+            "decode_tps": 52.4
+          },
+          "send_off_s": 0.0044,
+          "first_token_off_s": 1.4856,
+          "card_off_s": 4.806,
+          "end_off_s": 4.806,
+          "alert_wall_s": 4.806,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6734,
+            "completion_tokens": 810
+          },
+          "plan_wall_s": 16.9431
+        },
+        {
+          "machine_id": "CURE-03",
+          "event_id": "EVT-32c85f951f2f",
+          "alert": {
+            "ok": true,
+            "ttft_s": 2.8919691120026982,
+            "ttft_any_s": 2.8919691120026982,
+            "total_s": 21.553074750001542,
+            "prompt_tokens": 6834,
+            "completion_tokens": 1145,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"3 號機蒸汽壓下降 4.8→3.9 kgf/cm²\",\n    \"summary\": \"蒸汽壓低於基準，溫度 126°C 仍在範圍內（小胎），預測穩定在 2.8~4.8 kgf/cm²\"\n  },\n  \"goal\": \"3 號機蒸汽壓下降，小胎交期不受影響\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定在 126°C 以上\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-03\",\n      \"channel\": \"steam_kgf_cm2\",\n      \"op\": \">=\",\n      \"value\": 2.8,\n      \"within_min\": 30\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"蒸汽壓 4.8 → 3.9 kgf/cm²，低於基準 4.8\",\n      \"溫度 126°C 仍在 120~130°C 窗內（小胎）\",\n      \"預測 band_lo 2.8，band_hi 4.8，trend -0.033 kgf/cm²/min\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"S\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 126.0,\n        \"elapsed_h\": 6.0,\n        \"ref_cure_h\": 24.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 等效硫化公式計算當前溫度下所需總硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-03\"],\n        \"from_ts\": \"2026-10-02T21:06:05+08:00\",\n        \"to_ts\": \"2026-10-03T21:06:05+08:00\"\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查詢 J-03-S118 訂單交期與班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-03\": \"$S1.total_cure_h\"\n        },\n        \"time_limit_s\": 10.0\n      },\n      \"depends_on\": [\n        \"S1\",\n        \"S2\"\n      ],\n      \"purpose\": \"延長硫化時間後重排，保小胎交期\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S3.schedule_version\",\n        \"reason\": \"3 號機蒸汽壓下降，延長硫化至 ${S1.total_cure_h} h 後重排\"\n      },\n      \"depends_on\": [\n        \"S3\"\n      ],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\n          \"curing\",\n          \"maintenance\",",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 345,
+            "alert_card_s": 5.326373451003747,
+            "alert_card": {
+              "title": "3 號機蒸汽壓下降 4.8→3.9 kgf/cm²",
+              "summary": "蒸汽壓低於基準，溫度 126°C 仍在範圍內（小胎），預測穩定在 2.8~4.8 kgf/cm²"
+            },
+            "stopped_early": false,
+            "decode_tps": 61.36
+          },
+          "send_off_s": 0.0071,
+          "first_token_off_s": 2.899,
+          "card_off_s": 5.3334,
+          "end_off_s": 5.3334,
+          "alert_wall_s": 5.3334,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6834,
+            "completion_tokens": 1145
+          },
+          "plan_wall_s": 21.5601
+        }
+      ],
+      "batch_wall_s": 21.5622,
+      "batching": {
+        "n_ok": 3,
+        "serialized_pairs": [],
+        "send_skew_s": 0.007,
+        "first_token_skew_s": 2.4204,
+        "batched": true
+      }
+    },
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "event_id": "EVT-1a8f6c00676f",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.55421592300263,
+            "ttft_any_s": 1.55421592300263,
+            "total_s": 19.275428715998714,
+            "prompt_tokens": 6876,
+            "completion_tokens": 1105,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C，中胎已硫化 10 h／28 h，符合 SOP-CP-02 處置條件\"\n  },\n  \"goal\": \"7 號溫度穩定，中胎不能延誤交期\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定在 122°C\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121.0,\n      \"within_min\": 30.0\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"溫度 128→122°C，預測穩定在 122±1°C\",\n      \"蒸汽壓 20.0 kgf/cm²，低於設定值 128°C 之比約 6%\",\n      \"同管線 H2（6~8 號）無其他機台同時下降 → 單機問題\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"M\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 122.0,\n        \"elapsed_h\": 10.0,\n        \"ref_cure_h\": 28.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 計算降溫後所需總硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-07\"]\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查下一模訂單交期與班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-07\": \"$S1.total_cure_h\"\n        },\n        \"time_limit_s\": 10.0\n      },\n      \"depends_on\": [\"S1\", \"S2\"],\n      \"purpose\": \"延長硫化後重排，保中胎交期\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S3.schedule_version\",\n        \"reason\": \"7 號機溫度下降，延長硫化至 ${S1.total_cure_h} h 後重排\"\n      },\n      \"depends_on\": [\"S3\"],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    },\n    {\n      \"id\": \"S4b\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\n        \"press_id\": \"CURE-07\",\n        \"total_cure_h\": \"$S1.total_cure_h\",\n        \"reason\": \"7 號機降溫至 122°C，Arrhenius 等效硫化\"\n      },\n      \"depends_on\": [\"S1\", \"S3\"],\n      \"purpose\": \"設定7 號機硫化時間為公式值（需主管核准）\"\n    },\n    {\n      \"id\": \"S5\",\n      \"too",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 328,
+            "alert_card_s": 5.258628879004391,
+            "alert_card": {
+              "title": "7 號機溫度下降 128→122°C",
+              "summary": "預測穩定在 122±1°C，中胎已硫化 10 h／28 h，符合 SOP-CP-02 處置條件"
+            },
+            "stopped_early": false,
+            "decode_tps": 62.35
+          },
+          "send_off_s": 0.0002,
+          "first_token_off_s": 1.5544,
+          "card_off_s": 5.2588,
+          "end_off_s": 5.2588,
+          "alert_wall_s": 5.2588,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6876,
+            "completion_tokens": 1105
+          },
+          "plan_wall_s": 19.2756
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "event_id": "EVT-3ae1893dab2e",
+          "alert": {
+            "ok": true,
+            "ttft_s": 2.9779607919990667,
+            "ttft_any_s": 2.9779607919990667,
+            "total_s": 15.860052703996189,
+            "prompt_tokens": 6735,
+            "completion_tokens": 778,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN膠溫 112°C 持續上升\",\n    \"summary\": \"膠溫 112°C 超過 100°C 且持續上升，水流偏低，已開事件\"\n  },\n  \"goal\": \"A-BIGOPEN降溫，避免膠料提早硬化\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"冷卻水流偏低，膠溫持續上升\",\n    \"cause_code\": \"water_flow_low\",\n    \"expectation\": {\n      \"machine_id\": \"A-BIGOPEN\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 118.0,\n      \"within_min\": 20.0\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"膠溫 112°C 且持續上升（上限 120°C）\",\n      \"水流 21.5 L/min，低於正常值 70% 觸發點\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\n        \"machine_ids\": [\"A-BIGOPEN\"],\n        \"minutes\": 30.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"讀 A-BIGOPEN 膠溫與水流 30 分鐘趨勢\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {},\n      \"depends_on\": [],\n      \"purpose\": \"確認對大胎 #07 入硫化時間的影響\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"maintenance\"],\n        \"kind\": \"maintenance\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A-BIGOPEN 膠溫偏高，請檢查冷卻系統\"\n      },\n      \"depends_on\": [\"S1\"],\n      \"purpose\": \"通知維修檢查冷卻系統（自動 R1）\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"side\"],\n        \"kind\": \"slow_feed\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A-BIGOPEN 膠溫偏高，請放慢生料投入直到冷卻恢復\"\n      },\n      \"depends_on\": [\"S1\", \"S2\"],\n      \"purpose\": \"放慢生料投入（需主管核准 R3）\"\n    }\n  ],\n  \"safe_stop\": false,\n  \"rationale\": \"水流偏低，先通知維修檢查；溫度 112°C 超過 100°C 觸發事件，需確認冷卻水是否帶走熱；若冷卻無效則膠溫將突破 120°C 觸發安全核心停機\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 233,
+            "alert_card_s": 5.2537887250000495,
+            "alert_card": {
+              "title": "A-BIGOPEN膠溫 112°C 持續上升",
+              "summary": "膠溫 112°C 超過 100°C 且持續上升，水流偏低，已開事件"
+            },
+            "stopped_early": false,
+            "decode_tps": 60.39
+          },
+          "send_off_s": 0.0056,
+          "first_token_off_s": 2.9835,
+          "card_off_s": 5.2594,
+          "end_off_s": 5.2594,
+          "alert_wall_s": 5.2594,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6735,
+            "completion_tokens": 778
+          },
+          "plan_wall_s": 15.8656
+        },
+        {
+          "machine_id": "CURE-03",
+          "event_id": "EVT-0a605b1a4ead",
+          "alert": {
+            "ok": true,
+            "ttft_s": 4.040492631000234,
+            "ttft_any_s": 4.040492631000234,
+            "total_s": 19.414163153000118,
+            "prompt_tokens": 6829,
+            "completion_tokens": 1030,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"3 號機蒸汽壓下降\",\n    \"summary\": \"蒸汽壓 4.8→3.9 kgf/cm²，溫度 126°C 仍在範圍內（小胎），預測穩定在 3.2~5.2 kgf/cm²\"\n  },\n  \"goal\": \"3 號機蒸汽壓下降，小胎不能延誤交期\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-03\",\n      \"channel\": \"steam_kgf_cm2\",\n      \"op\": \"<=\",\n      \"value\": 5.2,\n      \"within_min\": 30\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"蒸汽壓 4.8→3.9 kgf/cm²，下降趨勢\",\n      \"溫度 126°C 仍在 120~130°C 窗內（小胎）\",\n      \"預測值 4.2 kgf/cm²，band_lo 3.2，band_hi 5.2，trend_per_min -0.02\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\n        \"machine_ids\": [\"CURE-03\"],\n        \"minutes\": 30\n      },\n      \"depends_on\": [],\n      \"purpose\": \"讀取 3 號機最近 30 分鐘溫度、蒸汽壓、液壓趨勢\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-03\"]\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查 3 號機下一模訂單交期與班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"S\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 126.0,\n        \"elapsed_h\": 6.0,\n        \"ref_cure_h\": 24.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 計算當前溫度下的等效硫化時間\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-03\": \"$S3.total_cure_h\"\n        },\n        \"time_limit_s\": 10\n      },\n      \"depends_on\": [\"S1\", \"S2\", \"S3\"],\n      \"purpose\": \"延長硫化時間後重排，保小胎交期\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"maintenance\", \"supervisor\"],\n        \"kind\": \"info\",\n        \"machine_id\": \"CURE-03\",\n        \"message\": \"3 號機蒸汽壓下降至 3.9 kgf/cm²，已依 Arrhenius 公式延長硫化時間至 ${S3.total_cure_h} h，請維修組檢查蒸汽管路與溫度計；依新排程調整下一模\"\n      },\n      \"depends_on\": [\"S4\"],\n      \"pu",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 326,
+            "alert_card_s": 5.664592016997631,
+            "alert_card": {
+              "title": "3 號機蒸汽壓下降",
+              "summary": "蒸汽壓 4.8→3.9 kgf/cm²，溫度 126°C 仍在範圍內（小胎），預測穩定在 3.2~5.2 kgf/cm²"
+            },
+            "stopped_early": false,
+            "decode_tps": 67.0
+          },
+          "send_off_s": 0.0098,
+          "first_token_off_s": 4.0503,
+          "card_off_s": 5.6744,
+          "end_off_s": 5.6744,
+          "alert_wall_s": 5.6744,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6829,
+            "completion_tokens": 1030
+          },
+          "plan_wall_s": 19.4239
+        }
+      ],
+      "batch_wall_s": 19.4275,
+      "batching": {
+        "n_ok": 3,
+        "serialized_pairs": [],
+        "send_skew_s": 0.0096,
+        "first_token_skew_s": 2.4959,
+        "batched": true
+      }
+    },
+    {
+      "each": [
+        {
+          "machine_id": "CURE-07",
+          "event_id": "EVT-dd0a16134e78",
+          "alert": {
+            "ok": true,
+            "ttft_s": 1.4866910639975686,
+            "ttft_any_s": 1.4866910639975686,
+            "total_s": 21.566761601003236,
+            "prompt_tokens": 6872,
+            "completion_tokens": 1099,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"7 號機溫度下降 128→122°C\",\n    \"summary\": \"預測穩定在 122±1°C；中胎已硫化 10 h／28 h，需延長硫化時間。\"\n  },\n  \"goal\": \"7 號機溫度穩定，中胎交期不延誤\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定在 122°C\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-07\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 121.0,\n      \"within_min\": 30.0\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"溫度 128→122°C，預測穩定在 122±1°C\",\n      \"同蒸汽管線 H2（6~8 號）其他機台無同時下降訊號\",\n      \"已硫化 10 h／28 h，中胎仍有餘量\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"M\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 122.0,\n        \"elapsed_h\": 10.0,\n        \"ref_cure_h\": 28.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 計算降溫後所需總硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-07\"]\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查下一模訂單交期與班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-07\": \"$S1.total_cure_h\"\n        },\n        \"time_limit_s\": 10.0\n      },\n      \"depends_on\": [\n        \"S1\",\n        \"S2\"\n      ],\n      \"purpose\": \"延長硫化後重排，保中胎交期\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S3.schedule_version\",\n        \"reason\": \"7 號機溫度下降延長硫化至 ${S1.total_cure_h} h 後重排\"\n      },\n      \"depends_on\": [\n        \"S3\"\n      ],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    },\n    {\n      \"id\": \"S4b\",\n      \"tool\": \"set_cure_time\",\n      \"args\": {\n        \"press_id\": \"CURE-07\",\n        \"total_cure_h\": \"$S1.total_cure_h\",\n        \"reason\": \"7 號機溫度下降至 122°C，Arrhenius 等效硫化\"\n      },\n      \"depends_on\": [\n        \"S1\",\n        \"S3\"\n      ],\n      \"purpose\": \"設定7 號機硫化時間為公式值（需主管核准）\"\n   ",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 312,
+            "alert_card_s": 4.783043661998818,
+            "alert_card": {
+              "title": "7 號機溫度下降 128→122°C",
+              "summary": "預測穩定在 122±1°C；中胎已硫化 10 h／28 h，需延長硫化時間。"
+            },
+            "stopped_early": false,
+            "decode_tps": 54.73
+          },
+          "send_off_s": 0.0001,
+          "first_token_off_s": 1.4868,
+          "card_off_s": 4.7832,
+          "end_off_s": 4.7832,
+          "alert_wall_s": 4.7832,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6872,
+            "completion_tokens": 1099
+          },
+          "plan_wall_s": 21.5669
+        },
+        {
+          "machine_id": "A-BIGOPEN",
+          "event_id": "EVT-641afbc6f40c",
+          "alert": {
+            "ok": true,
+            "ttft_s": 2.911327155001345,
+            "ttft_any_s": 2.911327155001345,
+            "total_s": 16.906897041000775,
+            "prompt_tokens": 6735,
+            "completion_tokens": 746,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"A-BIGOPEN膠溫 112°C 持續上升\",\n    \"summary\": \"水流偏低，未加硫上限 120°C，持續上升中\"\n  },\n  \"goal\": \"A-BIGOPEN降溫，避免膠料提早硬化\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"冷卻水流不足，膠溫持續上升\",\n    \"cause_code\": \"water_flow_low\",\n    \"expectation\": {\n      \"machine_id\": \"A-BIGOPEN\",\n      \"channel\": \"temp_c\",\n      \"op\": \">=\",\n      \"value\": 118.0,\n      \"within_min\": 20.0\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"膠溫 111.9°C 且持續上升\",\n      \"水流 21.5 L/min，低於正常值 70% 觸發點\",\n      \"未加硫上限 120°C\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"read_sensors\",\n      \"args\": {\n        \"machine_ids\": [\"A-BIGOPEN\"],\n        \"minutes\": 30.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"讀 A-BIGOPEN 膠溫與水流 30 分鐘趨勢\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"sop_search\",\n      \"args\": {\n        \"query\": \"開煉機過熱處置\",\n        \"k\": 3\n      },\n      \"depends_on\": [],\n      \"purpose\": \"搜尋開煉機過熱 SOP 步驟\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"maintenance\"],\n        \"kind\": \"maintenance\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A-BIGOPEN膠溫偏高，請檢查冷卻水閥與水路\"\n      },\n      \"depends_on\": [\"S2\"],\n      \"purpose\": \"通知維修檢查冷卻系統（自動 R1）\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"side\"],\n        \"kind\": \"slow_feed\",\n        \"machine_id\": \"A-BIGOPEN\",\n        \"message\": \"A-BIGOPEN膠溫偏高，請放慢生料投入直到冷卻恢復\"\n      },\n      \"depends_on\": [\"S1\", \"S3\"],\n      \"purpose\": \"放慢生料投入（需主管核准 R3）\"\n    }\n  ],\n  \"safe_stop\": false,\n  \"rationale\": \"水流偏低為已知原因，先通知維修；放慢投料需主管核准。\"\n}",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 229,
+            "alert_card_s": 5.162594107001496,
+            "alert_card": {
+              "title": "A-BIGOPEN膠溫 112°C 持續上升",
+              "summary": "水流偏低，未加硫上限 120°C，持續上升中"
+            },
+            "stopped_early": false,
+            "decode_tps": 53.3
+          },
+          "send_off_s": 0.0042,
+          "first_token_off_s": 2.9155,
+          "card_off_s": 5.1668,
+          "end_off_s": 5.1668,
+          "alert_wall_s": 5.1668,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6735,
+            "completion_tokens": 746
+          },
+          "plan_wall_s": 16.9111
+        },
+        {
+          "machine_id": "CURE-03",
+          "event_id": "EVT-08693e41b63c",
+          "alert": {
+            "ok": true,
+            "ttft_s": 3.9304295780020766,
+            "ttft_any_s": 3.9304295780020766,
+            "total_s": 22.542570447003527,
+            "prompt_tokens": 6834,
+            "completion_tokens": 1095,
+            "text": "{\n  \"alert_card\": {\n    \"title\": \"3 號機蒸汽壓下降 4.8→3.9 kgf/cm²\",\n    \"summary\": \"蒸汽壓低於基準，溫度 126°C 仍在範圍內（小胎），預測穩定在 3.8 kgf/cm²\"\n  },\n  \"goal\": \"3 號機蒸汽壓不足，維持小胎硫化交期\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"蒸汽壓不足，溫度會穩定\",\n    \"cause_code\": \"steam_pressure_low\",\n    \"expectation\": {\n      \"machine_id\": \"CURE-03\",\n      \"channel\": \"steam_kgf_cm2\",\n      \"op\": \">=\",\n      \"value\": 2.8,\n      \"within_min\": 30\n    },\n    \"status\": \"active\",\n    \"evidence\": [\n      \"蒸汽壓 4.8 → 3.9 kgf/cm²，低於基準 4.8\",\n      \"溫度 126°C 仍在 120–130°C 窗內（小胎）\",\n      \"預測穩定在 3.8 kgf/cm²，band_lo 2.8\"\n    ]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"cure_formula\",\n      \"args\": {\n        \"size\": \"S\",\n        \"ref_temp_c\": 128.0,\n        \"actual_temp_c\": 126.0,\n        \"elapsed_h\": 6.0,\n        \"ref_cure_h\": 24.0,\n        \"activation_energy_kj_mol\": 85.0\n      },\n      \"depends_on\": [],\n      \"purpose\": \"以 Arrhenius 等效硫化公式計算蒸汽壓不足下的等效總硫化時間\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-03\"],\n        \"from_ts\": \"2026-10-02T20:14:37+08:00\",\n        \"to_ts\": \"2026-10-04T00:00:00+08:00\"\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查訂單 #S-118 交期與下一班次班表缺口\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"cure_overrides_h\": {\n          \"CURE-03\": \"$S1.total_cure_h\"\n        },\n        \"time_limit_s\": 10.0\n      },\n      \"depends_on\": [\"S1\", \"S2\"],\n      \"purpose\": \"延長硫化時間後重排，保小胎交期\"\n    },\n    {\n      \"id\": \"S4\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S3.schedule_version\",\n        \"reason\": \"3 號機蒸汽壓不足，延長硫化至 ${S1.total_cure_h} h 後重排\"\n      },\n      \"depends_on\": [\"S3\"],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    },\n    {\n      \"id\": \"S5\",\n      \"tool\": \"notify_teams\",\n      \"args\": {\n        \"teams\": [\"curing\", \"maintenance\", \"qc\", \"supervisor\"],\n        \"kind\": \"info\",\n        \"machine_id\": \"CURE-03\",\n        \"message",
+            "reasoning_chars": 0,
+            "error": null,
+            "chunks": 333,
+            "alert_card_s": 6.537142575005419,
+            "alert_card": {
+              "title": "3 號機蒸汽壓下降 4.8→3.9 kgf/cm²",
+              "summary": "蒸汽壓低於基準，溫度 126°C 仍在範圍內（小胎），預測穩定在 3.8 kgf/cm²"
+            },
+            "stopped_early": false,
+            "decode_tps": 58.83
+          },
+          "send_off_s": 0.0066,
+          "first_token_off_s": 3.9371,
+          "card_off_s": 6.5438,
+          "end_off_s": 6.5438,
+          "alert_wall_s": 6.5438,
+          "plan": {
+            "ok": true,
+            "prompt_tokens": 6834,
+            "completion_tokens": 1095
+          },
+          "plan_wall_s": 22.5492
+        }
+      ],
+      "batch_wall_s": 22.5511,
+      "batching": {
+        "n_ok": 3,
+        "serialized_pairs": [],
+        "send_skew_s": 0.0065,
+        "first_token_skew_s": 2.4503,
+        "batched": true
+      }
+    }
+  ],
+  "prompt_tokens": {
+    "n": 9,
+    "min": 6734,
+    "p50": 6834.0,
+    "p90": 6873.6,
+    "max": 6876,
+    "mean": 6813.5556
+  },
+  "alert_each_s": {
+    "n": 9,
+    "min": 4.7832,
+    "p50": 5.2588,
+    "p90": 5.8483,
+    "max": 6.5438,
+    "mean": 5.3348
+  },
+  "batched": true,
+  "plan_each_s": {
+    "n": 9,
+    "min": 15.8656,
+    "p50": 19.4239,
+    "p90": 21.7634,
+    "max": 22.5492,
+    "mean": 19.3744
+  },
+  "verdicts": [
+    {
+      "name": "concurrent_3_worst_alert",
+      "target": "each ≤ 4.0 s, batched",
+      "measured": 6.5438,
+      "passed": false,
+      "note": "commander plan stream, alert_card complete; cold, unique event per call",
+      "extra": {}
+    },
+    {
+      "name": "concurrent_batched",
+      "target": "all rounds batched",
+      "measured": "3/3",
+      "passed": true,
+      "note": "max first-token skew 2.4959 s",
+      "extra": {}
+    }
+  ]
+}

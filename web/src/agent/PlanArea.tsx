@@ -2,6 +2,7 @@
 // A pending approval shows the decision card (problem, delivery impact, who does what, option picker, 核准 / 討論);
 // work in progress shows its tasks and how it will be verified; a delivery risk shows the order and asks the AI to
 // replan. Evidence (readings, tool calls) is not repeated here: it is in the conversation on the left.
+import { useEffect } from 'react'
 import type { Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { OrderCard } from '../components/OrderCard'
@@ -19,12 +20,26 @@ import { REPLAN_HINT, setReplan, useReplans, type Replan } from './replanStore'
 
 const STEP_STATE: Record<string, string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '未執行' }
 
-export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
-  sel: HomeItem | null; ev: Event | null; items: Item[]
+export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened = true }: {
+  sel: HomeItem | null; ev: Event | null; items: Item[]; opened?: boolean
   onDiscuss: () => void; onAsk: () => void; onCommand: (text: string) => void
 }) {
   const { state, transport } = useWarRoom()
   const replans = useReplans()
+  // issue #54 (CJ: 「下方應該要有核准，核准完要請主 agent 派一個 subagent 完成任務並回報」): an item without a plan gets
+  // one by itself — the 主 agent asks the order subagent to draft it as soon as the item is opened; no button needed
+  // only once the supervisor opens the item (a default pick on page load never starts a run nobody asked for)
+  const autoOrder = opened && sel?.orderId && !replans[sel.orderId] && transport?.command ? sel.orderId : null
+  // a plan already asked for this order (another tab, a reload) is adopted, never asked for twice
+  const prior = autoOrder ? [...(state.snapshot?.events ?? [])].filter((e) => e.source === 'supervisor' && (e.command ?? '').startsWith(`${autoOrder} `))
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0] : undefined
+  useEffect(() => {
+    if (!autoOrder || !transport) return
+    if (prior) {
+      const done = prior.state === 'closed' || prior.state === 'safe_stop'
+      setReplan(autoOrder, done ? { state: 'closed', eventId: prior.id, outcome: prior.outcome } : { state: 'planning', eventId: prior.id })
+    } else void startPlan(transport, autoOrder)
+  }, [autoOrder, transport, prior])
   if (!sel) return null
   if (sel.req && ev) {
     return (
@@ -36,17 +51,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
   if (sel.orderId) {
     const orderId = sel.orderId
     const rp = replans[orderId]
-    const busy = rp?.state === 'sending' || rp?.state === 'planning'
-    const text = `${orderId} 可能晚交，請重排保交期`
-    // send the task at once (no second step in the chat bar); the item then shows AI 規劃中… until the card arrives
-    const replan = async () => {
-      if (!transport?.command) { onCommand(text); return }
-      setReplan(orderId, { state: 'sending', eventId: null, error: null, since: Date.now() })
-      try {
-        const r = await transport.command(text)
-        setReplan(orderId, r.event_id ? { state: 'planning', eventId: r.event_id } : { state: 'failed', error: r.reply })
-      } catch (e) { setReplan(orderId, { state: 'failed', error: String(e).replace(/^Error: /, '') }) }
-    }
+    void onCommand
     const o = state.world?.orders.items.find((x) => x.id === sel.orderId)
     const jobs = (state.schedule?.schedule.jobs ?? []).filter((j) => j.order_id === sel.orderId)
     const now = Date.parse(state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? '')
@@ -60,10 +65,12 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
             : <p className="muted">工廠紀錄裡找不到 {sel.orderId} 的明細。</p>}
         </div>
         <footer className="apv-act">
-          <ReplanStatus r={rp} />
+          {rp || opened ? <ReplanStatus r={rp} /> : <p className="apv-next" data-testid="replan-hint">點左邊這一項，NemoClaw 就會擬計劃</p>}
           <div className="apv-btns">
-            <button className="btn-approve" onClick={replan} disabled={busy} data-testid="plan-replan">{busy ? 'AI 規劃中…' : rp?.state === 'failed' || rp?.state === 'closed' ? '再請 AI 重排' : '請 AI 重排'}</button>
-            <button className="btn-sec" onClick={onAsk}>問 AI</button>
+            <button className="btn-approve" disabled title="NemoClaw 的計劃還沒好；好了會自動切到它的核准卡" data-testid="plan-approve-wait">核准並派發</button>
+            <button className="btn-sec" onClick={onDiscuss} data-testid="plan-discuss">討論</button>
+            {transport?.command && (rp?.state === 'failed' || rp?.state === 'closed') &&
+              <button className="btn-ghost" onClick={() => void startPlan(transport, orderId)} data-testid="plan-again">再規劃一次</button>}
           </div>
         </footer>
       </section>
@@ -100,7 +107,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，紀錄在右邊 Agent 對話' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{closed ? '已結案，NemoClaw 的回報在右邊' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )
@@ -115,8 +122,18 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand }: {
 /** Where a ② item's replan stands: nothing yet (the one-line hint), planning, or failed. */
 function ReplanStatus({ r }: { r: Replan | undefined }) {
   if (!r) return <p className="apv-next" data-testid="replan-hint">{REPLAN_HINT}</p>
-  if (r.state === 'failed') return <p className="apv-next err" data-testid="replan-status">AI 沒有開始規劃：{r.error}</p>
-  if (r.state === 'closed') return <p className="apv-next" data-testid="replan-status">AI 已處理，沒有需要核准的方案：{plain(r.outcome ?? '已結案')}（可再請 AI 重排或問 AI）</p>
-  if (r.state === 'ready') return <p className="apv-next" data-testid="replan-status">方案已送出：核准卡在 ③，已自動選取</p>
-  return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />AI 規劃中…{r.eventId ? `（任務 ${r.eventId}）` : ''}完成後會自動跳到它的核准卡</p>
+  if (r.state === 'failed') return <p className="apv-next err" data-testid="replan-status">NemoClaw 沒有開始規劃：{r.error}</p>
+  if (r.state === 'closed') return <p className="apv-next" data-testid="replan-status">NemoClaw 規劃完，沒有需要核准的變更：{plain(r.outcome ?? '已結案')}</p>
+  if (r.state === 'ready') return <p className="apv-next" data-testid="replan-status">NemoClaw 的計劃好了：核准卡已自動選取</p>
+  return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />NemoClaw 規劃中…（訂單處理{r.eventId ? `・${r.eventId}` : ''}）好了會自動切到核准卡</p>
+}
+
+/** The 主 agent asks the order subagent to draft a plan for an at-risk order (POST /api/command → dispatch). */
+async function startPlan(transport: { command?: (t: string) => Promise<{ event_id: string; reply: string }> }, orderId: string) {
+  if (!transport.command) return
+  setReplan(orderId, { state: 'sending', eventId: null, error: null, since: Date.now() })
+  try {
+    const r = await transport.command(`${orderId} 可能晚交，請重排保交期`)
+    setReplan(orderId, r.event_id ? { state: 'planning', eventId: r.event_id } : { state: 'failed', error: r.reply })
+  } catch (e) { setReplan(orderId, { state: 'failed', error: String(e).replace(/^Error: /, '') }) }
 }

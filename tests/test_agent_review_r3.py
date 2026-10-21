@@ -168,9 +168,10 @@ async def test_ai_cure_hours_in_a_notice_never_go_out_on_their_own(tmp_path):
     t = asyncio.create_task(sup())
     await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await t
-    assert seen["before"] == []                            # held for the supervisor, not sent as 已自動
+    # held for the supervisor, not sent as 已自動 (only the R1 maintenance notice code adds for a press drop ran)
+    assert [a["kind"] for a in seen["before"]] == ["maintenance"]
     assert approvals.all()[0].risk is RiskLevel.R3_CRITICAL
-    assert not _writes(tools, ToolName.NOTIFY_TEAMS)
+    assert [a["kind"] for a in _writes(tools, ToolName.NOTIFY_TEAMS)] == ["maintenance"]
 
 
 class NoDependsOn(MockCommander):
@@ -193,7 +194,7 @@ async def test_cure_notice_waits_for_its_approved_set_cure_time(tmp_path):
     t = asyncio.create_task(sup())
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await t
-    assert seen["before"] == []
+    assert [a["kind"] for a in seen["before"]] == ["maintenance"]     # the cure notice waited; maintenance is R1
     order = [(c.tool, c.args.get("kind")) for c in tools.calls if c.tool in (ToolName.SET_CURE_TIME, ToolName.NOTIFY_TEAMS)]
     i_set = order.index((ToolName.SET_CURE_TIME, None))
     i_info = order.index((ToolName.NOTIFY_TEAMS, "info"))

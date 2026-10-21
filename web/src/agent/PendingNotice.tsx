@@ -25,7 +25,7 @@ export function PendingNotice({ ev, req, onPlan }: { ev: Event; req: ApprovalReq
       <p className="cn-line">{anomalyLine(ev, req)}{/[。.]$/.test(anomalyLine(ev, req)) ? '' : '。'}</p>
       <p className="cn-line">{ver != null ? '已完成影響分析，替代排程等待主管核准。' : '已完成處置分析，等待主管核准。'}</p>
       <button type="button" className="cn-link" onClick={onPlan} data-testid="see-plan">查看處置方案 →</button>
-      <small className="cn-ts">Agent・{fmtHM(req.created_at)}</small>
+      <small className="cn-ts">NemoClaw・{fmtHM(req.created_at)}</small>
     </div>
   )
 }

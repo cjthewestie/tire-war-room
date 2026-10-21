@@ -69,7 +69,7 @@ async def test_concurrent_cards_do_not_reuse_page11_staffing(tmp_path):
 async def test_page11_round1_says_what_is_approved(tmp_path):
     cards = await _cards(tmp_path, "press7_temp_drop", minutes=5)
     card = cards["CURE-07"][0]
-    assert card.done == []                                  # nothing has run yet: 已做 is empty, not 「將做：…」
+    assert card.done == ["已通知維修"]                      # only the R1 maintenance notice ran: never 「將做：…」
     assert any(a.startswith("S4b 7 號機硫化總時數 28.5 h") for a in card.actions), card.actions
     assert any(a.startswith("S4 排程") and "#A-311 改 " in a for a in card.actions), card.actions
     assert card.gaps == ["10/03 夜班缺 1 人"]               # #A-311's new mold-in lands in that night shift
