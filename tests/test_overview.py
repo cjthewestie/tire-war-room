@@ -116,3 +116,13 @@ async def test_overview_mode_has_no_selected_task(tmp_path, monkeypatch):
 def test_links_name_the_task_a_control_ran_on():
     r = _runtime([_ev("EV-1", state="safe_stop", closed_at=T0, follow_up=NS(status="closed"))])
     assert [x["event_id"] for x in overview.links(r, "好", "主管中斷 10 號機", [], ["EV-1", "EV-NOPE"])] == ["EV-1"]
+
+
+def test_closed_event_with_people_at_work_counts_as_main_console_does():
+    """#92 review: a fast repair closed the event while its people were still at work. 主控台 keeps it under ④; the
+    overview checks only its late tasks (never 「停在已結案」 or its old replans)."""
+    late = NS(event_id="EV-WORKING", status="執行中", eta=T0 - timedelta(minutes=8), title="檢修 7 號機")
+    evs = [_ev("EV-WORKING", state="closed", closed_at=T0, minutes=-60, replans=3),
+           _ev("EV-DONE", state="closed", closed_at=T0, minutes=-60, replans=3)]
+    q = {x["id"]: x["reasons"] for x in overview.questionable(_runtime(evs, now_min=6.0, tasks=[late]))}
+    assert list(q) == ["EV-WORKING"] and len(q["EV-WORKING"]) == 1 and "現場任務逾時" in q["EV-WORKING"][0]

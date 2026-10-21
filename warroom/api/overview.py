@@ -70,13 +70,18 @@ def questionable(r: Any) -> list[dict[str, Any]]:
         for a in r.approvals.pending():
             if a.event_id not in pending or a.version > pending[a.event_id].version:
                 pending[a.event_id] = a
-    evs = [e for e in r.events()
-           if e.closed_at is None or (e.state.value == "safe_stop" and e.follow_up is None)]
-    flags = _audit_flags(r, {e.id for e in evs})
     try:
         board = r.orch._board()
     except Exception:  # noqa: BLE001
         board = None
+
+    def working(e: Any) -> bool:
+        # closed while its people are still at work: 主控台 keeps it under ④ 執行中 (#92 review), so its late tasks count
+        return (e.state.value == "closed" and board is not None
+                and any(t.status != "完成" for t in board.for_event(e.id)))
+    evs = [e for e in r.events()
+           if e.closed_at is None or (e.state.value == "safe_stop" and e.follow_up is None) or working(e)]
+    flags = _audit_flags(r, {e.id for e in evs})
     out = []
     for e in evs:
         st = e.state.value
@@ -88,27 +93,28 @@ def questionable(r: Any) -> list[dict[str, Any]]:
             total, gone = _min(card.expires_at, card.created_at), _min(now, card.created_at)
             if total > 0 and gone > total / 2:
                 why.append(f"等核准 {gone:.0f} 分鐘，超過時限一半（時限 {total:.0f} 分鐘，到時沒核准會安全停止）")
-        if e.replans >= REPLANS:
-            why.append(f"重新規劃了 {e.replans} 次")
-        for h in e.hypotheses:
-            if h.status == HypothesisStatus.REJECTED:
-                why.append(f"假設 {h.id} 被推翻：{h.statement[:24]}")
-                break
-        f = flags.get(e.id, {})
-        if f.get("rejects"):
-            why.append(f"主管退回過 {f['rejects']} 次計劃")
-        if e.consecutive_failures:
-            why.append(f"步驟／驗證連續失敗 {e.consecutive_failures} 次")
-        elif any(s.state == "failed" for s in e.steps):
-            why.append("有步驟失敗")
-        if f.get("fallbacks"):
-            why.append("模型沒回應，計劃改用規則擬的")
-        last = e.timeline[-1].ts if e.timeline else e.opened_at
-        idle = _min(now, last)
-        if st in PLANNING and idle > STUCK_PLAN_MIN:
-            why.append(f"AI 規劃卡住 {idle:.0f} 分鐘")
-        elif st not in PLANNING and st not in ("await_approval", "safe_stop") and idle > STUCK_MIN:
-            why.append(f"停在「{STATE.get(st, st)}」{idle:.0f} 分鐘沒有進度")
+        if st != "closed":                              # closed, people still at work: only their late tasks
+            if e.replans >= REPLANS:
+                why.append(f"重新規劃了 {e.replans} 次")
+            for h in e.hypotheses:
+                if h.status == HypothesisStatus.REJECTED:
+                    why.append(f"假設 {h.id} 被推翻：{h.statement[:24]}")
+                    break
+            f = flags.get(e.id, {})
+            if f.get("rejects"):
+                why.append(f"主管退回過 {f['rejects']} 次計劃")
+            if e.consecutive_failures:
+                why.append(f"步驟／驗證連續失敗 {e.consecutive_failures} 次")
+            elif any(s.state == "failed" for s in e.steps):
+                why.append("有步驟失敗")
+            if f.get("fallbacks"):
+                why.append("模型沒回應，計劃改用規則擬的")
+            last = e.timeline[-1].ts if e.timeline else e.opened_at
+            idle = _min(now, last)
+            if st in PLANNING and idle > STUCK_PLAN_MIN:
+                why.append(f"AI 規劃卡住 {idle:.0f} 分鐘")
+            elif st not in PLANNING and st not in ("await_approval", "safe_stop") and idle > STUCK_MIN:
+                why.append(f"停在「{STATE.get(st, st)}」{idle:.0f} 分鐘沒有進度")
         if board is not None:
             late = [t for t in board.for_event(e.id) if t.status != "完成" and t.eta is not None and _min(now, t.eta) > TASK_LATE_MIN]
             if late:
@@ -119,6 +125,18 @@ def questionable(r: Any) -> list[dict[str, Any]]:
                         "reasons": why, "opened": e.opened_at})
     out.sort(key=lambda x: x.pop("opened"), reverse=True)
     return out
+
+
+def _state_word(r: Any, e: Any) -> str:
+    """The link's state word; a closed event whose people are still at work says so (主控台 ④, #92 review)."""
+    if e.state.value == "closed":
+        try:
+            left = [t for t in r.orch._board().for_event(e.id) if t.status != "完成"]
+        except Exception:  # noqa: BLE001
+            left = []
+        if left:
+            return "已結案，等現場完成"
+    return STATE.get(e.state.value, e.state.value)
 
 
 def snapshot(r: Any) -> dict[str, Any]:
@@ -181,7 +199,7 @@ def links(r: Any, text: str, reply: str, reads: list[tuple[str, Any]], acted: li
             continue
         seen.add(i)
         e = events[i]
-        out.append({"event_id": i, "label": label(e), "state": STATE.get(e.state.value, e.state.value), "reason": q.get(i)})
+        out.append({"event_id": i, "label": label(e), "state": _state_word(r, e), "reason": q.get(i)})
         if len(out) >= MAX_LINKS:
             break
     return out
