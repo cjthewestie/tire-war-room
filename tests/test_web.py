@@ -32,8 +32,9 @@ def test_machine_names_match_python():
 
 
 def test_no_foreign_machine_ids_in_web():
-    """Every machine-id-looking token in web/src must be one of the 28 ids from warroom.factory."""
-    pat = re.compile(r"\b(?:[ABCD]-[A-Z]+|BOND-\d\d|CURE-\d\d)\b")
+    """Every machine-id-looking token in web/src must be one of the 28 ids from warroom.factory
+    (a regex character class such as /^[A-Z]/ in Phone.tsx is not a machine id)."""
+    pat = re.compile(r"(?<!\[)\b(?:[ABCD]-[A-Z]+|BOND-\d\d|CURE-\d\d)\b")
     ok = set(F.MACHINE_IDS)
     for f in SRC.rglob("*.ts*"):
         for tok in pat.findall(f.read_text(encoding="utf-8")):
