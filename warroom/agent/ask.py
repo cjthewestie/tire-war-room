@@ -236,11 +236,11 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
             return "；".join(bits)
         if tool is ToolName.SOP_SEARCH:
             hits = data.get("hits") or []
-            if not hits:
-                return "SOP：查無相關 SOP"
-            # the text itself, so the answer can quote it instead of inventing steps
-            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{' '.join(str(h.get('text', '')).split())[:160]}"
-                                       for h in hits[:2])
+            if not hits:                      # the KB's no-answer gate: say so, never the nearest unrelated SOP
+                return "知識庫沒有相關 SOP"
+            # the text itself, so the answer can quote it instead of inventing steps; the source says house or team SOP
+            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{'（' + h['source_label'] + '）' if h.get('source_label') else ''}"
+                                       f"{' '.join(str(h.get('text', '')).split())[:160]}" for h in hits[:2])
     except (KeyError, TypeError, ValueError):
         pass
     return json.dumps(_brief(data, 300), ensure_ascii=False, default=str)[:300]

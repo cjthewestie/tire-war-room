@@ -267,7 +267,8 @@ class Ctx:
 def test_sop_search_tool_json(kb):
     out = sop_search_tool(Ctx(kb=kb), {"query": "硫化中斷處置", "k": 2})
     assert out["hits"][0]["title"] == "硫化中斷處置" and len(out["hits"]) == 2
-    assert set(out["hits"][0]) == {"sop_id", "title", "source", "score", "text"}
+    assert set(out["hits"][0]) == {"sop_id", "title", "source", "score", "text", "source_label"}
+    assert out["hits"][0]["source_label"] == "工廠 SOP" and out["reason"] == ""
     import json
     json.dumps(out, ensure_ascii=False)
 
