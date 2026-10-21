@@ -61,8 +61,8 @@ PROPOSE = "propose_plan"
 DISCUSS = "discuss_waiting_plan"
 ALL_TOOLS = [*READ_TOOLS, PROPOSE, DISCUSS]
 
-IDENTITY_REPLY = "我是 NemoClaw，戰情室的 AI agent。可以陪你看狀況、查 SOP；需要動到現場的事，我會擬計劃送你核准，核准後才執行。"
-HELLO_REPLY = "你好，我是 NemoClaw。要查狀況或安排事情，直接說就好。"
+IDENTITY_REPLY = "我是 Agent Nemo，戰情室的 AI agent。可以陪你看狀況、查 SOP；需要動到現場的事，我會擬計劃送你核准，核准後才執行。"
+HELLO_REPLY = "你好，我是 Agent Nemo。要查狀況或安排事情，直接說就好。"
 THANKS_REPLY = "不客氣，有事再叫我。"
 GIBBERISH_REPLY = "這句我看不懂，可以再說一次嗎？例如：「#A-311 會不會晚交？」"
 UNCLEAR_REPLY = "我不太確定你要我做什麼。你是想查狀況，還是要我安排一件事？例如：「7 號機現在怎樣？」"
@@ -123,9 +123,9 @@ _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）(
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
 MAX_SENTENCES = 3
 
-SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「NemoClaw」，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
+SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
 怎麼做：
-- 打招呼、問你是誰、閒聊：直接回答，不用工具。問你是誰就說你是 NemoClaw，能查狀況、查 SOP、擬計劃送核准。
+- 打招呼、問你是誰、閒聊：直接回答，不用工具。問你是誰就說你是 Agent Nemo，能查狀況、查 SOP、擬計劃送核准。
 - 問工廠的事（機台、訂單、班表、原料、SOP、怎麼處理）：先用讀取工具查，看完結果再回答。可以一次呼叫多個工具。
 - 主管要你「做」一件會動到現場的事（重排、通知、調人、加班、補料、保養、停用），而且說得出對象：呼叫 propose_plan。
   它會擬計劃送主管核准，核准前什麼都不會執行；回覆時說「已擬計劃送你核准」，不要說已經做完。

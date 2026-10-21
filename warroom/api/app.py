@@ -92,7 +92,7 @@ DIST = ROOT / "web" / "dist"
 
 
 class MainMessage(BaseModel):
-    """Issue #54: a message to the NemoClaw (it classifies it itself)."""
+    """Issue #54: a message to the Agent Nemo (it classifies it itself)."""
     text: str = Field(min_length=1, max_length=300)
     event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
 
@@ -948,7 +948,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
     @app.post("/api/main/message")
     async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
-        """The supervisor talks to the NemoClaw: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
+        """The supervisor talks to the Agent Nemo: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
         chat, read (knowledge base, sensors, orders), dispatch a subagent to draft a plan, or discuss the selected
         waiting plan. It has no write tool; a dispatched plan still needs 核准並派發. Same session rule as approvals."""
         r = rt()
@@ -985,7 +985,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return out.model_dump(mode="json")
 
         def slot():
-            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "NemoClaw 對話")
+            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "Agent Nemo 對話")
 
         res = await _main_agent(r).turn(text, context=r.ask_context(), waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot)

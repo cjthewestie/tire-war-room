@@ -80,7 +80,7 @@ function Console({ planEv, asks, setAsks, focus, onFull }: {
   const brief = useEventBriefing(talkEv)
 
   return (
-    <section className="console panel" aria-label="NemoClaw 對話">
+    <section className="console panel" aria-label="Agent Nemo 對話">
       <header className="con-h">
         <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
       </header>
@@ -91,7 +91,7 @@ function Console({ planEv, asks, setAsks, focus, onFull }: {
           ) : null} />
         </div>
       )}
-      <Bubbles items={thread} empty="跟NemoClaw 說要做的事，或問工廠現在的狀況。" />
+      <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
       <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
   )

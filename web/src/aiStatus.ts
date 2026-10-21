@@ -108,8 +108,8 @@ const BEFORE_APPROVAL = new Set(['detected', 'classify', 'plan', 'simulate', 'ga
 export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null) {
   const what = plain(firstDetection(ev)).replace(/^異常[：:]\s*/, '')
   const sub = state.subagents?.items.find((s) => s.id === ev.id)
-  // Kyle 10-21: the single agent is called NemoClaw on screen; the kind of work stays in brackets
-  const agent = `NemoClaw（${sub?.type_label ?? (ev.source === 'plant' ? '工廠調度' : ev.source === 'supervisor' ? '任務' : '機台處理')}）`
+  // Kyle 10-21: the single agent is called Agent Nemo on screen; the kind of work stays in brackets
+  const agent = `Agent Nemo（${sub?.type_label ?? (ev.source === 'plant' ? '工廠調度' : ev.source === 'supervisor' ? '任務' : '機台處理')}）`
   const who = `${BEFORE_APPROVAL.has(ev.state) ? '建議交由' : '交由'} ${agent}${runtime ? `（${runtime}）` : ''} 修正`
   const est = repairEstimate(ev, state)
   const done = est.tasks.length - est.open.length

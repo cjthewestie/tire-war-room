@@ -19,7 +19,7 @@ import './statemachine.css'
 type View = 'live' | 'day'
 const CHANNEL: Record<string, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽' }
 const OUTCOME: Record<string, string> = { closed: '結案', safe_stop: '安全停止', open: '處理中', answered: '已回答' }
-const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: 'NemoClaw 對話' }
+const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: 'Agent Nemo 對話' }
 
 export function StateMachinePage() {
   const { transport } = useWarRoom()
@@ -308,7 +308,7 @@ function PreClassPanel() {
   return (
     <section className="panel sm-pre" aria-label="事件預分類" data-testid="sm-preclass">
       <header className="panel-h"><h2>事件預分類（Python 偵測器，LLM 之前）</h2><span className="muted small">規則 → 驗證 → 預測 → 分派</span></header>
-      {!d?.items.length && <p className="muted small">還沒有異常。偵測器每秒檢查 28 台機台；觸發時這裡會列出是哪條規則、門檻、驗證結果與預測，再交給NemoClaw 分派。</p>}
+      {!d?.items.length && <p className="muted small">還沒有異常。偵測器每秒檢查 28 台機台；觸發時這裡會列出是哪條規則、門檻、驗證結果與預測，再交給 Agent Nemo 分派。</p>}
       <ol className="pre-list">
         {(d?.items ?? []).slice(0, 8).map((a) => (
           <li key={a.id} className={`pre sev-${a.severity}`} data-testid="preclass-item">
@@ -316,7 +316,7 @@ function PreClassPanel() {
               <span className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</span><b>{machineLabel(a.machine_id)}</b>
               <span className="tag">{a.preclass?.label ?? a.kind}</span>
               <span className={`tag ${a.severity === 'critical' ? 'rush' : ''}`}>{a.severity === 'critical' ? '嚴重' : a.severity === 'warn' ? '注意' : '資訊'}</span>
-              <span className="pre-route" data-testid="preclass-route">→ NemoClaw 派給 <b>{a.route.type_label}</b>（優先 {a.route.priority_label}）</span>
+              <span className="pre-route" data-testid="preclass-route">→ Agent Nemo 派給 <b>{a.route.type_label}</b>（優先 {a.route.priority_label}）</span>
               {a.event_id ? <a className="panel-link" href={`#console?event=${encodeURIComponent(a.event_id)}`}>{a.event_state ? STATE_LABEL[a.event_state as EventState] : ''} →</a> : <span className="muted small">併入既有事件</span>}
             </div>
             <div className="pre-grid">
