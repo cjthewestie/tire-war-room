@@ -1,7 +1,7 @@
 // 狀態機 (#sm, issue #37; CJ, 2026-10-20: 「新增一個 page 列出狀態機分類的實時狀態、事件偵測、訂單分類，就是列出狀態機的工作狀況」
 // and 「狀態機也需要記錄每天的事件」). Two views, read-only:
-//   即時看板 — header counts; 事件偵測 (per line: machines watched, last reading; recent anomalies not yet events);
-//              category chips; one column per state with a card per run (time in state, round, waiting on), live.
+//   即時看板 — header counts; category chips; one column per state with a card per run (time in state, round,
+//              waiting on), live; then 事件偵測 (per line: machines watched, last reading; recent anomalies not yet events).
 //   每日紀錄 — every event / task / question of a factory day (or demo loop) from GET /api/daylog, with a summary and CSV.
 import { useEffect, useMemo, useState } from 'react'
 import type { Anomaly, Event, EventState, Line, MachineState } from '../contracts'
@@ -91,6 +91,8 @@ function Live() {
   const count = (c: Category) => (c === 'ask' ? asks.length : events.filter((e) => categoryOf(e) === c).length)
   const shown = events.filter((e) => cat === 'all' || categoryOf(e) === cat)
   const isToday = (e: Event) => !day || todayIds.has(e.id)
+  // a state with no runs is a narrow strip on desktop and hidden on a phone; all 11 columns stay in the DOM
+  const onBoard = (s: EventState) => shown.filter((e) => e.state === s && ((s !== 'closed' && s !== 'safe_stop') || isToday(e)))
   const open = events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
   const waitTasks = open.filter((e) => waitingOn(e, tasks) === '人員任務').length
   const head = {
@@ -109,7 +111,6 @@ function Live() {
         <div className="kpi"><span className="kpi-l">今日結案</span><span className="kpi-v">{head.closed}</span><span className="kpi-s">{day ? day.label : '—'}</span></div>
         <div className={`kpi ${head.stopped ? 'is-alarm' : ''}`}><span className="kpi-l">今日安全停止</span><span className="kpi-v">{head.stopped}</span><span className="kpi-s">安全核心或連續失敗</span></div>
       </section>
-      <Detection events={events} today={events.filter(isToday).length} />
       <div className="sm-cats" role="group" aria-label="分類" data-testid="sm-cats">
         <button className={cat === 'all' ? 'on' : ''} aria-pressed={cat === 'all'} onClick={() => setCat('all')}>全部<small>{events.length}</small></button>
         {cats.map((c) => <button key={c} className={cat === c ? 'on' : ''} aria-pressed={cat === c} onClick={() => setCat(c)} data-cat={c}>{CATEGORY_LABEL[c]}<small>{count(c)}</small></button>)}
@@ -119,7 +120,7 @@ function Live() {
         <div className="sm-board" data-testid="sm-board">
           {BOARD.map((s) => {
             const done = s === 'closed' || s === 'safe_stop'
-            const cards = shown.filter((e) => e.state === s && (!done || isToday(e)))
+            const cards = onBoard(s)
             return (
               <section key={s} className={`sm-col ${cards.length ? '' : 'empty'} ${done ? 'done' : ''}`} data-state={s} aria-label={`${STATE_LABEL[s]} ${cards.length} 件`}>
                 <header><b>{STATE_LABEL[s]}</b><small>{STATE_CODE[s]}</small><span className="sm-n">{cards.length}</span></header>
@@ -128,9 +129,11 @@ function Live() {
               </section>
             )
           })}
+          {BOARD.every((s) => !onBoard(s).length) && <p className="muted sm-none">目前沒有事件。</p>}
         </div>
       )}
       <p className="muted small">每張卡點進去是 Agent 頁的完整過程與狀態機圖。結案／安全停止只列今天（{day?.label ?? '目前這一天'}）。</p>
+      <Detection events={events} today={events.filter(isToday).length} />
     </>
   )
 }
@@ -172,6 +175,7 @@ function Detection({ events, today }: { events: Event[]; today: number }) {
   const { state } = useWarRoom()
   const tiles = state.snapshot?.machines ?? []
   const evByAnom = new Set(events.map((e) => e.anomaly.id))
+  const [open, setOpen] = useState(false) // a phone shows only the header until opened; desktop always shows the panel
   const lineRow = (ln: Line) => {
     const ms_ = (machines ?? []).filter((m) => m.line === ln)
     const last = ms_.map((m) => m.last_reading?.ts).filter((x): x is string => !!x).sort().pop()
@@ -180,8 +184,9 @@ function Detection({ events, today }: { events: Event[]; today: number }) {
     return { ln, n, last, bad }
   }
   return (
-    <section className="panel sm-detect" aria-label="事件偵測" data-testid="sm-detect">
-      <header className="panel-h"><h2>事件偵測（不經 AI，常駐監看）</h2><span className="muted small">今天開了 {today} 個事件</span></header>
+    <section className={`panel sm-detect ${open ? 'open' : ''}`} aria-label="事件偵測" data-testid="sm-detect">
+      <header className="panel-h"><h2>事件偵測（不經 AI，常駐監看）</h2><span className="muted small">今天開了 {today} 個事件</span>
+        <button className="btn-ghost sm-fold" aria-expanded={open} onClick={() => setOpen((x) => !x)}>{open ? '收合' : '展開'}</button></header>
       <div className="sm-lines">
         {LINES.map(lineRow).map((r) => (
           <div key={r.ln} className={`sm-line ${r.bad ? 'bad' : ''}`} data-line={r.ln}>
