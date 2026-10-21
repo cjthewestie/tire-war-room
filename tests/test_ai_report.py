@@ -183,7 +183,7 @@ async def test_report_calls_wait_last_in_the_queue_and_take_one_slot_at_a_time()
     rows = []
     audit = SimpleNamespace(append=lambda kind, actor, payload, event_id=None: rows.append(payload))
     q = ModelQueue(slots=3, audit=audit)
-    assert PRIORITY_REPORT > PRIORITY["question"] == max(v for k, v in PRIORITY.items() if k != "report")
+    assert PRIORITY_REPORT > PRIORITY["question"] and PRIORITY_REPORT == max(PRIORITY.values())   # last in the queue
     llm = _FakeLLM(json.dumps(GOOD, ensure_ascii=False), delay=0.3)
     rep = IncidentReporter(_settings(), client=llm, queue=q, server_kind="vllm")
     jobs = [asyncio.create_task(rep.draft(_event(), _facts())) for _ in range(3)]

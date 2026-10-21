@@ -76,13 +76,14 @@ function ChatRow({ it }: { it: ChatItem }) {
       </div>
     )
   }
-  const head = it.kind === 'dispatch' ? 'NemoClaw・派發' : it.kind === 'report' ? 'NemoClaw・回報' : it.kind === 'interrupt' ? 'NemoClaw・中斷'
-    : it.by === 'main_agent' ? 'NemoClaw'
-    : it.kind === 'summary' ? `NemoClaw${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'NemoClaw・無法執行' : 'NemoClaw・回覆'
+  // plain event lines, no dispatch to a typed agent (CJ 2026-10-21: 「現在先不要派發，主要就是一個 agent 做 tool calling」)
+  const head = it.kind === 'dispatch' ? '事件' : it.kind === 'report' ? '事件・結果' : it.kind === 'interrupt' ? '事件・中斷'
+    : it.by === 'main_agent' ? 'Agent Nemo'
+    : it.kind === 'summary' ? `Agent Nemo${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'Agent Nemo・無法執行' : 'Agent Nemo・回覆'
   return (
     <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
-        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : it.classifiedBy === 'supervisor' ? '主管核准後' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        {it.classifiedBy && it.kind !== 'dispatch' && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
       {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
@@ -203,7 +204,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
     <div className="r-ask" data-kind="ask">
       <div className="r-q"><span>{it.question}</span><small>主管・{fmtHMS(it.ts)}</small></div>
       <div className="r-a" data-testid={a ? 'ask-answer' : undefined}>
-        <header><ToolIcon name="think" /><b>NemoClaw</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
+        <header><ToolIcon name="think" /><b>Agent Nemo</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
         {!a && !it.error && <p className="muted"><i className="spin" />查詢中…</p>}
         {it.error && <p className="err">{it.error}</p>}
         {a && !brief && a.steps.map((s, i) => (

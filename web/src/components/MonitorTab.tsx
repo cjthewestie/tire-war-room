@@ -73,7 +73,7 @@ function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalReque
 /** The shared approval card with its evidence grid folded away (CSS hides `.apv-grid` until 「展開」); the card
  *  itself lives in agent/ and is not changed, so 核准 / 討論 and the option ids keep their test hooks.
  *  Folded, a small A/B toggle picks the option without 展開: it clicks the card's own (hidden) option button, so the
- *  card keeps the one selection and 「核准並派發（A）」 sends the same request and option ids. */
+ *  card keeps the one selection and 「核准（A）」 sends the same request and option ids. */
 function CompactApproval({ req, onAgent }: { req: ApprovalRequest; onAgent?: () => void }) {
   const [open, setOpen] = useState(false)
   const rec = req.options.find((o) => o.recommended) ?? null

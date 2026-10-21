@@ -1,0 +1,258 @@
+"""query_plant: Agent Nemo's one general read over what the plant already knows (CJ, 2026-10-21: 「他的來源好像只來自我的
+資料庫跟sop」「這樣是不是太限縮資料來源」). Read everything, write nothing.
+
+Each topic is built from the Runtime's own read models (World snapshot, the active schedule, labor view, events, the
+daylog, the audit log): the same data the pages show, no logic of its own. Each answer is compact JSON under
+MAX_CHARS; a bigger one keeps fewer list items and says so. It is not one of the 9 ToolNames: the chat agent calls it,
+app.py audits it as an R0 read (tool_call / tool_result rows, actor "tool:query_plant"); no plan or gate can call it."""
+from __future__ import annotations
+
+import json
+from datetime import date, datetime, timedelta
+from typing import Any
+
+from warroom import factory as F
+
+MAX_CHARS = 2400          # about 1,500 tokens of mixed Chinese / JSON
+
+STATUS = {"running": "運轉", "idle": "待機", "warning": "注意", "alarm": "異常", "stopped": "停機",
+          "out_of_service": "停用", "offline": "離線"}
+STATE = {"detected": "偵測到", "classify": "分類", "plan": "擬計劃", "simulate": "模擬", "gate": "把關",
+         "await_approval": "等主管核准", "execute": "執行中", "verify": "驗證中", "replan": "重新規劃",
+         "closed": "已結案", "safe_stop": "安全停止"}
+
+
+def _hm(t: Any) -> str | None:
+    if t is None:
+        return None
+    t = t if isinstance(t, datetime) else datetime.fromisoformat(str(t))
+    return t.astimezone(F.TZ).strftime("%m/%d %H:%M")
+
+
+def _world(r: Any) -> Any:
+    try:
+        return r.world_snapshot()
+    except Exception:  # noqa: BLE001 - a sim without a World: the topic says so
+        return None
+
+
+def _open_events(r: Any) -> list[Any]:
+    return [e for e in r.events() if e.closed_at is None]
+
+
+def _dispatch_slots(now: datetime, days: int = 2) -> dict[str, Any]:
+    """Outbound truck slots today and tomorrow (warroom/sim/world.py DISPATCH_TIMES on DISPATCH_DAYS)."""
+    from warroom.sim.world import DISPATCH_DAYS, DISPATCH_TIMES
+    out: dict[str, Any] = {}
+    for k in range(days):
+        d: date = (now + timedelta(days=k)).date()
+        key = f"{'今天' if k == 0 else '明天'} {d:%m/%d}（{'一二三四五六日'[d.weekday()]}）"
+        out[key] = [f"{t:%H:%M}" for t in DISPATCH_TIMES] if d.weekday() in DISPATCH_DAYS else "不出貨"
+    return out
+
+
+# ---------------------------------------------------------------------------------- topics
+def overview(r: Any) -> dict[str, Any]:
+    """今日工廠概況 as the 主控台 shows it (web/src/agent/overviewModel.ts): machines, next shipment, headcount,
+    progress, open events."""
+    tiles = r.machine_tiles()
+    press = [t for t in tiles if t.machine_id.startswith("CURE-")]
+    counts: dict[str, int] = {}
+    for t in press:
+        counts[STATUS.get(t.status.value, t.status.value)] = counts.get(STATUS.get(t.status.value, t.status.value), 0) + 1
+    bad = [t.machine_id for t in tiles if t.status.value not in ("running", "idle")]
+    w = _world(r)
+    out: dict[str, Any] = {"factory_time": _hm(r.clock.now()), "presses": counts, "other_machines": len(tiles) - len(press),
+                           "abnormal": bad, "open_events": len(_open_events(r))}
+    if w is not None:
+        out.update(next_shipment=_hm(w.dock.next_departure), waiting_ship_tyres=w.finished_goods.waiting_ship,
+                   on_duty=w.people.on_duty, headcount=w.people.total,
+                   orders_count_by_status=w.orders.pipeline)      # 張 (orders), not tyres or trucks
+    return out
+
+
+def shipments(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"error": "這個模擬沒有出貨資料"}
+    ev = [e for e in w.events if e.kind.startswith("shipment") or e.kind == "truck_arrive"]
+    return {"factory_time": _hm(r.clock.now()), "next_departure": _hm(w.dock.next_departure),
+            "dispatch_slots": _dispatch_slots(r.clock.now()),
+            "rule": ("出貨車每個出貨時段（週一到週六 10:00、16:00）最多一班；那時有成品待出貨才會來，提前 45 分鐘到站裝貨。"
+                     "待出貨的單位是條（輪胎），不是車"),
+            "waiting_ship_tyres": w.finished_goods.waiting_ship, "finished_goods_tyres": w.finished_goods.by_size,
+            "trucks_at_dock": [{"plate": t.plate, "kind": t.kind, "cargo": t.cargo, "leaves": _hm(t.leaves_at)}
+                               for t in w.dock.trucks],
+            "next_inbound": _hm(w.dock.next_arrival),
+            "recent": [{"at": _hm(e.ts), "text": e.text} for e in ev[-6:]],
+            "dock_log": [{"at": _hm(d.ts), "text": d.text} for d in w.dock.log[:6]]}
+
+
+def schedule(r: Any) -> dict[str, Any]:
+    store = r.c.store
+    if store is None:
+        return {"error": "排程資料庫沒有開"}
+    v = store.current()
+    now = r.clock.now()
+    jobs = sorted(v.schedule.jobs, key=lambda j: j.mold_in)
+    day = now.astimezone(F.TZ).date()
+    demold = [f"{j.press_id} {j.order_id} {_hm(j.demold)[-5:]}" for j in sorted(jobs, key=lambda j: j.demold)
+              if j.demold.astimezone(F.TZ).date() == day]
+    mold_in = [f"{j.press_id} {j.order_id} {_hm(j.mold_in)[-5:]}" for j in jobs if j.mold_in.astimezone(F.TZ).date() == day]
+    nxt = sorted((j for j in jobs if j.demold > now), key=lambda j: j.demold)[:3]
+    # today's de-molds and mold-ins, not every press's queue: that made a 400-character reply cut off mid-line
+    return {"version": v.version, "status": v.status.value if hasattr(v.status, "value") else v.status,
+            "since": _hm(v.created_at), "reason": v.reason, "jobs_total": len(jobs),
+            "demold_today": {"count": len(demold), "items": demold[:8]},
+            "mold_in_today": {"count": len(mold_in), "items": mold_in[:8]},
+            "next_demolds": [f"{j.press_id} {j.order_id} {_hm(j.demold)}" for j in nxt],
+            "staffing_changes": [getattr(c, "label", None) or c.model_dump(mode="json") for c in v.schedule.staffing_changes][:5],
+            "warnings": list(v.schedule.warnings)[:5]}
+
+
+def materials(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"error": "這個模擬沒有原料資料"}
+    return {"materials": [{"name": m.name, "stock": round(m.stock, 1), "unit": m.unit, "days_left": m.days_left,
+                           "reorder_point": m.reorder_point, "on_order": m.on_order, "status": m.status} for m in w.materials],
+            "status_meaning": {"ok": "足夠", "reorder": "該補貨", "low": "偏低", "out": "缺料"},
+            "purchase_orders": [{"name": p.name, "qty": p.qty, "unit": p.unit, "eta": _hm(p.eta), "status": p.status}
+                                for p in w.purchase_orders if p.status != "已收貨"]}
+
+
+def open_events(r: Any) -> dict[str, Any]:
+    pending = {a.event_id for a in r.approvals.pending()} if r.approvals is not None else set()
+    items = [{"id": e.id, "machine": e.machine_id, "state": STATE.get(e.state.value, e.state.value), "opened": _hm(e.opened_at),
+              "what": e.command or (e.alert_card.title if e.alert_card else e.anomaly.message), "goal": e.goal,
+              "waiting_approval": e.id in pending} for e in sorted(_open_events(r), key=lambda e: e.opened_at)]
+    return {"count": len(items), "events": items}
+
+
+def handled_today(r: Any) -> dict[str, Any]:
+    from warroom.api import daylog
+    sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
+               for ev in r.events()}
+    days = daylog.build(r.audit.tail(0, 1_000_000), sources)
+    if not days:
+        return {"total": 0, "items": []}
+    d = max(days.values(), key=lambda x: x["last_seq"])
+    runs = [x for x in d["runs"] if x["type"] != "main"]          # the chat turns themselves are not work done
+    outcomes: dict[str, int] = {}
+    for x in runs:
+        outcomes[STATE.get(x["outcome"], x["outcome"])] = outcomes.get(STATE.get(x["outcome"], x["outcome"]), 0) + 1
+    return {"day": d.get("label") or d["key"], "total": len(runs), "by_outcome": outcomes,
+            "items": [{"id": x["id"], "type": daylog.TYPE_LABEL.get(x["type"], x["type"]), "title": x.get("title"),
+                       "opened": _hm(x["opened_at"]) if x.get("opened_at") else None,
+                       "outcome": STATE.get(x["outcome"], x["outcome"])} for x in runs][-15:]}
+
+
+def audit_recent(r: Any) -> dict[str, Any]:
+    rows = []
+    for e in r.audit.tail(0, 1_000_000)[-40:]:
+        p = e.payload or {}
+        if e.kind.value == "system" and p.get("orch") == "queue":
+            continue                                               # model-queue waits are noise here
+        what = p.get("text") or p.get("msg") or p.get("decision") or p.get("action") or p.get("reply")
+        rows.append({"at": _hm(e.ts), "kind": e.kind.value, "actor": e.actor, "event": e.event_id,
+                     "what": str(what)[:60] if what else None})
+    return {"entries": rows[-15:]}
+
+
+def staffing(r: Any) -> dict[str, Any]:
+    lv = r.labor_view()
+    w = _world(r)
+    now = r.clock.now()
+    out: dict[str, Any] = {"shifts": [{"name": s["name"], "team": s["team_label"], "start": _hm(s["start"]), "end": _hm(s["end"]),
+                                       "headcount": s["headcount"], "required": s["required"]} for s in lv["load"]
+                                      if datetime.fromisoformat(s["end"]) > now][:12],      # current and coming shifts
+                           "gaps": lv["gaps"]}
+    if w is not None:
+        out.update(on_duty=w.people.on_duty, total=w.people.total, by_state=w.people.by_state)
+    return out
+
+
+def orders(r: Any) -> dict[str, Any]:
+    """The order lines #99 computes in code (warroom/tools/orders_today.py: progress, press, ETA, lateness), for the
+    model to phrase; plus the World's pipeline."""
+    w = _world(r)
+    try:
+        from warroom.tools import orders_today as OT
+        data = OT.collect(r.sim, r.c.store, r.clock.now())
+        today = {"overview": OT.overview_text(data, limit=5), "risk": OT.risk_overview_text(data, limit=4)}
+    except Exception as e:  # noqa: BLE001 - the pipeline below still answers
+        today = {"error": f"{type(e).__name__}: {e}"[:120]}
+    if w is not None:
+        return {"pipeline": w.orders.pipeline, "new_today": w.orders.new_today, "rush_open": w.orders.rush_open, **today}
+    return today
+
+
+def _orders_world(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"orders": [o.model_dump(mode="json") for o in r.sim.orders()][:20]}
+    return {"pipeline": w.orders.pipeline, "new_today": w.orders.new_today, "rush_open": w.orders.rush_open,
+            "items": [{"id": o.id, "size": o.size.value, "qty": o.qty, "done": o.done, "due": o.due.isoformat(),
+                       "customer": o.customer, "status": o.status, "rush": o.rush} for o in w.orders.items][:20]}
+
+
+def machines(r: Any) -> dict[str, Any]:
+    return {"machines": [{"id": t.machine_id, "status": STATUS.get(t.status.value, t.status.value), "temp_c": t.temp_c}
+                         for t in r.machine_tiles()]}
+
+
+def quality(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"error": "這個模擬沒有品質資料"}
+    q = w.quality
+    return {"inspected_today": q.inspected_today, "defects_today": q.defects_today, "yield_pct": q.yield_pct,
+            "recent": [{"at": _hm(i.ts), "machine": i.machine_id, "result": i.result, "cause": i.cause} for i in q.recent[:6]]}
+
+
+def maintenance(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"error": "這個模擬沒有保養資料"}
+    m = w.maintenance
+
+    def row(x: Any) -> dict[str, Any]:
+        return {"machine": x.machine_id, "title": x.title, "start": _hm(x.start), "status": x.status}
+    return {"in_progress": [row(x) for x in m.in_progress], "upcoming": [row(x) for x in m.upcoming[:6]],
+            "recent": [row(x) for x in m.recent[:4]]}
+
+
+def energy(r: Any) -> dict[str, Any]:
+    w = _world(r)
+    if w is None:
+        return {"error": "這個模擬沒有用電資料"}
+    e = w.energy
+    return {"total_kw": round(e.total_kw, 1), "contract_kw": e.contract_kw, "peak": e.peak, "kwh_today": round(e.kwh_today, 1),
+            "by_line": {k: round(v, 1) for k, v in e.by_line.items()}}
+
+
+TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
+          "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
+          "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
+          "maintenance": maintenance, "energy": energy}
+
+
+def _shrink(d: Any, n: int) -> Any:
+    if isinstance(d, list):
+        return [_shrink(x, n) for x in d[:n]]
+    if isinstance(d, dict):
+        return {k: _shrink(v, n) for k, v in d.items()}
+    return d
+
+
+def query(r: Any, topic: str) -> dict[str, Any]:
+    """{topic: data} for one topic, at most MAX_CHARS as JSON; KeyError for an unknown topic."""
+    data = TOPICS[topic](r)
+    n = 20
+    while len(json.dumps(data, ensure_ascii=False, default=str)) > MAX_CHARS and n > 1:
+        n //= 2
+        data = {**_shrink(data, n), "note": f"資料太多，每個清單只留前 {n} 筆"}
+    text = json.dumps(data, ensure_ascii=False, default=str)
+    if len(text) > MAX_CHARS:
+        return {"text": text[:MAX_CHARS], "note": "資料太多，已截斷"}
+    return data

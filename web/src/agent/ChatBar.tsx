@@ -29,7 +29,12 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
     setSeen(focus.n)
     if (focus.text) setQ(focus.text)
   }
-  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
+  // 討論: the caret goes into this input, scrolled into view (on a narrow screen the chat sits below the card, and
+  // 「按了討論沒有用」 was the click focusing an input off screen)
+  useEffect(() => {
+    if (!focus?.n) return
+    setTimeout(() => { input.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); input.current?.focus() }, 60)
+  }, [focus?.n])
   const can = !!transport?.message
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? ''
@@ -47,7 +52,7 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
     const ts = ft || nowIso()
     setQ('')
     setBusy(true)
-    setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true, about), chat('agent', 'reply', 'NemoClaw 思考中…', keys[1], n + 0.5, ts, true, about)])
+    setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true, about), chat('agent', 'reply', 'Agent Nemo 思考中…', keys[1], n + 0.5, ts, true, about)])
     try {
       const r: MainReply = await transport.message(text, about)
       // the reply (with its tool line) stays here until the server's audit row of this turn replaces it
@@ -60,10 +65,10 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
   return (
     <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }} data-mode="main">
       <div className="askbar-in">
-        <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || busy} aria-label="跟NemoClaw 說"
+        <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || busy} aria-label="跟 Agent Nemo 說"
           data-testid="chat-input"
           data-plan={waiting ? 'waiting' : undefined}
-          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : waiting ? '這個計劃要怎麼改，直接說' : '跟NemoClaw 說…') : '模擬資料模式不支援，需連線後端'}
+          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : waiting ? '這個計劃要怎麼改，直接說' : '跟 Agent Nemo 說…') : '模擬資料模式不支援，需連線後端'}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(q) } }} />
         <button type="submit" className="btn-send" disabled={!can || busy || !q.trim()} data-testid="chat-send">{busy ? '判讀中…' : '送出'}</button>

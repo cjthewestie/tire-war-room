@@ -92,9 +92,10 @@ DIST = ROOT / "web" / "dist"
 
 
 class MainMessage(BaseModel):
-    """Issue #54: a message to the NemoClaw (it classifies it itself)."""
+    """Issue #54: a message to the Agent Nemo (it classifies it itself)."""
     text: str = Field(min_length=1, max_length=300)
     event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
 
 
 class RollbackBody(BaseModel):
@@ -910,15 +911,13 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
             return CommandReply(event_id="", accepted=False, reply=chat)
-        # issue #54: the main agent picks ONE subagent (model in its queue slot, or keyword rules), then starts it
-        from warroom.agent.orchestrator import TYPES
-        ev, d = await r.orch.dispatch_command(body.text.strip(), session.actor, r.start_command)
+        # one supervisor-command event, no dispatch to a typed subagent and no model call to pick one (CJ 2026-10-21:
+        # 「我只需要一個幫忙分類的，現在先不要派發」); the same path as Agent Nemo's propose_plan
+        ev = r.start_command(body.text.strip(), session.actor)
         from warroom.agent.talk import physical_request
         refusal = physical_request(body.text)
-        how = "模型判斷" if d["by"] == "model" else "關鍵字規則" + ("（模型失敗改用規則）" if d.get("fell_back") else "")
         return CommandReply(event_id=ev.id, accepted=refusal is None,
-                            reply=refusal or f"已開新任務：{TYPES[d['type']]}（{how}：{d['reason']}）。"
-                                             "這個任務的 agent 擬好計劃會送到計劃區給你核准；核准後執行，完成後在這裡回報。")
+                            reply=refusal or "已開新任務：計劃擬好會送到計劃區給你核准，核准後才執行。")
 
     @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
     async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
@@ -944,13 +943,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if "main" not in holder:
             from warroom.agent.main_agent import MainAgent
             holder["main"] = MainAgent(r.settings)
+            r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
 
     @app.post("/api/main/message")
     async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
-        """The supervisor talks to the NemoClaw: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
-        chat, read (knowledge base, sensors, orders), dispatch a subagent to draft a plan, or discuss the selected
-        waiting plan. It has no write tool; a dispatched plan still needs 核准並派發. Same session rule as approvals."""
+        """The supervisor talks to the Agent Nemo: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
+        chat, answer general questions, read (knowledge base, sensors, orders, query_plant over the rest of the plant),
+        propose a plan, or discuss the selected waiting plan. It has no write tool; a proposed plan still needs the
+        supervisor's approval. Same session rule as approvals."""
         r = rt()
         if r.network == "lan_down" and not session.local:
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
@@ -984,11 +985,48 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             out = await discuss(body.event_id, DiscussRequest(text=t), session)
             return out.model_dump(mode="json")
 
-        def slot():
-            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "NemoClaw 對話")
+        def slot(low: bool = False):
+            # small talk waits behind everything (an incident plan always goes first); plant questions keep "task"
+            return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
+                                     "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
-        res = await _main_agent(r).turn(text, context=r.ask_context(), waiting_plan=waiting, run_tool=run_tool,
-                                        propose=propose, discuss=talk if waiting else None, slot=slot)
+        async def read_plant(topic: str, call_id: str) -> dict[str, Any]:
+            # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
+            # refuses it); audited here like an ask read (tool_call / tool_result, R0), read-only by construction.
+            # Called on the loop, not in a thread: it walks live runtime state the loop also changes
+            eid, step = call_id.split(":")[0], call_id.split(":")[-1]
+            row = {"call_id": f"{eid}:Q{step[1:]}", "step_id": f"Q{step[1:]}", "attempt": 1, "risk": "R0"}
+            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic}, "state": "ASK"},
+                           event_id=eid)
+            t0 = time.perf_counter()
+            try:
+                data, err = plant_query.query(r, topic), None
+            except Exception as e:  # noqa: BLE001 - a failed read is said in the reply, never a 500
+                data, err = None, f"{type(e).__name__}: {e}"[:200]
+            r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",
+                           {**row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
+            return {"ok": err is None, "data": data, "error": err}
+
+        # safety and sensitive terms, by code on both sides of the model (CJ 2026-10-21: 「一些安全跟敏感詞彙還是要用程式擋下來」)
+        from warroom.agent import safety_filter
+        sf = safety_filter.default()
+        hit = sf.check_input(text)
+        if hit is not None:
+            r.audit.append(AuditKind.SYSTEM, "safety_filter", {**hit.audit(), "turn": None}, event_id=None)
+            return {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
+                    "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
+        from warroom.api import plant_query
+        # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
+        context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
+                                        propose=propose, discuss=talk if waiting else None, slot=slot,
+                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}")
+        key = getattr(r.audit, "_key", None)
+        out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+        if out_hit is not None:
+            r.audit.append(AuditKind.SYSTEM, "safety_filter", {**out_hit.audit(), "turn": res["id"]}, event_id=None)
+            res.update(reply=out_hit.reply, error=f"output blocked: {out_hit.category}")
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],

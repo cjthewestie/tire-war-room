@@ -122,6 +122,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
       {uses.length ? <ToolChips uses={uses} /> : <p className="muted small">尚無工具紀錄</p>}
     </Block>
   )
+  const gated = (ev?.steps ?? []).filter((x) => x.state === 'awaiting_approval')
   const conclusion = (n: number) => (
     <Block key="concl" n={n} title="結論" className="apv-concl">
       <dl className="concl">
@@ -140,6 +141,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
             {chosenOpt && <li>人力：{chosenOpt.id} {chosenOpt.label}</li>}
             {afterSteps.map((n) => <li key={n.id}>接著自動（R1）：{TOOL_LABEL[n.tool]}・{plain(n.purpose)}</li>)}
           </ul>
+          {gated.length > 0 && (
+            // the exact tool and args approving runs, from the event's steps (code), next to the AI's own words
+            // above: title and rationale are model prose and could differ (CJ 2026-10-21: 「我有方法避免prompt injection嗎」)
+            <details className="concl-sub apv-exec" data-testid="apv-exec">
+              <summary>程式實際會執行（工具與參數）</summary>
+              <ul>{gated.map((g) => <li key={g.step.id}><code>{g.step.id} {g.step.tool} {JSON.stringify(g.step.args)}</code></li>)}</ul>
+            </details>
+          )}
         </dd>
         <dt className="no">不同意時</dt>
         <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
@@ -195,7 +204,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
     <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
       <header className="apv-h">
         <div className="apv-tags">
-          <span className="apv-main" data-testid="main-plan-tag">NemoClaw 的計劃</span>
+          <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>
           <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
           <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
           {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
@@ -226,14 +235,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
         )}
 
       <footer className="apv-act">
-        {done ? <p className="apv-done" role="status">{done}・NemoClaw 已派人執行，完成後回報；決定已寫入稽核日誌</p> : <>
+        {done ? <p className="apv-done" role="status">{done}・執行中；決定已寫入稽核日誌</p> : <>
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
-              {busy ? '送出中…' : `核准並派發${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
+              {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">核准後 NemoClaw 派人執行並回報；要改，按「討論」跟NemoClaw 說</span>
+            <span className="apv-hint">核准後才執行；要改，按「討論」</span>
           </div>
         </>}
       </footer>

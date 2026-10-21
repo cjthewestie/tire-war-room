@@ -148,9 +148,8 @@ const BEFORE_APPROVAL = new Set(['detected', 'classify', 'plan', 'simulate', 'ga
  *  wall seconds left (「預計約 8 秒後完成」), not factory time (at 10× a 12-second repair read 「約 2 分鐘」). */
 export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null, fastS: number | null = null) {
   const what = plain(firstDetection(ev)).replace(/^異常[：:]\s*/, '')
-  const sub = state.subagents?.items.find((s) => s.id === ev.id)
-  // Kyle 10-21: the single agent is called NemoClaw on screen; the kind of work stays in brackets
-  const agent = `NemoClaw（${sub?.type_label ?? (ev.source === 'plant' ? '工廠調度' : ev.source === 'supervisor' ? '任務' : '機台處理')}）`
+  // Kyle 10-21: the single agent is called Agent Nemo on screen; no typed sub-agent in brackets (CJ 2026-10-21: 「現在先不要派發」)
+  const agent = 'Agent Nemo'
   const who = `${BEFORE_APPROVAL.has(ev.state) ? '建議交由' : '交由'} ${agent}${runtime ? `（${runtime}）` : ''} 修正`
   const est = repairEstimate(ev, state)
   const done = est.tasks.length - est.open.length

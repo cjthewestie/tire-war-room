@@ -45,7 +45,7 @@ await p.waitForSelector('[data-testid="tab-monitor"][aria-selected="true"]')
 check('ticker item opens 產線監控 on that machine', (await p.locator('.drawer, [role="dialog"]').count()) >= 1 || (await p.locator('.flash').count()) >= 1)
 await p.keyboard.press('Escape')
 
-// (b) ② delivery risk (issue #54): the 主 agent drafts a plan by itself → 主 agent 規劃中… → its card is selected with 核准並派發
+// (b) ② delivery risk (issue #54): the 主 agent drafts a plan by itself → 主 agent 規劃中… → its card is selected with 核准
 // (the 'normal' scenario: the day-loop default starts at 00:00, where a replan may have nothing to change)
 await post('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
@@ -55,14 +55,14 @@ check('② items say the 主 agent will draft the plan (or is drafting it)', (aw
 await riskItem.click()
 await p.waitForSelector('[data-testid="item-planning"], [data-testid="replan-status"]', { timeout: 10000 }).catch(() => {})
 check('opening it starts 主 agent 規劃中… with no button to press', (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') && (await p.locator('[data-testid="plan-replan"]').count()) === 0)
-check('plan area bottom: only 核准並派發 (waits for the plan) and 討論', (await p.locator('[data-testid="plan-approve-wait"]').isDisabled()) && (await p.locator('[data-testid="plan-discuss"]').count()) === 1)
+check('plan area bottom: only 核准 (waits for the plan) and 討論', (await p.locator('[data-testid="plan-approve-wait"]').isDisabled()) && (await p.locator('[data-testid="plan-discuss"]').count()) === 1)
 let selected = false
 for (let i = 0; i < 20 && !selected; i++) {
   await post('/api/sim/step', { seconds: 30 })
   await p.waitForTimeout(400)
   selected = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
 }
-check('the resulting card is selected automatically with 核准並派發', selected && (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]', { hasText: '核准並派發' }).count()) >= 1 && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1)
+check('the resulting card is selected automatically with 核准', selected && (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]', { hasText: '核准' }).count()) >= 1 && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1)
 
 // an event with an approval, so every page has something to show
 await post('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
