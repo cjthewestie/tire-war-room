@@ -40,38 +40,40 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
     <section className="plan-area panel plan-other home-ov" aria-label="今日工廠概況" data-testid="home-overview">
       <div className="po-body">
         <header className="ov-head">
-          {/* 全廠正常 only from a snapshot: before the first one arrives nothing is known yet */}
-          <h2 data-testid="ov-answer">{!snap ? '讀取工廠資料中…' : snap.header.abnormal_count > 0 ? '沒有要你處理的事' : '全廠正常，沒有要你處理的事'}</h2>
-          {next[0] && <p className="ov-next1">下一件：{next[0].when} {next[0].text}</p>}
+          {/* 全廠正常 only from a snapshot: before the first one arrives nothing is known yet, so nothing else is said */}
+          <h2 data-testid="ov-answer" className={snap ? '' : 'wait'}>{!snap ? '讀取工廠資料中…' : snap.header.abnormal_count > 0 ? '沒有要你處理的事' : '全廠正常，沒有要你處理的事'}</h2>
+          {snap && next[0] && <p className="ov-next1">下一件：{next[0].when} {next[0].text}</p>}
         </header>
-        {stripEv && <ResultStrip ev={stripEv} subject={last?.subject} onFull={onFull} />}
+        {snap && <>
+          {stripEv && <ResultStrip ev={stripEv} subject={last?.subject} onFull={onFull} />}
 
-        <Sec title="接下來" testId="ov-next">
-          {next.length > 1 ? (
-            <ul className="ov-list">{next.slice(1).map((u) => <li key={u.key}><span className="ov-time">{u.when}</span><span>{u.text}</span></li>)}</ul>
-          ) : <p className="muted ov-empty">{next.length ? '下一件之後，排程裡暫時沒有別的事' : '排程裡接下來沒有出模或入模；有新排程會出現在這裡'}</p>}
-        </Sec>
-
-        <Sec title="今天處理過的事" testId="ov-done">
-          {today.length || before.length ? (
-            <ul className="ov-list ov-hist">
-              {today.map((r) => { const ev = events.find((e) => e.id === r.eventId); return <HistLine key={r.key} r={r} now={now} href={ev ? r.eventId : null} ev={ev} tasks={w?.tasks?.items ?? []} onClick={full} /> })}
-              {!today.length && <li className="muted ov-empty">今天還沒有處理過的事</li>}
-              {before.length > 0 && <li className="ov-sub" aria-hidden="true">上一輪（切換情境前）</li>}
-              {before.map((r) => <HistLine key={r.key} r={r} now={now} href={null} old onClick={full} />)}
-            </ul>
-          ) : <p className="muted ov-empty">今天還沒有處理過的事；異常處理完或你做了決定，會記在這裡</p>}
-        </Sec>
-
-        {w && (
-          <Sec title="人力・出貨・品質" testId="ov-world">
-            <p className="ov-line">
-              <span>在廠 <b>{w.people.on_duty}</b>/{w.people.total} 人</span>
-              <span>待出貨 <b>{w.finished_goods.waiting_ship}</b> 條{w.dock.next_departure && ms(w.dock.next_departure) > now ? `・下一車 ${when(ms(w.dock.next_departure), now)}` : ''}</span>
-              {w.quality.inspected_today > 0 && w.quality.yield_pct != null && <span>良率 <b>{fmtNum(w.quality.yield_pct)}%</b>・不良 {w.quality.defects_today} 條</span>}
-            </p>
+          <Sec title="接下來" testId="ov-next">
+            {next.length > 1 ? (
+              <ul className="ov-list">{next.slice(1).map((u) => <li key={u.key}><span className="ov-time">{u.when}</span><span>{u.text}</span></li>)}</ul>
+            ) : <p className="muted ov-empty">{next.length ? '下一件之後，排程裡暫時沒有別的事' : '排程裡接下來沒有出模或入模；有新排程會出現在這裡'}</p>}
           </Sec>
-        )}
+
+          <Sec title="今天處理過的事" testId="ov-done">
+            {today.length || before.length ? (
+              <ul className="ov-list ov-hist">
+                {today.map((r) => { const ev = events.find((e) => e.id === r.eventId); return <HistLine key={r.key} r={r} now={now} href={ev ? r.eventId : null} ev={ev} tasks={w?.tasks?.items ?? []} onClick={full} /> })}
+                {!today.length && <li className="muted ov-empty">今天還沒有處理過的事</li>}
+                {before.length > 0 && <li className="ov-sub" aria-hidden="true">上一輪（切換情境前）</li>}
+                {before.map((r) => <HistLine key={r.key} r={r} now={now} href={null} old onClick={full} />)}
+              </ul>
+            ) : <p className="muted ov-empty">今天還沒有處理過的事；異常處理完或你做了決定，會記在這裡</p>}
+          </Sec>
+
+          {w && (
+            <Sec title="人力・出貨・品質" testId="ov-world">
+              <p className="ov-line">
+                <span>在廠 <b>{w.people.on_duty}</b>/{w.people.total} 人</span>
+                <span>待出貨 <b>{w.finished_goods.waiting_ship}</b> 條{w.dock.next_departure && ms(w.dock.next_departure) > now ? `・下一車 ${when(ms(w.dock.next_departure), now)}` : ''}</span>
+                {w.quality.inspected_today > 0 && w.quality.yield_pct != null && <span>良率 <b>{fmtNum(w.quality.yield_pct)}%</b>・不良 {w.quality.defects_today} 條</span>}
+              </p>
+            </Sec>
+          )}
+        </>}
       </div>
     </section>
   )
