@@ -968,7 +968,7 @@ class Event(_M):
     prior_rounds: list[StepRound] = Field(default_factory=list)   # earlier rounds' steps, oldest first
     closed_at: datetime | None = None
     outcome: str | None = None
-    ai_report: EventAiReport | None = None   # NemoClaw 異常報告 (warroom/agent/reporter.py), set when it closes
+    ai_report: EventAiReport | None = None   # Agent Nemo 異常報告 (warroom/agent/reporter.py), set when it closes
     # issue #10: who opened it (the detector, or a task the supervisor typed) and what the supervisor
     # asked the agent to honour while discussing its plan
     source: Literal["detector", "supervisor", "plant"] = "detector"   # plant = issue #17 plant event
@@ -1398,7 +1398,7 @@ class Bus(Protocol):
 
 
 class EventAiReport(_M):
-    """NemoClaw 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+    """Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
     (by "model"; mock mode or a model failure: the code-written draft, by "rules"), the result line appended by code when
     the event closed. drafted_ms: approval -> draft ready; late_ms: close -> delivered when the draft was not ready yet."""
     text: str

@@ -1,4 +1,4 @@
-// 快速維修的修復預估 (Kyle 10-21 demo flow: 主管核准 → NemoClaw 派人進廠維修 → 維修完成 → 回溫 → 恢復正常). With
+// 快速維修的修復預估 (Kyle 10-21 demo flow: 主管核准 → Agent Nemo 派人進廠維修 → 維修完成 → 回溫 → 恢復正常). With
 // REPAIR_FAST_S > 0 a repair task runs repair_fast_s WALL seconds at any sim speed, then the readings ramp back over
 // recover_fast_s wall seconds (RECOVER_FAST_S). The phone's 修復預估 says those wall seconds (「約 16 秒」), not the
 // verification window (「約 30 分鐘」) or a factory-clock time.

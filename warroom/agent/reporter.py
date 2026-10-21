@@ -1,4 +1,4 @@
-"""NemoClaw 異常報告 (Kyle 10-21, option A): the incident report is WRITTEN BY THE LOCAL MODEL while the crew repairs.
+"""Agent Nemo 異常報告 (Kyle 10-21, option A): the incident report is WRITTEN BY THE LOCAL MODEL while the crew repairs.
 
 Flow: 主管核准 → the draft starts in the background with the facts known then (anomaly, hypothesis, what ran, the
 approved option, the worker tasks, the SOPs) → the model writes title / summary / cause / actions during the 10–15 s
@@ -6,15 +6,15 @@ repair → when the event closes (machine back to normal) CODE appends the resul
 recovery time) and the report is delivered at once, in step with the repair state. Progress messages stay code-written.
 
 - IncidentReporter.draft(event, facts): the model through the same OpenAI-compatible settings as the commander (BASE_URL,
-  MODEL, key, server kind, thinking off, JSON schema), in the ModelQueue at the lowest priority 「NemoClaw 報告」 (reports
+  MODEL, key, server kind, thinking off, JSON schema), in the ModelQueue at the lowest priority 「Agent Nemo 報告」 (reports
   never take the queue's last slot, so safety / machine planning always has one), timeout ~15 s. Every number it writes
   must appear in the facts (the ungrounded-number check of ask.py / main_agent.py): a clause with an invented number is
   dropped; a part left empty, invalid JSON, a timeout or mock mode -> the code-written draft from the same facts
   (by "rules").
 - IncidentReporter.finalize(draft, final_facts): the text with the code-appended 「結果：…」 line.
 - ReportDesk: the hooks the main agent (orchestrator) calls — on_decided (approve / modify: start the draft) and on_ended
-  (CLOSED: finalize and publish Event.ai_report, audit SYSTEM {"msg": "NemoClaw 異常報告", ...} as a main_agent row so
-  the 主控台 shows it as a NemoClaw bubble). A draft not ready at close is finalized as soon as it is (delay noted)."""
+  (CLOSED: finalize and publish Event.ai_report, audit SYSTEM {"msg": "Agent Nemo 異常報告", ...} as a main_agent row so
+  the 主控台 shows it as a Agent Nemo bubble). A draft not ready at close is finalized as soon as it is (delay noted)."""
 from __future__ import annotations
 
 import asyncio
@@ -42,8 +42,8 @@ from warroom.contracts import (
 from warroom.factory import MACHINE_BY_ID, TEAM_LABELS, TZ
 
 ACTOR = "main_agent"
-PRIORITY_REPORT = 5            # below questions (orchestrator.PRIORITY["question"] = 4)
-QUEUE_LABEL = "NemoClaw 報告"
+PRIORITY_REPORT = 6            # last in the queue: after questions (4) and small talk (5), orchestrator.PRIORITY["report"]
+QUEUE_LABEL = "Agent Nemo 報告"
 TIMEOUT_S = 15.0               # the model call
 CLOSE_WAIT_S = 30.0            # after close: how long a slow draft may still run before the rules draft is used
 RECOVER_WAIT_S = 30.0          # an Event with recovered_at (the recovery ramp): wait for it after close at most this
@@ -55,7 +55,7 @@ _NUM_RX = re.compile(r"\d+(?:\.\d+)?")
 _CLAUSE_RX = re.compile(r"[^。；;]+[。；;]?")
 _BACK_RX = re.compile(r"回到\s*(-?\d+(?:\.\d+)?)\s*(°C|kgf/cm²|L/min)?")
 
-SYSTEM = """你是實心胎工廠戰情室的 NemoClaw。機台異常的處置已經由主管核准、現場正在維修；請依使用者訊息的 facts（系統紀錄）先寫好異常報告，修好後系統會補上結果。
+SYSTEM = """你是實心胎工廠戰情室的 Agent Nemo。機台異常的處置已經由主管核准、現場正在維修；請依使用者訊息的 facts（系統紀錄）先寫好異常報告，修好後系統會補上結果。
 只輸出一個 JSON 物件 {"title","summary","cause","actions"}：
 - title：機台名稱＋異常，20 字內
 - summary：一句話，50 字內：發生什麼事、怎麼處理
@@ -347,7 +347,7 @@ class _Job:
 
 
 class ReportDesk:
-    """The main agent's NemoClaw report desk: on_decided starts a draft, on_ended delivers the report."""
+    """The main agent's Agent Nemo report desk: on_decided starts a draft, on_ended delivers the report."""
 
     def __init__(self, orch: Any, reporter: IncidentReporter | None = None):
         self.o = orch
@@ -407,7 +407,7 @@ class ReportDesk:
         job = self.jobs.get(ev.id)
         if job is None or job.published or job.finishing:
             return
-        if ev.state is not EventState.CLOSED:        # safe stop / interrupt / scenario switch: no NemoClaw report
+        if ev.state is not EventState.CLOSED:        # safe stop / interrupt / scenario switch: no Agent Nemo report
             if job.task is not None:
                 job.task.cancel()
             self.jobs.pop(ev.id, None)
@@ -465,7 +465,7 @@ class ReportDesk:
                             at=self._now(), late_ms=late_ms or None)
         ev.ai_report = rep
         self.o.audit.append(AuditKind.SYSTEM, ACTOR, {
-            "orch": "ai_report", "msg": "NemoClaw 異常報告", "text": text, "summary": rep.summary, "by": rep.by,
+            "orch": "ai_report", "msg": "Agent Nemo 異常報告", "text": text, "summary": rep.summary, "by": rep.by,
             "drafted_ms": rep.drafted_ms, "late_ms": rep.late_ms, "model": draft.get("model"),
             "model_ms": draft.get("model_ms"), "model_error": draft.get("model_error"),
             "dropped": draft.get("dropped") or [], **({"model_raw": draft["raw"]} if draft.get("raw") else {})},

@@ -290,7 +290,7 @@ class Orchestrator:
         self.subs: dict[str, SubAgent] = {}
         self.preplan_ids: set[str] = set()      # events the runtime pre-plans: they wait behind incidents
         self._pending_dispatch: list[dict[str, Any]] = []      # supervisor dispatch decided, event not open yet
-        from warroom.agent.reporter import ReportDesk  # NemoClaw 異常報告 (Kyle 10-21, option A)
+        from warroom.agent.reporter import ReportDesk  # Agent Nemo 異常報告 (Kyle 10-21, option A)
         self.reports = ReportDesk(self, reporter)
         if hasattr(sm, "on_open"):
             sm.on_open = self._opened
@@ -408,13 +408,13 @@ class Orchestrator:
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
                      "type_label": TYPES.get(t, t), "by": "supervisor", "decision": kind, "option": d.option_id,
                      "approval_id": req.id, "text": text}, ev_id)
-        self.reports.on_decided(req)                              # NemoClaw starts the incident report now
+        self.reports.on_decided(req)                              # Agent Nemo starts the incident report now
         self.publish()
 
     # ---------------------------------------------------------------- report back
     def _ended(self, ev: Event) -> None:
         """StateMachine hook: a run ended. The main agent reports a code-built summary once."""
-        self.reports.on_ended(ev)                                 # CLOSED: the NemoClaw report gets its result line
+        self.reports.on_ended(ev)                                 # CLOSED: the Agent Nemo report gets its result line
         sub = self.subs.get(ev.id)
         if sub is None:
             self._opened(ev)

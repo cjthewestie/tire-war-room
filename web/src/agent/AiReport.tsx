@@ -1,4 +1,4 @@
-// NemoClaw 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): written by NemoClaw (the local model) during the
+// Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): written by Agent Nemo (the local model) during the
 // 10–15 s repair, the 「結果」 line appended by code when the machine is back to normal (Event.ai_report). Shown on top of
 // the Agent page's 處理報告 (ReportBlock) and on /report. Tagged AI 撰寫, or 規則備援 when mock mode / a model failure
 // left the code-written draft.
@@ -15,9 +15,9 @@ export function AiReport({ ev }: { ev: Event }) {
   const secs = r.drafted_ms != null ? `撰寫 ${(r.drafted_ms / 1000).toFixed(1)} 秒` : ''
   const late = r.late_ms ? `・晚 ${(r.late_ms / 1000).toFixed(1)} 秒送達` : ''
   return (
-    <section className="ai-report" data-testid="ai-report" data-by={r.by} aria-label="NemoClaw 異常報告">
+    <section className="ai-report" data-testid="ai-report" data-by={r.by} aria-label="Agent Nemo 異常報告">
       <header>
-        <b>NemoClaw 異常報告</b>
+        <b>Agent Nemo 異常報告</b>
         <span className={`ai-tag${ai ? ' ai' : ''}`} data-testid="ai-report-tag">{ai ? 'AI 撰寫' : '規則備援'}</span>
         <small>{fmtHM(r.at)}{ai && secs ? `・${secs}` : ''}{late}</small>
       </header>
@@ -32,7 +32,7 @@ export function AiReport({ ev }: { ev: Event }) {
           )
         })}
       </dl>
-      <p className="ai-foot">{ai ? '由 NemoClaw 依系統紀錄撰寫；「結果」由程式在機台恢復正常時補上' : '規則備援：模擬模式或模型沒有及時回應，由程式依同一份紀錄整理；「結果」由程式補上'}</p>
+      <p className="ai-foot">{ai ? '由 Agent Nemo 依系統紀錄撰寫；「結果」由程式在機台恢復正常時補上' : '規則備援：模擬模式或模型沒有及時回應，由程式依同一份紀錄整理；「結果」由程式補上'}</p>
     </section>
   )
 }

@@ -1,7 +1,7 @@
-"""NemoClaw 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): the local model drafts the incident report during
+"""Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): the local model drafts the incident report during
 the repair (fake client here: model JSON, invalid JSON / ungrounded number / timeout -> the rules draft), code appends
 the result line at close; the main agent's hooks (approval decided -> draft starts; CLOSED -> Event.ai_report, audit
-SYSTEM {"msg": "NemoClaw 異常報告"} as a main_agent row for the 主控台 bubble); and the mock flow of open_mill_overheat."""
+SYSTEM {"msg": "Agent Nemo 異常報告"} as a main_agent row for the 主控台 bubble); and the mock flow of open_mill_overheat."""
 from __future__ import annotations
 
 import asyncio
@@ -286,9 +286,9 @@ async def test_approval_starts_the_draft_and_close_delivers_the_report():
     assert rep.summary and rep.summary in rep.text
     ma = [r for r in audit.rows if r.actor == "main_agent" and r.event_id == ev.id]
     kinds = [r.payload.get("orch") for r in ma]
-    assert kinds[-2:] == ["report", "ai_report"]            # the 「完成」 line first, then the NemoClaw report bubble
+    assert kinds[-2:] == ["report", "ai_report"]            # the 「完成」 line first, then the Agent Nemo report bubble
     row = ma[-1]
-    assert row.kind is AuditKind.SYSTEM and row.payload["msg"] == "NemoClaw 異常報告" and row.payload["text"] == rep.text
+    assert row.kind is AuditKind.SYSTEM and row.payload["msg"] == "Agent Nemo 異常報告" and row.payload["text"] == rep.text
     assert row.payload["by"] == "rules" and "error" not in row.payload    # (an 「error」 key would show as a warning row)
     pub = [m for m in bus.history if m.type is WsType.EVENT]
     assert pub and pub[-1].data["ai_report"]["text"] == rep.text
@@ -407,7 +407,7 @@ async def test_open_mill_overheat_report_lands_with_the_close(tmp_path):
         decided = next(e for e in rows if e.kind is AuditKind.APPROVAL_DECISION)
         ai = [e for e in rows if e.actor == "main_agent" and e.payload.get("orch") == "ai_report"]
         done = next(e for e in rows if e.actor == "main_agent" and e.payload.get("orch") == "report")
-        assert len(ai) == 1 and ai[0].kind is AuditKind.SYSTEM and ai[0].payload["msg"] == "NemoClaw 異常報告"
+        assert len(ai) == 1 and ai[0].kind is AuditKind.SYSTEM and ai[0].payload["msg"] == "Agent Nemo 異常報告"
         assert decided.seq < done.seq < ai[0].seq
     finally:
         await rt.stop()

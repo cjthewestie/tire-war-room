@@ -360,7 +360,7 @@ export interface Event {
   prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
   closed_at: ISODate | null
   outcome: string | null
-  ai_report?: EventAiReport | null   // NemoClaw 異常報告 (warroom/agent/reporter.py), set when the event closes
+  ai_report?: EventAiReport | null   // Agent Nemo 異常報告 (warroom/agent/reporter.py), set when the event closes
   // issue #10
   source?: "detector" | "supervisor" | "plant"  // plant = issue #17 plant event (machine_id "PLANT")
   command?: string | null
@@ -801,7 +801,7 @@ export interface MainReply {
   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
 }
 
-/** NemoClaw 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+/** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
  *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
 export interface EventAiReport {
   text: string; summary: string; by: "model" | "rules"; drafted_ms: number | null; at: ISODate; late_ms: number | null

@@ -1,4 +1,4 @@
-/* NemoClaw 異常報告 (AiReport.tsx): the model's report, above the code-built 處理報告; theme tokens from index.css */
+/* Agent Nemo 異常報告 (AiReport.tsx): the model's report, above the code-built 處理報告; theme tokens from index.css */
 .ai-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .55); border-left-width: 4px; background: var(--panel); border-radius: 10px; padding: 10px 12px; margin: 0 0 10px; display: flex; flex-direction: column; gap: 6px; }
 .ai-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ai-report header b { font-size: 15px; }
