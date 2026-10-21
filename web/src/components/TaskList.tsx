@@ -69,7 +69,7 @@ function ReportLine({ t, compact }: { t: WorkTask; compact: boolean }) {
   return (
     <div className="task-rep small">
       {t.overdue && <span className="task-overdue" role="status" data-testid="task-overdue">逾時提醒：已超過預計 {t.work_min * 2} 分鐘，{who || '負責人'}尚未回報完成</span>}
-      {!t.overdue && <span className="muted">{t.status === '待派' ? '核准後派人' : t.status === '前往中' ? `等 ${who} 回報到達` : `等 ${who} 回報完成`}</span>}
+      {!t.overdue && <span className="muted">{t.status === '待派' ? '等有空的人接手' : t.status === '前往中' ? `等 ${who} 回報到達` : `等 ${who} 回報完成`}</span>}
       {!compact && !open && <button type="button" className="btn-ghost task-ovr" onClick={() => setOpen(true)} data-testid="task-override">代為完成</button>}
       {!compact && open && (
         <span className="task-ovr-f">
