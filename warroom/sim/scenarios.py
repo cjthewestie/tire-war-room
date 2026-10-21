@@ -13,9 +13,8 @@ On curing presses temperature faults act through the steam (the platen is steam 
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
-
-from datetime import date
+import os
+from datetime import date, datetime, timedelta
 
 from warroom.contracts import (
     FaultKind,
@@ -43,6 +42,8 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
     ScenarioName.RUSH_ORDER: datetime(2026, 10, 7, 9, 50, 0, tzinfo=TZ),
     # issue #36 一日循環: the team dataset's one full quiet day (10/21, a Wednesday), from midnight
     ScenarioName.DAY_LOOP: datetime(2026, 10, 21, 0, 0, 0, tzinfo=TZ),
+    # issue #104 一早訂單湧入: the finals' second day (a Friday; the roster has a full 早班), five minutes before 開工
+    ScenarioName.MORNING_RUSH: datetime(2026, 10, 23, 6, 55, 0, tzinfo=TZ),
 }
 DAY_LOOP_SHIFT_START_S = 8 * 3600.0     # 08:00 開工 every loop
 PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER})
@@ -84,6 +85,88 @@ P11_LEAK_OFFSET_S = 655.0
 P11_LEAK_RATE_C_PER_MIN = 1.0 / 3.0
 # Page 2: cooling water fails 14:20:15; compound reaches ~112 °C near 14:26 and levels ~117.6.
 P2_FLOW_DROP_OFFSET_S = 135.0
+
+
+# issue #104 一早訂單湧入 (the finals demo). CJ, 2026-10-22: 「因為我demo 是以一天的開始就是訂單湧進來 然後事件」.
+# Offsets from 06:55. Demo speed 30× (web/src/mock/engine.ts SCENARIOS): 07:00 → 10:00 is 6 real minutes of sim time;
+# the sim clock also waits while the model plans (Runtime._hold_for_compute), which adds the model's time on top.
+MR_SHIFT_START_S = 300.0                 # 07:00 早班開工
+# The order flood, 07:05–07:20: (offset s, id, customer, size, qty, due in days, priority, rush). Ids continue the team
+# dataset's orders.csv (SO-001..SO-009, customers 客戶A–G). A re-solve keeps the active plan's tyres and adds only
+# orders of priority >= 2 it does not carry (solver._prepare), so the normal orders wait for the next full plan and
+# SO-012, flagged 優先 (priority 2, no card of its own), goes in with the rush order's re-solve. SO-012 is the at-risk
+# one: 8 小胎 due tomorrow (10/24 23:59). 小胎 cures 24 h on the 7 small presses (01–07) and its compound is fed
+# 100 min before mold-in, so from 07:20 each press can de-mold at most one of them by 10/24 and the eighth always ends
+# after its due date, whatever the solver picks. Once the rush re-plan is approved it is a 交期風險 item (rule ②: last
+# de-mold after the due date) and #101's pre-plan drafts its plan. The rush order comes last, so its re-solve sees
+# the whole flood.
+MR_ORDERS: tuple[tuple[float, str, str, TireSize, int, int, int, bool], ...] = (
+    (600.0, "SO-010", "客戶A", TireSize.S, 20, 17, 0, False),
+    (720.0, "SO-011", "客戶B", TireSize.M, 12, 28, 0, False),
+    (840.0, "SO-012", "客戶F", TireSize.S, 8, 1, 2, False),
+    (960.0, "SO-013", "客戶C", TireSize.S, 16, 21, 0, False),
+    (1080.0, "SO-014", "客戶D", TireSize.L, 6, 35, 0, False),
+    (1200.0, "SO-015", "客戶E", TireSize.S, 24, 24, 0, False),
+    (1320.0, "SO-016", "客戶B", TireSize.M, 10, 30, 0, False),
+    (1500.0, "SO-017", "客戶G", TireSize.M, 2, 3, 3, True),   # 07:20 急單: SO-009's customer again, 2 中胎 by Monday
+)
+MR_AT_RISK_ORDER = "SO-012"
+MR_RUSH_ORDER = "SO-017"
+# 07:40 the page-11 incident on press 7 (the press is curing EV-2's S-027 until ~11:50), same relative timing as
+# page 11: steam drop, then the leak 580 s later that makes H1 (extend the cure) fail at verify (~17 min later)
+MR_P11_OFFSET_S = 2700.0
+# 08:30 (MORNING_RUSH_SAFETY=0 leaves it out): B 線開煉機 loses its cooling and the compound climbs past 120 °C; the
+# Safety Core stops the machine on the reading (SR-COMPOUND-120), without waiting for the AI
+MR_SAFETY_OFFSET_S = 5700.0
+MR_SAFETY_RATE_C_PER_MIN = 3.0
+
+
+def morning_rush_safety() -> bool:
+    """MORNING_RUSH_SAFETY=0 drops the 08:30 Safety Core step (read when the scenario is built, i.e. on each load)."""
+    return os.environ.get("MORNING_RUSH_SAFETY", "1") != "0"
+
+
+def _mr_order(start: datetime, oid: str, cust: str, size: TireSize, qty: int, days: int, prio: int) -> Order:
+    return Order(id=oid, size=size, qty=qty, done=0, due=start.date() + timedelta(days=days), customer=cust,
+                 mold_id=f"MD-{oid}", priority=prio)
+
+
+def _morning_rush(start: datetime) -> Scenario:
+    size_zh = {TireSize.S: "小胎", TireSize.M: "中胎", TireSize.L: "大胎"}
+    steps = [ScenarioStep(at_offset_s=MR_SHIFT_START_S, note="07:00 早班開工",
+                          plant=PlantInput(kind="shift_start", text="07:00 早班開工：排今日計畫"))]
+    for off, oid, cust, size, qty, days, prio, rush in MR_ORDERS:
+        o = _mr_order(start, oid, cust, size, qty, days, prio)
+        at = scenario_time_of(start, off)
+        what = f"{cust} {size_zh[size]} {qty} 條，交期 {o.due:%m/%d}" + ("（優先）" if prio and not rush else "")
+        if rush:
+            steps.append(ScenarioStep(at_offset_s=off, note=f"{at} 急單 {oid} 到單",
+                                      plant=PlantInput(kind="rush_order", order=o, text=f"急單 {oid} 到：{what}")))
+        else:
+            steps.append(ScenarioStep(at_offset_s=off, note=f"{at} 新訂單 {oid}：{what}", order=o))
+    steps += [
+        ScenarioStep(at_offset_s=MR_P11_OFFSET_S, note="07:40 蒸汽壓不足：7 號 128 → 122°C",
+                     fault=_f("F-MR-STEAM", "CURE-07", FaultKind.STEAM_PRESSURE_DROP, target_c=122.0)),
+        ScenarioStep(at_offset_s=MR_P11_OFFSET_S + P11_LEAK_OFFSET_S - P11_STEAM_DROP_OFFSET_S,
+                     note="持續洩壓：7 號溫度續降到 120°C 以下",
+                     fault=_f("F-MR-LEAK", "CURE-07", FaultKind.STEAM_LEAK, rate_c_per_min=P11_LEAK_RATE_C_PER_MIN,
+                              floor_kgf_cm2=2.0, header_drop=0.1)),
+    ]
+    expected = ["07:00 早班開工：今日計畫核准卡", "07:05–07:20 訂單湧入 8 張：7 張一般訂單進訂單簿，07:20 急單 SO-017 → 重排核准卡",
+                "急單核准後 SO-012（小胎 8 條、交期明天）交期風險 → Agent Nemo 先擬保交期方案",
+                "07:40 7 號硫化機溫降 (p.11)：H1 延長硫化 → 驗證不成立 → H2"]
+    if morning_rush_safety():
+        steps.append(ScenarioStep(at_offset_s=MR_SAFETY_OFFSET_S, note="08:30 B 線開煉機冷卻失效：膠溫上升",
+                                  fault=_f("F-MR-BOPEN", "B-OPEN", FaultKind.TEMP_RAMP, target=126.0,
+                                           rate_c_per_min=MR_SAFETY_RATE_C_PER_MIN)))
+        expected.append("~08:39 B 線開煉機膠溫 ≥120°C → 安全核心 STOP_MACHINE（不等 AI）")
+    expected.append("10:00 出貨車出廠（shipment_departed）")
+    return Scenario(name=ScenarioName.MORNING_RUSH, title="一早訂單湧入：開工、訂單湧入、急單與交期風險、7 號機溫降、出貨",
+                    start_at=start, steps=steps, expected=expected)
+
+
+def scenario_time_of(start: datetime, offset_s: float) -> str:
+    return f"{start + timedelta(seconds=offset_s):%H:%M}"
 
 
 def _f(fid: str, mid: str, kind: FaultKind, duration_s: float | None = None, **params: float) -> FaultSpec:
@@ -186,6 +269,8 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
                                 plant=PlantInput(kind="shift_start", text="08:00 早班開工：排今日計畫"))],
             expected=["A03/A04/A06、V06–V08 播放團隊資料集 10/21 的實際曲線，其餘機台由模擬器在同一天運轉",
                       "08:00 開工核准卡；10:00、16:00 出貨車", "24:00 回到 00:00：無誤報，訂單／貨品／人員回到當天起點"])
+    if name is ScenarioName.MORNING_RUSH:
+        return _morning_rush(start)
     raise ValueError(f"unknown scenario {name}")
 
 

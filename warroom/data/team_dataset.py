@@ -33,6 +33,7 @@ SCENARIO_ANCHOR: dict[ScenarioName, date] = {
     ScenarioName.STAFFING: date(2026, 10, 26),
     ScenarioName.RUSH_ORDER: date(2026, 10, 21),
     ScenarioName.DAY_LOOP: date(2026, 10, 21),        # issue #36: the sim date IS the dataset's quiet day
+    ScenarioName.MORNING_RUSH: date(2026, 10, 23),    # issue #104: the sim date IS the dataset day (a full 早班)
 }
 
 
