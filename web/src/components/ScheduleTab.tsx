@@ -26,7 +26,9 @@ export function ScheduleTab() {
   const loadVersions = useCallback(() => {
     transport?.scheduleVersions().then(setVersions).catch((e) => setMsg(`排程版本讀取失敗：${e}`))
   }, [transport])
-  useEffect(() => { loadVersions() }, [loadVersions, state.scheduleRev])
+  // a proposed version arrives with its approval card, not as a schedule message: refetch when the waiting cards change too
+  const pendingKey = state.pending.map((p) => p.id).join(',')
+  useEffect(() => { loadVersions() }, [loadVersions, state.scheduleRev, pendingKey])
   // an approved staffing change (夜班加班／跨組調人) arrives as a new schedule version and changes the head counts
   useEffect(() => {
     transport?.shifts().then(setShifts).catch(() => setShifts((s) => s ?? []))
