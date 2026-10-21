@@ -3,6 +3,8 @@
 // (sensor readings, orders, SOP hits with their source), gate verdicts, approvals and replans — with filters
 // and an event picker. CJ, 2026-10-20: 「在那個大的單獨的 agent 的 page 那邊才要去有這些步驟讓我們看到她思考的過程
 // 跟調用工具調用資料的過程」. Rows come from the same audit-log transcript as the home panel (useTranscript).
+// Fast repair (Kyle 10-21): the 處理歷程 also has the workers' tasks, 維修完成 and 覆核, and ends with the 處理報告 once the
+// event closes (ReportBlock).
 import { useMemo, useState } from 'react'
 import type { Event, EventState, ToolName } from '../contracts'
 import { machineLabel } from '../factory'
@@ -22,17 +24,18 @@ import { Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
+import { ReportBlock } from './ReportBlock'
 import './agent.css'
 
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
 const KINDS: { id: Kind; label: string; hint: string }[] = [
   { id: 'all', label: '全部', hint: '每一步' },
-  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心' },
+  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與覆核' },
   { id: 'think', label: '計畫與判斷', hint: '指揮官回傳的計畫、假設、程式驗證' },
   { id: 'tool', label: '工具', hint: '每次工具呼叫：參數、結果、耗時' },
   { id: 'data', label: '讀資料', hint: '只讀的工具：感測器、預測、SOP、訂單班表、排程求解' },
   { id: 'gate', label: '把關', hint: '動作把關的判定與攔截' },
-  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件' },
+  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件、主管覆核' },
   { id: 'talk', label: '對話', hint: '主管訊息與 Agent 回覆' },
 ]
 const READ_TOOLS: ToolName[] = ['read_sensors', 'predict_anomaly', 'cure_formula', 'sop_search', 'query_orders_shifts', 'solve_schedule']
@@ -40,12 +43,12 @@ const READ_TOOLS: ToolName[] = ['read_sensors', 'predict_anomaly', 'cure_formula
 function inKind(i: Item, k: Kind): boolean {
   switch (k) {
     case 'all': return true
-    case 'state': return i.k === 'state' || i.k === 'anomaly' || i.k === 'safety'
+    case 'state': return i.k === 'state' || i.k === 'anomaly' || i.k === 'safety' || i.k === 'task' || i.k === 'review'
     case 'think': return i.k === 'think' || i.k === 'note'
     case 'tool': return i.k === 'tool'
     case 'data': return i.k === 'tool' && READ_TOOLS.includes(i.tool)
     case 'gate': return i.k === 'gate' || i.k === 'blocked'
-    case 'approval': return i.k === 'approval' || i.k === 'version' || i.k === 'chips'
+    case 'approval': return i.k === 'approval' || i.k === 'version' || i.k === 'chips' || i.k === 'review'
     case 'talk': return i.k === 'chat' || i.k === 'ask'
   }
 }
@@ -180,6 +183,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
   const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])   // a subagent shows its own run only
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
+  const ended = !!ev && (ev.state === 'closed' || ev.state === 'safe_stop')
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState(false)
   const [pick, setPick] = useState<EventState | null>(null)
@@ -198,7 +202,11 @@ function Trace({ ev, asks, setAsks, onPick }: {
           <h2>{ev ? <>{evName(ev)}・{fmtMD(ev.opened_at)} {fmtHMS(ev.opened_at)}</> : '問戰情室（只查不改）'}</h2>
           {ev && <p className="muted small trace-id">{ev.id}{ev.goal ? `・目標：${plain(ev.goal)}` : ''}</p>}
         </div>
-        {ev && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
+        {ev && <span className="trace-h-r">
+          {ended && <button type="button" className="btn-ghost" data-testid="trace-to-report"
+            onClick={() => document.getElementById(`report-${ev.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>看處理報告 ↓</button>}
+          <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>
+        </span>}
       </header>
       {ev && <SubagentHead ev={ev} />}
       {ev && <StateDiagram ev={ev} path={path} pick={pick} onPick={setPick} />}
@@ -226,6 +234,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
         {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
         {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
+        {ev && ended && <ReportBlock ev={ev} />}
       </div>
       <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} focus={null} onSent={(about) => { if (!about) onPick(MAIN) }} /></div>
     </section>

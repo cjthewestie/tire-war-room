@@ -8,13 +8,15 @@ import { STATE_LABEL } from '../components/common'
 import { ToolIcon } from './ToolIcon'
 import {
   expectationText, thinkContext,
-  type ApprovalItem, type AskItem, type ChatItem, type ChipsItem, type GateItem, type Item, type ThinkItem, type ToolItem, type VersionItem,
+  type ApprovalItem, type AskItem, type ChatItem, type ChipsItem, type GateItem, type Item, type ReviewItem, type TaskItem, type ThinkItem, type ToolItem,
+  type VersionItem,
 } from './transcript'
 
 const PHASE: Record<string, string> = { plan: '規劃', replan: '重新規劃' }
 const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需主管核准', reject: '拒絕' }
 const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回', superseded: '作廢此卡（討論後改版）', expired: '逾時' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
+const TASK_PHASE: Record<TaskItem['phase'], string> = { created: '派工', assigned: '前往中', started: '執行中', done: '完成', cancelled: '取消派工', count: '人員任務' }
 
 /** One transcript row. `open` expands tool calls (args, data read, raw result); `brief` keeps a 問戰情室 row to
  *  the question and the answer (the home 主控台 shows the final dialogue only). */
@@ -41,7 +43,29 @@ export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev
     case 'chat': return <ChatRow it={it} />
     case 'chips': return <ChipsRow it={it} />
     case 'version': return <VersionRow it={it} />
+    case 'task': return <TaskRow it={it} />
+    case 'review': return <ReviewRow it={it} />
   }
+}
+
+/** 派工 → 前往中 → 執行中 → 完成, by whom (repair tasks marked: they are what fixes the machine). */
+function TaskRow({ it }: { it: TaskItem }) {
+  return (
+    <div className={`r-line r-task tp-${it.phase} ${it.repair ? 'repair' : ''}`} data-kind="task" data-phase={it.phase} data-testid="task-row">
+      <ToolIcon name={it.phase === 'done' ? 'confirm_schedule' : it.phase === 'created' ? 'notify_teams' : 'human'} />
+      <span><b>{TASK_PHASE[it.phase]}</b>　{plain(it.text)}{it.who ? `・${it.who}` : ''}{it.repair && it.phase === 'created' && <small>維修</small>}</span>
+      <time>{fmtHMS(it.ts)}</time></div>
+  )
+}
+
+/** 維修完成，故障排除 → 請主管覆核 → 主管覆核. */
+function ReviewRow({ it }: { it: ReviewItem }) {
+  return (
+    <div className={`r-line r-review rv-${it.phase}`} data-kind="review" data-phase={it.phase} data-testid={`review-${it.phase}`}>
+      <ToolIcon name={it.phase === 'requested' ? 'human' : 'confirm_schedule'} />
+      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'requested' && <small>已送到主管手機</small>}</span>
+      <time>{fmtHMS(it.ts)}</time></div>
+  )
 }
 
 function ChatRow({ it }: { it: ChatItem }) {

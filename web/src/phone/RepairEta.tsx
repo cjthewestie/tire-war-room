@@ -4,13 +4,11 @@
 // - 預計完成: the approval time (or now, before approval) + that window, or the latest field-task ETA if later
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
-import type { Channel, Event, Expectation } from '../contracts'
-import { repairEstimate, targetText } from '../aiStatus'
+import type { Event, Expectation } from '../contracts'
+import { CH_LABEL, repairEstimate, targetText } from '../aiStatus'
 import { fmtHM, fmtMD } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
-
-const CH_LABEL: Record<Channel, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽壓' }
 
 function expectationText(x: Expectation): string {
   return `${x.within_min} 分內${CH_LABEL[x.channel]}回到 ${targetText(x)}`

@@ -2,8 +2,11 @@
 // LAN-only, no cloud push service: a new pending approval rings (Web Audio), vibrates, flashes the tab title
 // and, when the browser allows it, raises a system notification. While the link is down the alerts are held
 // and flushed as one alert when the phone reconnects.
+// Fast repair (Kyle 10-21): an event waiting for the supervisor's 覆核 (Event.review pending) rings the same way.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ApprovalRequest } from '../contracts'
+import type { Event } from '../contracts'
+import { machineLabel } from '../factory'
+import { plain } from '../plain'
 
 export type AlertPermission = 'granted' | 'denied' | 'default' | 'unsupported'
 
@@ -14,11 +17,27 @@ export interface PushEnv {
   setTitle(t: string): void
 }
 
-/** Pure diff: which pending ids are new since last time, and which alerts to fire now. */
-export interface PushState { seen: Set<string>; held: ApprovalRequest[] }
-export interface PushOut { fire: ApprovalRequest[]; flushed: boolean }
+/** What rings: a pending approval card (ApprovalRequest fits), or an event waiting for 覆核 (review: true). */
+export interface AlertItem { id: string; title: string; reason: string; risk?: string; review?: boolean }
 
-export function diffPending(st: PushState, pending: ApprovalRequest[], online: boolean): PushOut {
+/** Events whose repair is done and waits for the supervisor's 覆核, as alert items (one per review request). */
+export function reviewAlerts(events: Event[] | undefined): AlertItem[] {
+  return (events ?? []).filter((e) => e.review?.status === 'pending').map((e) => ({
+    id: `review:${e.id}:${e.review!.requested_at}`, title: `${machineLabel(e.machine_id)}維修完成`, reason: plain(e.outcome) || '請主管覆核', review: true,
+  }))
+}
+
+/** 「待核准」, 「待覆核」 or both, for the tab title and the multi-item alert. */
+export function waitLabel(items: AlertItem[]): string {
+  const r = items.some((a) => a.review), q = items.some((a) => !a.review)
+  return r && q ? '待核准／覆核' : r ? '待覆核' : '待核准'
+}
+
+/** Pure diff: which pending ids are new since last time, and which alerts to fire now. */
+export interface PushState { seen: Set<string>; held: AlertItem[] }
+export interface PushOut { fire: AlertItem[]; flushed: boolean }
+
+export function diffPending(st: PushState, pending: AlertItem[], online: boolean): PushOut {
   const fresh = pending.filter((a) => !st.seen.has(a.id))
   // Only ids still pending count as seen: a request that left the list (decided, or the scenario was reset)
   // and comes back is a new request and rings again. Held items decided elsewhere (touch screen) are dropped.
@@ -32,10 +51,10 @@ export function diffPending(st: PushState, pending: ApprovalRequest[], online: b
   return { fire, flushed }
 }
 
-export function alertText(fire: ApprovalRequest[], flushed: boolean): { title: string; body: string } {
+export function alertText(fire: AlertItem[], flushed: boolean): { title: string; body: string } {
   const first = fire[0]
-  const title = fire.length === 1 ? `待核准：${first.title}` : `${fire.length} 件待核准`
-  const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? `${first.risk}・${first.reason}` : fire.map((a) => a.title).join('；'))
+  const title = fire.length === 1 ? `${first.review ? '請覆核' : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
+  const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? `${first.risk ? `${first.risk}・` : ''}${first.reason}` : fire.map((a) => a.title).join('；'))
   return { title, body }
 }
 
@@ -95,8 +114,8 @@ function writeAlertPref(on: boolean): void {
   try { localStorage.setItem(PREF_KEY, on ? 'on' : 'off') } catch { /* private mode: the choice lasts this visit */ }
 }
 
-/** Watches the pending list; fires push alerts on new requests, holds them while offline. */
-export function useApprovalAlerts(pending: ApprovalRequest[], online: boolean, env: PushEnv = browserEnv()): ApprovalAlerts {
+/** Watches the pending list (approval cards and 覆核 requests); fires push alerts on new ones, holds them while offline. */
+export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: PushEnv = browserEnv()): ApprovalAlerts {
   const st = useRef<PushState>({ seen: new Set(), held: [] })
   const envRef = useRef(env)
   useEffect(() => { envRef.current = env })
@@ -115,7 +134,7 @@ export function useApprovalAlerts(pending: ApprovalRequest[], online: boolean, e
     const { fire, flushed } = diffPending(st.current, pending, online)
     setHeld(st.current.held.length)
     const e = envRef.current
-    e.setTitle(pending.length ? `(${pending.length}) 待核准・${baseTitle.current}` : baseTitle.current)
+    e.setTitle(pending.length ? `(${pending.length}) ${waitLabel(pending)}・${baseTitle.current}` : baseTitle.current)
     if (!fire.length || !enabledRef.current) return
     const { title, body } = alertText(fire, flushed)
     e.notify(title, body, `approval-${fire[0].id}`)

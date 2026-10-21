@@ -40,6 +40,13 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
     { k: '處理時長', text: closed ? dur(t(ev.closed_at) - t(ev.opened_at)) : '—' },
     { k: '結果', text: plain(ev.outcome) || STATE_LABEL[ev.state], tone: ev.state === 'safe_stop' ? 'bad' : closed ? 'ok' : 'warn' },
   ]
+  // fast repair: when the crew's repair cleared the fault, and the supervisor's 覆核 after it
+  if (ev.repaired_at) head.push({ k: '維修完成', text: when(ev.repaired_at), tone: 'ok' })
+  const rv = ev.review
+  if (rv) {
+    const by = rv.by && rv.by !== 'supervisor' ? `・${rv.by}` : ''
+    head.push(rv.status === 'done' ? { k: '主管覆核', text: `已覆核（${when(rv.done_at)}${by}）`, tone: 'ok' } : { k: '主管覆核', text: `待主管覆核（${when(rv.requested_at)} 起）`, tone: 'warn' })
+  }
 
   const parts: Part[] = []
   parts.push({

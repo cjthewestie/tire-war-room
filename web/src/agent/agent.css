@@ -62,6 +62,14 @@
 .r-note.verify { color: var(--line-c); }
 .r-note.warn { color: var(--warn); }
 .r-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin: 8px 4px 0 5px; flex: none; }
+/* worker tasks and the repair / 覆核 rows (fast repair) */
+.r-task { color: var(--ink-dim); font-size: 13.5px; }
+.r-task .ticon { color: var(--line-b); }
+.r-task.repair b, .r-task.tp-done .ticon { color: var(--accent); }
+.r-review { background: var(--accent-soft); color: var(--c-d6efb0, #d6efb0); }
+.r-review .ticon { color: var(--accent); }
+.r-review.rv-requested { background: var(--warn-soft); color: var(--c-f7dfae, #f7dfae); }
+.r-review.rv-requested .ticon { color: var(--warn); }
 
 /* 思考 block */
 .r-think { border: 1px solid var(--c-2a3c55, #2a3c55); background: linear-gradient(180deg, rgb(var(--info-rgb, 93 178 245) / .07), transparent 80%), var(--panel-2); border-radius: 10px; padding: 10px 12px; margin: 4px 0; }
@@ -622,3 +630,28 @@
 .main-thread { min-height: 60vh; }
 .main-thread .con-body { padding: 0; }
 .sp-talk { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-3); padding-top: 8px; margin-top: 4px; }
+
+/* 處理報告 at the end of the 處理歷程 (ReportBlock, fast repair) */
+.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: 80px; }
+.r-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.r-report header .ticon { color: var(--accent); }
+.r-report header b { font-size: 15px; }
+.r-report header small { color: var(--ink-faint); }
+.r-report header a { margin-left: auto; color: var(--accent); font-weight: 700; text-decoration: none; border: 1px solid currentColor; border-radius: 8px; padding: 4px 10px; }
+.r-report h4 { margin: 8px 0; font-size: 15px; }
+.r-report-head { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; margin: 0 0 8px; }
+.r-report-head div { display: flex; gap: 8px; min-width: 0; }
+.r-report-head dt { color: var(--ink-faint); flex: none; }
+.r-report-head dd { margin: 0; min-width: 0; }
+.r-report-head .t-ok, .r-report li.t-ok b { color: var(--accent); }
+.r-report-head .t-warn, .r-report li.t-warn b { color: var(--warn); }
+.r-report-head .t-bad, .r-report li.t-bad b { color: var(--alarm); }
+.r-report details { border-top: 1px solid var(--border); padding: 6px 0 2px; }
+.r-report summary { cursor: pointer; font-weight: 700; }
+.r-report summary small { margin-left: 6px; color: var(--ink-faint); font-weight: 400; }
+.r-report ul { margin: 4px 0; padding-left: 0; list-style: none; display: grid; gap: 3px; }
+.r-report li { display: flex; gap: 8px; color: var(--ink-dim); }
+.r-report li time { margin: 0; padding: 0; flex: none; }
+.r-report li b { flex: none; color: var(--ink); }
+.r-report-foot { margin: 8px 0 0; display: flex; align-items: center; gap: 8px; }
+.trace-h-r { display: flex; align-items: center; gap: 8px; flex: none; }

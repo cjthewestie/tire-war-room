@@ -2,7 +2,7 @@
 // Mock mode syncs tabs over BroadcastChannel, so approving on /phone updates the dashboard.
 import {
   API, apiPath,
-  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
+  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
   type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
@@ -55,6 +55,9 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
+  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no pending review. */
+  review?(eventId: string, note?: string): Promise<Event>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
@@ -184,6 +187,7 @@ export class LiveTransport implements Transport {
   ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
+  review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId }) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
