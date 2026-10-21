@@ -49,20 +49,24 @@ await p.keyboard.press('Escape')
 // (the 'normal' scenario: the day-loop default starts at 00:00, where a replan may have nothing to change)
 await post('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
-await p.waitForSelector('[data-testid^="home-item-order:"]')
-const riskItem = p.locator('[data-testid^="home-item-order:"]').first()
-check('② items say the 主 agent will draft the plan (or is drafting it)', (await p.locator('[data-testid="item-replan-hint"], [data-testid="item-planning"]').count()) >= 1)
-await riskItem.click()
-await p.waitForSelector('[data-testid="item-planning"], [data-testid="replan-status"]', { timeout: 10000 }).catch(() => {})
-check('opening it starts 主 agent 規劃中… with no button to press', (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') && (await p.locator('[data-testid="plan-replan"]').count()) === 0)
-check('plan area bottom: only 核准 (waits for the plan) and 討論', (await p.locator('[data-testid="plan-approve-wait"]').isDisabled()) && (await p.locator('[data-testid="plan-discuss"]').count()) === 1)
-let selected = false
-for (let i = 0; i < 20 && !selected; i++) {
-  await post('/api/sim/step', { seconds: 30 })
-  await p.waitForTimeout(400)
-  selected = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
+// no ② item → one FAIL and the other pages are still checked (the block below needs the item)
+const hasRisk = await p.waitForSelector('[data-testid^="home-item-order:"]', { timeout: 30000 }).then(() => true, () => false)
+check('② the normal scenario lists a 交期預警 item', hasRisk, hasRisk ? '' : `none (schedule warnings: ${JSON.stringify(await p.evaluate(() => fetch('/api/schedule').then((r) => r.json()).then((s) => s.schedule?.warnings ?? [])))})`)
+if (hasRisk) {
+  const riskItem = p.locator('[data-testid^="home-item-order:"]').first()
+  check('② items say the 主 agent will draft the plan (or is drafting it)', (await p.locator('[data-testid="item-replan-hint"], [data-testid="item-planning"]').count()) >= 1)
+  await riskItem.click()
+  await p.waitForSelector('[data-testid="item-planning"], [data-testid="replan-status"]', { timeout: 10000 }).catch(() => {})
+  check('opening it starts Agent Nemo 規劃中… with no button to press', (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('Agent Nemo') && (await p.locator('[data-testid="plan-replan"]').count()) === 0)
+  check('plan area bottom: only 核准 (waits for the plan) and 討論', (await p.locator('[data-testid="plan-approve-wait"]').isDisabled()) && (await p.locator('[data-testid="plan-discuss"]').count()) === 1)
+  let selected = false
+  for (let i = 0; i < 20 && !selected; i++) {
+    await post('/api/sim/step', { seconds: 30 })
+    await p.waitForTimeout(400)
+    selected = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
+  }
+  check('the resulting card is selected automatically with 核准', selected && (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]', { hasText: '核准' }).count()) >= 1 && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1)
 }
-check('the resulting card is selected automatically with 核准', selected && (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]', { hasText: '核准' }).count()) >= 1 && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1)
 
 // an event with an approval, so every page has something to show
 await post('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
@@ -150,7 +154,7 @@ check('問戰情室 category lists asks', await p.locator('[data-testid="sm-asks
 await p.click('[data-testid="sm-view-day"]')
 await p.waitForSelector('[data-testid="day-runs"] tbody tr', { timeout: 10000 })
 check('每日事件紀錄: runs with state paths', await p.locator('[data-testid="day-runs"] .pp').count() >= 3)
-check('每日事件紀錄: summary', (await p.locator('[data-testid="day-summary"]').innerText()).includes('平均結案時間'))
+check('每日事件紀錄: summary (#102: 平均耗時)', (await p.locator('[data-testid="day-summary"]').innerText()).includes('平均耗時'))
 const csvHref = await p.locator('[data-testid="day-csv"]').getAttribute('href')
 const csv = await p.evaluate(async (u) => { const r = await fetch(u); return { s: r.status, t: (await r.text()).slice(0, 60) } }, csvHref)
 check('每日事件紀錄: CSV download', csv.s === 200 && csv.t.includes('id,類型'), csv.t.split('\n')[0])
