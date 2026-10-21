@@ -253,3 +253,10 @@ html, body, #root { height: 100%; overflow: hidden; }
 /* the guided demo's cards and bar stay above the war-room computer it opens (.f3-monitor-wrap is z 20) */
 .f3-cue, .f3-demo-bar, .f3-demo-badge, .f3-pitch-clock, .f3-pitch-nudge { z-index: 26; }
 .f3-cue-big { z-index: 32; }
+
+/* ③–⑥ (the doorway view of 7 號機): the card drops to just above the bar and slims down, so the alerting press
+   in the middle of the frame stays in view */
+.f3-cue.low { top: auto; bottom: 70px; width: min(560px, calc(100vw - 32px)); padding: 9px 16px 11px; gap: 3px; }
+.f3-cue.low b { font-size: 22px; } .f3-cue.low span { font-size: 14px; }
+.f3-cue.low .f3-cue-links button { font-size: 14px; padding: 6px 14px; }
+@media (max-width: 640px) { .f3-cue.low { bottom: 120px; } }
