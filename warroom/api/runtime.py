@@ -22,6 +22,7 @@ import itertools
 import json
 import logging
 import os
+import re
 import shutil
 import time
 from collections.abc import Callable
@@ -511,6 +512,11 @@ class Runtime:
         self.tick_wall_s = tick_wall_s
         self.max_steps_per_iter = max_steps_per_iter
         self.run_loop = run_loop
+        # pre-plan the 核准區 ② items (CJ 2026-10-21: 「流程應該改成有事項需要計劃的時候要已經計劃好了等我點下面的核准或是
+        # 討論」): on in the served app; tests that drive tick() opt in (WARROOM_PREPLAN=0/1 overrides)
+        self.preplan_on = os.environ.get("WARROOM_PREPLAN", "1" if run_loop else "0") == "1"
+        self._preplanned: dict[str, tuple[str, str]] = {}   # order id -> (risk signature, event id)
+        self._preplan_at: datetime | None = None
         self.started_wall = time.monotonic()
         self.safety_log: list[SafetyAction] = []
         self.anomalies: list[Anomaly] = []
@@ -849,6 +855,8 @@ class Runtime:
         self.safety_pass(readings)              # RED path first: nothing below can delay it
         self._random_event()                    # issue #36: off by default
         self._plant_inputs()                    # issue #17: a scripted shift start / rush order / sick call
+        if self.preplan_on:
+            self._preplan_orders()
         readings = self.ingest.transport(readings)
         self.ingest.record(readings)
         self._track_baseline(readings)
@@ -1078,6 +1086,78 @@ class Runtime:
         self._tasks[ev.id] = task
         task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
         return ev
+
+    PREPLAN_EVERY_S = 30.0      # sim seconds between looks at the at-risk orders
+    PREPLAN_MAX = 2             # pre-plans drafting at once: incidents always go first in the ModelQueue anyway
+
+    def at_risk_orders(self) -> dict[str, str]:
+        """The 核准區 ② 交期風險 items, as web/src/agent/homeItems.ts builds them: an open order whose active schedule
+        de-molds its last tyre after the due date (date-only due = 23:59), and the orders the solver's own warnings
+        name. {order id: signature}; the signature changes when the item does (a new ETA or warning)."""
+        out: dict[str, str] = {}
+        w = self.world_snapshot()
+        sched = self._active_schedule()
+        jobs = list(sched.jobs) if sched is not None else []
+        for o in (w.orders.items if w is not None else []):
+            if o.status in ("已出貨", "完成", "待出貨"):
+                continue
+            mine = [j.demold for j in jobs if j.order_id == o.id]
+            if not mine:
+                continue
+            due = datetime.combine(o.due, datetime.min.time().replace(hour=23, minute=59), tzinfo=F.TZ)
+            if max(mine) > due:
+                out[o.id] = f"eta {max(mine).isoformat()} due {o.due}"
+        for warn in (sched.warnings if sched is not None else []):
+            for oid in re.findall(r"#\w-\d+", warn):
+                out.setdefault(oid, f"warning {warn[:80]}")
+        return out
+
+    def _preplan_orders(self) -> list[str]:
+        """Draft a plan for each at-risk order before anyone opens it: one supervisor-command event per item (the same
+        「<id> 可能晚交，請重排保交期」 the item's click used to send), at the pre-plan priority in the ModelQueue (below
+        incidents, above small talk). One plan per item; a new one only when the item changed and the last one ended.
+        Only WHEN planning starts changes: the run is the normal PLAN → GATE → approval path."""
+        now = self.clock.now()
+        if self._preplan_at is not None and (now - self._preplan_at).total_seconds() < self.PREPLAN_EVERY_S:
+            return []
+        self._preplan_at = now
+        try:
+            risky = self.at_risk_orders()
+            sm = self.state_machine
+            if not callable(getattr(sm, "open_command", None)) or self.c.tools is None:
+                return []
+            events = {e.id: e for e in self.events()}
+        except Exception:  # noqa: BLE001 - a pre-plan is a convenience; the click still plans
+            log.exception("pre-plan check")
+            return []
+        from warroom.agent.orchestrator import PRIORITY
+        from warroom.contracts import TERMINAL_STATES
+        # drafting = not yet at its card (a card waiting for the supervisor no longer takes a model slot)
+        running = sum(1 for _sig, eid in self._preplanned.values() if eid in events
+                      and events[eid].state not in TERMINAL_STATES and events[eid].state.value != "await_approval")
+        started = []
+        for oid, sig in risky.items():
+            if running >= self.PREPLAN_MAX:
+                break
+            prior = self._preplanned.get(oid)
+            mine = events.get(prior[1]) if prior else None
+            if mine is not None and (prior[0] == sig or mine.state not in TERMINAL_STATES):
+                continue                                         # planned already (or still drafting)
+            asked = [e for e in events.values() if e.source == "supervisor" and (e.command or "").startswith(f"{oid} ")]
+            if any(e.state not in TERMINAL_STATES for e in asked) or (asked and mine is None and prior is None):
+                # the supervisor (or an earlier pre-plan before a restart) already asked for this order
+                self._preplanned[oid] = (sig, max(asked, key=lambda e: e.opened_at).id)
+                continue
+            ev = self.start_command(f"{oid} 可能晚交，請重排保交期", "agent_nemo")
+            self.orch.preplan_ids.add(ev.id)
+            t, _p = self.orch.queue.tags.get(ev.id, ("order", 0))
+            self.orch.queue.tags[ev.id] = (t, PRIORITY["preplan"])    # also when the run opens later (Orchestrator._opened)
+            self._preplanned[oid] = (sig, ev.id)
+            self.audit.append(AuditKind.SYSTEM, "agent_nemo", {"msg": "pre-plan", "order_id": oid, "signature": sig},
+                              event_id=ev.id)
+            running += 1
+            started.append(ev.id)
+        return started
 
     def _spawn(self, an: Anomaly) -> None:
         task = asyncio.create_task(self.state_machine.handle(an), name=f"event-{an.id}")

@@ -29,7 +29,12 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
     setSeen(focus.n)
     if (focus.text) setQ(focus.text)
   }
-  useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
+  // 討論: the caret goes into this input, scrolled into view (on a narrow screen the chat sits below the card, and
+  // 「按了討論沒有用」 was the click focusing an input off screen)
+  useEffect(() => {
+    if (!focus?.n) return
+    setTimeout(() => { input.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); input.current?.focus() }, 60)
+  }, [focus?.n])
   const can = !!transport?.message
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? ''

@@ -9,7 +9,8 @@ export interface Replan { orderId: string; state: 'sending' | 'planning' | 'read
 }
 
 /** The one line a ② item shows before anyone asked the AI. */
-export const REPLAN_HINT = 'Agent Nemo 會擬計劃；好了這裡會出現「核准並派發」'
+// CJ 2026-10-21: 「流程應該改成有事項需要計劃的時候要已經計劃好了等我點下面的核准或是討論」: the backend drafts it already
+export const REPLAN_HINT = 'Agent Nemo 正在預先擬計劃，好了這裡會出現核准卡'
 
 let replans: Record<string, Replan> = {}
 const subs = new Set<() => void>()

@@ -50,7 +50,7 @@ _DECISION = {"approve": "核准", "reject": "駁回", "modify": "修改", "super
 TYPES: dict[str, str] = {"machine": "機台處理", "order": "訂單處理", "material": "原料處理", "staff": "人力調度",
                          "shift": "早班開工", "task": "主管任務"}
 PRIORITY: dict[str, int] = {"safety": 0, "machine": 1, "order": 2, "material": 2, "staff": 3, "shift": 3, "task": 2,
-                            "question": 4, "smalltalk": 5}
+                            "question": 4, "preplan": 4, "smalltalk": 5}
 PRIORITY_LABEL = {0: "安全", 1: "機台故障", 2: "訂單／原料", 3: "人力", 4: "提問", 5: "閒聊"}
 
 # code routing: anomaly kind -> subagent type (machine faults, orders, staffing, the shift start)
@@ -288,6 +288,7 @@ class Orchestrator:
         self._board = board or (lambda: None)
         self.dispatcher = dispatcher or Dispatcher()
         self.subs: dict[str, SubAgent] = {}
+        self.preplan_ids: set[str] = set()      # events the runtime pre-plans: they wait behind incidents
         self._pending_dispatch: list[dict[str, Any]] = []      # supervisor dispatch decided, event not open yet
         if hasattr(sm, "on_open"):
             sm.on_open = self._opened
@@ -323,6 +324,8 @@ class Orchestrator:
             t, p = route(ev)
             via, why = "code", f"依偵測種類 {ev.anomaly.kind.value} 分派"
             extra = {"kind": ev.anomaly.kind.value, "severity": ev.anomaly.severity.value}
+        if ev.id in self.preplan_ids:
+            p = PRIORITY["preplan"]
         sub = SubAgent(ev.id, t, p, via, why, self._now().isoformat())
         self.subs[ev.id] = sub
         self.queue.tags[ev.id] = (t, p)

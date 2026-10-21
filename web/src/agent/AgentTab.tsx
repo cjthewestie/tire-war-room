@@ -1,4 +1,4 @@
-// Home 主控台: the 核准區 list, the plan of the selected item (核准並派發 / 討論), and the conversation with the 主 agent
+// Home 主控台: the 核准區 list, the plan of the selected item (核准 / 討論), and the conversation with the 主 agent
 // (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
 // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
 import { useEffect, useMemo, useState } from 'react'

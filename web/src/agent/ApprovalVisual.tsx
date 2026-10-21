@@ -226,14 +226,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
         )}
 
       <footer className="apv-act">
-        {done ? <p className="apv-done" role="status">{done}・Agent Nemo 已派人執行，完成後回報；決定已寫入稽核日誌</p> : <>
+        {done ? <p className="apv-done" role="status">{done}・執行中；決定已寫入稽核日誌</p> : <>
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
-              {busy ? '送出中…' : `核准並派發${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
+              {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">核准後 Agent Nemo 派人執行並回報；要改，按「討論」跟 Agent Nemo 說</span>
+            <span className="apv-hint">核准後才執行；要改，按「討論」</span>
           </div>
         </>}
       </footer>
