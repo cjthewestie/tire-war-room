@@ -97,28 +97,35 @@ check('back to the 主 agent conversation', await p.locator('[data-testid="sc-ag
 // 2. Agent page: tree, progress, model queue, 中斷 on a second task
 await api('/api/command', { text: '夜班缺一人，請調人並重排' })
 let second = null
-await until(async () => { second = (await subs()).items.find((x) => x.type === 'staff' && !['done', 'failed', 'interrupted'].includes(x.status)); return !!second }, 40)
+// one agent for every event now (CJ 2026-10-21: no typed subagents): the command's run is the supervisor's
+await until(async () => { second = (await subs()).items.find((x) => x.source === 'supervisor' && !['done', 'failed', 'interrupted'].includes(x.status)); return !!second }, 40)
 // interrupt it while it still works (do not wait for its card: a real-model run may end on its own)
 await p.goto(`${BASE}/#console?event=${encodeURIComponent(second.id)}`, { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tree-root"]')
-check('Agent page: 「主 agent ▸ 派出的子 agent」 with subagents under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('主 agent ▸ 派出的子 agent') && await p.locator('[data-testid="trace-event"]').count() >= 1)
-check('each row is 「<what>：<plain status>」', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /：(規劃中|等你核准|執行中|等現場完成|完成|已停止)/.test(t)),
+check('Agent page: 「Agent Nemo 對話」 with the events under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('Agent Nemo 對話') && await p.locator('[data-testid="trace-event"]').count() >= 1)
+check('each row is <what>, then its plain status on a second line', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /\n(規劃中|待核准|執行中|維修中|放慢投料中|暫停投料中|維修完成|現場工作|已恢復正常|已停用|已處置|完成|已停止)/.test(t)),
   (await p.locator('[data-testid="sub-status"]').allInnerTexts()).join(' | '))
 check('no 查詢 row in the tree', (await p.locator('.trace-list').innerText()).indexOf('查詢') < 0)
 await p.click('[data-testid="tree-root"]')
 check('clicking 「主 agent」 shows the 主 agent conversation', await until(async () => (await p.locator('[data-testid="main-thread"] [data-testid="sc-agent"]').count()) >= 1, 10))
 await p.click('.trace-side .seg button:has-text("全部")')
 await p.locator(`[data-testid="trace-event"][data-event="${second.id}"]`).click()
-check('the model queue is shown', await p.locator('[data-testid="model-queue"]').count() === 1)
-check('the selected subagent shows how it was dispatched', (await p.locator('[data-testid="sub-head"]').innerText()).includes('主 agent →'))
+// veteran audit 10-22: the queue bar only while somebody waits for the model
+const waitingN = ((await subs()).queue?.waiting ?? []).length
+check('the model queue shows only while someone waits', await p.locator('[data-testid="model-queue"]').count() === (waitingN ? 1 : 0), `${waitingN} waiting`)
+// the conclusion names the command and where it stands, in one sentence (veteran audit: 結論區)
+const head = await p.locator('[data-testid="sub-head"] h2').innerText().catch(() => '')
+check('the selected event opens on its conclusion: the command and where it stands', head.includes('主管指令「夜班缺一人') &&
+  /(Agent Nemo 規劃中|請核准|執行核准的計畫|已停止|已結束)/.test(head), head)
 await p.screenshot({ path: `${OUT}/agent-tree-1440.png`, fullPage: false })
 const s2 = (await subs()).items.find((x) => x.id === second.id)
 if (!['done', 'failed', 'interrupted'].includes(s2.status)) {
   p.once('dialog', (d) => d.accept())
   await p.click('[data-testid="interrupt"]')
   check('中斷 stops it: status 已中斷', await until(async () => (await subs()).items.find((x) => x.id === second.id)?.status === 'interrupted', 30))
-  check('主 agent writes the interrupt and the report', await until(async () => (await p.locator('[data-testid="trace-body"] [data-testid="main-interrupt"]').count()) >= 1 &&
-    (await p.locator('[data-testid="trace-body"] [data-testid="main-report"]').count()) >= 1, 30))
+  // the 主 agent's report repeats the conclusion: the transcript keeps the interrupt row, the conclusion says it stopped
+  check('主 agent writes the interrupt; the conclusion says it stopped', await until(async () => (await p.locator('[data-testid="trace-body"] [data-testid="main-interrupt"]').count()) >= 1 &&
+    /已停止/.test(await p.locator('[data-testid="sub-head"] h2').innerText().catch(() => '')), 30))
   const ev2 = (await api(`/api/events/${second.id}`)).j
   check('the run ended in SAFE_STOP 「主管中斷」 with no pending card', ev2.state === 'safe_stop' && ev2.outcome.includes('主管中斷') &&
     !(await api('/api/approvals?status=pending')).j.some((a) => a.event_id === second.id), ev2.outcome)

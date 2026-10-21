@@ -1,7 +1,8 @@
 // Live state-machine diagram for one event (CJ, 2026-10-20: 「我看得到狀態機裡面的 loop 嗎？」): the 11 states of
 // warroom/contracts.py with every allowed transition, the current state lit, the path taken so far with the time on
 // each edge (×n when taken more than once), the replan loop (SIMULATE → … → VERIFY → REPLAN → SIMULATE) marked
-// 「第 n 輪」, and the failure counter against MAX_CONSECUTIVE_FAILURES. Clicking a state filters the transcript.
+// 「第 n 輪」 (from round 2), and the failures against MAX_CONSECUTIVE_FAILURES (once there is one). Clicking a state filters
+// the transcript.
 import type { Event, EventState } from '../contracts'
 import { fmtHMS } from '../format'
 import { STATE_LABEL } from '../components/common'
@@ -39,8 +40,10 @@ export function StateDiagram({ ev, path, pick, onPick }: { ev: Event; path: Hop[
       <header className="sm-h">
         <h3 className="sub">狀態機<small>（點狀態篩選下方紀錄{pick ? `・目前：${STATE_LABEL[pick]}` : ''}）</small></h3>
         <div className="sm-stats">
-          <span className={loops ? 'loop' : ''} data-testid="sm-round">第 {round} 輪{ev.replans ? `・重新規劃 ${ev.replans} 次` : ''}</span>
-          <span className={fails ? (fails >= MAX_CONSECUTIVE_FAILURES ? 'bad' : 'warn') : ''}>連續失敗 {fails}/{MAX_CONSECUTIVE_FAILURES}（到上限 → 安全停止）</span>
+          {/* veteran audit: the round from round 2 on, the failures only when there are any */}
+          {round > 1 && <span className={loops ? 'loop' : ''} data-testid="sm-round">第 {round} 輪{ev.replans ? `・重新判斷 ${ev.replans} 次` : ''}</span>}
+          {fails > 0 && <span className={fails >= MAX_CONSECUTIVE_FAILURES ? 'bad' : 'warn'}>
+            連續失敗 {fails} 次，{fails >= MAX_CONSECUTIVE_FAILURES ? '已安全停止' : `再 ${MAX_CONSECUTIVE_FAILURES - fails} 次就安全停止`}</span>}
           {pick && <button className="btn-ghost" onClick={() => onPick(null)}>清除篩選</button>}
         </div>
       </header>

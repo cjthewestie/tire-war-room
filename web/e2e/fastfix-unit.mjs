@@ -21,7 +21,7 @@ const load = (p) => vite.ssrLoadModule(p)
 const { aiStatusParts } = await load('/src/aiStatus.ts')
 const { machineRing, ringRecoveries, recoveryKey } = await load('/src/factory3d/machineRing.ts')
 const { alertText, diffPending, repairNotices } = await load('/src/phone/alert.ts')
-const { fromAudit } = await load('/src/agent/transcript.ts')
+const { fromAudit, thinkContext } = await load('/src/agent/transcript.ts')
 const { buildReport, outcomeText } = await load('/src/report/build.ts')
 const { buildHandover } = await load('/src/handover/build.ts')
 
@@ -201,22 +201,62 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   ]
   const items = fromAudit([...rows].reverse(), base)
   const seqd = items.map((i) => (i.k === 'task' ? `task:${i.phase}${i.who ? `@${i.who}` : ''}` : i.k === 'review' ? `review:${i.phase}` : i.k === 'state' ? `state:${i.to}` : i.k === 'note' ? 'note' : i.k))
-  const want = ['state:detected', 'approval', 'task:created', 'task:assigned@陳志明', 'task:started@陳志明', 'task:done@陳志明', 'review:repaired',
+  // veteran audit: one row per task (派工, 前往中, 執行中 and 完成 merged), its latest phase and when each change happened
+  const want = ['state:detected', 'approval', 'task:done@陳志明', 'review:repaired',
     'state:verify', 'review:recovered', 'note', 'state:closed', 'review:report', 'review:read']
-  check('處理歷程 rows in time order: 派工 → 前往中 → 執行中 → 完成 → 維修完成 → 驗證 → 已恢復正常 → 結案 → 異常報告已產生 → 主管已讀報告', JSON.stringify(seqd) === JSON.stringify(want), seqd.join(' '))
+  check('處理歷程 rows in time order: 現場工作（一列）→ 維修完成 → 驗證 → 已恢復正常 → 結案 → 異常報告 → 主管已讀報告', JSON.stringify(seqd) === JSON.stringify(want), seqd.join(' '))
+  const task = items.find((i) => i.k === 'task')
+  check('… the merged task row keeps when the worker was sent, started and finished', task?.times.assigned === at(11) && task?.times.started === at(12) && task?.times.done === at(14),
+    JSON.stringify(task?.times))
+  check('… a task made after the decision is not 「核准後才派人」', task?.held === false)
   const rep = items.find((i) => i.k === 'review' && i.phase === 'repaired')
-  check('… 維修完成 names the machine', rep?.text === '維修完成，故障排除・B 線開煉機', rep?.text)
+  check('… 維修完成 names the machine', rep?.text === 'B 線開煉機維修完成', rep?.text)
   const rec = items.find((i) => i.k === 'review' && i.phase === 'recovered')
-  check('… 已恢復正常 with the machine and the value in the event\'s channel', rec?.text === '已恢復正常・B 線開煉機 101.2°C', rec?.text)
+  check('… 已恢復正常 with the machine and the value in the event\'s channel', rec?.text === 'B 線開煉機已恢復正常（101.2°C）', rec?.text)
   check('… 主管已讀報告 keeps the note', items.at(-1)?.text === '主管已讀報告' && items.at(-1)?.note === '現場確認正常')
   const older = fromAudit([a('system', 'state_machine', { msg: '請主管覆核' }, at(15)), a('system', 'supervisor', { msg: '主管覆核' }, at(30))], base)
-  check('… an older audit file (請主管覆核 / 主管覆核) reads as 異常報告已產生 / 主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(',') === 'report:異常報告已產生,read:主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(','))
+  check('… an older audit file (請主管覆核 / 主管覆核) reads as 異常報告已送到主管手機 / 主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(',') === 'report:Agent Nemo 異常報告已送到主管手機,read:主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(','))
   // the world assigns at once, so its 前往中 row is written before the state machine's 派工 row
   const swapped = fromAudit([rows[3], rows[2], rows[4]].map((r, i) => ({ ...r, seq: 500 + i })), base)
-  check('派工 shown before 前往中 even when the audit wrote 前往中 first', swapped.map((i) => i.phase).join(',') === 'created,assigned,started', swapped.map((i) => i.phase).join(','))
+  check('派工 first even when the audit wrote 前往中 first: one row, sent and started', swapped.length === 1 && swapped[0].phase === 'started' &&
+    swapped[0].times.assigned === at(11) && swapped[0].times.started === at(12), swapped.map((i) => `${i.phase}${JSON.stringify(i.times)}`).join(','))
   check('… 派工 text does not repeat the machine already in the title', swapped[0].text === '檢修 B 線開煉機', swapped[0].text)
   const old = fromAudit([a('system', 'world', { msg: '現場處置完成，故障排除', machine_id: 'B-OPEN' }, at(14))], base)
   check('… the runtime\'s older wording counts as 維修完成 too', old[0]?.k === 'review' && old[0].phase === 'repaired')
+
+  // 「核准後才派人」 only on evidence of the approval hold (a card follows the repair, nobody went before its decision);
+  // a notice 待派 for want of a free person says 待派
+  const made = (id, kind, x = {}) => a('task', 'state_machine', { created: [{ id, kind, title: `${kind} B 線開煉機`, machine_id: 'B-OPEN', status: '待派' }], approval_id: null, from_step: 'S6', ...x }, at(1))
+  // rows in audit order (seq): build each list in the order it was written
+  const card = () => a('approval_request', 'state_machine', { id: 'AP-9', risk: 'R3', round: 1, title: 't', options: [] }, at(2))
+  const hold = fromAudit([made('TK-0101', '檢修'), made('TK-0102', '宣達'), card()], base).filter((i) => i.k === 'task')
+  check('a repair made before the card, nobody sent → held (核准後才派人)', hold[0]?.held === true, JSON.stringify(hold[0]))
+  check('… a 宣達 nobody took yet → 待派, not held', hold[1]?.held === false && hold[1]?.waiting === true, JSON.stringify(hold[1]))
+  const noCard = fromAudit([made('TK-0103', '檢修')], base).find((i) => i.k === 'task')
+  check('… a repair 待派 with no card after it → not held', noCard?.held === false && noCard?.waiting === true)
+  const early = fromAudit([made('TK-0104', '檢修'), a('task', 'world', { task_id: 'TK-0104', change: 'assigned', kind: '檢修', worker: 'S05' }, at(1.5)), card()], base)
+  check('… a repair somebody took before the card → not held', early.find((i) => i.k === 'task')?.held === false)
+
+  // a confirm another event's schedule beat: 正在重算 until the transcript shows the carried approval or the new card
+  const call = a('tool_call', 'tool:confirm_schedule', { call_id: 'c1', step_id: 'S4', args: {}, attempt: 1 }, at(3))
+  const fail = a('tool_result', 'tool:confirm_schedule', { call_id: 'c1', ok: false, error: 'ToolError: schedule v3 is stale: solved against v1, but v2 is active now' }, at(3))
+  const staleOf = (more) => fromAudit([call, fail, ...more], { ...base, state: 'verify' }).find((i) => i.k === 'tool')?.stale
+  check('stale confirm, nothing after it yet → resolving', staleOf([]) === 'resolving', staleOf([]))
+  check('… a recalculated card follows → ask', staleOf([a('approval_request', 'state_machine', { id: 'AP-9v2', options: [] }, at(4))]) === 'ask')
+  check('… the approval carried over (…-rebased) → carried', staleOf([a('approval_request', 'state_machine', { id: 'AP-9-rebased', options: [] }, at(4))]) === 'carried')
+
+  // H1 → the stale H1 round re-solved by code (no 規劃 block) → H2: the second block is H2's own round
+  const sr = (id, tool) => ({ step: { id, tool, purpose: 'p', args: {}, depends_on: [] }, state: 'ok', result: null, gate: null })
+  const h1 = [sr('S1', 'cure_formula'), sr('S2', 'query_orders_shifts')]
+  const ev3 = { ...base, prior_rounds: [{ round: 1, hypothesis_id: 'H1', steps: h1 }, { round: 2, hypothesis_id: 'H1', steps: h1 }],
+    steps: [sr('S1', 'solve_schedule'), sr('S2', 'confirm_schedule')] }
+  const thinks = fromAudit([
+    a('llm_call', 'commander', { phase: 'plan', hypothesis: 'H1', steps: ['S1', 'S2'] }, at(1)),
+    a('system', 'state_machine', { stale_resolve: 'code', commander_called: false, hypothesis: 'H1', steps: ['S1', 'S2'] }, at(5)),
+    a('llm_call', 'commander', { phase: 'replan', hypothesis: 'H2', steps: ['S1', 'S2'] }, at(9)),
+  ], ev3).filter((i) => i.k === 'think')
+  const tools = thinks.map((t) => thinkContext(ev3, t).steps.map((x) => x.tool).join('+'))
+  check('H1 → stale re-solve → H2: each 規劃 block shows its own round\'s tools', tools.join(' | ') === 'cure_formula+query_orders_shifts | solve_schedule+confirm_schedule', tools.join(' | '))
 }
 
 // ---------------------------------------------------------------- report
