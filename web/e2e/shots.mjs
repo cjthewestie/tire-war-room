@@ -148,7 +148,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   check('sync: dashboard pending cleared by phone', !(await d.locator('body').innerText()).includes('待核准：放慢生料投入'))
   await d.click('text=LAN 斷')
   await d.waitForTimeout(400)
-  check('lan_down banner', (await d.locator('body').innerText()).includes('LAN 中斷'))
+  check('lan_down banner', (await d.locator('body').innerText()).includes('廠內網路斷線'))
   await d.screenshot({ path: `${OUT}/dashboard-lan-down-1440.png` })
   await ctx.close()
 }

@@ -18,7 +18,6 @@ export interface WarRoomState {
   scheduleRev: number          // bumps on every schedule message so views refetch versions
   audit: AuditEntry[]
   visited: Record<string, EventState[]>   // per event id, states seen in order
-  lastAlert: { event_id: string; title: string; summary: string; ts: string } | null
   lastMessageAt: number
   /** The whole plant around the machines (orders, materials, dock, people, energy, quality, maintenance). Live only. */
   world: WorldSnapshot | null
@@ -28,7 +27,7 @@ export interface WarRoomState {
 
 export const initialState: WarRoomState = {
   snapshot: null, pending: [], resolved: [], clock: null, schedule: null, scheduleRev: 0,
-  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null, subagents: null,
+  audit: [], visited: {}, lastMessageAt: 0, world: null, subagents: null,
 }
 
 /** Apply a WS "world" message: a full one replaces, a delta overwrites only the sections it carries.
@@ -96,8 +95,6 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
       return s.snapshot
         ? { ...base, snapshot: { ...s.snapshot, safety_actions: [msg.data, ...s.snapshot.safety_actions.filter((x) => x.id !== msg.data.id)] } }
         : base
-    case 'alert_card':
-      return { ...base, lastAlert: { event_id: msg.data.event_id, ...msg.data.card, ts: msg.ts } }
     case 'approval_request':
       return { ...base, pending: [...s.pending.filter((p) => p.id !== msg.data.id), msg.data] }
     case 'approval_resolved':

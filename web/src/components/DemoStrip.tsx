@@ -6,7 +6,7 @@ import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
 
 const Q = new URLSearchParams(location.search)
-/** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
+/** ?demo=1: the presenter mode — this strip on the dashboard (App.tsx), and in 3D the key strip listed, key 4 隨機事件 off. */
 export const DEMO_MODE = Q.get('demo') === '1'
 /** ?scenarios=all (developer; the 3D desk, wall screen and phone iframes inherit it): every scenario plus the
  *  day-loop jumps and the 隨機事件／觸發事件 controls. Without it the strip is the presenter's: three scenarios only. */
@@ -80,9 +80,6 @@ export function DemoStrip() {
         </div>
       )}
       {ALL_SCENARIOS && <SimEventControls busy={busy} run={run} />}
-      {state.lastAlert && (
-        <span className="demo-alert" title={state.lastAlert.summary}>⚡ 最新告警卡：{state.lastAlert.title}</span>
-      )}
     </div>
   )
 }

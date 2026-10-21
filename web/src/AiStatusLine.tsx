@@ -6,7 +6,7 @@ import { fastApplies, fastRepairOf } from './phone/fastEta'
 import { useWarRoom } from './useWarRoom'
 
 /** The 公版 line. `className` lets each screen keep its own box (3D HUD pill, phone card row, drawer note).
- *  While the card waits, with fast repair, the time is the whole wall-clock time 「核准後約 16 秒修好」 instead of the
+ *  While the card waits, with fast repair, the time is 「核准後約 12 秒維修完成」 (aiStatusParts' eta) instead of the
  *  verification window (「約 30 分鐘」), on every screen: the phone card and the 3D answer card side by side gave two times.
  *  `compact` (3D demo HUD only, under the answer card's headline that already says what happened): just what Agent Nemo
  *  does and when. */
@@ -17,7 +17,7 @@ export function AiStatusLine({ ev, className, compact = false }: { ev: Event | n
   const p = aiStatusParts(ev, state, health?.agent_runtime ?? null, health?.repair_fast_s ?? null)
   const fast = fastRepairOf(health)
   const fixes = ev.state === 'await_approval' && fastApplies(ev, (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id))
-  const fixBy = fixes && fast ? `核准後約 ${Math.round((fast.repair_s + fast.recover_s) * 10) / 10} 秒修好` : ''
+  const fixBy = fixes && fast ? `核准後約 ${Math.max(1, Math.round(fast.repair_s))} 秒維修完成` : ''   // the same words as aiStatusParts' eta (veteran 10-22)
   if (compact) {
     // with fast repair the verification window (「約 30 分鐘」) is not the time: no time until the crew is on it
     const when = fixBy || (fast && !['execute', 'verify', 'closed'].includes(ev.state) ? '' : p.eta)
@@ -32,10 +32,10 @@ export function AiStatusLine({ ev, className, compact = false }: { ev: Event | n
   }
   return (
     <p className={`ai-status ${className ?? ''}`} data-testid="ai-status">
-      <b>AI 偵測到：{p.what}</b>
-      <span>{p.who}</span>
-      <span>{p.phase}</span>
-      {(fixBy || p.eta) && <span>{fixBy || p.eta}</span>}
+      <b>{p.lead}</b>
+      {p.who && <span>{p.who}</span>}
+      {p.phase && <span>{p.phase}</span>}
+      {p.eta && <span>{p.eta}</span>}
     </p>
   )
 }

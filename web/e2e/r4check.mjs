@@ -1,7 +1,7 @@
 // Round-4 UI review fixes against a live backend:
 //   uv run python -m warroom.api serve --port 8793   then   node web/e2e/r4check.mjs http://localhost:8793
 // 1 phone 討論 never runs the plan (changes go through the conversation; no 修改/駁回 buttons since #16); 2 a stopped press shows 扣模待 QC (drawer, Gantt, outcome);
-// 3 bad data is visible on the main screen (header chip, ③ note, machine marks, drawer).
+// 3 bad data is visible on the main screen (預警 row, ③ note, machine marks, drawer; not in the header any more).
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
 import { dirname, resolve } from 'node:path'
@@ -24,15 +24,18 @@ await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 
 // ---- 3 bad data
 await post({ action: 'scenario', scenario: 'bad_data' }); await post({ action: 'speed', speed: 30 })
-await d.waitForSelector('[data-testid=chip-bad-data]', { timeout: 30000 }).catch(() => {})
+await d.waitForFunction(() => /不可信的讀值/.test(document.querySelector('[data-testid=early-warnings]')?.textContent ?? ''), null, { timeout: 30000 }).catch(() => {})
 await d.waitForTimeout(4000)
-const chip = await d.locator('[data-testid=chip-bad-data]').innerText().catch(() => '')
-check('header chip counts rejected readings', /驗證層攔下 \d+ 筆壞資料/.test(chip) && chip.includes('未喚醒 AI'), chip)
+// textContent: past the first three rows the 預警 list folds into 「還有 N 項預警」
+const early = await d.locator('[data-testid=early-warnings]').textContent().catch(() => '')
+check('預警 counts rejected readings', /已擋下 \d+ 筆不可信的讀值，未用來觸發異常判斷/.test(early ?? ''), (early ?? '').match(/[^。]{0,20}不可信[^。]{0,20}/)?.[0])
+check('… and the header does not (it stays one row)', !/不可信|壞資料|攔下/.test(await d.locator('.topbar').innerText()))
 const note = await d.locator('[data-testid=bad-data-note]').innerText().catch(() => '')
 check('③ names the machines', note.includes('3 號硫化機') || note.includes('A 線'), note)
 const marks = await d.locator('.mdot.dq').count()
 check('machine dots carry a data mark', marks >= 3, `${marks} marked`)
-check('header still 異常 0', (await d.locator('[data-testid=tk-fixed]').innerText()).includes('異常 0'))
+// the 異常 count left the header (it is on 主控台 now): ask the snapshot that rejected readings opened no event
+check('still 異常 0', (await (await d.request.get(BASE + '/api/snapshot')).json()).header.abnormal_count === 0)
 await d.screenshot({ path: `${OUT}/r4fix-baddata-1440.png` })
 await d.locator('.mdot[data-machine=CURE-03]').click()
 await d.waitForSelector('[data-testid=drawer-bad-data]', { timeout: 5000 }).catch(() => {})

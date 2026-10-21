@@ -1,6 +1,6 @@
-// Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 專人維修 →
-// 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 專人維修中 / 維修完成・溫度回降中 / 已恢復正常・報告已產生 /
-// 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
+// Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 派人維修 →
+// 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 核准後約 N 秒維修完成 / 維修中 / 維修完成・溫度回降中 /
+// 已恢復正常｜Agent Nemo 異常報告已產生 / 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
 // page's task, 已恢復正常 and 報告 rows, and the report's 維修完成 / 恢復正常 / 主管已讀 lines. Built on
 // fixtures/status-cases.json (concurrent_3, B 線開煉機 overheat: ≤118°C) with the Event.repaired_at / recovered_at / review
 // fields of the shared contract patched in.
@@ -32,7 +32,7 @@ const stateOf = (events, tasks, now = s.now) => ({
   clock: { factory_time: now, speed: 10 }, snapshot: { header: { factory_time: now }, events, machines: [] },
   world: { factory_time: now, tasks: { items: tasks } }, subagents: null, pending: [], resolved: [],
 })
-const line = (p) => [p.what, p.who, p.phase, p.eta].filter(Boolean).join('｜')
+const line = (p) => [p.lead, p.who, p.phase, p.eta].filter(Boolean).join('｜')
 // a fast repair: 檢修 assigned at once, 30 factory seconds to go (3 wall s at 10×)
 const now = T(s.now)
 const repair = {
@@ -43,23 +43,54 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
 
 // ---------------------------------------------------------------- AI status line
 {
+  const held = { ...repair, status: '待派', assigned_at: null, started_at: null, progress: 0 }
+  const wait = { ...base, state: 'await_approval', closed_at: null, outcome: null }
+  const a = aiStatusParts(wait, stateOf([wait], [held]), null, 12)
+  check('card waiting, 檢修 held 待派 → 偵測到…｜Agent Nemo 建議派人維修｜待核准｜核准後約 12 秒維修完成 (REPAIR_FAST_S, not the verification window)',
+    a.lead.startsWith('偵測到：B 線開煉機 膠溫') && a.who === 'Agent Nemo 建議派人維修' && a.phase === '待核准' && a.eta === '核准後約 12 秒維修完成', line(a))
+  check('… the detection stops at its first clause (no forecast, no 水流 clause)', !/[，；]|預測/.test(a.what), a.what)
+  check('… NemoClaw 沙箱 at the end of the Agent Nemo part when the runtime is set',
+    aiStatusParts(wait, stateOf([wait], [held]), 'NemoClaw 沙箱', 12).who === 'Agent Nemo 建議派人維修（NemoClaw 沙箱）')
   const ev = { ...base, state: 'verify', closed_at: null, outcome: null }
   const p = aiStatusParts(ev, stateOf([ev], [repair, slow]), null)
-  check('verify + 檢修 running → 專人維修中（1/2）', p.phase === '專人維修中（1/2）', line(p))
+  check('verify + 檢修 running → Agent Nemo 已派人維修、放慢投料｜維修中（1/2）', p.who === 'Agent Nemo 已派人維修、放慢投料' && p.phase === '維修中（1/2）', line(p))
   check('… ETA from the repair task (30 s), not the 20-minute window', /約 30 秒/.test(p.eta), p.eta)
   const fast = aiStatusParts(ev, stateOf([ev], [repair, slow]), null, 12)
-  check('… with REPAIR_FAST_S (wall clock): 預計約 10 秒後完成 (20 % of 12 s done)', fast.eta === '預計約 10 秒後完成', fast.eta)
+  check('… with REPAIR_FAST_S (wall clock): 約 10 秒後維修完成 (20 % of 12 s done)', fast.eta === '約 10 秒後維修完成', fast.eta)
+  // GATE → EXECUTE (the R1 檢修) → AWAIT_APPROVAL: the 檢修 is made in EXECUTE before the card and held 待派
+  const auto = { ...base, state: 'execute', closed_at: null, outcome: null, approvals: [] }
+  const e = aiStatusParts(auto, stateOf([auto], [held]), null, 12)
+  check('EXECUTE before the card, 檢修 held 待派 → Agent Nemo 建議派人維修｜Agent Nemo 擬方案中｜核准後約 12 秒維修完成 (not 已派人／維修中)',
+    e.who === 'Agent Nemo 建議派人維修' && e.phase === 'Agent Nemo 擬方案中' && e.eta === '核准後約 12 秒維修完成', line(e))
+  const planning = { ...base, state: 'plan', closed_at: null, outcome: null, approvals: [] }
+  const pl = aiStatusParts(planning, stateOf([planning], []), null, 12)
+  check('planning, no repair yet, REPAIR_FAST_S set → Agent Nemo 擬方案中 and no ETA (not the 20-minute window first)',
+    !pl.who && pl.phase === 'Agent Nemo 擬方案中' && !pl.eta, line(pl))
+  // concurrent_3: approved, then another event's schedule took effect first; code re-solves (REPLAN … GATE) while the
+  // approved 檢修 goes on (runtime approved_rebase)
+  const rebase = { ...base, state: 'replan', closed_at: null, outcome: null }
+  const rb = aiStatusParts(rebase, stateOf([rebase], [repair]), null, 12)
+  check('approved, re-solving the schedule, 檢修 running → Agent Nemo 已派人維修｜維修中（0/1）｜約 10 秒後維修完成 (not 建議／核准後)',
+    rb.who === 'Agent Nemo 已派人維修' && rb.phase === '維修中（0/1）' && rb.eta === '約 10 秒後維修完成', line(rb))
+  const v2 = aiStatusParts({ ...rebase, state: 'await_approval' }, stateOf([rebase], [repair]), null, 12)
+  check('… a new card for the re-solve while the 檢修 runs → 已派人維修｜待核准｜約 10 秒後維修完成',
+    v2.who === 'Agent Nemo 已派人維修' && v2.phase === '待核准' && v2.eta === '約 10 秒後維修完成', line(v2))
   const done = { ...repair, status: '完成', done_at: iso(now), progress: 1 }
   const warm = { ...base, state: 'verify', closed_at: null, outcome: null, repaired_at: iso(now), recovered_at: null, review: null }
   const w = aiStatusParts(warm, stateOf([warm], [done, slow]), null)
   check('repaired, not closed (overheat ≤118°C) → 維修完成・溫度回降中, no ETA', w.phase === '維修完成・溫度回降中' && !w.eta, line(w))
   const cold = { ...warm, plan: { ...warm.plan, hypothesis: { ...warm.plan.hypothesis, expectation: { ...warm.plan.hypothesis.expectation, op: '>=', value: 121 } } } }
   check('… a temperature drop (≥121°C) → 維修完成・溫度回升中', aiStatusParts(cold, stateOf([cold], [done, slow]), null).phase === '維修完成・溫度回升中')
-  const closed = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null } }
-  const q = aiStatusParts(closed, stateOf([closed], [done, slow]), null)
-  check('closed + report unread → 已恢復正常・報告已產生, no ETA', q.phase === '已恢復正常・報告已產生' && !q.eta, line(q))
+  const closed = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null }, ai_report: null }
+  const drafting = aiStatusParts(closed, stateOf([closed], [done, slow]), null)
+  check('closed, review pending, Event.ai_report not written yet → …已恢復正常（94°C）｜Agent Nemo 異常報告整理中 (not 已產生)',
+    drafting.lead === 'B 線開煉機已恢復正常（94°C）' && drafting.phase === 'Agent Nemo 異常報告整理中', line(drafting))
+  const report = { text: '…', summary: '…', by: 'rules', drafted_ms: null, at: iso(now + 4000), late_ms: null }
+  const q = aiStatusParts({ ...closed, ai_report: report }, stateOf([closed], [done, slow]), null)
+  check('closed + report unread → B 線開煉機已恢復正常（94°C）｜Agent Nemo 異常報告已產生, no detection, no ETA',
+    q.lead === 'B 線開煉機已恢復正常（94°C）' && !q.who && q.phase === 'Agent Nemo 異常報告已產生' && !q.eta, line(q))
   const r = aiStatusParts({ ...closed, review: { ...closed.review, status: 'done', done_at: iso(now + 5000), by: 'supervisor' } }, stateOf([closed], [done, slow]), null)
-  check('report read → 已恢復正常・主管已讀報告', r.phase === '已恢復正常・主管已讀報告', line(r))
+  check('report read → …已恢復正常（94°C）｜主管已讀報告', r.lead === q.lead && r.phase === '主管已讀報告', line(r))
 }
 
 // ---------------------------------------------------------------- 3D ring
@@ -130,14 +161,20 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('two more (3 concurrent) → only the new ones ring: 2 件維修完成', more.fire.length === 2 && alertText(more.fire, false).title === '2 件維修完成', alertText(more.fire, false).title)
   check('… and not again (the reading moving does not re-ring)', diffPending(st, repairNotices(evs, [{ machine_id: 'B-OPEN', temp_c: 120 }]), true).fire.length === 0)
   const closed = evs.map((e, i) => (i === 0 ? { ...e, state: 'closed', closed_at: iso(now + 4000), recovered_at: iso(now + 4000), outcome: '已修復：B 線開煉機 膠溫回到 100°C',
-    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null } } : e))
+    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null },
+    ai_report: { text: '…', summary: '…', by: 'rules', drafted_ms: null, at: iso(now + 4000), late_ms: null } } : e))
+  const drafting = repairNotices(closed.map((e, i) => (i === 0 ? { ...e, ai_report: null } : e)), tiles)
+  check('closed, report not written yet (ai_report null) → no 報告已產生 notice yet', drafting.length === 2 && drafting.every((a) => a.notice === 'repaired'), drafting.map((a) => a.notice).join(','))
   const rep = repairNotices(closed, tiles)
   const ring = diffPending(st, rep, true)
   check('closed with its report → 已恢復正常，報告已產生：B 線開煉機 rings once', ring.fire.length === 1 && ring.fire[0].notice === 'report' && alertText(ring.fire, false).title === '已恢復正常，報告已產生：B 線開煉機', alertText(ring.fire, false).title)
+  check('… its text: 溫度回到 94°C（10:32 維修完成）, no 「已修復：」 and no machine twice', alertText(ring.fire, false).body === '溫度回到 94°C（10:32 維修完成）', alertText(ring.fire, false).body)
   const read = repairNotices(closed.map((e, i) => (i === 0 ? { ...e, review: { ...e.review, status: 'done' } } : e)))
   check('a read report leaves the list', read.length === 2 && read.every((a) => a.notice === 'repaired'))
   const mixed = alertText([{ id: 'AP-1', title: '7 號機溫降', reason: 'x', risk: 'R2' }, items[0]], false)
   check('approval + notice together → 2 件待核准與通知', mixed.title === '2 件待核准與通知', mixed.title)
+  const card = alertText([{ id: 'AP-1', title: '7 號機溫度下降 128→122.3°C', reason: '假設 H1：蒸汽壓不足，溫度會穩定', risk: 'R3' }], false)
+  check('approval alert (phone push, 3D notice): no 「R3・」, 判斷一 for 假設 H1', card.title === '待核准：7 號機溫度下降 128→122.3°C' && card.body.replace(/\u2060/g, '') === '判斷一：蒸汽壓不足，溫度會穩定', `${card.title} / ${card.body}`)
 }
 
 // ---------------------------------------------------------------- Agent page 處理歷程
