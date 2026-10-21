@@ -28,7 +28,7 @@ await d.waitForFunction(() => /不可信的讀值/.test(document.querySelector('
 await d.waitForTimeout(4000)
 // textContent: past the first three rows the 預警 list folds into 「還有 N 項預警」
 const early = await d.locator('[data-testid=early-warnings]').textContent().catch(() => '')
-check('預警 counts rejected readings', /已擋下 \d+ 筆不可信的讀值，沒有交給 Agent Nemo/.test(early ?? ''), (early ?? '').match(/[^。]{0,20}不可信[^。]{0,20}/)?.[0])
+check('預警 counts rejected readings', /已擋下 \d+ 筆不可信的讀值，未用來觸發異常判斷/.test(early ?? ''), (early ?? '').match(/[^。]{0,20}不可信[^。]{0,20}/)?.[0])
 check('… and the header does not (it stays one row)', !/不可信|壞資料|攔下/.test(await d.locator('.topbar').innerText()))
 const note = await d.locator('[data-testid=bad-data-note]').innerText().catch(() => '')
 check('③ names the machines', note.includes('3 號硫化機') || note.includes('A 線'), note)

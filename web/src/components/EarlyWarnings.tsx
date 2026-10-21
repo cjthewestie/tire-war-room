@@ -34,7 +34,7 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
   }
   // only the solver's late-delivery warnings are 交期; the rest (備援排法, 硫化延長中, 停用…) are about the schedule itself
   for (const s of state.schedule?.schedule.warnings ?? []) rows.push({ k: /延遲|延誤|晚於交期/.test(s) ? '交期' : '排程', what: plain(s), when: '排程預估', tone: 'warn' })
-  for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `已擋下 ${b.count} 筆不可信的讀值，沒有交給 Agent Nemo`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
+  for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `已擋下 ${b.count} 筆不可信的讀值，未用來觸發異常判斷`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
   return (
     // council review 10-21: the title says what it is, and an empty 預警 is one line instead of a whole panel
     <section className={`panel early ${rows.length ? '' : 'is-empty'}`} aria-label="預警" data-testid="early-warnings">
