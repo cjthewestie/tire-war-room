@@ -6,7 +6,7 @@
 import { useMemo, useState } from 'react'
 import type { Event, EventState, ToolName } from '../contracts'
 import { machineLabel } from '../factory'
-import { fmtHMS, fmtMD, fmtMs } from '../format'
+import { fmtHM, fmtHMS, fmtMD, fmtMs } from '../format'
 import { plain } from '../plain'
 import { TOOL_LABEL } from '../stepText'
 import { STATE_LABEL } from '../components/common'
@@ -14,7 +14,7 @@ import { StateDiagram } from './StateDiagram'
 import { pathOf, stateAt } from './stateGraph'
 import { useWarRoom } from '../useWarRoom'
 import { ToolIcon } from './ToolIcon'
-import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
+import { asksOf, withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
 import { ChatBar } from './ChatBar'
 import { useTranscript } from './useTranscript'
@@ -75,7 +75,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           ))}
         </div>
         <select className="trace-pick" value={askOnly ? ASKS : ev?.id ?? ''} onChange={(e) => pick(e.target.value)} aria-label="選擇事件">
-          {listed.map((e) => <option key={e.id} value={e.id}>{evName(e)}・{fmtHMS(e.opened_at).slice(0, 5)}・{STATE_LABEL[e.state]}</option>)}
+          {listed.map((e) => <option key={e.id} value={e.id}>{evName(e)}・{fmtHM(e.opened_at)}・{STATE_LABEL[e.state]}</option>)}
           {asks.length > 0 && <option value={ASKS}>問戰情室（這次開啟）</option>}
         </select>
         <ul className="trace-list" role="listbox" aria-label="事件清單">
@@ -83,7 +83,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
             <li key={e.id} role="option" aria-selected={e.id === ev?.id}>
               <button className={e.id === ev?.id ? 'on' : ''} onClick={() => pick(e.id)} data-testid="trace-event">
                 <b>{evName(e)}</b><span className={`state-pill st-${e.state}`}>{STATE_LABEL[e.state]}</span>
-                <small className="muted">{fmtMD(e.opened_at)} {fmtHMS(e.opened_at).slice(0, 5)}{e.replans ? `・重新規劃 ${e.replans} 次` : ''}</small>
+                <small className="muted">{fmtMD(e.opened_at)} {fmtHM(e.opened_at)}{e.replans ? `・重新規劃 ${e.replans} 次` : ''}</small>
                 <small className="muted trace-what">{plain(e.command ?? e.alert_card?.title ?? e.anomaly.message)}</small>
               </button>
             </li>
@@ -113,7 +113,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
   const { state } = useWarRoom()
   const { items: evItems, source } = useTranscript(ev)
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
-  const items = useMemo(() => withAsks(ev ? evItems : [], asks), [ev, evItems, asks])
+  const items = useMemo(() => withAsks(ev ? evItems : [], asksOf(asks, ev?.id ?? null, !ev)), [ev, evItems, asks])
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const [kind, setKind] = useState<Kind>('all')
   const [open, setOpen] = useState(false)

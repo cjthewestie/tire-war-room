@@ -37,13 +37,16 @@ export interface ApprovalItem extends Base {
 export interface SafetyItem extends Base { k: 'safety'; message: string; machine: string | null }
 export interface AnomalyItem extends Base { k: 'anomaly'; message: string }
 export interface NoteItem extends Base { k: 'note'; text: string; tone: 'verify' | 'warn' | 'plain' }
-export interface AskItem extends Base { k: 'ask'; question: string; answer: AskAnswer | null; error: string | null }
+/** `eventId`: the event that was selected when the message was sent (null = none, a general question). Local rows only —
+ *  the server's own rows are fetched per event. */
+export interface AskItem extends Base { k: 'ask'; question: string; answer: AskAnswer | null; error: string | null; eventId?: string | null }
 /** Issue #10: the conversation about a plan. me = what the supervisor typed (a discussion message or a
  *  task); agent = the agent's reply or its plain summary of a plan at the gate. */
 export interface ChatItem extends Base {
   k: 'chat'; role: 'me' | 'agent'; kind: 'discuss' | 'command' | 'reply' | 'summary' | 'refused'; text: string; by: string
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
+  eventId?: string | null
 }
 /** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }
@@ -278,6 +281,12 @@ export function fromEvent(ev: Event): Item[] {
 }
 function pushGate(push: (it: Omit<GateItem, 'seq' | 'key' | 'ts'>) => void, step: PlanStep, g: GateDecision) {
   push({ k: 'gate', stepId: step.id, tool: step.tool, risk: g.risk, verdict: g.verdict, reasons: g.reasons, checks: g.checks, dropped: null })
+}
+
+/** The local rows that belong in one view: those sent while `eventId` was selected (null = no event selected).
+ *  `all` (the 全部 view and the page's 問戰情室 list) keeps every row. */
+export function asksOf(asks: LocalItem[], eventId: string | null | undefined, all = false): LocalItem[] {
+  return all ? asks : asks.filter((a) => (a.eventId ?? null) === (eventId ?? null))
 }
 
 /** Merge the 問戰情室 conversation into the event transcript by factory time. */

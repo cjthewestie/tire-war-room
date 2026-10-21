@@ -74,7 +74,9 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   const hyp = ev?.plan?.hypothesis ?? null
   const afterSteps = nodes.filter((n) => n.status === 'after')
   const activeV = diff?.before.version ?? versions.find((v) => v.status === 'active')?.version ?? null
-  const expires = req.expires_at ? `${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前` : null
+  // 核准期限 (factory time, from the card): only while the card is still waiting; gone once decided / closed
+  const deadline = req.expires_at && req.status === 'pending' && !done && !isNaN(ms(req.expires_at))
+    ? `請於 ${fmtMD(req.expires_at).slice(5)} ${fmtHM(req.expires_at)} 前核准` : null
   // one delivery line for all options when the solver gives no per-option figure
   const dLine = deliveryLine(req.delivery_impact, facts)
   const planLayout = layout === 'plan'
@@ -149,10 +151,10 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   const impact = (n: number) => (
     <Block key="impact" n={n} title="對交期的影響" className="apv-impact">
       {impactRows.length > 0 && (
-        <table className="impact-t" data-testid="impact-table">
-          <thead><tr><th>訂單</th><th>原本</th><th>改後</th><th>交期</th></tr></thead>
+        <table className="impact-t apv-impact-t" data-testid="impact-table">
+          <thead><tr><th>訂單</th><th>原排程</th><th>調整後</th><th>出模時間變化</th><th>交期</th></tr></thead>
           <tbody>{impactRows.map((r) => (
-            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
+            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={`chg chg-${r.dir}`} data-testid="demold-change">{r.change}</td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
           ))}</tbody>
         </table>
       )}
@@ -160,15 +162,22 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
       <p className="impact-line">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>
     </Block>
   )
-  // 核准後誰去做: what executes on approval (the card's actions, the chosen staffing option, the R1 steps after)
-  const whoRows = [
-    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => splitAction(plain(a))),
-    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ who: o.who ?? (o.teams.join('、') || '人力'), what: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
-    ...afterSteps.map((n) => ({ who: '系統（R1 自動）', what: `${TOOL_LABEL[n.tool]}・${plain(n.purpose)}` })),
-  ]
+  // 核准後的執行事項: what happens on approval (the card's actions, the chosen staffing option, the R1 steps after).
+  // Only the R1 steps that follow in the plan are labelled 系統自動; nothing else is guessed to be manual or automatic.
+  const execRows = mergeExec([
+    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => actionRow(plain(a))),
+    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ item: '人力安排', how: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
+    ...afterSteps.map((n) => ({ item: TOOL_LABEL[n.tool], how: `系統自動・${plain(n.purpose)}` })),
+  ])
   const who = (n: number) => (
-    <Block key="who" n={n} title="核准後誰去做" className="apv-who">
-      {whoRows.length ? <ul className="who-list" data-testid="who-does-what">{whoRows.map((r, i) => <li key={i}><b>{r.who}</b><span>{r.what}</span></li>)}</ul>
+    <Block key="who" n={n} title="核准後的執行事項" className="apv-who">
+      {execRows.length
+        ? (
+          <table className="exec-t" data-testid="who-does-what">
+            <thead><tr><th>執行項目</th><th>執行方式</th></tr></thead>
+            <tbody>{execRows.map((r, i) => <tr key={i}><td><b>{r.item}</b></td><td>{r.how}</td></tr>)}</tbody>
+          </table>
+        )
         : <p className="muted small">這張卡沒有列出要執行的動作</p>}
     </Block>
   )
@@ -197,7 +206,6 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
           {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
           {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
-          {expires && <span className="apv-exp">{expires}決定</span>}
           {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
         </div>
         <h3 className="apv-title">{plain(req.title)}</h3>
@@ -230,8 +238,9 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
               {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">要改或不同意，按「討論」跟 AI 說</span>
+            {deadline && <span className="apv-deadline" data-testid="approve-deadline" title="期限依模擬工廠時間計算">{deadline}<small>模擬工廠時間</small></span>}
           </div>
+          <p className="apv-hint">要改或不同意，按「討論」跟 AI 說</p>
         </>}
       </footer>
     </section>
@@ -253,7 +262,19 @@ function changedSteps(evId: string, version: number, nodes: PlanNode[], lines: R
   return changed
 }
 
-interface ImpactRow { order: string; before: string; after: string; verdict: string; late: boolean; ok: boolean }
+interface ImpactRow { order: string; before: string; after: string; change: string; dir: 'later' | 'earlier' | 'same' | 'none'; verdict: string; late: boolean; ok: boolean }
+
+/** 出模時間變化: after − before of the order's last demold (works across day / month / year). Not the customer-delivery delay. */
+export function demoldChange(before: string | null | undefined, after: string | null | undefined): { text: string; dir: ImpactRow['dir'] } {
+  if (before == null || after == null) return { text: '—', dir: 'none' }
+  const a = ms(before), b = ms(after)
+  if (isNaN(a) || isNaN(b)) return { text: '—', dir: 'none' }
+  const mins = Math.round((b - a) / 60000)
+  if (mins === 0) return { text: '無變化', dir: 'same' }
+  const abs = Math.abs(mins), h = Math.floor(abs / 60), m = abs % 60
+  const span = `${h ? `${h} 小時` : ''}${m ? `${h ? ' ' : ''}${m} 分` : ''}`
+  return mins > 0 ? { text: `延後 ${span}`, dir: 'later' } : { text: `提前 ${span}`, dir: 'earlier' }
+}
 function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: string[] }): ImpactRow[] {
   const byOrder = new Map<string, { before: ScheduleJob | null; after: ScheduleJob }>()
   for (const c of diff.changes) {
@@ -264,17 +285,30 @@ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: str
   const at = (j: ScheduleJob) => `${Number(j.press_id.slice(5))} 號・${fmtMD(j.demold)} ${fmtHM(j.demold)} 出模`
   return [...byOrder.entries()].map(([order, { before, after }]) => {
     const late = facts.late.some((l) => l.includes(order))
-    return { order, before: before ? at(before) : '—', after: at(after), late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
+    const ch = demoldChange(before?.demold, after.demold)
+    return { order, before: before ? at(before) : '—', after: at(after), change: ch.text, dir: ch.dir, late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
   })
 }
 
-/** Who carries out one approved action: the line's own label ("人力：…", "通知：…"), else by what it changes. */
-function splitAction(a: string): { who: string; what: string } {
+/** One approved action as 執行項目 / 執行方式: the line's own label ("人力：…", "通知：…") if it has one, else what it changes.
+ *  No who-does-it guess: the text is shown as the card wrote it. */
+function actionRow(a: string): { item: string; how: string } {
   const m = /^([^：:（(]{1,8})[：:]\s*(.+)$/.exec(a)
-  if (m) return { who: m[1], what: m[2] }
-  if (a.includes('排程')) return { who: '排程（系統生效）', what: a }
-  if (a.includes('硫化')) return { who: '硫化機（系統設定）', what: a }
-  return { who: '系統', what: a }
+  if (m) return { item: m[1], how: m[2] }
+  if (a.includes('排程')) return { item: '排程調整', how: a }
+  if (a.includes('硫化')) return { item: '硫化時間', how: a }
+  return { item: '執行事項', how: a }
+}
+
+/** Merge repeats: the same text twice, or one text that only restates another row. */
+function mergeExec(rows: { item: string; how: string }[]): { item: string; how: string }[] {
+  const out: { item: string; how: string }[] = []
+  for (const r of rows) {
+    const key = r.how.replace(/\s+/g, '')
+    if (out.some((o) => o.how.replace(/\s+/g, '') === key)) continue
+    out.push(r)
+  }
+  return out
 }
 
 function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {

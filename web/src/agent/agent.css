@@ -650,3 +650,42 @@ a.ov-row:hover { background: var(--panel-2); }
 .con-brief .br { font-size: 14px; }
 .con-brief .br-head { font-size: 15px; }
 .br-link { color: var(--accent); font-size: 13.5px; width: fit-content; }
+
+/* ── Console chat bubbles (Phase 2): supervisor right / light green, Agent left / light grey ── */
+.con-body .r-q { background: var(--accent-soft); color: var(--ink); max-width: 85%; }
+.con-body .r-ask, .con-body .r-chat { gap: 6px; }
+.con-body .r-a, .con-body .r-chat.agent {
+  justify-self: start; max-width: 92%; background: var(--panel-3); border-left: 0;
+  border-radius: 12px 12px 12px 3px; padding: 8px 12px;
+}
+.con-body .r-chat.agent header, .con-body .r-a header { color: var(--ink-dim); }
+.con-body .con-guide-q:disabled { opacity: .5; cursor: not-allowed; }
+.con-offline { margin: 6px 0 0; font-size: 13px; color: var(--warn); }
+
+/* short 待核准 notice (desktop Console only) */
+.con-notice { margin: 8px 0 4px; padding: 10px 12px; border-radius: 12px; background: var(--panel-2); border-left: 4px solid var(--alarm); min-width: 0; display: grid; gap: 4px; }
+.cn-head { font-size: 14.5px; font-weight: 600; overflow-wrap: anywhere; }
+.cn-st { color: var(--alarm); margin-left: 6px; font-weight: 600; }
+.cn-line { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.cn-link { justify-self: start; background: none; border: 0; padding: 2px 0; color: var(--info); font: inherit; font-size: 14px; cursor: pointer; text-decoration: underline; }
+.cn-ts { color: var(--ink-faint); font-size: 11.5px; }
+
+/* ── center items (Phase 2) ── */
+.apv-impact-t td.chg { font-weight: 600; }
+.apv-impact-t td.chg-later { color: var(--warn); }
+.apv-impact-t td.chg-earlier { color: var(--info); }
+.apv-impact-t td.chg-same, .apv-impact-t td.chg-none { color: var(--ink-faint); font-weight: 400; }
+.exec-t { width: 100%; border-collapse: collapse; font-size: 14px; }
+.exec-t th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-dim); padding: 4px 8px 4px 0; border-bottom: 1px solid var(--border); }
+.exec-t td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
+.exec-t td:first-child { width: 28%; white-space: nowrap; }
+.exec-t td b { color: var(--ink-dim); font-weight: 600; }
+.apv-deadline { display: inline-flex; align-items: baseline; gap: 6px; flex-wrap: wrap; background: #f6d860; color: #4a3a00; border-radius: 999px; padding: 6px 14px; font-size: 14px; font-weight: 600; align-self: center; }
+.apv-deadline small { font-size: 12px; font-weight: 500; opacity: .85; }
+.apv-act > .apv-hint { margin: 0; }
+@media (max-width: 720px) {
+  .apv-impact-t { display: block; overflow-x: auto; }
+  .apv-impact-t td, .apv-impact-t th { white-space: normal; }
+  .exec-t td:first-child { white-space: normal; width: 34%; }
+  .apv-deadline { width: 100%; justify-content: center; border-radius: 14px; }
+}

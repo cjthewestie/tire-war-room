@@ -60,7 +60,7 @@ try {
   check('transcript shows the supervisor message', me.includes('9 號機今晚要保養'), me.slice(0, 60))
   const reply = await tr.locator('[data-testid=chat-reply]').last().innerText().catch(() => '')
   check('agent reply names v2 and the code check', /v2|第 2 版/.test(reply) && reply.includes('程式已檢查'), reply.replace(/\n/g, ' ').slice(0, 160))
-  check('agent shows the latest plan summary (建議處置) for v2', (await d.locator('[data-testid=con-brief]', { hasText: '建議處置' }).count()) >= 1)
+  check('agent shows the short 待核准 notice for v2 (not the big summary)', (await d.locator('[data-testid=con-brief][data-kind=pending-notice][data-version="2"]').count()) >= 1)
   // issue #37: chips, the replan row and the card version are steps, shown on the Agent page (看完整過程)
   await d.locator('[data-testid=see-full]').click()
   await d.waitForSelector('[data-testid=trace-body] [data-kind=state]', { timeout: 10000 }).catch(() => {})

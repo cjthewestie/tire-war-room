@@ -53,9 +53,10 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
   const can = mode === 'ask' ? !!transport?.ask : mode === 'command' ? !!transport?.command : !!transport?.discuss && waiting
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? ''
+  const evId = ev?.id ?? null          // every local row remembers the event that was selected when it was sent
   const chat = (role: ChatItem['role'], kind: ChatItem['kind'], text: string, key: string, n: number, ts: string): ChatItem => ({
     k: 'chat', key, ts, seq: 1e9 + n, role, kind, text, by: 'supervisor', intent: null, version: null,
-    changes: [], constraints: [], classifiedBy: null, fellBack: false, pending: true,
+    changes: [], constraints: [], classifiedBy: null, fellBack: false, pending: true, eventId: evId,
   })
   const send = async (raw: string) => {
     const text = raw.trim()
@@ -64,7 +65,7 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
     setQ('')
     if (mode === 'ask' && transport.ask) {
       const key = `ask-${n}`
-      setAsks((xs) => [...xs, { k: 'ask', key, ts: ft || new Date().toISOString(), seq: 1e9 + n, question: text, answer: null, error: null }])
+      setAsks((xs) => [...xs, { k: 'ask', key, ts: ft || new Date().toISOString(), seq: 1e9 + n, question: text, answer: null, error: null, eventId: evId }])
       setBusy('查詢中…')
       try {
         const a: AskAnswer = await transport.ask(text, convId.current)

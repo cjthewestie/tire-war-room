@@ -21,6 +21,13 @@ export function fmtHM(iso: string | number | null | undefined): string {
   const d = new Date(iso)
   return isNaN(d.getTime()) ? '—' : clean(hm12d.format(d))
 }
+/** Turn a 24h "HH:MM" inside backend text ("19:30 開始備料") into 12h "7:30 PM"; text without one is returned as is. */
+export function clock12(text: string): string {
+  return text.replace(/(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])/g, (_m, h: string, mi: string) => {
+    const n = Number(h)
+    return `${n % 12 === 0 ? 12 : n % 12}:${mi} ${n < 12 ? 'AM' : 'PM'}`
+  })
+}
 /** "07:00:05 AM" */
 export function fmtHMS(iso: string | number | null | undefined): string {
   if (iso == null) return '—'

@@ -6,7 +6,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { Event, Line } from '../contracts'
 import { machineLabel } from '../factory'
-import { fmtHMS } from '../format'
+import { fmtHM, ms } from '../format'
 import { RISK_PLAIN } from '../plain'
 import { useWarRoom } from '../useWarRoom'
 import { STATE_LABEL } from '../components/common'
@@ -15,13 +15,15 @@ import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
 import { useHomeSelection } from './homeSelection'
 import { PlanArea } from './PlanArea'
-import { isDialogue, withAsks, type Item, type LocalItem } from './transcript'
+import { asksOf, isDialogue, withAsks, type Item, type LocalItem } from './transcript'
 import { Row } from './TranscriptRows'
 import { setReplan, useReplans } from './replanStore'
 import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
 import { useTranscript } from './useTranscript'
 import { BriefingView } from '../components/BriefingView'
 import { useEventBriefing } from '../useBriefing'
+import type { ApprovalRequest } from '../contracts'
+import { PendingNotice } from './PendingNotice'
 import './agent.css'
 
 /** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
@@ -66,6 +68,20 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   )
 }
 
+/** The newest pending card of an event (a v2 replaces its v1). */
+function latestReq(pending: ApprovalRequest[], evId: string | undefined): ApprovalRequest | null {
+  if (!evId) return null
+  return [...pending].filter((p) => p.event_id === evId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null
+}
+
+/** Split the messages around a time: those at or before it, and those after (stable; no time = all before). */
+function splitAt(rows: Item[], t: number): [Item[], Item[]] {
+  if (isNaN(t)) return [rows, []]
+  let i = rows.length
+  while (i > 0 && ms(rows[i - 1].ts) > t) i--
+  return [rows.slice(0, i), rows.slice(i)]
+}
+
 const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
 
 function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAll, focus, onFull, onGuide }: {
@@ -73,10 +89,27 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null; onFull?: (eventId?: string) => void; onGuide: (text: string) => void
 }) {
-  const { state } = useWarRoom()
+  const { state, transport, connected } = useWarRoom()
   const brief = useEventBriefing(ev)
+  const req = useMemo(() => latestReq(state.pending, ev?.id), [state.pending, ev?.id])
+  // local rows (asks, a message being sent) belong to the event that was selected when they were sent; 全部 keeps all
+  const mine = useMemo(() => {
+    const own = asksOf(asks, ev?.id ?? null, allView)
+    // a message still shown as "sending" is hidden once the record already carries the same message (no twin bubbles)
+    return own.filter((a) => !(a.k === 'chat' && a.pending && items.some((i) => i.k === 'chat' && i.role === 'me' && i.text === a.text)))
+  }, [asks, ev?.id, allView, items])
   // the plan-summary chat rows are replaced by ONE briefing that follows the event's state; the rest of the dialogue stays
-  const talk = useMemo(() => withAsks(items.filter(isDialogue), asks).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary')), [items, asks, brief])
+  const talk = useMemo(() => withAsks(items.filter(isDialogue), mine).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary')), [items, mine, brief])
+  // the briefing sits among the messages by its own time: a 待核准 card by its created_at (so a v2 comes after the 討論
+  // that asked for it), any other state by the latest step of the record. No time → it stays last, as before.
+  const briefAt = useMemo(() => {
+    if (!brief) return NaN
+    if (brief.state === 'pending' && req) return ms(req.created_at)
+    const stepTs = items.filter((i) => !isDialogue(i)).map((i) => ms(i.ts)).filter((t) => !isNaN(t))
+    return stepTs.length ? Math.max(...stepTs) : NaN
+  }, [brief, req, items])
+  const [before, after] = useMemo(() => splitAt(talk, briefAt), [talk, briefAt])
+  const askReady = !!transport?.ask && (transport.mode !== 'live' || connected)
   const steps = items.length - items.filter(isDialogue).length
   const scroller = useRef<HTMLDivElement>(null)
   const briefBox = useRef<HTMLDivElement>(null)
@@ -86,15 +119,15 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
     if (el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
   }
   const last = talk[talk.length - 1]
-  const tail = `${allView}:${events.length}:${talk.length}:${last?.key}:${last?.k === 'ask' ? !!last.answer : ''}:${last?.k === 'chat' ? last.pending : ''}:${brief?.state ?? ''}`
+  const tail = `${allView}:${ev?.id}:${events.length}:${talk.length}:${last?.key}:${last?.k === 'ask' ? !!last.answer : ''}:${last?.k === 'chat' ? last.pending : ''}:${brief?.state ?? ''}:${req?.id ?? ''}`
   useLayoutEffect(() => {
     const el = scroller.current
     if (!el || !pinned) return
-    // the briefing is the newest thing: show it from its heading, not from its last line
+    // newest message at the bottom. A long briefing (not the short 待核准 notice) that is the last thing is shown from its heading.
     const box = briefBox.current
-    if (box && !allView) el.scrollTop += box.getBoundingClientRect().top - el.getBoundingClientRect().top - 8
+    if (box && !allView && !after.length) el.scrollTop += box.getBoundingClientRect().top - el.getBoundingClientRect().top - 8
     else el.scrollTop = el.scrollHeight
-  }, [tail, pinned, allView])
+  }, [tail, pinned, allView, after.length])
   const jump = () => { const el = scroller.current; if (el) { el.scrollTop = el.scrollHeight; setPinned(true) } }
   const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
   const waiting = open && ev.state === 'await_approval'
@@ -107,7 +140,7 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
           <h2>Agent 對話</h2>
           <div className="seg sm con-view" role="group" aria-label="對話範圍">
             <button className={!allView ? 'on' : ''} aria-pressed={!allView} onClick={() => setAll(false)} disabled={!ev} data-testid="con-follow">
-              {ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・${fmtHMS(ev.opened_at).slice(0, 5)}` : '此事項'}</button>
+              {ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・${fmtHM(ev.opened_at)}` : '此事項'}</button>
             <button className={allView ? 'on' : ''} aria-pressed={allView} onClick={() => setAll(true)} data-testid="con-all">全部</button>
           </div>
           {ev && !allView && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
@@ -128,17 +161,27 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
               <p className="muted small">只查不改。我可以幫你：</p>
               <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
               <p className="muted small">試試這些問題：</p>
-              {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" onClick={() => onGuide(q)}>{q}</button>)}
+              {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
+              {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent 問答</p>}
             </div>
           ))}
-        {(allView ? talk.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)) : talk).map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
-        {!allView && ev && brief && (
-          <div className="con-brief" data-testid="con-brief" ref={briefBox}>
-            <BriefingView b={brief} footer={brief.state !== 'pending' ? (
-              <a className="br-link" href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-record">查看處理紀錄</a>
-            ) : null} />
-          </div>
-        )}
+        {allView
+          ? talk.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)).map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)
+          : (
+            <>
+              {before.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
+              {ev && brief && (brief.state === 'pending' && req
+                ? <PendingNotice ev={ev} req={req} onPlan={() => { onPick(ev.id); document.querySelector('[data-testid=plan-area]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
+                : (
+                  <div className="con-brief" data-testid="con-brief" ref={briefBox}>
+                    <BriefingView b={brief} footer={brief.state !== 'pending' ? (
+                      <a className="br-link" href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-record">查看處理紀錄</a>
+                    ) : null} />
+                  </div>
+                ))}
+              {after.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
+            </>
+          )}
         {!allView && open && !brief && (
           <div className={`con-live ${waiting ? 'wait' : ''}`} role="status" aria-live="polite">
             {waiting ? <><i className="pulse" />等待主管核准…（{state.pending.filter((p) => p.event_id === ev.id).map((p) => RISK_PLAIN[p.risk]).join('、') || '核准卡在中間'}）</>
@@ -160,7 +203,7 @@ function EventFeed({ ev, onPick }: { ev: Event; onPick: (id: string) => void }) 
   return (
     <div className="feed-ev">
       <button type="button" className="feed-ev-h" onClick={() => onPick(ev.id)}>
-        {ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・{fmtHMS(ev.opened_at).slice(0, 5)}・{STATE_LABEL[ev.state]}
+        {ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・{fmtHM(ev.opened_at)}・{STATE_LABEL[ev.state]}
       </button>
       {rows.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
       {brief && <div className="con-brief"><BriefingView b={brief} testId="feed-brief" /></div>}
