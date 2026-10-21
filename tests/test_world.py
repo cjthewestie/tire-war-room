@@ -111,6 +111,11 @@ def test_dataset_worker_names_use_the_team_names_on_screen():
     assert w.worker_name("S03") == "S03（胎體／胎面膠組）" and w.worker_name("NOPE") is None
     named = next(x for x in w._workers if not x.group)                         # a generated worker keeps their name
     assert w.worker_name(named.id) == named.name
+    people = {x.id: x for x in w.snapshot().people.workers}                    # the staff list and the leave list too
+    assert people["S14"].team_label == "硫化機組" and people["S18"].team_label == "胎側膠組"
+    assert people["S03"].team_label == "胎體／胎面膠組"
+    assert {x["id"]: x["team_label"] for x in w.leave_now()}.get("S11") == "貼合組"
+    assert not [x for x in w.snapshot().people.workers if x.team_label in ("加硫組", "胎邊組", "打膠組", "成形組")]
 
 
 def test_team_dataset_sources_and_dates():

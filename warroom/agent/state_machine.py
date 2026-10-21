@@ -678,7 +678,7 @@ class StateMachine:
                        (f"；今日排 {today['mold_ins']} 模入模" if today.get("mold_ins") is not None else ""))
         leave = d.get("leave")
         if leave is not None:
-            names = "、".join(f"{x.get('name')}（{x.get('group') or x.get('team_label')}：{x.get('note') or '請假'}）"
+            names = "、".join(f"{x.get('name')}（{x.get('team_label') or x.get('group')}：{x.get('note') or '請假'}）"
                              for x in leave)
             out.append(f"出勤：在廠 {today.get('on_duty', '?')} 人；請假 {len(leave)} 人" + (f"：{names}" if names else ""))
         mats = [m for m in d.get("materials") or [] if m.get("status") != "ok"]

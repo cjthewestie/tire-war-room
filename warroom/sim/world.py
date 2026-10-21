@@ -1393,7 +1393,7 @@ class World:
                 if row is not None and row.code == "病":
                     note = f"病假：{row.note}" if row.note else "病假"
             if note is not None:
-                out[w.id] = {"id": w.id, "name": w.name, "group": w.group, "team_label": w.group or TEAM_LABELS[w.team],
+                out[w.id] = {"id": w.id, "name": w.name, "group": w.group, "team_label": TEAM_LABELS[w.team],
                              "shift": w.sd.name, "note": note}
         return list(out.values())
 
@@ -1457,7 +1457,7 @@ class World:
         return pool[0].id
 
     def _people_view(self) -> PeopleView:
-        workers = [Worker(id=w.id, name=w.name, team=w.team, team_label=w.group or TEAM_LABELS[w.team],
+        workers = [Worker(id=w.id, name=w.name, team=w.team, team_label=TEAM_LABELS[w.team],
                           role=w.role, shift=w.sd.name, state=w.state, zone=w.zone,  # type: ignore[arg-type]
                           machine_id=w.machine_id, since=w.since or self.t0, note=w.note,
                           source="team_dataset" if w.staff_id else "generated") for w in self._workers]
