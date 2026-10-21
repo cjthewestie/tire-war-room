@@ -4,8 +4,7 @@
 import type { ApprovalRequest, Event, WorldSnapshot } from '../contracts'
 import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
-import { plain } from '../plain'
-import { VIA, eventTitle, headline, openPhase, outcomeText, who } from '../report/build'
+import { VIA, eventTitle, headline, openPhase, outcomeText, staleCards, tidy, who } from '../report/build'
 
 export interface HandoverInput {
   now: string                      // factory time
@@ -29,7 +28,7 @@ const subject = (e: Event) => (e.machine_id in MACHINE_META ? machineLabel(e.mac
 /** confirmed by a reading: its result reads 已恢復正常 */
 const recovered = (e: Event) => e.state === 'closed' && outcomeText(e.machine_id, e.state, e.outcome).startsWith('已恢復正常')
 /** 「核准全部：排程 v3 生效（…）；…」 → 「第 3 版排程生效」: the option's first clause */
-const optionText = (label: string) => plain(label.replace(/^核准(全部)?[：:]/, '').split(/[（；]/)[0].replace(/排程\s*v(\d+)\s*/g, '第 $1 版排程'))
+const optionText = (label: string) => tidy(label.replace(/^核准(全部)?[：:]/, '').split(/[（；]/)[0])
 /** 「已恢復正常 2、處理中 1」: only the counts that are not 0 */
 const counts = (pairs: [string, number][], unit = '') => pairs.filter(([, n]) => n > 0).map(([k, n]) => `${k} ${n}${unit}`).join('、')
 
@@ -62,8 +61,8 @@ export function buildHandover(inp: HandoverInput): Handover {
   const decided = inp.approvals.filter((a) => a.status !== 'pending' && a.status !== 'superseded' && within(a.decision?.decided_at ?? a.created_at))
     .sort((a, b) => t(a.decision?.decided_at ?? a.created_at) - t(b.decision?.decided_at ?? b.created_at))
   const waiting = inp.approvals.filter((a) => a.status === 'pending')
-  // an approved card that a later card replaced: its schedule went stale before it took effect (3 at once)
-  const redone = new Set(inp.approvals.map((a) => a.supersedes).filter(Boolean))
+  // an approved card whose schedule went stale before it took effect (3 at once): never 「第 N 版排程生效」
+  const redone = staleCards(inp.approvals)
   const evOf = (a: ApprovalRequest) => inp.events.find((e) => e.id === a.event_id)
   // 「10 號硫化機 溫度下降」: the card's title without the readings (the event line has them)
   const cardTitle = (a: ApprovalRequest) => headline(evOf(a)?.machine_id, a.title).replace(/\s*[\d.]+\s*→\s*[\d.]+\s*°C$/, '')
@@ -80,7 +79,7 @@ export function buildHandover(inp: HandoverInput): Handover {
         const what = redone.has(a.id) ? '，排程已先被更新，已重算' : pick ? `：${pick}${rec}` : ''
         return {
           time: fmtHM(d?.decided_at ?? a.created_at),
-          text: `${DECISION[a.status] ?? a.status}「${cardTitle(a)}」${what}${by ? `｜${by}` : ''}${d?.reason ? `｜理由：${d.reason}` : ''}`,
+          text: `${DECISION[a.status] ?? a.status}「${cardTitle(a)}」${what}${by ? `｜${by}` : ''}${d?.reason ? `｜理由：${tidy(d.reason)}` : ''}`,
           tone: a.status === 'rejected' || a.status === 'expired' ? 'warn' : 'ok',
         } as Line
       }),
@@ -113,12 +112,15 @@ export function buildHandover(inp: HandoverInput): Handover {
     ],
   })
 
-  // the answer on top: what the next shift has to pick up (cards waiting, events not settled), or that nothing is left
+  // the answer on top: what the next shift has to pick up (cards waiting, events not settled, materials short, orders
+  // running late), or that nothing is left
   const waitingEv = new Set(waiting.map((a) => a.event_id))
   const todo = [
     ...waiting.map((a) => { const e = evOf(a); return `${e ? subject(e) : cardTitle(a)}待核准${a.expires_at ? `，${fmtHM(a.expires_at)} 前要決定` : ''}` }),
     ...open.filter((e) => !waitingEv.has(e.id)).map((e) => `${subject(e)}${openPhase(e, tasks)}`),
     ...stopped.map((e) => `${subject(e)}已安全停止，要人確認`),
+    ...mats.map((m) => `${m.name}${MAT[m.status] ?? m.status}`),
+    ...(late.length ? [`${late.length} 張單會晚交`] : []),
   ]
   const busy = active ? `還有 ${active} 件現場工作在做${queued ? `、${queued} 件待派` : ''}` : queued ? `${queued} 件現場工作待派` : ''
   const lead: Line = todo.length

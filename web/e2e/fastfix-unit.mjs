@@ -22,7 +22,8 @@ const { aiStatusParts } = await load('/src/aiStatus.ts')
 const { machineRing, ringRecoveries, recoveryKey } = await load('/src/factory3d/machineRing.ts')
 const { alertText, diffPending, repairNotices } = await load('/src/phone/alert.ts')
 const { fromAudit } = await load('/src/agent/transcript.ts')
-const { buildReport } = await load('/src/report/build.ts')
+const { buildReport, outcomeText } = await load('/src/report/build.ts')
+const { buildHandover } = await load('/src/handover/build.ts')
 
 const s = fx.c3_closed
 const T = (iso) => new Date(iso).getTime()
@@ -202,6 +203,36 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('… with one: written by Agent Nemo, 規則備援 by the rules', ai.parts.find((p) => p.id === 'audit').rows[2].text.startsWith('最上面的異常報告由 Agent Nemo 撰寫（標「規則備援」時由規則整理）') && ai.ai?.tag === '規則備援')
   const none = buildReport({ ev: base, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
   check('… an event without the fields: no 維修完成 / 恢復正常 in the head', none.head.length === 1 && !/維修完成|恢復正常/.test(none.head[0].text), none.head[0].text)
+  const bare = buildReport({ ev: { ...s.events.find((e) => e.id.endsWith('CURE-03')), alert_card: null, state: 'classify' }, approvals: [], tasks: [], chainOk: null, auditCount: null })
+  check('… no alert card yet: a short title from the anomaly, the machine named once', bare.title === '3 號硫化機 溫度下降 128→123.3°C' || bare.title === '3 號硫化機 溫度下降 128→123°C', bare.title)
+  const stop = outcomeText('CURE-10', 'safe_stop', '安全中止：指揮官要求安全中止；維持原排程')
+  check('… a safe stop reads 安全停止 once, replan reads 重新判斷', stop === '安全停止：Agent Nemo 要求安全停止；維持原排程' && outcomeText('CURE-10', 'replan', null) === '處理中（重新判斷）', stop)
+}
+
+// ---------------------------------------------------------------- report + handover: 3 at once, the stale card
+{
+  const ev = s.events.find((e) => e.id.endsWith('CURE-10'))
+  const ap = (id, label, extra = {}) => ({
+    id, event_id: ev.id, round: 1, created_at: ev.opened_at, risk: 'R3', title: '10 號機溫度下降 128→122.4°C', reason: '', delivery_impact: '',
+    actions: [], gaps: [], done: [], version: 1, supersedes: null, status: 'approved',
+    options: [{ id: 'A', label, tool: 'confirm_schedule', args: {}, recommended: true }],
+    decision: { request_id: id, decision: 'approve', option_id: 'A', modified_args: null, reason: '', decided_by: 'supervisor', via: 'phone', decided_at: ev.opened_at },
+    ...extra,
+  })
+  // state_machine.py: the re-solve carried the same content over, recorded as 「<id>-rebased」 (supersedes stays null)
+  const old = ap('AP-X-1', '核准全部：排程 v2 生效（10 號機硫化 41.1 h）')
+  const reb = ap('AP-X-1-rebased', '核准全部：排程 v3 生效（10 號機硫化 41.1 h）')
+  reb.decision = { ...reb.decision, via: 'auto', reason: '沿用 AP-X-1：排程 v2 過期後依現行排程重解為 v3，內容相同' }
+  const dec = buildReport({ ev, approvals: [old, reb], tasks: [], chainOk: true, auditCount: null }).parts.find((p) => p.id === 'decisions').rows.map((x) => x.text)
+  check('report: the card a -rebased one carried over is marked 已重算, the carried one is not',
+    dec[0].endsWith('排程已先被更新，已重算') && !dec[0].includes('第 2 版排程生效') && !dec[1].includes('已重算'), dec.join(' / '))
+  check('… 第 3 版排程生效 in the option and the reason, no approval id', dec[1].includes('第 3 版排程生效') && dec[1].includes('理由：沿用原核准：第 2 版排程過期後') && !/排程（第|AP-/.test(dec.join()), dec[1])
+  const h = buildHandover({ now: s.now, hours: 8, events: [ev], approvals: [old, reb], world: null, chainOk: true })
+  const lines = h.sections.find((x) => x.id === 'approvals').lines.map((l) => l.text)
+  check('handover: the stale card never reads 第 2 版排程生效', !lines.some((l) => l.includes('第 2 版排程生效')) && lines[0].includes('排程已先被更新，已重算') && lines[1].includes('：第 3 版排程生效'), lines.join(' / '))
+  const world = { tasks: { items: [] }, materials: [{ key: 'cb', name: '碳黑', unit: 'kg', stock: 0, on_order: 0, status: 'out' }], goods: { orders: [{ order_id: 'SO-1', due: '10/05', done: 1, qty: 10, late: true }] } }
+  const h2 = buildHandover({ now: s.now, hours: 8, events: [], approvals: [], world, chainOk: true })
+  check('handover: a material out and a late order are things to hand over', h2.lead.text === '交班要交代 2 件：碳黑缺料；1 張單會晚交。', h2.lead.text)
 }
 
 await vite.close()

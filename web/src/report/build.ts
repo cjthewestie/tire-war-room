@@ -2,7 +2,7 @@
 // hypotheses, steps and safety actions, its approval cards, the worker tasks, the audit chain). No model writes it,
 // so each line can be traced back to a record. The prevention measures are the one part a person writes. Agent Nemo's
 // 異常報告 (Event.ai_report) sits on top of it on /report and goes into the copied text.
-import type { ApprovalRequest, Event, EventState, StepRun, WorkTask } from '../contracts'
+import type { AnomalyKind, ApprovalRequest, Event, EventState, StepRun, WorkTask } from '../contracts'
 import { repairStage } from '../aiStatus'
 import { STATE_LABEL } from '../components/common'
 import { MACHINE_META, machineLabel } from '../factory'
@@ -26,38 +26,63 @@ const ACTOR: Record<string, string> = { 指揮官: 'Agent Nemo', supervisor: '�
 export const who = (by: string | null | undefined) => (!by || by === 'supervisor' || by === 'dashboard' ? '主管' : by === 'system' ? '系統' : by)
 
 /** plain() plus what the records still carry for engineers: the event id in front (八、稽核 gives it), the [工具] / [人工]
- *  tags, the solver's name, 指揮官 (now Agent Nemo) and the older words for 安全把關 / 稽核紀錄. Display only. */
+ *  tags, the solver's name, the approval id a carried-over approval names, 指揮官 (now Agent Nemo) and the older words
+ *  for 安全把關 / 稽核紀錄 / 安全停止; 「排程 v3 生效」 reads 「第 3 版排程生效」 (glossary). Display only. */
 export function tidy(s: string | null | undefined): string {
-  return plain((s ?? '').replace(/^EV-[^｜\s]*｜/, ''))
+  return plain((s ?? '').replace(/^EV-[^｜\s]*｜/, '').replace(/沿用(核准)? AP-[\w-]+/g, '沿用原核准')
+    .replace(/排程\s*v(\d+)\s*/g, '第 $1 版排程').replace(/([\u4e00-\u9fff])\s+v(\d+)\b/g, '$1第 $2 版'))
     .replace(/\[(工具|人工)\]\s*/g, '')
     .replace(/喚醒指揮官/g, '交給 Agent Nemo')
-    .replace(/指揮官/g, 'Agent Nemo')
+    .replace(/指揮官/g, 'Agent Nemo').replace(/([\u4e00-\u9fff])Agent Nemo/g, '$1 Agent Nemo').replace(/Agent Nemo([\u4e00-\u9fff])/g, 'Agent Nemo $1')
     .replace(/，?可行（CP-SAT）/g, '')
     .replace(/動作把關/g, '安全把關')
     .replace(/稽核日誌/g, '稽核紀錄')
+    .replace(/安全中止/g, '安全停止')
+}
+
+/** STATE_LABEL in the supervisor's words: replan reads 重新判斷 (glossary), not 換假設. */
+export const stateLabel = (state: string) => (state === 'replan' ? '重新判斷' : STATE_LABEL[state as EventState] ?? state)
+
+/** Approved cards whose schedule went stale before it took effect (3 at once): a later version of the card replaced
+ *  it (supersedes), or the re-solve carried the same content over as 「<id>-rebased」 (state_machine.py). The schedule
+ *  such a card names never took effect. */
+export function staleCards(approvals: ApprovalRequest[]): Set<string> {
+  return new Set(approvals.flatMap((a) => [a.supersedes, /^(.+)-rebased\d*$/.exec(a.id)?.[1]]).filter((x): x is string => !!x))
 }
 
 /** 「10 號硫化機 溫度下降 128→122.4°C」「B 線開煉機 溫度過高」: the machine's full name and what went wrong, from a title
  *  (the alert card's, an approval's), not the detector's forecast sentence; without 「異常：」 / 「已處置：」 (the state is
  *  written next to it) and without the machine named twice. */
 export function headline(machineId: string | null | undefined, title: string): string {
-  const s = plain(title.replace(/^(異常|已處置)[：:]\s*/, ''))
+  const s = tidy(title.replace(/^(異常|已處置)[：:]\s*/, ''))
   const m = machineId ? MACHINE_META[machineId] : undefined
   if (!m || !machineId) return s
   const full = machineLabel(machineId)
   const short = `${m.short} 號機`
   const rest = s.startsWith(full) ? s.slice(full.length) : m.line === 'CURE' && s.startsWith(short) ? s.slice(short.length) : s
-  return `${full} ${rest.trim()}`.trim()
+  return `${full} ${rest.replace(/^\s*[：:]/, '').trim()}`.trim()
 }
-export const eventTitle = (ev: Event) => headline(ev.machine_id, ev.alert_card?.title || ev.command || ev.anomaly.message || ev.goal || ev.id)
+
+const KIND: Partial<Record<AnomalyKind, string>> = {
+  temp_drop: '溫度下降', overheat: '溫度過高', pressure_low: '壓力偏低', water_flow_low: '冷卻水流偏低', steam_low: '蒸汽壓偏低', schedule_slip: '排程延誤',
+}
+const num = (v: number) => String(Math.round(v * 10) / 10)
+/** Before Agent Nemo writes the alert card (alert_card null): the same short title from the anomaly's fields, as
+ *  commander.py writes it (「溫度下降 128→122.4°C」), not the detector's sentence that names the machine again. */
+function anomalyTitle(ev: Event): string | null {
+  const a = ev.anomaly
+  if (!(ev.machine_id in MACHINE_META) || a.kind === 'supervisor_command') return null
+  return a.kind === 'temp_drop' ? `${KIND.temp_drop} ${num(a.baseline)}→${num(a.value)}°C` : KIND[a.kind] ?? '異常'
+}
+export const eventTitle = (ev: Event) => headline(ev.machine_id, ev.alert_card?.title || ev.command || anomalyTitle(ev) || ev.anomaly.message || ev.goal || ev.id)
 
 /** The result as the supervisor reads it. 「已恢復正常」 only when a reading confirmed it (outcome 已修復, as aiStatus.ts
  *  closedPhase): 「已修復：10 號機 溫度回到 128°C（維修完成 10:03、恢復 10:04）」 → 「已恢復正常，溫度回到 128°C」. A machine
  *  taken out or an unverified close says what really happened. */
 export function outcomeText(machineId: string | null | undefined, state: string, outcome: string | null | undefined): string {
-  const o = plain(outcome)
-  if (state === 'safe_stop') return o ? `安全停止：${o}` : '安全停止'
-  if (state !== 'closed') return `處理中（${STATE_LABEL[state as EventState] ?? state}）`
+  const o = tidy(outcome)
+  if (state === 'safe_stop') { const why = o.replace(/^安全停止[：:]\s*/, ''); return why ? `安全停止：${why}` : '安全停止' }
+  if (state !== 'closed') return `處理中（${stateLabel(state)}）`
   if (/停用/.test(o)) return '已停用該機，排程已調整'
   if (/未驗證/.test(o)) return '已處置，未用讀值確認'
   if (!/^已修復[：:]/.test(o)) return o || '已結束'
@@ -72,7 +97,7 @@ export function outcomeText(machineId: string | null | undefined, state: string,
 export function openPhase(ev: Event, tasks: WorkTask[]): string {
   if (ev.state === 'await_approval') return '待核准'
   const st = repairStage(ev, tasks)
-  return st === 'repairing' ? '維修中' : st === 'recovering' ? '回溫中' : st === 'recovered' ? '已恢復正常' : `處理中（${STATE_LABEL[ev.state]}）`
+  return st === 'repairing' ? '維修中' : st === 'recovering' ? '回溫中' : st === 'recovered' ? '已恢復正常' : `處理中（${stateLabel(ev.state)}）`
 }
 
 const t = (iso: string | null | undefined) => (iso ? Date.parse(iso) : NaN)
@@ -87,9 +112,11 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
   const closed = ev.state === 'closed' || ev.state === 'safe_stop'
   const title = eventTitle(ev)
   // one line (Kyle 10-21 flow): when it happened, the repair, back to normal, how long, the result
+  // a later step on another day carries its date, so the times never seem to run backwards
+  const at = (iso: string) => (fmtMD(iso) === fmtMD(ev.opened_at) ? fmtHM(iso) : `${fmtMD(iso)} ${fmtHM(iso)}`)
   const steps = [`${fmtMD(ev.opened_at)} ${fmtHM(ev.opened_at)} 發生`]
-  if (ev.repaired_at) steps.push(`${fmtHM(ev.repaired_at)} 維修完成`)
-  if (ev.recovered_at) steps.push(`${fmtHM(ev.recovered_at)} 恢復正常`)
+  if (ev.repaired_at) steps.push(`${at(ev.repaired_at)} 維修完成`)
+  if (ev.recovered_at) steps.push(`${at(ev.recovered_at)} 恢復正常`)
   const took = closed ? `・共 ${dur(t(ev.closed_at) - t(ev.opened_at))}` : ''
   const result = closed ? outcomeText(ev.machine_id, ev.state, ev.outcome) : openPhase(ev, tasks)
   const head: Row[] = [{
@@ -136,8 +163,7 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
   })
 
   const mine = approvals.filter((a) => a.event_id === ev.id).sort((a, b) => t(a.created_at) - t(b.created_at))
-  // an approved card that a later card replaced: its schedule went stale before it took effect, the later card ran
-  const redone = new Set(mine.map((a) => a.supersedes).filter(Boolean))
+  const redone = staleCards(mine)
   const round = (n: number) => (n > 1 ? `第 ${n} 輪` : '')   // 第 N 輪 from the second round on
   parts.push({
     id: 'decisions', title: '四、主管決定',
@@ -145,9 +171,11 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
       const d = a.decision
       const opt = a.options.find((o) => o.id === d?.option_id)
       const by = [d?.decided_by ? who(d.decided_by) : null, d?.via ? VIA[d.via] ?? d.via : null].filter(Boolean).join('・')
+      // the schedule a stale card names never took effect: its option keeps 「第 2 版排程」 without 「生效」
+      const label = opt && (redone.has(a.id) ? tidy(opt.label).replace(/(第 \d+ 版排程)生效/g, '$1') : tidy(opt.label))
       return {
         time: fmtHM(d?.decided_at ?? a.created_at), k: [round(a.round), DECISION[a.status] ?? a.status].filter(Boolean).join('・'),
-        text: `${tidy(a.title)}${opt ? `；選擇：${tidy(opt.label)}${opt.recommended ? '（系統建議）' : '（沒選系統建議）'}` : ''}${by ? `；${by}` : ''}${d?.reason ? `；理由：${d.reason}` : ''}${redone.has(a.id) ? '；排程已先被更新，已重算' : ''}`,
+        text: `${tidy(a.title)}${opt ? `；選擇：${label}${opt.recommended ? '（系統建議）' : '（沒選系統建議）'}` : ''}${by ? `；${by}` : ''}${d?.reason ? `；理由：${tidy(d.reason)}` : ''}${redone.has(a.id) ? '；排程已先被更新，已重算' : ''}`,
         tone: (a.status === 'approved' || a.status === 'modified') && !redone.has(a.id) ? 'ok' : 'warn',
       }
     }),
@@ -156,7 +184,7 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
 
   parts.push({
     id: 'impact', title: '五、交期影響',
-    rows: mine.filter((a) => a.status === 'approved' || a.status === 'modified')
+    rows: mine.filter((a) => (a.status === 'approved' || a.status === 'modified') && !redone.has(a.id))
       .map((a) => ({ time: fmtHM(a.decision?.decided_at ?? a.created_at), k: round(a.round) || undefined, text: tidy(a.delivery_impact) || '—' })),
     empty: '沒有核准過的排程變更',
   })
