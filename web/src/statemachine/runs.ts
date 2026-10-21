@@ -51,3 +51,39 @@ export function enteredAt(ev: Event, run: DayRun | undefined): string {
 }
 
 export const BOARD: EventState[] = ['detected', 'classify', 'plan', 'simulate', 'gate', 'await_approval', 'execute', 'verify', 'replan', 'closed', 'safe_stop']
+
+// The page's plain view (CJ, 2026-10-22: 「狀態幾那麼多層真的搞不清楚在做什麼」): the 11 states fold into 4 stages a
+// supervisor can read at a glance; the 11-state board stays behind 「看細節」.
+export type Stage = 'ai' | 'you' | 'run' | 'end'
+export const STAGES: { key: Stage; label: string; meaning: string; states: EventState[] }[] = [
+  { key: 'ai', label: 'AI 處理中', meaning: 'AI 在查資料、想原因、排計劃', states: ['detected', 'classify', 'plan', 'simulate', 'gate'] },
+  { key: 'you', label: '等你決定', meaning: '計劃好了，等你核准或討論', states: ['await_approval'] },
+  { key: 'run', label: '執行與確認', meaning: '照核准的做，程式確認有沒有效；沒效會換假設重來', states: ['execute', 'verify', 'replan'] },
+  { key: 'end', label: '結束', meaning: '結案，或 AI 停手交給人', states: ['closed', 'safe_stop'] },
+]
+export function stageOf(s: EventState): Stage {
+  return STAGES.find((g) => g.states.includes(s))?.key ?? 'ai'
+}
+
+/** One plain sentence: where the event is and what it waits on, e.g. 「H1 被讀值否決，正在換假設 H2」. */
+export function statusText(ev: Event, tasks: WorkTask[], mins: number): string {
+  const open = tasks.filter((t) => t.event_id === ev.id && t.status !== '完成').length
+  const v = (ev.prior_rounds?.length ?? 0) + 1
+  switch (ev.state) {
+    case 'detected': return '偵測到異常，AI 正在看資料'
+    case 'classify': return 'AI 正在判斷是哪一類問題'
+    case 'plan': return v > 1 ? `AI 正在排第 ${v} 版計劃` : 'AI 正在想原因、排計劃'
+    case 'simulate': return `計劃 v${v} 排好了，程式正在試算影響`
+    case 'gate': return `程式正在檢查計劃 v${v} 安不安全、要不要你核准`
+    case 'await_approval': return `計劃 v${v} 等你核准（已等 ${mins} 分鐘）`
+    case 'execute': return open ? `照核准的做，等現場完成 ${open} 項任務` : '照核准的計劃執行中'
+    case 'verify': return open ? `等現場完成 ${open} 項任務，再由程式確認` : '程式正在看讀值，確認有沒有效'
+    case 'replan': {
+      const rejected = ev.plan?.rejected_hypothesis_ids.at(-1) ?? ev.hypotheses.find((h) => h.status === 'rejected')?.id ?? ev.plan?.hypothesis.id
+      const next = ev.hypotheses.find((h) => h.status !== 'rejected' && h.id !== rejected)?.id
+      return `${rejected ? `${rejected} 被讀值否決` : '上一個假設沒效'}，正在換假設${next ? ` ${next}` : ''}`
+    }
+    case 'closed': return '已結案'
+    case 'safe_stop': return 'AI 停手，交給人處理'
+  }
+}
