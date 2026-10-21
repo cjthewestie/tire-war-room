@@ -178,8 +178,7 @@ async def test_bare_replan_on_the_selected_task_asks_then_runs():
     agent = MainAgent(_settings(), client=m)
     q = await _say(agent, "重新排", ctl)
     assert q["reply"] == CONFIRM_Q.format(verb="重新規劃", label="7 號硫化機那件", eid="EV-7")
-    offered = {t["function"]["name"] for t in m.calls[0]["tools"]}
-    assert "query_plant" not in offered and "read_sensors" not in offered and "replan_task" in offered
+    assert not m.calls and q["by"] == "control"           # a bare command is acted on by code: no lookups, no model call
     done = await _say(agent, "好", ctl)
     assert ctl.ran == [("replan_task", "EV-7")] and done["by"] == "control"
 
