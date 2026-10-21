@@ -3,7 +3,7 @@
 // Only what happened since the scenario was last loaded (the runtime's system row {"msg": "scenario loaded"}): the 主控台
 // showed earlier rehearsals, and every reload added 「機台處理 agent 已停止：事件處理被取消」.
 import { useEffect, useMemo, useState } from 'react'
-import type { AuditEntry } from '../contracts'
+import type { AuditEntry, ChatMode, TaskLink } from '../contracts'
 import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import type { LocalItem } from './transcript'
@@ -13,6 +13,8 @@ export interface Bubble {
   steps?: { label: string; summary: string; ok: boolean }[]; fellBack?: boolean; error?: string | null
   /** the waiting plan (event id) the message was about */
   about?: string | null
+  /** 總覽 replies: the task boards it names (code-made from real event ids) */
+  links?: TaskLink[]
 }
 
 type D = Record<string, unknown>
@@ -20,15 +22,18 @@ type D = Record<string, unknown>
 const isLoad = (e: AuditEntry) => e.kind === 'system' && (e.payload as D | null)?.msg === 'scenario loaded'
 const mine = (e: AuditEntry) => (e.actor === 'main_agent' && e.kind === 'system') || isLoad(e)
 
-/** Audit rows of the 主 agent → bubbles. */
-function fromAudit(e: AuditEntry): Bubble[] {
+/** Audit rows of the 主 agent → bubbles. The 總覽 conversation (mode overview) has only its own turns; the task chat
+ *  has the rest (its turns, dispatches, reports). */
+function fromAudit(e: AuditEntry, scope: ChatMode): Bubble[] {
   const p = (e.payload ?? {}) as D
   const o = String(p.orch ?? '')
+  if ((o === 'chat' && p.mode === 'overview') !== (scope === 'overview')) return []
   if (o === 'chat') {
     const steps = Array.isArray(p.steps) ? (p.steps as D[]).map((s) => ({ label: String(s.label ?? s.tool ?? ''), summary: String(s.summary ?? ''), ok: s.ok !== false })) : []
     const about = (p.selected as string) ?? null
     return [{ key: `a${e.seq}-me`, ts: e.ts, who: 'me', text: String(p.text ?? ''), about },
-      { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null, about }]
+      { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null, about,
+        links: Array.isArray(p.links) ? (p.links as TaskLink[]) : undefined }]
   }
   // an event the scenario switch (or the day loop) cancelled is not news for the supervisor
   if (o === 'report' && /事件處理被取消/.test(String(p.outcome ?? p.text ?? ''))) return []
@@ -46,7 +51,9 @@ function shortText(t: string): string {
   return first.length > 90 ? `${first.slice(0, 88)}…` : `${first}。`
 }
 
-export function useMainThread(asks: LocalItem[]): Bubble[] {
+/** `scope`: 'overview' = the Agent page's 總覽 conversation; 'task' = the 主控台 chat. `about`: only the turns sent with
+ *  that task selected (the Agent page's task board). */
+export function useMainThread(asks: LocalItem[], scope: ChatMode = 'task', about?: string): Bubble[] {
   const { state, transport, connected } = useWarRoom()
   const [backfill, setBackfill] = useState<AuditEntry[]>([])
   useEffect(() => {
@@ -71,14 +78,16 @@ export function useMainThread(asks: LocalItem[]): Bubble[] {
     const all = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
     // every turn the server has, so a message sent before the switch does not come back as a local bubble
     const turns = new Set(all.map((e) => String((e.payload as D)?.turn ?? '')).filter(Boolean))
-    const out: Bubble[] = all.filter((e) => e.seq > loaded).flatMap(fromAudit)
+    const out: Bubble[] = all.filter((e) => e.seq > loaded && (about === undefined || (e.payload as D)?.selected === about))
+      .flatMap((e) => fromAudit(e, scope))
     // what is being sent now (and answers whose audit row has not arrived yet)
     for (const it of asks) {
-      if (it.k !== 'chat' || (it.turn && turns.has(it.turn))) continue
+      if (it.k !== 'chat' || (it.turn && turns.has(it.turn)) || (it.mode === 'overview') !== (scope === 'overview')) continue
+      if (about !== undefined && it.selected !== about) continue
       out.push({ key: it.key, ts: it.ts, who: it.role === 'me' ? 'me' : 'agent', text: it.text, pending: it.pending, steps: it.steps,
-        fellBack: it.fellBack, error: it.error, about: it.about ?? null })
+        fellBack: it.fellBack, error: it.error, about: it.about ?? null, links: it.links })
     }
     return out
-  }, [backfill, kept, state.audit, asks])
+  }, [backfill, kept, state.audit, asks, scope, about])
 }
 

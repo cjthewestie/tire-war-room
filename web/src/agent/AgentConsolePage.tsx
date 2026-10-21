@@ -18,9 +18,9 @@ import { useWarRoom } from '../useWarRoom'
 import { ToolIcon } from './ToolIcon'
 import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
-import { ChatBar } from './ChatBar'
+import { ChatBar, type BarFocus } from './ChatBar'
 import { SUB_STATUS, SUB_TONE, isOpen, plainStatus, whatOf } from './subagents'
-import { Bubbles } from './SimpleChat'
+import { BubbleRow, Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
@@ -56,6 +56,8 @@ function inKind(i: Item, k: Kind): boolean {
 
 
 const MAIN = '__main'
+/** 總覽 questions (CJ 2026-10-22: 統合整理進行中的任務、查詢過去資料、列出有疑問的任務) */
+const OVERVIEW_QUESTIONS = ['現在所有任務狀況', '哪些任務有問題', '今天處理過什麼', '#A-311 之前怎麼了']
 
 export function AgentConsolePage({ asks, setAsks, initial }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; initial: string | null
@@ -76,7 +78,9 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
   const subs = new Map((state.subagents?.items ?? []).map((x) => [x.id, x]))
   const openOf = (e: Event) => { const sa = subs.get(e.id); return sa ? isOpen(sa) : e.state !== 'closed' && e.state !== 'safe_stop' }
   const listed = events.filter((e) => scope === 'all' || (scope === 'open') === openOf(e))
-  const thread = useMainThread(asks)
+  // 總覽: Agent Nemo over every task — its own conversation (mode overview), no task selected (CJ 2026-10-22)
+  const thread = useMainThread(asks, 'overview')
+  const [focus, setFocus] = useState<BarFocus | null>(null)
   if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
   return (
     <>
@@ -113,12 +117,17 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
         <TaskLog onPick={pick} />
       </aside>
       {main ? (
-        <section className="panel trace-main main-thread" aria-label="Agent Nemo" data-testid="main-thread">
-          <h2 className="trace-h">Agent Nemo</h2>
-          <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
-          <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={null} /></div>
+        <section className="panel trace-main main-thread" aria-label="Agent Nemo 總覽" data-testid="main-thread" data-mode="overview">
+          <h2 className="trace-h">Agent Nemo・總覽</h2>
+          <Bubbles items={thread} empty="問全部任務的狀況、哪些有問題、過去的紀錄，或工廠的任何事。" onLink={pick} guide={(
+            <div className="con-guide" data-testid="overview-guide">
+              <p className="muted small">我看得到所有進行中的任務、過去的紀錄和工廠資料。提到的任務會附連結，點了直接打開那件的任務版。</p>
+              {OVERVIEW_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" onClick={() => setFocus((f) => ({ text: q, send: true, n: (f?.n ?? 0) + 1 }))}>{q}</button>)}
+            </div>
+          )} />
+          <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={focus} mode="overview" /></div>
         </section>
-      ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
+      ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} /> : (
         <section className="panel trace-main"><p className="muted">找不到這個事件。</p></section>
       )}
     </div>
@@ -175,13 +184,14 @@ function evName(e: Event): string {
   return e.source === 'supervisor' ? '主管指令' : e.source === 'plant' ? '工廠事件' : machineLabel(e.machine_id)
 }
 
-function Trace({ ev, asks, setAsks, onPick }: {
-  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+function Trace({ ev, asks, setAsks }: {
+  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
 }) {
   const { state } = useWarRoom()
   const { items: evItems, source } = useTranscript(ev)
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
   const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])   // a subagent shows its own run only
+  const talk = useMainThread(asks, 'task', ev?.id ?? '')    // what was said with this task selected
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const ended = !!ev && (ev.state === 'closed' || ev.state === 'safe_stop')
   const [kind, setKind] = useState<Kind>('all')
@@ -235,8 +245,9 @@ function Trace({ ev, asks, setAsks, onPick }: {
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
         {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
         {ev && ended && <ReportBlock ev={ev} />}
+        {talk.length > 0 && <div className="sc sp-talk" data-testid="trace-talk">{talk.map((b) => <BubbleRow key={b.key} b={b} />)}</div>}
       </div>
-      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} focus={null} onSent={(about) => { if (!about) onPick(MAIN) }} /></div>
+      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} focus={null} /></div>
     </section>
   )
 }

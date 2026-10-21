@@ -865,7 +865,13 @@ export interface SubagentsView { items: Subagent[]; queue: { slots: number; runn
 export interface MainReply {
   id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
+  /** overview mode only: links to task boards, made by code from event ids that exist (warroom/api/overview.py) */
+  mode?: ChatMode; links?: TaskLink[]
 }
+/** 'overview': the Agent page's 總覽 conversation with Agent Nemo; 'task': the chat bound to the selected task. */
+export type ChatMode = "task" | "overview"
+/** A task named in an overview reply: opens its board (#console?event=<event_id>); `reason` only for questionable ones. */
+export interface TaskLink { event_id: string; label: string; state: string; reason: string | null }
 
 /** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
  *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */

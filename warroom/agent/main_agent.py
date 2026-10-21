@@ -94,6 +94,7 @@ PLANT_TOPICS: dict[str, str] = {
     "orders_history": "之前的訂單：已完成、已出貨的訂單，出貨日、是否準時、遲交的有哪些，和每天產量紀錄",
     "order_lookup": "單張訂單紀錄（要給 order_id）：建立、排程、硫化、完成、出貨，以及相關事件",
     "safety_stops": "安全核心停機：每台停下的機台，①派現場檢查 ②讀值回安全範圍 ③主管放行（只能按按鈕）各到哪一步",
+    "questionable": "有疑問、要主管注意的任務：每件附原因（等核准太久、安全停止沒人處理、重新規劃多次、假設被推翻、主管退回、驗證失敗、模型改用規則、卡住沒進度、現場任務逾時）",
     "tasks": "現在所有任務狀況：每件進行中的事件與預先規劃，目前狀態（規劃中／待核准 vN／執行中 n/m／驗證中／安全停止）、在等什麼、多久了、卡在哪",
 }
 # task control from chat (CJ 2026-10-22: 「A」): existing supervisor actions only, each confirmed in chat first.
@@ -240,6 +241,7 @@ _TOPIC_RX: list[tuple[str, re.Pattern[str]]] = [
     ("schedule", re.compile(r"排程|工單|入模|出模|下一模")),
     ("materials", re.compile(r"原料|庫存|缺料|補料|進貨|採購|橡膠|碳黑|鋼絲|尼龍|硫化劑")),
     ("safety_stops", re.compile(r"安全核心.{0,6}(?:停|狀況|怎樣|如何|放行)|安全停機|停機.{0,4}(?:放行|解除|恢復)|放行")),
+    ("questionable", re.compile(r"有問題|有疑問|怪怪|不對勁|卡住|要注意|該注意|哪些.{0,4}(?:不正常|出錯|有狀況)")),
     ("tasks", re.compile(r"(?:所有|全部|每個|每件)?任務.{0,4}(?:狀況|狀態|進度|怎樣|如何)|任務(?:狀況|進度)|卡在哪")),
     ("open_events", re.compile(r"事件|還沒結|未結|待核准|等核准|警報")),
     ("handled_today", re.compile(r"處理過|做了什麼|做過|今天.{0,4}(?:處理|完成)|結案")),
@@ -550,6 +552,7 @@ class MainAgent:
         self._ids = itertools.count(1)
         self._turns = -1                   # rotation index of the canned replies (the first call picks variant 0)
         self._read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
+        self.mode = "task"
 
     # ---------------------------------------------------------------- one turn
     async def turn(self, text: str, *, context: dict[str, Any], waiting_plan: str | None,
@@ -558,8 +561,9 @@ class MainAgent:
                    discuss: Callable[[str], Awaitable[dict[str, Any]]] | None,
                    slot: Callable[[], Any] | None = None,
                    read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None,
-                   conversation: str | None = None, control: Any = None) -> dict[str, Any]:
+                   conversation: str | None = None, control: Any = None, mode: str = "task") -> dict[str, Any]:
         t0 = time.perf_counter()
+        self.mode = mode                   # "overview": the Agent page's 總覽 conversation (warroom/api/overview.py)
         tid = f"MAIN-{next(self._ids):04d}"
         steps: list[dict[str, Any]] = []
         out: dict[str, Any] = {"id": tid, "reply": "", "steps": steps, "event_id": None, "by": "rules",
@@ -1008,6 +1012,10 @@ class MainAgent:
         # 「我剛剛說哪台不要動？」「前面我們聊過什麼」: about the conversation itself, answered from its own record; with
         # the last turn alongside it re-answered that turn (「7 號機現在溫度 127.9°C」, real run 10-22)
         recall = prev is not None and bool(_RECALL_RX.search(t))
+        if self.mode == "overview" and prev is not None and topic_for(t) not in (None, topic_for(prev[0])):
+            # 總覽: 「哪些任務有問題」 after 「#A-311 之前怎麼了」 is its own question (with the last turn alongside, the real
+            # model re-read #A-311, preview run 10-22)
+            asked = about_last = False
         follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked or recall)
         # the supervisor's earlier words, repeats folded (20 × 「7號機現在溫度多少」 crowded out the real question)
         earlier = list(dict.fromkeys(q for q, _a in self.memory)) if follow else []
