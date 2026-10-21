@@ -8,6 +8,8 @@
 // lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
 // click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
 // is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
+// ▶ Demo（6 分鐘） (G): the guided 6-minute run for the finals (GuidedDemo.tsx, demoCues.ts): cue cards, the camera
+// flies to each beat, and at 3:00 the pitch on the whiteboard (Whiteboard.tsx; CJ's slides in web/public/pitch/).
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -27,6 +29,9 @@ import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
+import { DemoOverlay, SlideView } from './GuidedDemo'
+import { useGuidedDemo } from './useGuidedDemo'
+import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
@@ -179,6 +184,32 @@ export function FactoryApp() {
     const t = setTimeout(() => setDemoNote(null), demoNote.ms ?? 2500)
     return () => clearTimeout(t)
   }, [demoNote])
+  // ▶ Demo（6 分鐘）: the camera is the director's while it runs, so the lead stands still and the overview is on
+  const deck = useDeck()
+  const onDemoBegin = useCallback(() => {
+    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
+  }, [])
+  const onDemoEnd = useCallback(() => { window.focus(); canvasRef.current?.focus() }, [])
+  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd })
+  const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
+  const nSlides = deck.slides.length
+  const { running: demoOn, setSlide, setSlideView, slideView } = demo
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA')) return
+      if (e.code === 'KeyG' && !e.repeat) { void demo.begin(); return }
+      if (!demoOn) return
+      if (e.code === 'KeyN' && !e.repeat) demo.skip()
+      else if (e.code === 'KeyB' && !e.repeat) demo.togglePause()
+      else if ((pitchView || slideView) && (e.code === 'ArrowRight' || e.code === 'PageDown')) setSlide((i) => Math.min(nSlides - 1, i + 1))
+      else if ((pitchView || slideView) && (e.code === 'ArrowLeft' || e.code === 'PageUp')) setSlide((i) => Math.max(0, i - 1))
+      else if (e.code === 'Escape' && slideView) setSlideView(false)
+    }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [demo, demoOn, pitchView, slideView, nSlides, setSlide, setSlideView])
+
   const stateRef = useRef(state)          // 情境疊加: the key handler decides overlay / load on the latest state
   useEffect(() => { stateRef.current = state }, [state])
 
@@ -250,6 +281,7 @@ export function FactoryApp() {
       }
       if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
+      if (e.code === 'Escape' && demoOn) return   // the demo's slide view takes Esc
       if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
@@ -264,7 +296,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen, demoOn])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -310,15 +342,16 @@ export function FactoryApp() {
         <color attach="background" args={['#e9dfcf']} />
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
-        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
+          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
-          enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
+          enabled={started && !overlay && !fading && !demoOn} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
           pending={pending.length + reviews.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
           prompt={prompt}
         />
-        <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
+        <TiltShift enabled={(!started || mode === 'third') && !phoneUp && !pitchView} />
       </Canvas>
 
       {/* first person: a small aim dot, and what F does right here */}
@@ -349,14 +382,19 @@ export function FactoryApp() {
           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length || reviews.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{reviews.length ? `・待覆核 ${reviews.length} 件` : ''}{pending.length || reviews.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
-        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
+        {!demoOn && (
+          <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
+        )}
+        {started && !phoneUp && !demoOn && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
-      <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
+      {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
-      </div>
+      </div>}
+      <DemoOverlay demo={demo} slides={nSlides} onPhone={() => raisePhone(true)} />
+      {slideView && <SlideView slides={deck.slides} index={Math.min(demo.slide, nSlides - 1)} onIndex={setSlide} onClose={() => setSlideView(false)} />}
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
       )}
@@ -387,6 +425,7 @@ export function FactoryApp() {
               <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
             </ul>}
             <button className="f3-go">點擊開始</button>
+            <button className="f3-go f3-go-demo" data-testid="demo-start-intro" onClick={(e) => { e.stopPropagation(); void demo.begin() }}>▶ Demo（6 分鐘）</button>
           </div>
         </div>
       )}

@@ -293,6 +293,12 @@ def test_web_pages(client):
         assert r.status_code == 200 and "<" in r.text
 
 
+def test_pitch_deck_manifest_served(client):
+    # the 3D whiteboard reads its slides from web/public/pitch/ (no rebuild needed); empty list = placeholders
+    r = client.get("/pitch/slides.json")
+    assert r.status_code == 200 and isinstance(r.json()["slides"], list)
+
+
 # ---------------------------------------------------------------- runtime loop
 async def test_background_loop_advances_time(tmp_path):
     rt = Runtime(_settings(tmp_path, sim_speed=50), use_real=False, tick_wall_s=0.05)

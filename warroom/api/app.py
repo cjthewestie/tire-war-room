@@ -1249,6 +1249,12 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
 
+    # the 3D whiteboard's pitch deck (web/public/pitch/README.md): served straight from the source folder, so CJ's
+    # slides show without a rebuild; the built copy is the fallback
+    pitch = next((d for d in (ROOT / "web" / "public" / "pitch", dist / "pitch") if d.is_dir()), None)
+    if pitch is not None:
+        app.mount("/pitch", StaticFiles(directory=pitch), name="pitch")
+
     def page(name: str):
         p = dist / name
         if p.is_file():

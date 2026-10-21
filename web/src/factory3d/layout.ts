@@ -69,6 +69,10 @@ export const DOCK = { x0: 5.2, x1: 9.0, z0: 6.2, z1: 8.0 }
 /** [x, z, yaw]: yaw as for the lead (π = facing +z), so they look out over the corridor and the doors. */
 export const STAFF_SPOTS: [number, number, number][] = [[10.1, -1.3, Math.PI + 0.5], [10.85, -0.6, Math.PI - 0.3], [10.15, 0.4, Math.PI + 0.2], [10.85, 1.2, Math.PI - 0.4]]
 
+/** The pitch whiteboard (Whiteboard.tsx): a mobile board in the lobby by the east wall, facing west over the floor.
+ *  (x, z) is the board's centre on the ground; w × h the writing surface, y its centre height. */
+export const WHITEBOARD = { x: 11.0, z: -4.2, yaw: -Math.PI / 2, w: 2.4, h: 1.35, y: 1.12 }
+
 export const DESK = { x: 8.35, z: 0, w: 0.45, d: 1.5, h: 0.42 }
 export const SCREEN = { x: 9.5, z: 0, w: 2.4, h: 1.35, y: 1.2 }
 
@@ -137,6 +141,7 @@ export const COLLIDERS: Box[] = [
   around(SCREEN.x - 0.05, SCREEN.z, 0.2, SCREEN.w + 0.2),
   around(PALLETS[0][0], PALLETS[0][1], 0.7, 0.7), around(PALLETS[1][0], PALLETS[1][1], 0.7, 0.7),
   DOCK_PROPS.crates, DOCK_PROPS.forklift,
+  around(WHITEBOARD.x, WHITEBOARD.z, 0.6, WHITEBOARD.w + 0.15),
   ...Object.values(OUTER_WALLS).flat(), ...INNER_WALLS.map((w) => w.box),
 ]
 
