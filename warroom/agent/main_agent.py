@@ -1275,9 +1275,10 @@ class MainAgent:
                     # 10-21: 「天氣我沒有資料，但工廠方面：目前運轉 5 台…」); then one plant fact and an offer, as small talk
                     end = min([k for k in (words.find(c, said.end()) for c in "。，,；;！!？?") if k >= 0] or [len(words)])
                     words = self._with_fact(words[:end].rstrip("，,；; ") + "。", context)
-            if code is None and _APPROVE_RX.search(t) and not re.search(r"按鈕|不能|無法", words):
+            if code is None and _APPROVE_RX.search(t) and not re.search(r"按鈕", words):
+                # 「幫我放行 B 線開煉機」: the answer names the button (it got the general injection line, real run 10-22)
                 words = APPROVE_REPLY
-            if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
+            if code is None and inject and not _APPROVE_RX.search(t) and not re.search(r"不能|無法|沒辦法|核准", words):
                 # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
                 words = INJECT_REPLY
             out["reply"] = code if code is not None else words
