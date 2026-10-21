@@ -57,6 +57,24 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('… ETA from the repair task (30 s), not the 20-minute window', /約 30 秒/.test(p.eta), p.eta)
   const fast = aiStatusParts(ev, stateOf([ev], [repair, slow]), null, 12)
   check('… with REPAIR_FAST_S (wall clock): 約 10 秒後維修完成 (20 % of 12 s done)', fast.eta === '約 10 秒後維修完成', fast.eta)
+  // GATE → EXECUTE (the R1 檢修) → AWAIT_APPROVAL: the 檢修 is made in EXECUTE before the card and held 待派
+  const auto = { ...base, state: 'execute', closed_at: null, outcome: null, approvals: [] }
+  const e = aiStatusParts(auto, stateOf([auto], [held]), null, 12)
+  check('EXECUTE before the card, 檢修 held 待派 → Agent Nemo 建議派人維修｜Agent Nemo 擬方案中｜核准後約 12 秒維修完成 (not 已派人／維修中)',
+    e.who === 'Agent Nemo 建議派人維修' && e.phase === 'Agent Nemo 擬方案中' && e.eta === '核准後約 12 秒維修完成', line(e))
+  const planning = { ...base, state: 'plan', closed_at: null, outcome: null, approvals: [] }
+  const pl = aiStatusParts(planning, stateOf([planning], []), null, 12)
+  check('planning, no repair yet, REPAIR_FAST_S set → Agent Nemo 擬方案中 and no ETA (not the 20-minute window first)',
+    !pl.who && pl.phase === 'Agent Nemo 擬方案中' && !pl.eta, line(pl))
+  // concurrent_3: approved, then another event's schedule took effect first; code re-solves (REPLAN … GATE) while the
+  // approved 檢修 goes on (runtime approved_rebase)
+  const rebase = { ...base, state: 'replan', closed_at: null, outcome: null }
+  const rb = aiStatusParts(rebase, stateOf([rebase], [repair]), null, 12)
+  check('approved, re-solving the schedule, 檢修 running → Agent Nemo 已派人維修｜維修中（0/1）｜約 10 秒後維修完成 (not 建議／核准後)',
+    rb.who === 'Agent Nemo 已派人維修' && rb.phase === '維修中（0/1）' && rb.eta === '約 10 秒後維修完成', line(rb))
+  const v2 = aiStatusParts({ ...rebase, state: 'await_approval' }, stateOf([rebase], [repair]), null, 12)
+  check('… a new card for the re-solve while the 檢修 runs → 已派人維修｜待核准｜約 10 秒後維修完成',
+    v2.who === 'Agent Nemo 已派人維修' && v2.phase === '待核准' && v2.eta === '約 10 秒後維修完成', line(v2))
   const done = { ...repair, status: '完成', done_at: iso(now), progress: 1 }
   const warm = { ...base, state: 'verify', closed_at: null, outcome: null, repaired_at: iso(now), recovered_at: null, review: null }
   const w = aiStatusParts(warm, stateOf([warm], [done, slow]), null)

@@ -5,7 +5,9 @@
 // runs inside OpenShell), the time is the repair estimate of #73 (verification window from approval, or the last field
 // task's ETA if later), or the wall seconds of a fast repair (/api/health repair_fast_s).
 // Detection is a Python rule (warroom/detect), not AI: 「偵測到」, never 「AI 偵測到」. The repair task is made before the
-// approval but held 待派 (warroom/sim/work.py): 「建議派人維修」 before, 「已派人維修」 after.
+// approval but held 待派 (warroom/sim/work.py): 「建議派人維修」 before, 「已派人維修」 after — read from the task itself
+// (released), not the event's state: the R1 檢修 is made in EXECUTE before the card, and code re-solves an approved
+// round's stale schedule (REPLAN … GATE, concurrent_3) while the approved repair goes on.
 // Fast repair (Kyle 10-21 flow): 維修中（n/m）→ 維修完成・溫度回升中 (Event.repaired_at, the readings ramp back) →
 // 7 號硫化機已恢復正常（128°C）｜Agent Nemo 異常報告已產生 (closed, Event.review pending = the incident report unread, and
 // Event.ai_report written: until then 「Agent Nemo 異常報告整理中」) → …｜主管已讀報告.
@@ -110,6 +112,13 @@ export function recoverText(x: Expectation | null, now: number | null, normal: n
   return `${recoverWord(x, now, normal)}${x && now != null ? ` ${readingText(x.channel, now)} → ${to}` : ''}`
 }
 
+/** The field already works on this task: someone took it, or (fast repair) its wall seconds run. Until the supervisor's
+ *  decision a fast repair task stays 待派 with no progress (warroom/sim/work.py TaskBoard.hold, runtime
+ *  _awaits_decision); after it the task runs on, even while code re-solves the approved round's schedule. */
+function released(t: WorkTask): boolean {
+  return t.status !== '待派' || !!t.assigned_at || (t.progress ?? 0) > 0
+}
+
 /** The incident report is unread and written: Event.review pending is set at close, Event.ai_report once Agent Nemo's
  *  draft is in (warroom/agent/reporter.py, up to its close wait later). */
 export function reportReady(ev: Event): ev is Event & { review: NonNullable<Event['review']> } {
@@ -124,8 +133,7 @@ export function repairStage(ev: Event, items: WorkTask[]): RepairStage | null {
   if (ev.state === 'safe_stop') return null
   if (ev.recovered_at) return 'recovered'
   if (ev.repaired_at) return 'recovering'
-  if (BEFORE_APPROVAL.has(ev.state)) return null
-  return items.some((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind) && t.status !== '完成') ? 'repairing' : null
+  return items.some((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind) && t.status !== '完成' && released(t)) ? 'repairing' : null
 }
 
 /** What was detected: the same text on every screen for the whole event (not the latest alert title, which a later round
@@ -145,7 +153,8 @@ function detection(ev: Event): string {
 /** The field work of these repair tasks in the supervisor's words: 檢修／停用檢修 = 維修, 放慢投料, 暫停投料
  *  (B 線開煉機: 維修、放慢投料). */
 function repairWork(tasks: WorkTask[]): string[] {
-  return [...new Set(tasks.map((t) => (t.kind === '放慢投料' || t.kind === '暫停投料' ? t.kind : '維修')))]
+  const work = new Set(tasks.map((t) => (t.kind === '放慢投料' || t.kind === '暫停投料' ? t.kind : '維修')))
+  return [...work].sort((a, b) => Number(b === '維修') - Number(a === '維修'))   // 維修 first, whatever the task order
 }
 
 /** 「維修中（1/2）」: the repair tasks done out of all of them, named by the work still open (維修 first). */
@@ -185,7 +194,13 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null,
   // any round's repair task counts: the machine is not fixed while maintenance is still on it
   const repair = (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind))
   const repairOpen = repair.filter((t) => t.status !== '完成')
-  const before = BEFORE_APPROVAL.has(ev.state)
+  // the crew is on the open repair (the supervisor decided, or no card was needed)
+  const running = repairOpen.some(released)
+  // before the supervisor's decision: the open repair is still held (and the newest card not decided), or, with none
+  // open, nothing was ever sent out while the event plans or waits
+  const ended = ev.state === 'closed' || ev.state === 'safe_stop' || !!ev.repaired_at
+  const before = !ended && (repairOpen.length ? !running && est.decided == null
+    : !repair.some(released) && BEFORE_APPROVAL.has(ev.state))
   const plantEvent = ev.source === 'supervisor' || ev.source === 'plant'
   // closed and verified by a reading (a supervisor or plant event has nothing to verify: 已處理完)
   const unverified = ev.state === 'closed' && !plantEvent ? unverifiedClose(ev, repair, repairOpen) : null
@@ -196,6 +211,9 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null,
   // Kyle 10-21: the single agent is called Agent Nemo on screen; no typed sub-agent in brackets (CJ 2026-10-21: 「現在先不要派發」)
   const work = repairWork(repair)
   const who = !verified && work.length ? `Agent Nemo ${before ? '建議' : '已'}派人${work.join('、')}` : ''
+  // once closed, and while the crew repairs the machine, the ETA is the repair tasks' own (a fast repair takes seconds,
+  // not the verification window)
+  const repairing = ev.state === 'closed' || (!before && repairOpen.length > 0)
   const phase =
     ev.state === 'closed' ? (plantEvent ? '已處理完' : unverified
       ?? (ev.review?.status === 'done' ? '主管已讀報告' : ev.review?.status === 'pending'
@@ -203,20 +221,21 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null,
       : ev.state === 'safe_stop' ? '已安全停止'
         : recovering ? (ev.recovered_at ? '已恢復正常' : `維修完成・${recoverWord(est.x)}`)
         : ev.state === 'await_approval' ? '待核准'
-          : ev.state === 'execute' || ev.state === 'verify'
-            ? (repairOpen.length ? repairPhase(repair, repairOpen) : est.open.length ? `現場工作中（${done}/${est.tasks.length}）` : '確認讀值中')
-            : ev.state === 'detected' || ev.state === 'classify' ? 'Agent Nemo 分析中' : 'Agent Nemo 擬方案中'
-  // once closed, and while the crew repairs the machine, the ETA is the repair tasks' own (a fast repair takes seconds,
-  // not the verification window)
-  const repairing = ev.state === 'closed' || ((ev.state === 'execute' || ev.state === 'verify') && repairOpen.length > 0)
+          : repairing ? repairPhase(repair, repairOpen)
+            : ev.state === 'execute' || ev.state === 'verify'
+              ? (before ? 'Agent Nemo 擬方案中' : est.open.length ? `現場工作中（${done}/${est.tasks.length}）` : '確認讀值中')
+              // the newest card approved, its schedule gone stale: code re-solves it, the repair already done
+              : !before && est.decided != null && repair.length ? '重新排程中'
+                : ev.state === 'detected' || ev.state === 'classify' ? 'Agent Nemo 分析中' : 'Agent Nemo 擬方案中'
   const repairEta = repairing ? latestEta(repairOpen, est.now) : null
   const doneBy = ev.state === 'safe_stop' || recovering ? null : repairEta ? ms(repairEta) : ev.state === 'closed' ? null : est.doneBy
   let eta = ''
   if (fastS && fastS > 0 && ev.state !== 'closed' && !recovering && repairing && repairOpen.length) {
     const left = Math.max(...repairOpen.map((t) => (1 - Math.min(1, Math.max(0, t.progress ?? 0))) * fastS))
     eta = `約 ${Math.max(1, Math.round(left))} 秒後維修完成`
-  } else if (fastS && fastS > 0 && before && repairOpen.length) {
-    eta = `核准後約 ${Math.max(1, Math.round(fastS))} 秒維修完成`
+  } else if (fastS && fastS > 0 && before) {
+    // while Agent Nemo still plans there is no repair yet: no 「約 30 分鐘」 (the verification window) before 「約 12 秒」
+    eta = repairOpen.length ? `核准後約 ${Math.max(1, Math.round(fastS))} 秒維修完成` : ''
   } else if (doneBy) {
     const s = est.now ? (doneBy - ms(est.now)) / 1000 : null
     const left = s == null ? '' : s <= 0 ? '即將完成' : s < 60 ? `約 ${Math.max(1, Math.round(s))} 秒` : `約 ${Math.round(s / 60)} 分鐘`
