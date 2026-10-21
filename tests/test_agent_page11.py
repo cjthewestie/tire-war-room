@@ -167,13 +167,17 @@ async def test_page11_timeline(tmp_path):
 
     # executed writes: round 2 sent overtime, not a staff move; press 7 out of service
     notifies = [c.args["kind"] for c in tools.calls_of(ToolName.NOTIFY_TEAMS)]
-    # round 1: chosen transfer (B) then S5 info (waits for S4's approval); round 2: machine out + overtime (A)
+    # round 1: maintenance checks the steam supply (R1, auto, before the card), then the chosen transfer (B) and
+    # S5 info (waits for S4's approval); round 2: machine out + overtime (A)
     # round 2 then withdraws the round-1 transfer with an info notice, so only overtime stands
-    assert notifies == [NotifyKind.STAFF_MOVE.value, NotifyKind.INFO.value,
+    assert notifies == [NotifyKind.MAINTENANCE.value, NotifyKind.STAFF_MOVE.value, NotifyKind.INFO.value,
                         NotifyKind.MACHINE_OUT.value, NotifyKind.OVERTIME.value, NotifyKind.INFO.value]
+    maint = tools.calls_of(ToolName.NOTIFY_TEAMS)[0]
+    assert maint.args["teams"] == ["maintenance"] and maint.args["machine_id"] == "CURE-07"
+    assert maint.args["message"] == "7 號機溫度下降，請檢查蒸汽供應與溫度計"
     revoke = tools.calls_of(ToolName.NOTIFY_TEAMS)[-1]
     assert revoke.args["message"].startswith("撤回：") and "夜班加班" in revoke.args["message"]
-    assert revoke.args["teams"] == tools.calls_of(ToolName.NOTIFY_TEAMS)[0].args["teams"]   # same teams as the move
+    assert revoke.args["teams"] == tools.calls_of(ToolName.NOTIFY_TEAMS)[1].args["teams"]   # same teams as the move
     _find(tl, "系統", "依主管改選「夜班加班」", "撤回第 1 輪已執行的「從 2 線調 1 人」")
     assert not any("人力沿用" in t.text for t in tl)     # round 1 ran the transfer, not overtime
     assert not any(d.startswith("將做") for d in r2.done), r2.done
@@ -199,8 +203,9 @@ async def test_page11_timeline(tmp_path):
     assert AuditKind.SAFETY_ACTION in kinds
     assert audit.verify_chain()
     transitions = [e.payload["to"] for e in entries if e.kind is AuditKind.STATE_TRANSITION]
-    assert transitions == ["detected", "classify", "plan", "simulate", "gate", "await_approval", "execute", "verify",
-                           "replan", "simulate", "gate", "await_approval", "execute", "verify", "closed"]
+    # round 1: the R1 maintenance notice executes right after the gate, before the card
+    assert transitions == ["detected", "classify", "plan", "simulate", "gate", "execute", "await_approval", "execute",
+                           "verify", "replan", "simulate", "gate", "await_approval", "execute", "verify", "closed"]
     # the dashboard / phone saw it live
     types = {m.type for m in bus.history}
     assert {WsType.EVENT, WsType.ALERT_CARD, WsType.APPROVAL_REQUEST, WsType.APPROVAL_RESOLVED, WsType.AUDIT} <= types

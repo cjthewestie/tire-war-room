@@ -298,6 +298,26 @@ class Factory:
         self._faults = [f for f in self._faults if machine_id is not None and f.spec.machine_id != machine_id]
         if machine_id is None:
             self._pending = []
+        else:                                   # #76: the machine's scripted faults that have not started yet go too
+            self._pending = [(at, st) for at, st in self._pending if st.fault is None or st.fault.machine_id != machine_id]
+
+    def snap_to_nominal(self, machine_id: str) -> None:
+        """Fast repair (Settings.repair_fast_s): the repaired machine's process values go straight back to nominal (no
+        cool-down / heat-up), and so does its current reading (tiles, VERIFY): the sim clock may be held while another
+        event's solver runs, so the fix must not wait for the next step. Only after its faults were cleared; the
+        status is untouched. The reading is noiseless so the plant's RNG stream stays as it was."""
+        m = self._m[machine_id]
+        m.temp, m.pressure = m.nominal.temp_c, m.nominal.pressure
+        if m.flow is not None:
+            m.flow = m.nominal.flow_lpm
+        if m.steam is not None:
+            m.steam = P.STEAM_NOMINAL_KGF_CM2
+        if m.hist:
+            ts, *_, seq = m.hist[-1]
+            row = (ts, round(m.temp, 2), round(m.pressure, 2), None if m.flow is None else round(m.flow, 2),
+                   None if m.steam is None else round(m.steam, 3), seq)
+            m.hist[-1] = row
+            m.last = self._to_reading(machine_id, row)
 
     def faults(self, active_only: bool = True) -> list[FaultSpec]:
         t = self._t

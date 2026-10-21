@@ -8,13 +8,15 @@ import { STATE_LABEL } from '../components/common'
 import { ToolIcon } from './ToolIcon'
 import {
   expectationText, thinkContext,
-  type ApprovalItem, type AskItem, type ChatItem, type ChipsItem, type GateItem, type Item, type ThinkItem, type ToolItem, type VersionItem,
+  type ApprovalItem, type AskItem, type ChatItem, type ChipsItem, type GateItem, type Item, type ReviewItem, type TaskItem, type ThinkItem, type ToolItem,
+  type VersionItem,
 } from './transcript'
 
 const PHASE: Record<string, string> = { plan: '規劃', replan: '重新規劃' }
 const VERDICT: Record<string, string> = { allow: '放行', needs_approval: '需主管核准', reject: '拒絕' }
 const DECISION: Record<string, string> = { approve: '核准', modify: '修改', reject: '駁回', superseded: '作廢此卡（討論後改版）', expired: '逾時' }
 const VIA: Record<string, string> = { phone: '手機', touchscreen: '現場觸控螢幕', dashboard: '戰情室', auto: '自動' }
+const TASK_PHASE: Record<TaskItem['phase'], string> = { created: '派工', assigned: '前往中', started: '執行中', done: '完成', cancelled: '取消派工', count: '人員任務' }
 
 /** One transcript row. `open` expands tool calls (args, data read, raw result); `brief` keeps a 問戰情室 row to
  *  the question and the answer (the home 主控台 shows the final dialogue only). */
@@ -41,22 +43,46 @@ export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev
     case 'chat': return <ChatRow it={it} />
     case 'chips': return <ChipsRow it={it} />
     case 'version': return <VersionRow it={it} />
+    case 'task': return <TaskRow it={it} />
+    case 'review': return <ReviewRow it={it} />
   }
+}
+
+/** 派工 → 前往中 → 執行中 → 完成, by whom (repair tasks marked: they are what fixes the machine). */
+function TaskRow({ it }: { it: TaskItem }) {
+  return (
+    <div className={`r-line r-task tp-${it.phase} ${it.repair ? 'repair' : ''}`} data-kind="task" data-phase={it.phase} data-testid="task-row">
+      <ToolIcon name={it.phase === 'done' ? 'confirm_schedule' : it.phase === 'created' ? 'notify_teams' : 'human'} />
+      <span><b>{TASK_PHASE[it.phase]}</b>　{plain(it.text)}{it.who ? `・${it.who}` : ''}{it.repair && it.phase === 'created' && <small>維修</small>}</span>
+      <time>{fmtHMS(it.ts)}</time></div>
+  )
+}
+
+/** 維修完成，故障排除 → 請主管覆核 → 主管覆核. */
+function ReviewRow({ it }: { it: ReviewItem }) {
+  return (
+    <div className={`r-line r-review rv-${it.phase}`} data-kind="review" data-phase={it.phase} data-testid={`review-${it.phase}`}>
+      <ToolIcon name={it.phase === 'requested' ? 'human' : 'confirm_schedule'} />
+      <span><b>{it.text}</b>{it.note ? `　${it.note}` : ''}{it.phase === 'requested' && <small>已送到主管手機</small>}</span>
+      <time>{fmtHMS(it.ts)}</time></div>
+  )
 }
 
 function ChatRow({ it }: { it: ChatItem }) {
   if (it.role === 'me') {
     return (
       <div className={`r-chat me ${it.pending ? 'pending' : ''}`} data-kind="chat" data-role="me" data-testid="chat-me">
-        <div className="r-q"><span>{it.text}</span><small>{it.kind === 'command' ? '主管・下新任務' : '主管・討論計劃'}・{fmtHMS(it.ts)}</small></div>
+        <div className="r-q"><span>{it.text}</span><small>主管・{fmtHMS(it.ts)}</small></div>
       </div>
     )
   }
-  const head = it.kind === 'summary' ? `AI 指揮官${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'AI 指揮官・無法執行' : 'AI 指揮官・回覆'
+  const head = it.kind === 'dispatch' ? 'NemoClaw・派發' : it.kind === 'report' ? 'NemoClaw・回報' : it.kind === 'interrupt' ? 'NemoClaw・中斷'
+    : it.by === 'main_agent' ? 'NemoClaw'
+    : it.kind === 'summary' ? `NemoClaw${it.version && it.version > 1 ? `・v${it.version}` : ''}・計劃摘要` : it.kind === 'refused' ? 'NemoClaw・無法執行' : 'NemoClaw・回覆'
   return (
-    <div className={`r-chat agent k-${it.kind}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : 'chat-agent'}>
+    <div className={`r-chat agent k-${it.kind} ${it.by === 'main_agent' ? 'main' : ''}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : it.by === 'main_agent' ? `main-${it.kind}` : 'chat-agent'}>
       <header><ToolIcon name="think" /><b>{head}</b>
-        {it.classifiedBy && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
+        {it.classifiedBy && <small>{it.kind === 'dispatch' ? (it.classifiedBy === 'model' ? 'Nemotron 選派' : it.classifiedBy === 'code' ? '程式依偵測種類' : it.classifiedBy === 'supervisor' ? '主管核准後' : '關鍵字規則') : it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
       {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
@@ -177,7 +203,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
     <div className="r-ask" data-kind="ask">
       <div className="r-q"><span>{it.question}</span><small>主管・{fmtHMS(it.ts)}</small></div>
       <div className="r-a" data-testid={a ? 'ask-answer' : undefined}>
-        <header><ToolIcon name="think" /><b>問戰情室</b><span className="ro">只查不改</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
+        <header><ToolIcon name="think" /><b>NemoClaw</b><span className="ro">查詢</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
         {!a && !it.error && <p className="muted"><i className="spin" />查詢中…</p>}
         {it.error && <p className="err">{it.error}</p>}
         {a && !brief && a.steps.map((s, i) => (

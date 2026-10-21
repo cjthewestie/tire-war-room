@@ -191,7 +191,8 @@ async def test_info_notice_with_r3_instruction_needs_approval(tmp_path):
     t = asyncio.create_task(sup())
     await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await t
-    assert seen["writes_before"] == []
+    # nothing but the R1 maintenance notice code adds for a press temperature drop ran before the card
+    assert [a.get("kind") for _, a in seen["writes_before"]] == ["maintenance"]
     assert seen["req"].risk is RiskLevel.R3_CRITICAL
     assert "暫停全線投料" in seen["req"].actions[0]
     assert not [w for w in _writes(tools) if "暫停" in str(w[1])]

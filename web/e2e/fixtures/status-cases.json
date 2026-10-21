@@ -1,0 +1,2206 @@
+{
+"source":"captured 2026-10-21 from a mock-mode server (press7_temp_drop with round 1 B / round 2 A; concurrent_3 recommended options)",
+"p11_r1_pending":{
+"now":"2026-10-03T02:15:10+08:00",
+"events":[
+{
+"id":"EV-20261003-021400-CURE-07",
+"opened_at":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"anomaly":{
+"id":"AN-20261003-021400-CURE-07",
+"ts":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"prediction":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"now_value":122.35,
+"predicted_value":121.96,
+"band_lo":120.96,
+"band_hi":122.96,
+"horizon_s":1800.0,
+"trend_per_min":-1.678,
+"model":"exp-approach"
+},
+"severity":"warn",
+"message":"7 號 128 → 122°C，預測穩定在 122±1°C",
+"related_machines":[
+"CURE-06",
+"CURE-08"
+],
+"detection_latency_s":45.0,
+"preclass":{
+"rule":"press_deviation_held",
+"label":"硫化機溫度偏離基準並持續",
+"checks":[
+"偏離 -5.7°C（門檻 ±2.5°C）",
+"持續 33 秒（門檻 10 秒）",
+"確認 39 秒（門檻 39 秒）"
+],
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"sigma":0.136,
+"severity":"warn",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok",
+"steam_model":"蒸汽推算 122.4°C，差 0.1°C（容許 1.5°C）",
+"neighbours":"同蒸汽管線 2 台比對"
+},
+"forecast":{
+"model":"exp-approach",
+"predicted":121.96,
+"band":[
+120.96,
+122.96
+],
+"horizon_min":30,
+"trend_per_min":-1.678
+},
+"limit":null
+}
+},
+"state":"await_approval",
+"plan":{
+"goal":"7 號降溫，大胎不能延誤",
+"hypothesis":{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"active",
+"evidence":[
+"30 分鐘溫度 128→122.3°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發"
+]
+},
+"rejected_hypothesis_ids":[],
+"steps":[
+{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"S",
+"ref_temp_c":128.0,
+"actual_temp_c":122.0,
+"elapsed_h":14.4003,
+"ref_cure_h":24.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+{
+"id":"S2",
+"tool":"query_orders_shifts",
+"args":{
+"press_ids":[
+"CURE-07"
+]
+},
+"depends_on":[],
+"purpose":"查下一模訂單交期與班表缺口"
+},
+{
+"id":"S3",
+"tool":"solve_schedule",
+"args":{
+"cure_overrides_h":{
+"CURE-07":"$S1.total_cure_h"
+},
+"time_limit_s":10.0
+},
+"depends_on":[
+"S1",
+"S2"
+],
+"purpose":"延長硫化後重排，保大胎交期"
+},
+{
+"id":"S4",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":"$S3.schedule_version",
+"reason":"7 號機降溫，延長硫化至 ${S1.total_cure_h} h 後重排"
+},
+"depends_on":[
+"S3"
+],
+"purpose":"確認新排程（需主管核准）"
+},
+{
+"id":"S4b",
+"tool":"set_cure_time",
+"args":{
+"press_id":"CURE-07",
+"total_cure_h":"$S1.total_cure_h",
+"reason":"7 號機降溫至 122°C，Arrhenius 等效硫化"
+},
+"depends_on":[
+"S1",
+"S3"
+],
+"purpose":"設定7 號機硫化時間為公式值（需主管核准）"
+},
+{
+"id":"S5",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"curing",
+"body"
+],
+"kind":"info",
+"machine_id":"CURE-07",
+"message":"7 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模"
+},
+"depends_on":[
+"S4",
+"S4b"
+],
+"purpose":"通知硫化組與胎體組新排程"
+}
+],
+"alert_card":{
+"title":"7 號機溫度下降 128→122.3°C",
+"summary":"預測穩定在 122±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"safe_stop":false,
+"rationale":"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"active",
+"evidence":[
+"30 分鐘溫度 128→122.3°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-021400-CURE-07-1"
+],
+"replans":0,
+"outcome":null,
+"alert_card":{
+"title":"7 號機溫度下降 128→122.3°C",
+"summary":"預測穩定在 122±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"closed_at":null,
+"source":"detector",
+"steps":[
+{
+"step":{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"S",
+"ref_temp_c":128.0,
+"actual_temp_c":122.0,
+"elapsed_h":14.4003,
+"ref_cure_h":24.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+"state":"ok",
+"result":{
+"call_id":"EV-20261003-021400-CURE-07:S1:3",
+"tool":"cure_formula",
+"ok":true,
+"data":{
+"rate_ratio":0.6791,
+"remaining_ref_h":9.6,
+"remaining_actual_h":14.14,
+"total_cure_h":28.54,
+"extra_h":4.54,
+"formula":"k(T)/k(Tref) = exp(−Ea/R·(1/T − 1/Tref)), Ea=85 kJ/mol（假設值）, T=122°C, Tref=128°C → 0.679; 剩餘 9.6 h@128°C ÷ 0.679 = 14.1 h@122°C; 總硫化 28.5 h（+4.5 h）"
+},
+"error":null,
+"duration_ms":2.71,
+"attempt":1
+},
+"gate":{
+"step_id":"S1",
+"tool":"cure_formula",
+"verdict":"allow",
+"risk":"R0",
+"checks":{
+"allow_list":true,
+"state_allowed":true,
+"format_ok":true,
+"simulation_feasible":true
+},
+"reasons":[]
+}
+}
+],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+}
+],
+"tasks":[],
+"approvals":[
+{
+"id":"AP-EV-20261003-021400-CURE-07-1",
+"event_id":"EV-20261003-021400-CURE-07",
+"round":1,
+"created_at":"2026-10-03T02:14:25+08:00",
+"risk":"R3",
+"title":"7 號機溫度下降 128→122.3°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v2 生效（7 號硫化 28.5 h；無機台異動）",
+"S4b 7 號機硫化總時數 28.5 h（公式 28.5 h）",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"pending",
+"decision":null,
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[]
+}
+]
+},
+"p11_r2_pending":{
+"now":"2026-10-03T02:32:00+08:00",
+"events":[
+{
+"id":"EV-20261003-021400-CURE-07",
+"opened_at":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"anomaly":{
+"id":"AN-20261003-021400-CURE-07",
+"ts":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"prediction":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"now_value":122.35,
+"predicted_value":121.96,
+"band_lo":120.96,
+"band_hi":122.96,
+"horizon_s":1800.0,
+"trend_per_min":-1.678,
+"model":"exp-approach"
+},
+"severity":"warn",
+"message":"7 號 128 → 122°C，預測穩定在 122±1°C",
+"related_machines":[
+"CURE-06",
+"CURE-08"
+],
+"detection_latency_s":45.0,
+"preclass":{
+"rule":"press_deviation_held",
+"label":"硫化機溫度偏離基準並持續",
+"checks":[
+"偏離 -5.7°C（門檻 ±2.5°C）",
+"持續 33 秒（門檻 10 秒）",
+"確認 39 秒（門檻 39 秒）"
+],
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"sigma":0.136,
+"severity":"warn",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok",
+"steam_model":"蒸汽推算 122.4°C，差 0.1°C（容許 1.5°C）",
+"neighbours":"同蒸汽管線 2 台比對"
+},
+"forecast":{
+"model":"exp-approach",
+"predicted":121.96,
+"band":[
+120.96,
+122.96
+],
+"horizon_min":30,
+"trend_per_min":-1.678
+},
+"limit":null
+}
+},
+"state":"await_approval",
+"plan":{
+"goal":"7 號降溫，大胎不能延誤",
+"hypothesis":{
+"id":"H2",
+"statement":"持續洩壓或感測器漂移",
+"cause_code":"steam_leak_or_sensor_drift",
+"expectation":null,
+"status":"active",
+"evidence":[
+"H1 不成立：溫度續降至 119.5°C",
+"同管線 6、8 號溫度正常 → 問題侷限 7 號（排除總管蒸汽不足）",
+"依 SOP「硫化中斷處置」：停用並重排"
+]
+},
+"rejected_hypothesis_ids":[
+"H1"
+],
+"steps":[
+{
+"id":"S1",
+"tool":"solve_schedule",
+"args":{
+"unavailable_presses":[
+"CURE-07"
+],
+"time_limit_s":10.0
+},
+"depends_on":[],
+"purpose":"7 號機停用，重排其模次"
+},
+{
+"id":"S2",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":"$S1.schedule_version",
+"reason":"7 號機持續降溫，停用重排"
+},
+"depends_on":[
+"S1"
+],
+"purpose":"確認重排（需主管核准）"
+},
+{
+"id":"S3",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"curing",
+"maintenance",
+"qc"
+],
+"kind":"machine_out",
+"machine_id":"CURE-07",
+"message":"7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管"
+},
+"depends_on":[
+"S2"
+],
+"purpose":"通知7 號機停用"
+}
+],
+"alert_card":{
+"title":"7 號機停用，重排中",
+"summary":"H1 不成立：溫度續降至 119.5°C；改判持續洩壓或感測器漂移，停用重排。"
+},
+"safe_stop":false,
+"rationale":"同管線其他機台正常，排除總管蒸汽不足；依 SOP 停用該機並重排。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"rejected",
+"evidence":[
+"30 分鐘溫度 128→122.3°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度續降至 119.5°C"
+]
+},
+{
+"id":"H2",
+"statement":"持續洩壓或感測器漂移",
+"cause_code":"steam_leak_or_sensor_drift",
+"expectation":null,
+"status":"active",
+"evidence":[
+"H1 不成立：溫度續降至 119.5°C",
+"同管線 6、8 號溫度正常 → 問題侷限 7 號（排除總管蒸汽不足）",
+"依 SOP「硫化中斷處置」：停用並重排"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-021400-CURE-07-1",
+"AP-EV-20261003-021400-CURE-07-2"
+],
+"replans":1,
+"outcome":null,
+"alert_card":{
+"title":"7 號機停用，重排中",
+"summary":"H1 不成立：溫度續降至 119.5°C；改判持續洩壓或感測器漂移，停用重排。"
+},
+"closed_at":null,
+"source":"detector",
+"steps":[],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+}
+],
+"tasks":[
+{
+"id":"TK-0002",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"調派支援",
+"title":"從胎側膠組調 1 人到胎體／胎面膠組夜班支援出入模",
+"team_label":"胎側膠組",
+"worker_name":null,
+"machine_id":"A-MIX",
+"status":"待派",
+"created_at":"2026-10-03T02:15:16+08:00",
+"assigned_at":null,
+"done_at":null,
+"eta":"2026-10-03T02:45:00+08:00"
+},
+{
+"id":"TK-0003",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"宣達",
+"title":"向硫化機組宣達：7 號機延長硫化至 28.5 h（+4.5 h），已依新排程",
+"team_label":"硫化機組",
+"worker_name":"S16（加硫組）",
+"machine_id":"CURE-01",
+"status":"完成",
+"created_at":"2026-10-03T02:15:17+08:00",
+"assigned_at":"2026-10-03T02:15:17+08:00",
+"done_at":"2026-10-03T02:21:17+08:00",
+"eta":"2026-10-03T02:21:17+08:00"
+},
+{
+"id":"TK-0004",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"宣達",
+"title":"向胎體／胎面膠組宣達：7 號機延長硫化至 28.5 h（+4.5 h），已依新排程",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S03（打膠組）",
+"machine_id":"A-MIX",
+"status":"完成",
+"created_at":"2026-10-03T02:15:17+08:00",
+"assigned_at":"2026-10-03T02:15:17+08:00",
+"done_at":"2026-10-03T02:21:17+08:00",
+"eta":"2026-10-03T02:21:17+08:00"
+},
+{
+"id":"TK-0001",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"設定硫化時間",
+"title":"在硫化機面板輸入硫化總時數 28.5 h（核准值，人工設定）",
+"team_label":"硫化機組",
+"worker_name":"S15（加硫組）",
+"machine_id":"CURE-07",
+"status":"完成",
+"created_at":"2026-10-03T02:15:15+08:00",
+"assigned_at":"2026-10-03T02:15:15+08:00",
+"done_at":"2026-10-03T02:21:15+08:00",
+"eta":"2026-10-03T02:21:15+08:00"
+}
+],
+"approvals":[
+{
+"id":"AP-EV-20261003-021400-CURE-07-1",
+"event_id":"EV-20261003-021400-CURE-07",
+"round":1,
+"created_at":"2026-10-03T02:14:25+08:00",
+"risk":"R3",
+"title":"7 號機溫度下降 128→122.3°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v2 生效（7 號硫化 28.5 h；無機台異動）",
+"S4b 7 號機硫化總時數 28.5 h（公式 28.5 h）",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-021400-CURE-07-1",
+"decision":"approve",
+"option_id":"B",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T02:15:13+08:00"
+},
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[]
+},
+{
+"id":"AP-EV-20261003-021400-CURE-07-2",
+"event_id":"EV-20261003-021400-CURE-07",
+"round":2,
+"created_at":"2026-10-03T02:31:22+08:00",
+"risk":"R3",
+"title":"7 號機停用，重排中",
+"reason":"H1 不成立：溫度續降至 119.5°C",
+"delivery_impact":"不受影響",
+"actions":[
+"人力：第 1 輪已核准並執行「從 2 線調 1 人」（本輪改選其他方案會撤回並通知）",
+"S2 排程 v3 生效（7 號停用；#A-311 改 1 號；SO-004 ×2 → 1 號、×2 → 2 號、×1 → 4 號、×1 → 6 號；SO-006 ×3 → 2 號、×2 → 4 號、×1 → 5 號；SO-001 ×2 → 3 號、×1 → 6 號）",
+"S3 機台停用 → 硫化機組、維修組、品管［7 號機］：7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"pending",
+"decision":null,
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[
+"安全核心已處置"
+]
+}
+]
+},
+"p11_end":{
+"now":"2026-10-03T02:35:30+08:00",
+"events":[
+{
+"id":"EV-20261003-021400-CURE-07",
+"opened_at":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"anomaly":{
+"id":"AN-20261003-021400-CURE-07",
+"ts":"2026-10-03T02:14:00+08:00",
+"machine_id":"CURE-07",
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"prediction":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"now_value":122.35,
+"predicted_value":121.96,
+"band_lo":120.96,
+"band_hi":122.96,
+"horizon_s":1800.0,
+"trend_per_min":-1.678,
+"model":"exp-approach"
+},
+"severity":"warn",
+"message":"7 號 128 → 122°C，預測穩定在 122±1°C",
+"related_machines":[
+"CURE-06",
+"CURE-08"
+],
+"detection_latency_s":45.0,
+"preclass":{
+"rule":"press_deviation_held",
+"label":"硫化機溫度偏離基準並持續",
+"checks":[
+"偏離 -5.7°C（門檻 ±2.5°C）",
+"持續 33 秒（門檻 10 秒）",
+"確認 39 秒（門檻 39 秒）"
+],
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.35,
+"baseline":128.0,
+"sigma":0.136,
+"severity":"warn",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok",
+"steam_model":"蒸汽推算 122.4°C，差 0.1°C（容許 1.5°C）",
+"neighbours":"同蒸汽管線 2 台比對"
+},
+"forecast":{
+"model":"exp-approach",
+"predicted":121.96,
+"band":[
+120.96,
+122.96
+],
+"horizon_min":30,
+"trend_per_min":-1.678
+},
+"limit":null
+}
+},
+"state":"closed",
+"plan":{
+"goal":"7 號降溫，大胎不能延誤",
+"hypothesis":{
+"id":"H2",
+"statement":"持續洩壓或感測器漂移",
+"cause_code":"steam_leak_or_sensor_drift",
+"expectation":null,
+"status":"active",
+"evidence":[
+"H1 不成立：溫度續降至 119.5°C",
+"同管線 6、8 號溫度正常 → 問題侷限 7 號（排除總管蒸汽不足）",
+"依 SOP「硫化中斷處置」：停用並重排"
+]
+},
+"rejected_hypothesis_ids":[
+"H1"
+],
+"steps":[
+{
+"id":"S1",
+"tool":"solve_schedule",
+"args":{
+"unavailable_presses":[
+"CURE-07"
+],
+"time_limit_s":10.0
+},
+"depends_on":[],
+"purpose":"7 號機停用，重排其模次"
+},
+{
+"id":"S2",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":"$S1.schedule_version",
+"reason":"7 號機持續降溫，停用重排"
+},
+"depends_on":[
+"S1"
+],
+"purpose":"確認重排（需主管核准）"
+},
+{
+"id":"S3",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"curing",
+"maintenance",
+"qc"
+],
+"kind":"machine_out",
+"machine_id":"CURE-07",
+"message":"7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管"
+},
+"depends_on":[
+"S2"
+],
+"purpose":"通知7 號機停用"
+}
+],
+"alert_card":{
+"title":"7 號機停用，重排中",
+"summary":"H1 不成立：溫度續降至 119.5°C；改判持續洩壓或感測器漂移，停用重排。"
+},
+"safe_stop":false,
+"rationale":"同管線其他機台正常，排除總管蒸汽不足；依 SOP 停用該機並重排。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-07",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"rejected",
+"evidence":[
+"30 分鐘溫度 128→122.3°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度續降至 119.5°C"
+]
+},
+{
+"id":"H2",
+"statement":"持續洩壓或感測器漂移",
+"cause_code":"steam_leak_or_sensor_drift",
+"expectation":null,
+"status":"active",
+"evidence":[
+"H1 不成立：溫度續降至 119.5°C",
+"同管線 6、8 號溫度正常 → 問題侷限 7 號（排除總管蒸汽不足）",
+"依 SOP「硫化中斷處置」：停用並重排"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-021400-CURE-07-1",
+"AP-EV-20261003-021400-CURE-07-2"
+],
+"replans":1,
+"outcome":"H2 持續洩壓或感測器漂移（未驗證：已停用該機，未以讀值驗證）：排程 v3 生效；7 號機停用；夜班加班；撤回從 2 線調 1 人",
+"alert_card":{
+"title":"7 號機停用，重排中",
+"summary":"H1 不成立：溫度續降至 119.5°C；改判持續洩壓或感測器漂移，停用重排。"
+},
+"closed_at":"2026-10-03T02:32:06+08:00",
+"source":"detector",
+"steps":[],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+}
+],
+"tasks":[
+{
+"id":"TK-0010",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":null,
+"kind":"宣達",
+"title":"向胎體／胎面膠組宣達：撤回：10/03 夜班從 2 線調 1 人（1 人）（主管改",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S04（打膠組）",
+"machine_id":"A-MIX",
+"status":"執行中",
+"created_at":"2026-10-03T02:32:06+08:00",
+"assigned_at":"2026-10-03T02:32:06+08:00",
+"done_at":null,
+"eta":"2026-10-03T02:40:06+08:00"
+},
+{
+"id":"TK-0008",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-2",
+"kind":"加班補位",
+"title":"胎體／胎面膠組夜班加班：延長工時、接手缺人的出入模崗位",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S03（打膠組）",
+"machine_id":"A-MIX",
+"status":"執行中",
+"created_at":"2026-10-03T02:32:05+08:00",
+"assigned_at":"2026-10-03T02:32:05+08:00",
+"done_at":null,
+"eta":"2026-10-03T02:43:05+08:00"
+},
+{
+"id":"TK-0006",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-2",
+"kind":"停用檢修",
+"title":"硫化機停用：檢查蒸汽管路與溫度計",
+"team_label":"維修組",
+"worker_name":"黃建宏",
+"machine_id":"CURE-07",
+"status":"執行中",
+"created_at":"2026-10-03T02:32:04+08:00",
+"assigned_at":"2026-10-03T02:32:04+08:00",
+"done_at":null,
+"eta":"2026-10-03T03:03:04+08:00"
+},
+{
+"id":"TK-0005",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-2",
+"kind":"換模準備",
+"title":"#A-311 備模到硫化機，04:30 入模",
+"team_label":"硫化機組",
+"worker_name":"S15（加硫組）",
+"machine_id":"CURE-01",
+"status":"執行中",
+"created_at":"2026-10-03T02:32:03+08:00",
+"assigned_at":"2026-10-03T02:32:03+08:00",
+"done_at":null,
+"eta":"2026-10-03T02:53:03+08:00"
+},
+{
+"id":"TK-0009",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":null,
+"kind":"宣達",
+"title":"向胎側膠組宣達：撤回：10/03 夜班從 2 線調 1 人（1 人）（主管改",
+"team_label":"胎側膠組",
+"worker_name":null,
+"machine_id":"B-MIX",
+"status":"待派",
+"created_at":"2026-10-03T02:32:06+08:00",
+"assigned_at":null,
+"done_at":null,
+"eta":"2026-10-03T02:43:30+08:00"
+},
+{
+"id":"TK-0007",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-2",
+"kind":"品管",
+"title":"硫化機在模胎標示待判，交品管",
+"team_label":"品管",
+"worker_name":null,
+"machine_id":"CURE-07",
+"status":"待派",
+"created_at":"2026-10-03T02:32:04+08:00",
+"assigned_at":null,
+"done_at":null,
+"eta":"2026-10-03T02:53:30+08:00"
+},
+{
+"id":"TK-0003",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"宣達",
+"title":"向硫化機組宣達：7 號機延長硫化至 28.5 h（+4.5 h），已依新排程",
+"team_label":"硫化機組",
+"worker_name":"S16（加硫組）",
+"machine_id":"CURE-01",
+"status":"完成",
+"created_at":"2026-10-03T02:15:17+08:00",
+"assigned_at":"2026-10-03T02:15:17+08:00",
+"done_at":"2026-10-03T02:21:17+08:00",
+"eta":"2026-10-03T02:21:17+08:00"
+},
+{
+"id":"TK-0004",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"宣達",
+"title":"向胎體／胎面膠組宣達：7 號機延長硫化至 28.5 h（+4.5 h），已依新排程",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S03（打膠組）",
+"machine_id":"A-MIX",
+"status":"完成",
+"created_at":"2026-10-03T02:15:17+08:00",
+"assigned_at":"2026-10-03T02:15:17+08:00",
+"done_at":"2026-10-03T02:21:17+08:00",
+"eta":"2026-10-03T02:21:17+08:00"
+},
+{
+"id":"TK-0001",
+"event_id":"EV-20261003-021400-CURE-07",
+"approval_id":"AP-EV-20261003-021400-CURE-07-1",
+"kind":"設定硫化時間",
+"title":"在硫化機面板輸入硫化總時數 28.5 h（核准值，人工設定）",
+"team_label":"硫化機組",
+"worker_name":"S15（加硫組）",
+"machine_id":"CURE-07",
+"status":"完成",
+"created_at":"2026-10-03T02:15:15+08:00",
+"assigned_at":"2026-10-03T02:15:15+08:00",
+"done_at":"2026-10-03T02:21:15+08:00",
+"eta":"2026-10-03T02:21:15+08:00"
+}
+],
+"approvals":[
+{
+"id":"AP-EV-20261003-021400-CURE-07-1",
+"event_id":"EV-20261003-021400-CURE-07",
+"round":1,
+"created_at":"2026-10-03T02:14:25+08:00",
+"risk":"R3",
+"title":"7 號機溫度下降 128→122.3°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v2 生效（7 號硫化 28.5 h；無機台異動）",
+"S4b 7 號機硫化總時數 28.5 h（公式 28.5 h）",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-021400-CURE-07-1",
+"decision":"approve",
+"option_id":"B",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T02:15:13+08:00"
+},
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[]
+},
+{
+"id":"AP-EV-20261003-021400-CURE-07-2",
+"event_id":"EV-20261003-021400-CURE-07",
+"round":2,
+"created_at":"2026-10-03T02:31:22+08:00",
+"risk":"R3",
+"title":"7 號機停用，重排中",
+"reason":"H1 不成立：溫度續降至 119.5°C",
+"delivery_impact":"不受影響",
+"actions":[
+"人力：第 1 輪已核准並執行「從 2 線調 1 人」（本輪改選其他方案會撤回並通知）",
+"S2 排程 v3 生效（7 號停用；#A-311 改 1 號；SO-004 ×2 → 1 號、×2 → 2 號、×1 → 4 號、×1 → 6 號；SO-006 ×3 → 2 號、×2 → 4 號、×1 → 5 號；SO-001 ×2 → 3 號、×1 → 6 號）",
+"S3 機台停用 → 硫化機組、維修組、品管［7 號機］：7 號機停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-021400-CURE-07-2",
+"decision":"approve",
+"option_id":"A",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T02:32:02+08:00"
+},
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[
+"安全核心已處置"
+]
+}
+]
+},
+"c3_closed":{
+"now":"2026-10-03T10:32:40+08:00",
+"events":[
+{
+"id":"EV-20261003-100148-CURE-10",
+"opened_at":"2026-10-03T10:01:48+08:00",
+"machine_id":"CURE-10",
+"anomaly":{
+"id":"AN-20261003-100148-CURE-10",
+"ts":"2026-10-03T10:01:48+08:00",
+"machine_id":"CURE-10",
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.4,
+"baseline":127.98,
+"prediction":{
+"machine_id":"CURE-10",
+"channel":"temp_c",
+"now_value":122.4,
+"predicted_value":121.96,
+"band_lo":120.96,
+"band_hi":122.96,
+"horizon_s":1800.0,
+"trend_per_min":-1.77,
+"model":"exp-approach"
+},
+"severity":"warn",
+"message":"10 號 128 → 122°C，預測穩定在 122±1°C",
+"related_machines":[
+"CURE-09",
+"CURE-11"
+],
+"detection_latency_s":44.0,
+"preclass":{
+"rule":"press_deviation_held",
+"label":"硫化機溫度偏離基準並持續",
+"checks":[
+"偏離 -5.6°C（門檻 ±2.5°C）",
+"持續 31 秒（門檻 10 秒）",
+"確認 39 秒（門檻 39 秒）"
+],
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":122.4,
+"baseline":127.98,
+"sigma":0.126,
+"severity":"warn",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok",
+"steam_model":"蒸汽推算 122.4°C，差 0.0°C（容許 1.5°C）",
+"neighbours":"同蒸汽管線 2 台比對"
+},
+"forecast":{
+"model":"exp-approach",
+"predicted":121.96,
+"band":[
+120.96,
+122.96
+],
+"horizon_min":30,
+"trend_per_min":-1.77
+},
+"limit":null
+}
+},
+"state":"closed",
+"plan":{
+"goal":"10 號降溫，大胎不能延誤",
+"hypothesis":{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-10",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"confirmed",
+"evidence":[
+"30 分鐘溫度 128→122.4°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度維持 122°C，符合預期 30 分內 ≥121°C"
+]
+},
+"rejected_hypothesis_ids":[],
+"steps":[
+{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"L",
+"ref_temp_c":128.0,
+"actual_temp_c":122.0,
+"elapsed_h":19.0303,
+"ref_cure_h":34.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+{
+"id":"S2",
+"tool":"query_orders_shifts",
+"args":{
+"press_ids":[
+"CURE-10"
+]
+},
+"depends_on":[],
+"purpose":"查下一模訂單交期與班表缺口"
+},
+{
+"id":"S3",
+"tool":"solve_schedule",
+"args":{
+"cure_overrides_h":{
+"CURE-10":"$S1.total_cure_h"
+},
+"time_limit_s":10.0
+},
+"depends_on":[
+"S1",
+"S2"
+],
+"purpose":"延長硫化後重排，保大胎交期"
+},
+{
+"id":"S4",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":"$S3.schedule_version",
+"reason":"10 號機降溫，延長硫化至 ${S1.total_cure_h} h 後重排"
+},
+"depends_on":[
+"S3"
+],
+"purpose":"確認新排程（需主管核准）"
+},
+{
+"id":"S4b",
+"tool":"set_cure_time",
+"args":{
+"press_id":"CURE-10",
+"total_cure_h":"$S1.total_cure_h",
+"reason":"10 號機降溫至 122°C，Arrhenius 等效硫化"
+},
+"depends_on":[
+"S1",
+"S3"
+],
+"purpose":"設定10 號機硫化時間為公式值（需主管核准）"
+},
+{
+"id":"S5",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"curing",
+"body"
+],
+"kind":"info",
+"machine_id":"CURE-10",
+"message":"10 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模"
+},
+"depends_on":[
+"S4",
+"S4b"
+],
+"purpose":"通知硫化組與胎體組新排程"
+}
+],
+"alert_card":{
+"title":"10 號機溫度下降 128→122.4°C",
+"summary":"預測穩定在 122±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"safe_stop":false,
+"rationale":"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-10",
+"channel":"temp_c",
+"op":">=",
+"value":121.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"confirmed",
+"evidence":[
+"30 分鐘溫度 128→122.4°C，預測穩定在 122±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度維持 122°C，符合預期 30 分內 ≥121°C"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-100148-CURE-10-1",
+"AP-EV-20261003-100148-CURE-10-2"
+],
+"replans":1,
+"outcome":"H1 蒸汽壓不足，溫度會穩定：排程 v4 生效；10 號機硫化 41.1 h；從 2 線調 1 人",
+"alert_card":{
+"title":"10 號機溫度下降 128→122.4°C",
+"summary":"預測穩定在 122±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"closed_at":"2026-10-03T10:32:40+08:00",
+"source":"detector",
+"steps":[
+{
+"step":{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"L",
+"ref_temp_c":128.0,
+"actual_temp_c":122.0,
+"elapsed_h":19.0303,
+"ref_cure_h":34.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+"state":"ok",
+"result":{
+"call_id":"EV-20261003-100148-CURE-10:S1:24",
+"tool":"cure_formula",
+"ok":true,
+"data":{
+"rate_ratio":0.6791,
+"remaining_ref_h":14.97,
+"remaining_actual_h":22.04,
+"total_cure_h":41.07,
+"extra_h":7.07,
+"formula":"k(T)/k(Tref) = exp(−Ea/R·(1/T − 1/Tref)), Ea=85 kJ/mol（假設值）, T=122°C, Tref=128°C → 0.679; 剩餘 15.0 h@128°C ÷ 0.679 = 22.0 h@122°C; 總硫化 41.1 h（+7.1 h）"
+},
+"error":null,
+"duration_ms":2.23,
+"attempt":1
+},
+"gate":{
+"step_id":"S1",
+"tool":"cure_formula",
+"verdict":"allow",
+"risk":"R0",
+"checks":{
+"allow_list":true,
+"state_allowed":true,
+"format_ok":true,
+"simulation_feasible":true
+},
+"reasons":[]
+}
+}
+],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+},
+{
+"id":"EV-20261003-100145-CURE-03",
+"opened_at":"2026-10-03T10:01:45+08:00",
+"machine_id":"CURE-03",
+"anomaly":{
+"id":"AN-20261003-100145-CURE-03",
+"ts":"2026-10-03T10:01:45+08:00",
+"machine_id":"CURE-03",
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":123.34,
+"baseline":128.01,
+"prediction":{
+"machine_id":"CURE-03",
+"channel":"temp_c",
+"now_value":123.34,
+"predicted_value":122.97,
+"band_lo":121.97,
+"band_hi":123.97,
+"horizon_s":1800.0,
+"trend_per_min":-1.412,
+"model":"exp-approach"
+},
+"severity":"warn",
+"message":"3 號 128 → 123°C，預測穩定在 123±1°C",
+"related_machines":[
+"CURE-01",
+"CURE-02",
+"CURE-04",
+"CURE-05"
+],
+"detection_latency_s":45.0,
+"preclass":{
+"rule":"press_deviation_held",
+"label":"硫化機溫度偏離基準並持續",
+"checks":[
+"偏離 -4.7°C（門檻 ±2.5°C）",
+"持續 30 秒（門檻 10 秒）",
+"確認 39 秒（門檻 39 秒）"
+],
+"kind":"temp_drop",
+"channel":"temp_c",
+"value":123.34,
+"baseline":128.01,
+"sigma":0.094,
+"severity":"warn",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok",
+"steam_model":"蒸汽推算 123.3°C，差 0.0°C（容許 1.5°C）",
+"neighbours":"同蒸汽管線 4 台比對"
+},
+"forecast":{
+"model":"exp-approach",
+"predicted":122.97,
+"band":[
+121.97,
+123.97
+],
+"horizon_min":30,
+"trend_per_min":-1.412
+},
+"limit":null
+}
+},
+"state":"closed",
+"plan":{
+"goal":"3 號降溫，大胎不能延誤",
+"hypothesis":{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-03",
+"channel":"temp_c",
+"op":">=",
+"value":122.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"confirmed",
+"evidence":[
+"30 分鐘溫度 128→123.3°C，預測穩定在 123±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度維持 123°C，符合預期 30 分內 ≥122°C"
+]
+},
+"rejected_hypothesis_ids":[],
+"steps":[
+{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"S",
+"ref_temp_c":128.0,
+"actual_temp_c":123.0,
+"elapsed_h":6.6961,
+"ref_cure_h":24.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+{
+"id":"S2",
+"tool":"query_orders_shifts",
+"args":{
+"press_ids":[
+"CURE-03"
+]
+},
+"depends_on":[],
+"purpose":"查下一模訂單交期與班表缺口"
+},
+{
+"id":"S3",
+"tool":"solve_schedule",
+"args":{
+"cure_overrides_h":{
+"CURE-03":"$S1.total_cure_h"
+},
+"time_limit_s":10.0
+},
+"depends_on":[
+"S1",
+"S2"
+],
+"purpose":"延長硫化後重排，保大胎交期"
+},
+{
+"id":"S4",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":"$S3.schedule_version",
+"reason":"3 號機降溫，延長硫化至 ${S1.total_cure_h} h 後重排"
+},
+"depends_on":[
+"S3"
+],
+"purpose":"確認新排程（需主管核准）"
+},
+{
+"id":"S4b",
+"tool":"set_cure_time",
+"args":{
+"press_id":"CURE-03",
+"total_cure_h":"$S1.total_cure_h",
+"reason":"3 號機降溫至 123°C，Arrhenius 等效硫化"
+},
+"depends_on":[
+"S1",
+"S3"
+],
+"purpose":"設定3 號機硫化時間為公式值（需主管核准）"
+},
+{
+"id":"S5",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"curing",
+"body"
+],
+"kind":"info",
+"machine_id":"CURE-03",
+"message":"3 號機延長硫化至 ${S1.total_cure_h} h（+${S1.extra_h} h），已依新排程調整下一模"
+},
+"depends_on":[
+"S4",
+"S4b"
+],
+"purpose":"通知硫化組與胎體組新排程"
+}
+],
+"alert_card":{
+"title":"3 號機溫度下降 128→123.3°C",
+"summary":"預測穩定在 123±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"safe_stop":false,
+"rationale":"溫度降後趨穩，符合蒸汽壓不足；先以公式延長硫化，再由求解器重排。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"蒸汽壓不足，溫度會穩定",
+"cause_code":"steam_pressure_low",
+"expectation":{
+"machine_id":"CURE-03",
+"channel":"temp_c",
+"op":">=",
+"value":122.0,
+"value_hi":null,
+"within_min":30.0
+},
+"status":"confirmed",
+"evidence":[
+"30 分鐘溫度 128→123.3°C，預測穩定在 123±1°C",
+"仍在 120–130°C，安全核心未觸發",
+"溫度維持 123°C，符合預期 30 分內 ≥122°C"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-100145-CURE-03-1"
+],
+"replans":0,
+"outcome":"H1 蒸汽壓不足，溫度會穩定：排程 v2 生效；3 號機硫化 30.6 h",
+"alert_card":{
+"title":"3 號機溫度下降 128→123.3°C",
+"summary":"預測穩定在 123±1°C；假設蒸汽壓不足，延長硫化並重排，保大胎交期。"
+},
+"closed_at":"2026-10-03T10:31:50+08:00",
+"source":"detector",
+"steps":[
+{
+"step":{
+"id":"S1",
+"tool":"cure_formula",
+"args":{
+"size":"S",
+"ref_temp_c":128.0,
+"actual_temp_c":123.0,
+"elapsed_h":6.6961,
+"ref_cure_h":24.0,
+"activation_energy_kj_mol":85.0
+},
+"depends_on":[],
+"purpose":"以 Arrhenius 計算降溫後所需總硫化時間"
+},
+"state":"ok",
+"result":{
+"call_id":"EV-20261003-100145-CURE-03:S1:10",
+"tool":"cure_formula",
+"ok":true,
+"data":{
+"rate_ratio":0.7249,
+"remaining_ref_h":17.3,
+"remaining_actual_h":23.87,
+"total_cure_h":30.57,
+"extra_h":6.57,
+"formula":"k(T)/k(Tref) = exp(−Ea/R·(1/T − 1/Tref)), Ea=85 kJ/mol（假設值）, T=123°C, Tref=128°C → 0.725; 剩餘 17.3 h@128°C ÷ 0.725 = 23.9 h@123°C; 總硫化 30.6 h（+6.6 h）"
+},
+"error":null,
+"duration_ms":1.06,
+"attempt":1
+},
+"gate":{
+"step_id":"S1",
+"tool":"cure_formula",
+"verdict":"allow",
+"risk":"R0",
+"checks":{
+"allow_list":true,
+"state_allowed":true,
+"format_ok":true,
+"simulation_feasible":true
+},
+"reasons":[]
+}
+}
+],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+},
+{
+"id":"EV-20261003-100133-B-OPEN",
+"opened_at":"2026-10-03T10:01:33+08:00",
+"machine_id":"B-OPEN",
+"anomaly":{
+"id":"AN-20261003-100133-B-OPEN",
+"ts":"2026-10-03T10:01:33+08:00",
+"machine_id":"B-OPEN",
+"kind":"overheat",
+"channel":"temp_c",
+"value":95.65,
+"baseline":94.01,
+"prediction":{
+"machine_id":"B-OPEN",
+"channel":"temp_c",
+"now_value":95.65,
+"predicted_value":229.72,
+"band_lo":186.27,
+"band_hi":273.16,
+"horizon_s":1800.0,
+"trend_per_min":4.465,
+"model":"linear-trend"
+},
+"severity":"critical",
+"message":"B 線開煉機 膠溫 96°C 持續上升（+4.5°C/分），水流偏低 16 L/min（基準 40）；預測約 6 分後達 120°C 上限",
+"related_machines":[],
+"detection_latency_s":31.0,
+"preclass":{
+"rule":"compound_rising",
+"label":"膠溫持續上升（冷卻水偏低或預測達上限）",
+"checks":[
+"上升趨勢 ≥ 0.5°C/分",
+"冷卻水流低於基準 70%"
+],
+"kind":"overheat",
+"channel":"temp_c",
+"value":95.65,
+"baseline":94.01,
+"sigma":0.115,
+"severity":"critical",
+"validation":{
+"range":"通過",
+"jump":"通過",
+"stale":"通過",
+"quality":"ok"
+},
+"forecast":{
+"model":"linear-trend",
+"predicted":229.72,
+"band":[
+186.27,
+273.16
+],
+"horizon_min":30,
+"trend_per_min":4.465
+},
+"limit":120.0
+}
+},
+"state":"closed",
+"plan":{
+"goal":"B 線開煉機降溫，避免整批膠料提早硬化",
+"hypothesis":{
+"id":"H1",
+"statement":"冷卻能力不足（水流偏低）",
+"cause_code":"cooling_insufficient",
+"expectation":{
+"machine_id":"B-OPEN",
+"channel":"temp_c",
+"op":"<=",
+"value":118.0,
+"value_hi":null,
+"within_min":20.0
+},
+"status":"confirmed",
+"evidence":[
+"膠溫 95.7°C 且持續上升（上限 120°C）",
+"冷卻水流偏低",
+"溫度維持 113.7°C，符合預期 20 分內 ≤118°C"
+]
+},
+"rejected_hypothesis_ids":[],
+"steps":[
+{
+"id":"S1",
+"tool":"read_sensors",
+"args":{
+"machine_ids":[
+"B-OPEN"
+],
+"minutes":30.0
+},
+"depends_on":[],
+"purpose":"讀膠溫與冷卻水流 30 分鐘趨勢"
+},
+{
+"id":"S2",
+"tool":"query_orders_shifts",
+"args":{},
+"depends_on":[],
+"purpose":"確認對大胎 #07 入硫化時間的影響"
+},
+{
+"id":"S3",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"maintenance"
+],
+"kind":"maintenance",
+"machine_id":"B-OPEN",
+"message":"B 線開煉機冷卻水流偏低，請檢修冷卻水路"
+},
+"depends_on":[
+"S1"
+],
+"purpose":"通知維修冷卻水路（自動）"
+},
+{
+"id":"S4",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side"
+],
+"kind":"slow_feed",
+"machine_id":"B-OPEN",
+"message":"B 線開煉機膠溫偏高，請放慢生料投入直到冷卻恢復"
+},
+"depends_on":[
+"S1",
+"S2"
+],
+"purpose":"放慢生料投入（需主管核准）"
+}
+],
+"alert_card":{
+"title":"異常：B 線開煉機 溫度過高",
+"summary":"膠溫 95.7°C 且持續上升（上限 120°C）；原因：冷卻能力不足。已通知維修，建議放慢生料投入。"
+},
+"safe_stop":false,
+"rationale":"水流偏低與升溫同步，判定冷卻不足；通知維修為 R1 自動，放慢投料為 R3 需核准。"
+},
+"hypotheses":[
+{
+"id":"H1",
+"statement":"冷卻能力不足（水流偏低）",
+"cause_code":"cooling_insufficient",
+"expectation":{
+"machine_id":"B-OPEN",
+"channel":"temp_c",
+"op":"<=",
+"value":118.0,
+"value_hi":null,
+"within_min":20.0
+},
+"status":"confirmed",
+"evidence":[
+"膠溫 95.7°C 且持續上升（上限 120°C）",
+"冷卻水流偏低",
+"溫度維持 113.7°C，符合預期 20 分內 ≤118°C"
+]
+}
+],
+"approvals":[
+"AP-EV-20261003-100133-B-OPEN-1"
+],
+"replans":0,
+"outcome":"H1 冷卻能力不足（水流偏低）：已通知維修；放慢生料投入",
+"alert_card":{
+"title":"異常：B 線開煉機 溫度過高",
+"summary":"膠溫 95.7°C 且持續上升（上限 120°C）；原因：冷卻能力不足。已通知維修，建議放慢生料投入。"
+},
+"closed_at":"2026-10-03T10:21:40+08:00",
+"source":"detector",
+"steps":[],
+"prior_rounds":[],
+"timeline":[],
+"safety_actions":[]
+}
+],
+"tasks":[
+{
+"id":"TK-0001",
+"event_id":"EV-20261003-100133-B-OPEN",
+"approval_id":null,
+"kind":"檢修",
+"title":"開煉機：B 線開煉機冷卻水流偏低，請檢修冷卻水路",
+"team_label":"維修組",
+"worker_name":"陳志明",
+"machine_id":"B-OPEN",
+"status":"執行中",
+"created_at":"2026-10-03T10:01:45+08:00",
+"assigned_at":"2026-10-03T10:01:45+08:00",
+"done_at":null,
+"eta":"2026-10-03T10:34:45+08:00"
+},
+{
+"id":"TK-0007",
+"event_id":"EV-20261003-100148-CURE-10",
+"approval_id":"AP-EV-20261003-100148-CURE-10-2",
+"kind":"調派支援",
+"title":"從胎側膠組調 1 人到胎體／胎面膠組夜班支援出入模",
+"team_label":"胎側膠組",
+"worker_name":"S18（胎邊組）",
+"machine_id":"A-MIX",
+"status":"完成",
+"created_at":"2026-10-03T10:03:30+08:00",
+"assigned_at":"2026-10-03T10:08:00+08:00",
+"done_at":"2026-10-03T10:21:00+08:00",
+"eta":"2026-10-03T10:21:00+08:00"
+},
+{
+"id":"TK-0006",
+"event_id":"EV-20261003-100148-CURE-10",
+"approval_id":"AP-EV-20261003-100148-CURE-10-2",
+"kind":"設定硫化時間",
+"title":"在硫化機面板輸入硫化總時數 41.1 h（核准值，人工設定）",
+"team_label":"硫化機組",
+"worker_name":"S05（成形組）",
+"machine_id":"CURE-10",
+"status":"完成",
+"created_at":"2026-10-03T10:03:29+08:00",
+"assigned_at":"2026-10-03T10:08:30+08:00",
+"done_at":"2026-10-03T10:16:30+08:00",
+"eta":"2026-10-03T10:16:30+08:00"
+},
+{
+"id":"TK-0008",
+"event_id":"EV-20261003-100148-CURE-10",
+"approval_id":"AP-EV-20261003-100148-CURE-10-2",
+"kind":"宣達",
+"title":"向硫化機組宣達：10 號機延長硫化至 41.1 h（+7.1 h），已依新排",
+"team_label":"硫化機組",
+"worker_name":"S13（加硫組）",
+"machine_id":"CURE-01",
+"status":"完成",
+"created_at":"2026-10-03T10:03:31+08:00",
+"assigned_at":"2026-10-03T10:08:40+08:00",
+"done_at":"2026-10-03T10:14:40+08:00",
+"eta":"2026-10-03T10:14:40+08:00"
+},
+{
+"id":"TK-0009",
+"event_id":"EV-20261003-100148-CURE-10",
+"approval_id":"AP-EV-20261003-100148-CURE-10-2",
+"kind":"宣達",
+"title":"向胎體／胎面膠組宣達：10 號機延長硫化至 41.1 h（+7.1 h），已依新排",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S02（打膠組）",
+"machine_id":"A-MIX",
+"status":"完成",
+"created_at":"2026-10-03T10:03:31+08:00",
+"assigned_at":"2026-10-03T10:03:31+08:00",
+"done_at":"2026-10-03T10:11:31+08:00",
+"eta":"2026-10-03T10:11:31+08:00"
+},
+{
+"id":"TK-0004",
+"event_id":"EV-20261003-100145-CURE-03",
+"approval_id":"AP-EV-20261003-100145-CURE-03-1",
+"kind":"宣達",
+"title":"向硫化機組宣達：3 號機延長硫化至 30.6 h（+6.6 h），已依新排程",
+"team_label":"硫化機組",
+"worker_name":"S14（加硫組）",
+"machine_id":"CURE-01",
+"status":"完成",
+"created_at":"2026-10-03T10:02:37+08:00",
+"assigned_at":"2026-10-03T10:02:37+08:00",
+"done_at":"2026-10-03T10:08:37+08:00",
+"eta":"2026-10-03T10:08:37+08:00"
+},
+{
+"id":"TK-0005",
+"event_id":"EV-20261003-100145-CURE-03",
+"approval_id":"AP-EV-20261003-100145-CURE-03-1",
+"kind":"宣達",
+"title":"向胎體／胎面膠組宣達：3 號機延長硫化至 30.6 h（+6.6 h），已依新排程",
+"team_label":"胎體／胎面膠組",
+"worker_name":"S01（打膠組）",
+"machine_id":"A-MIX",
+"status":"完成",
+"created_at":"2026-10-03T10:02:37+08:00",
+"assigned_at":"2026-10-03T10:02:37+08:00",
+"done_at":"2026-10-03T10:08:37+08:00",
+"eta":"2026-10-03T10:08:37+08:00"
+},
+{
+"id":"TK-0003",
+"event_id":"EV-20261003-100145-CURE-03",
+"approval_id":"AP-EV-20261003-100145-CURE-03-1",
+"kind":"設定硫化時間",
+"title":"在硫化機面板輸入硫化總時數 30.6 h（核准值，人工設定）",
+"team_label":"硫化機組",
+"worker_name":"S13（加硫組）",
+"machine_id":"CURE-03",
+"status":"完成",
+"created_at":"2026-10-03T10:02:36+08:00",
+"assigned_at":"2026-10-03T10:02:36+08:00",
+"done_at":"2026-10-03T10:08:36+08:00",
+"eta":"2026-10-03T10:08:36+08:00"
+},
+{
+"id":"TK-0002",
+"event_id":"EV-20261003-100133-B-OPEN",
+"approval_id":"AP-EV-20261003-100133-B-OPEN-1",
+"kind":"放慢投料",
+"title":"開煉機放慢投料（現場人工調整）",
+"team_label":"胎側膠組",
+"worker_name":"S18（胎邊組）",
+"machine_id":"B-OPEN",
+"status":"完成",
+"created_at":"2026-10-03T10:01:57+08:00",
+"assigned_at":"2026-10-03T10:01:57+08:00",
+"done_at":"2026-10-03T10:07:57+08:00",
+"eta":"2026-10-03T10:07:57+08:00"
+}
+],
+"approvals":[
+{
+"id":"AP-EV-20261003-100133-B-OPEN-1",
+"event_id":"EV-20261003-100133-B-OPEN",
+"round":1,
+"created_at":"2026-10-03T10:01:45+08:00",
+"risk":"R3",
+"title":"異常：B 線開煉機 溫度過高",
+"reason":"假設 H1：冷卻能力不足（水流偏低）",
+"delivery_impact":"排程未變更（本事件未重排，未經排程模擬）",
+"actions":[
+"S4 放慢生料投入 → 胎側膠組［B 線開煉機］：B 線開煉機膠溫偏高，請放慢生料投入直到冷卻恢復"
+],
+"options":[
+{
+"id":"A",
+"label":"放慢生料投入",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side"
+],
+"kind":"slow_feed",
+"machine_id":"B-OPEN",
+"message":"B 線開煉機膠溫偏高，請放慢生料投入直到冷卻恢復"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-100133-B-OPEN-1",
+"decision":"approve",
+"option_id":"A",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T10:01:56+08:00"
+},
+"version":1,
+"gaps":[],
+"done":[
+"已通知維修"
+]
+},
+{
+"id":"AP-EV-20261003-100145-CURE-03-1",
+"event_id":"EV-20261003-100145-CURE-03",
+"round":1,
+"created_at":"2026-10-03T10:02:10+08:00",
+"risk":"R3",
+"title":"3 號機溫度下降 128→123.3°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v2 生效（3 號硫化 30.6 h；SO-001 改 2 號；SO-004 ×1 → 4 號、×1 → 7 號）",
+"S4b 3 號機硫化總時數 30.6 h（公式 30.6 h）",
+"人力：本次不含人力調動（10/03 夜班 從 2 線調 1 人 未列入核准，該班缺口維持原狀）"
+],
+"options":[
+{
+"id":"A",
+"label":"核准全部：排程 v2 生效（3 號硫化 30.6 h；SO-001 改 2 號；SO-004 ×1 → 4 號、×1 → 7 號）；3 號機硫化總時數 30.6 h（公式 30.6 h）",
+"tool":"confirm_schedule",
+"args":{
+"schedule_version":2,
+"reason":"3 號機降溫，延長硫化至 30.6 h 後重排"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-100145-CURE-03-1",
+"decision":"approve",
+"option_id":"A",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T10:02:34+08:00"
+},
+"version":1,
+"gaps":[],
+"done":[]
+},
+{
+"id":"AP-EV-20261003-100148-CURE-10-1",
+"event_id":"EV-20261003-100148-CURE-10",
+"round":1,
+"created_at":"2026-10-03T10:02:13+08:00",
+"risk":"R3",
+"title":"10 號機溫度下降 128→122.4°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v3 生效（10 號硫化 41.1 h；SO-003 ×2 → 8 號；SO-002 改 9 號；SO-008 ×2 → 11 號）",
+"S4b 10 號機硫化總時數 41.1 h（公式 41.1 h）",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-100148-CURE-10-1",
+"decision":"approve",
+"option_id":"B",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T10:02:34+08:00"
+},
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[]
+},
+{
+"id":"AP-EV-20261003-100148-CURE-10-2",
+"event_id":"EV-20261003-100148-CURE-10",
+"round":2,
+"created_at":"2026-10-03T10:02:58+08:00",
+"risk":"R3",
+"title":"10 號機溫度下降 128→122.4°C",
+"reason":"假設 H1：蒸汽壓不足，溫度會穩定",
+"delivery_impact":"不受影響",
+"actions":[
+"S4 排程 v4 生效（10 號硫化 41.1 h；SO-002 改 8 號）",
+"S4b 10 號機硫化總時數 41.1 h（公式 41.1 h）",
+"人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）"
+],
+"options":[
+{
+"id":"A",
+"label":"夜班加班",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"body"
+],
+"kind":"overtime",
+"message":"10/03 夜班加班（1 人）"
+},
+"recommended":false
+},
+{
+"id":"B",
+"label":"從 2 線調 1 人",
+"tool":"notify_teams",
+"args":{
+"teams":[
+"side",
+"body"
+],
+"kind":"staff_move",
+"message":"10/03 夜班從 2 線調 1 人（1 人）"
+},
+"recommended":true
+}
+],
+"status":"approved",
+"decision":{
+"request_id":"AP-EV-20261003-100148-CURE-10-2",
+"decision":"approve",
+"option_id":"B",
+"modified_args":null,
+"reason":"",
+"decided_by":"supervisor",
+"via":"dashboard",
+"decided_at":"2026-10-03T10:03:27+08:00"
+},
+"version":1,
+"gaps":[
+"10/03 夜班缺 1 人"
+],
+"done":[]
+}
+]
+}
+}

@@ -508,7 +508,8 @@ async def test_out_of_scope_steps_intercepted_and_logged(tmp_path):
     assert any(e.payload["tool"] == "sop_search" for e in inter)
     rejected_gate = [e for e in entries if e.kind is AuditKind.GATE and e.payload.get("tool") == "notify_teams"]
     assert rejected_gate                                       # malformed (bad machine id) write rejected
-    assert not tools.calls_of(ToolName.NOTIFY_TEAMS)
+    # nothing of the plan ran; only the maintenance notice code adds for a press temperature drop (R1, once)
+    assert [c.args["kind"] for c in tools.calls_of(ToolName.NOTIFY_TEAMS)] == ["maintenance"]
     # a plan whose only write the gate refused did nothing: a miss, not a closed success
     assert ev.state is EventState.SAFE_STOP and audit.verify_chain()
 

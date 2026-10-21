@@ -40,6 +40,11 @@ export function DemoStrip() {
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
   const current = scenario ?? (state.clock?.scenario as ScenarioName | undefined) ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : null)
   const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
+  // a scenario picked while paused used to load and stay paused (the plant looked frozen): loading it also plays
+  const loadAndPlay = async (name: ScenarioName, speed: number) => {
+    await transport.control({ action: 'scenario', scenario: name, speed, preroll: true })
+    await transport.control({ action: 'play' })
+  }
   // 情境疊加: a different overlayable scenario while an event or approval is open adds on top; otherwise load as before
   const pick = (s: (typeof SCENARIOS)[number]) => {
     if (scenarioClick(s.name, state, current) === 'overlay') {
@@ -50,7 +55,7 @@ export function DemoStrip() {
       return
     }
     setScenario(s.name); setOverlaid(null); setLoading(s.label)
-    run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null))
+    run(() => loadAndPlay(s.name, s.speed)).finally(() => setLoading(null))
   }
   const overlays = runningScenarios(state).overlays
   return (
@@ -95,7 +100,7 @@ export function DemoStrip() {
         ))}
       </div>
       {state.lastAlert && (
-        <span className="demo-alert" title={state.lastAlert.summary}>⚡ 首張告警卡：{state.lastAlert.title}</span>
+        <span className="demo-alert" title={state.lastAlert.summary}>⚡ 最新告警卡：{state.lastAlert.title}</span>
       )}
     </div>
   )

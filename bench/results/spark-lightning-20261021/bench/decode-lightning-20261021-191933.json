@@ -1,0 +1,180 @@
+{
+  "bench": "decode",
+  "recorded_at": "2026-10-21T19:19:33.189923+08:00",
+  "host": {
+    "hostname": "aitopatom-3ef3",
+    "platform": "Linux-7.0.0-1019-nvidia-aarch64-with-glibc2.39",
+    "machine": "aarch64",
+    "processor": "aarch64",
+    "ram_gb": 121.6,
+    "cpu_count": 20
+  },
+  "code": {
+    "git_sha": "afb2553cfdd2",
+    "deps": [
+      "decode.py",
+      "llm.py",
+      "prompts.py"
+    ],
+    "deps_dirty": false,
+    "fingerprint": "f93930d1f41a985e"
+  },
+  "host_load_avg_1_5_15": [
+    2.4,
+    1.69,
+    1.5
+  ],
+  "endpoint": {
+    "base_url": "http://127.0.0.1:8000/v1",
+    "model": "lightning",
+    "kind": "vllm",
+    "vllm_version": "0.27.1"
+  },
+  "config": null,
+  "batch": 1,
+  "target_band_tps": [
+    95.0,
+    108.0
+  ],
+  "prompt": "commander: warroom.agent.commander.build_messages(CommanderRequest), full plan stream, plan + replan rounds, unique event per call",
+  "calls": [
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2954055839945795,
+      "total_s": 9.3822,
+      "completion_tokens": 1070,
+      "prompt_tokens": 6872,
+      "decode_tps": 132.19,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2287629769998603,
+      "total_s": 7.3697,
+      "completion_tokens": 801,
+      "prompt_tokens": 6730,
+      "decode_tps": 130.27,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.245279793998634,
+      "total_s": 9.6368,
+      "completion_tokens": 1020,
+      "prompt_tokens": 6831,
+      "decode_tps": 121.43,
+      "counted": true
+    },
+    {
+      "phase": "replan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.3185251780014369,
+      "total_s": 9.7631,
+      "completion_tokens": 1111,
+      "prompt_tokens": 6982,
+      "decode_tps": 131.44,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2801585209963378,
+      "total_s": 8.4469,
+      "completion_tokens": 862,
+      "prompt_tokens": 6736,
+      "decode_tps": 120.14,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2526346610029577,
+      "total_s": 9.2857,
+      "completion_tokens": 1003,
+      "prompt_tokens": 6832,
+      "decode_tps": 124.73,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2539753710007062,
+      "total_s": 9.4056,
+      "completion_tokens": 1072,
+      "prompt_tokens": 6874,
+      "decode_tps": 131.38,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.287497067998629,
+      "total_s": 8.2219,
+      "completion_tokens": 847,
+      "prompt_tokens": 6738,
+      "decode_tps": 122.0,
+      "counted": true
+    },
+    {
+      "phase": "plan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2486361900009797,
+      "total_s": 9.5378,
+      "completion_tokens": 1015,
+      "prompt_tokens": 6832,
+      "decode_tps": 122.33,
+      "counted": true
+    },
+    {
+      "phase": "replan",
+      "ok": true,
+      "error": null,
+      "ttft_any_s": 1.2765132729982724,
+      "total_s": 9.7553,
+      "completion_tokens": 1087,
+      "prompt_tokens": 6980,
+      "decode_tps": 128.08,
+      "counted": true
+    }
+  ],
+  "n_counted": 10,
+  "n_errors": 0,
+  "decode_tps": {
+    "n": 10,
+    "min": 120.14,
+    "p50": 126.405,
+    "p90": 131.515,
+    "max": 132.19,
+    "mean": 126.399
+  },
+  "completion_tokens": {
+    "n": 10,
+    "min": 801,
+    "p50": 1017.5,
+    "p90": 1089.4,
+    "max": 1111,
+    "mean": 988.8
+  },
+  "verdicts": [
+    {
+      "name": "decode_tps_p50",
+      "target": "≥ 95 tok/s (slide 95–108)",
+      "measured": 126.405,
+      "passed": true,
+      "note": "batch 1, commander full plan stream, n=10; above the slide's 108: the slide under-states it",
+      "extra": {}
+    }
+  ]
+}

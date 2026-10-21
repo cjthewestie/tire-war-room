@@ -337,7 +337,7 @@ class FallbackDetector:
                           band_lo=round(pred - 1, 1), band_hi=round(pred + 1, 1), horizon_s=horizon_s,
                           trend_per_min=round(trend, 3), model="fallback-linear")
 
-    def reset(self, machine_id: str | None = None) -> None:
+    def reset(self, machine_id: str | None = None, *, repaired: bool = False) -> None:
         if machine_id:
             self._flagged.discard(machine_id)
         else:

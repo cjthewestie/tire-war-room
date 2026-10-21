@@ -13,6 +13,7 @@ import {
   type PlanNode, type ScheduleDiff, type ToolUse,
 } from './approvalView'
 import { ToolIcon } from './ToolIcon'
+import { OptionGuideNote } from '../OptionGuideNote'
 import { expectationText, type Item, type ToolItem } from './transcript'
 import { useTranscript, useVersions } from './useTranscript'
 import './agent.css'
@@ -92,6 +93,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   )
   const options = (n: number) => opts.length > 0 && (
     <Block key="opts" n={n} title="人力方案" hint="點選一個方案">
+      <OptionGuideNote a={req} ev={ev} />
       <div className="apv-opts" role="group" aria-label="人力方案">
         {opts.map((o) => {
           const on = chosen === o.opt.id
@@ -193,6 +195,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
     <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
       <header className="apv-h">
         <div className="apv-tags">
+          <span className="apv-main" data-testid="main-plan-tag">NemoClaw 的計劃</span>
           <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
           <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
           {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
@@ -223,14 +226,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
         )}
 
       <footer className="apv-act">
-        {done ? <p className="apv-done" role="status">{done}・決定已寫入稽核日誌，系統接著往下執行</p> : <>
+        {done ? <p className="apv-done" role="status">{done}・NemoClaw 已派人執行，完成後回報；決定已寫入稽核日誌</p> : <>
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
-              {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
+              {busy ? '送出中…' : `核准並派發${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">要改或不同意，按「討論」跟 AI 說</span>
+            <span className="apv-hint">核准後 NemoClaw 派人執行並回報；要改，按「討論」跟NemoClaw 說</span>
           </div>
         </>}
       </footer>
