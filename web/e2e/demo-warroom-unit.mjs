@@ -27,8 +27,8 @@ const want = {
   console: ['agent', 'home-item-{id}', '計劃已經先擬好，只等核准或討論'],
   event: ['agent', 'plan-area', 'AI 只在規劃時被叫醒'],
   phone: ['agent', 'approve-bar', '📱 主管手機核准（R2 以上一定要人）'],
-  worker: ['agent', 'result-strip', '員工完成，程式驗證讀值'],
-  agent: ['console', 'trace-body', '每一步都在稽核鏈上'],
+  worker: ['monitor', 'data-machine', '員工完成，程式驗證讀值'],
+  agent: ['console', 'hyp-rejected', '每一步都在稽核鏈上'],
   robot: ['sm', 'sm-stages', '只有「規劃」和「換假設」會叫 AI'],
   rush: ['agent', 'approve-bar', '急單進來：先核准'],
   h1: ['agent', 'approve-bar', '核准 H1（第一個假設）'],
@@ -61,7 +61,8 @@ const before = B.beatView('event', { snapshot: { events: events.filter((e) => e.
 check('event beat before the incident: no order plan in the spotlight, the status strip', before.anchors[0] === '[data-testid="status-strip"]' && before.eventId === null, before.anchors.join(' | '))
 check('event beat with the incident: its plan', B.beatView('event', { snapshot: { events } }).anchors[0] === '[data-testid="plan-area"]')
 check('phone beat with the incident: the 核准 bar', B.beatView('phone', { snapshot: { events } }).anchors[0] === '[data-demo-anchor="approve-bar"]')
-check('agent beat spotlights the trace and the task log together', B.BEATS.agent.anchors[0] === '[data-testid="trace-body"] & [data-testid="tasklog"]')
+check('agent beat: H1 rejected → verdict → H2 first', B.BEATS.agent.anchors[0].startsWith('[data-testid="think-block"][data-hyp-status="rejected"] & [data-demo-anchor="hyp-rejected"] & '))
+check('agent beat falls back to the trace and the task log', B.BEATS.agent.anchors.includes('[data-testid="trace-body"] & [data-testid="tasklog"]'))
 check('agent beat opens the incident', B.beatView('agent', { snapshot: { events } }).eventId === 'EV-7')
 
 // what each beat waits for
@@ -79,6 +80,12 @@ check('the incident card is', S.signals({ ...base, pending: [{ id: 'AP-7', event
 check('worker not yet: the approval was before the demo', S.signals(base, seen).worker === false)
 check('worker not on an order approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R')] }, seen).worker === false)
 check('worker after the incident approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R'), ok('EV-7')] }, seen).worker === true)
+const tiles = (repaired) => ({ machines: [{ machine_id: 'CURE-07', status: 'out_of_service', repaired }] })
+check('workerDone not before the repair (停用, not green)', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(false) } }, seen).workerDone === false)
+const afterH2 = { ...base, resolved: [ok('EV-OLD'), { id: 'AP-7-1', ...ok('EV-7') }, { id: 'AP-7-2', ...ok('EV-7') }] }
+check('workerDone needs this incident approved', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === false)
+check('workerDone on machines[].repaired (green 檢修完成・待恢復運轉)', S.signals({ ...afterH2, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === true)
+check('worker beat spotlights the 7 號機 tile', B.beatView('worker', { snapshot: { events } }).anchors[0] === '[data-machine="CURE-07"]')
 check('incident followed', seen.id === 'EV-7' && seen.machine === 'CURE-07')
 
 // the Xbox pad: A continues, Menu pauses, a held button fires once

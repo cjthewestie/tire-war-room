@@ -23,6 +23,9 @@ export interface Beat {
   pitch?: boolean
 }
 
+const H1_REJECTED = '[data-testid="think-block"][data-hyp-status="rejected"]'
+const VERDICT_ROW = '[data-demo-anchor="hyp-rejected"]'
+
 export const BEATS: Record<string, Beat> = {
   start: {
     tab: 'agent', focus: null, caption: '訂單湧進來',
@@ -57,13 +60,20 @@ export const BEATS: Record<string, Beat> = {
     tab: 'agent', focus: 'incident', caption: 'AI 換假設：程式驗證失敗才會換',
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
   },
+  // 員工完成 → 變綠: the press tile on 產線監控 turns green 「檢修完成・待恢復運轉」 (morning_rush, machines[].repaired)
   worker: {
-    tab: 'agent', focus: 'incident', caption: '員工完成，程式驗證讀值',
-    anchors: ['?[data-testid="result-strip"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
+    tab: 'monitor', focus: 'incident', caption: '員工完成，程式驗證讀值',
+    anchors: ['[data-machine="{machine}"]', '[data-testid="early-warnings"]'],
   },
   agent: {
     tab: 'console', focus: 'incident', caption: '每一步都在稽核鏈上',
-    anchors: ['[data-testid="trace-body"] & [data-testid="tasklog"]', '[data-testid="trace-body"]', '[data-testid="agent-page"]'],
+    // AI 猜錯換假設: the H1 plan the readings overturned, the code's verdict and the H2 plan after it; before the H1→H2
+    // turn (or in a story without it) the whole trace and 今天處理過的任務
+    anchors: [
+      `${H1_REJECTED} & ${VERDICT_ROW} & ${VERDICT_ROW} ~ [data-testid="think-block"]`,
+      `${H1_REJECTED} & ${VERDICT_ROW}`,
+      '[data-testid="trace-body"] & [data-testid="tasklog"]', '[data-testid="trace-body"]', '[data-testid="agent-page"]',
+    ],
   },
   robot: {
     tab: 'sm', focus: null, caption: '只有「規劃」和「換假設」會叫 AI',

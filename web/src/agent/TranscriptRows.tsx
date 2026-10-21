@@ -38,7 +38,8 @@ export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev
     case 'anomaly':
       return <div className="r-line r-anom" data-kind="anomaly"><ToolIcon name="safety" /><span><b>事件偵測</b>　{plain(it.message)}</span><time>{fmtHMS(it.ts)}</time></div>
     case 'note':
-      return <div className={`r-line r-note ${it.tone}`} data-kind="note"><span className="r-dot" /><span>{plain(it.text)}</span><time>{fmtHMS(it.ts)}</time></div>
+      // data-demo-anchor: the guided demo's Agent beat spotlights 「H1 不成立 → H2」 (demo/beats.ts)
+      return <div className={`r-line r-note ${it.tone}`} data-kind="note" data-demo-anchor={it.tone === 'verify' && it.text.includes('不成立') ? 'hyp-rejected' : undefined}><span className="r-dot" /><span>{plain(it.text)}</span><time>{fmtHMS(it.ts)}</time></div>
     case 'ask': return <AskRow it={it} brief={brief} />
     case 'chat': return <ChatRow it={it} />
     case 'chips': return <ChipsRow it={it} />
@@ -114,7 +115,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
   const who = it.mode === 'llm' ? `Nemotron${it.model ? `（${it.model}）` : ''}` : it.mode === 'mock' ? 'Agent Nemo（規則模式）' : 'Agent Nemo'
   const exp = expectationText(hyp)
   return (
-    <article className="r-think" data-kind="think" data-testid="think-block">
+    <article className="r-think" data-kind="think" data-testid="think-block" data-hyp-status={hyp?.status}>
       <header><ToolIcon name="think" /><b>{who} {PHASE[it.phase] ?? it.phase}</b>
         {it.totalMs != null && <small>{Math.round(it.totalMs)} ms</small>}{it.tokens != null && <small>{it.tokens} tokens</small>}<time>{fmtHMS(it.ts)}</time></header>
       <p className="r-think-note">{thinkNote(it)}</p>
