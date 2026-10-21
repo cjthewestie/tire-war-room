@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom import factory as F
-from warroom.agent import order_ask, plant
+from warroom.agent import budget, order_ask, plant
 from warroom.agent.convo import AskMemory, ConvContext
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
@@ -305,8 +305,8 @@ class AskAgent:
 
     async def _llm_plan(self, question: str, context: dict[str, Any]) -> AskPlan:
         user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=400,
+        r = await budget.create(  # metered; over the day's budget it raises and the keyword rules plan
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=400,
             messages=[{"role": "system", "content": PLAN_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "AskPlan", "schema": ask_plan_schema()}},
             **self._extra())
@@ -316,8 +316,8 @@ class AskAgent:
 
     async def _llm_answer(self, question: str, results: list[AskStepResult]) -> str:
         lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=300,
+        r = await budget.create(
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=300,
             messages=[{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
                       {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
             **self._extra())

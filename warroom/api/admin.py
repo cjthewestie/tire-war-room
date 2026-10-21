@@ -221,6 +221,13 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
     async def params(request: Request, _: Any = ADMIN) -> dict[str, Any]:
         return await asyncio.to_thread(AP.params, rt(), request.app.state)
 
+    @app.get(P + "/usage")
+    async def usage(_: Any = ADMIN) -> dict[str, Any]:
+        """模型用量 (warroom/agent/budget.py): today's totals by kind, the top events and conversations, the caps, % used
+        and the degradation state."""
+        from warroom.agent import budget
+        return (getattr(rt(), "budget", None) or budget.get()).view()
+
     @app.get(P + "/runs")
     async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
         r = rt()

@@ -238,8 +238,9 @@ class Dispatcher:
             from warroom.agent.commander import thinking_off
             extra = thinking_off(self.server_kind)
             try:
-                r = await self.client.chat.completions.create(
-                    model=self.settings.model, temperature=0.0, max_tokens=120,
+                from warroom.agent import budget
+                r = await budget.create(  # metered; over the day's budget → keyword dispatch below
+                    self.client, "dispatch", model=self.settings.model, temperature=0.0, max_tokens=120,
                     messages=[{"role": "system", "content": DISPATCH_SYSTEM + plant.section()},
                               {"role": "user", "content": json.dumps({"task": text}, ensure_ascii=False)}],
                     response_format={"type": "json_schema", "json_schema": {"name": "Dispatch", "schema": dispatch_schema()}},

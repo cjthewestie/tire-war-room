@@ -544,6 +544,15 @@ class Runtime:
         self.anomalies: list[Anomaly] = []
         self._tasks: dict[str, asyncio.Task] = {}
         _ = self.orch                          # issue #54: hook the main agent onto the state machine now
+        # model usage budget (warroom/agent/budget.py): today's counters recomputed from the audit file, so a restart
+        # keeps them; resets at the real-day boundary only (not at a 一日循環 loop wrap)
+        from warroom.agent import budget
+        self.budget = budget.install(budget.Budget(self.settings, audit=lambda: self.audit,
+                                                   is_preplan=lambda eid: eid in self.orch.preplan_ids))
+        try:
+            self.budget.load(getattr(self.audit, "path", None))   # a memory log (tests) has none
+        except Exception:  # noqa: BLE001 - an unreadable log starts the day's counters at zero
+            log.exception("budget recompute")
         self._loop_task: asyncio.Task | None = None
         self._baseline: dict[str, dict[str, float]] = {}
         self._last_machines_pub = 0.0
@@ -1342,6 +1351,9 @@ class Runtime:
         if self._preplan_at is not None and (now - self._preplan_at).total_seconds() < self.PREPLAN_EVERY_S:
             return []
         self._preplan_at = now
+        why = self.budget.blocked("preplan")   # past 90 % of the day's model budget: no new pre-plans
+        if why:
+            return []
         try:
             risky = self.at_risk_orders()
             sm = self.state_machine

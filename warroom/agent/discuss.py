@@ -90,8 +90,9 @@ class PlanTalk:
             if card is not None else None
         user = json.dumps({"message": text, "waiting_plan": plan}, ensure_ascii=False, default=str)
         extra = thinking_off(self.server_kind)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=300,
+        from warroom.agent import budget
+        r = await budget.create(  # metered; over the day's budget it raises and the rules classify
+            self.client, "discuss", model=self.settings.model, temperature=0.0, max_tokens=300,
             messages=[{"role": "system", "content": CLASSIFY_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "PlanTalk", "schema": classify_schema()}},
             **({"extra_body": extra} if extra else {}))

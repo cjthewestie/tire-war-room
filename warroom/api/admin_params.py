@@ -152,6 +152,14 @@ def params(r: Any, app_state: Any = None) -> dict[str, Any]:
         _c("warroom.api.plant_query", "MAX_CHARS", "query_plant 一次回傳最多幾個字", key="query_plant 上限"),
     ])
 
+    # 模型用量上限 (warroom/agent/budget.py): 80 % 閒聊改程式回覆、90 % 暫停預先規劃、100 % 對話改規則；事件規劃永不擋
+    g("budget", "模型用量上限", [
+        _s(s, "budget_daily_tokens", "今天（實際日期）全部模型 token 上限；80% 閒聊改程式回覆、90% 暫停預先規劃、100% 對話改規則模式"),
+        _s(s, "budget_daily_model_s", "今天全部模型呼叫的秒數上限（和 token 取較高的比例）"),
+        _s(s, "budget_event_tokens", "單一事件的 token 上限；超過就不再用模型重新規劃（改規則計劃）"),
+        _s(s, "budget_conversation_tokens", "單段 Agent Nemo 對話的 token 上限；超過這段對話改規則模式"),
+    ])
+
     g("preplan", "預先擬計劃", [
         _row("啟用", getattr(r, "preplan_on", MISSING), "有風險的訂單先擬好計劃，等主管核准或討論",
              "env WARROOM_PREPLAN（warroom/api/runtime.py）"),
