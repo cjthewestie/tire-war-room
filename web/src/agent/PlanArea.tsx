@@ -41,6 +41,14 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     } else void startPlan(transport, autoOrder)
   }, [autoOrder, transport, prior])
   if (!sel) return null
+  const sc = sel.caseId ? (state.snapshot?.safety_cases ?? []).find((c) => c.id === sel.caseId) : undefined
+  if (sc) {
+    return (
+      <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
+        <div className="po-body"><SafetyCaseCard c={sc} /></div>
+      </section>
+    )
+  }
   if (sel.req && ev) {
     return (
       <section className="plan-area" aria-label="計劃" data-testid="plan-area">
@@ -107,7 +115,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{ev.state === 'safe_stop' ? '安全停止：用上面的按鈕走向解決' : closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )

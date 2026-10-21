@@ -90,8 +90,13 @@ def build(entries: Iterable[AuditEntry], sources: dict[str, str] | None = None) 
             if p.get("msg") == "ask":
                 r["title"] = str(p.get("question") or "")
                 r["by"] = e.actor
+            if p.get("follow_up"):              # SAFE_STOP → 請 AI 重新規劃 / 交給現場處理 / 確認結案 (warroom/api/resolve.py)
+                r["follow_up"] = {"status": str(p["follow_up"]), "by": e.actor, "ts": e.ts,
+                                  "new_event_id": p.get("new_event_id"), "note": p.get("note")}
             if p.get("msg") == "answered" and r["type"] == "ask":
                 r["outcome"], r["closed_at"] = "answered", e.ts
+        elif e.kind == AuditKind.SAFETY_RELEASE:
+            r["safety_release"] = {"decision": p.get("decision"), "by": e.actor, "ts": e.ts, "reason": p.get("reason")}
         elif e.kind == AuditKind.APPROVAL_REQUEST:
             requested.setdefault(eid, set()).add(str(p.get("id") or e.seq))
             r["title"] = r["title"] or (str(p["title"]) if p.get("title") else None)
@@ -139,6 +144,7 @@ def jsonable(day: dict[str, Any]) -> dict[str, Any]:
 
 CSV_COLUMNS = ["id", "類型", "機台", "開始", "結束", "耗時(分)", "結果", "輪數", "狀態路徑", "核准", "待核准", "內容"]
 OUTCOME = {"closed": "結案", "safe_stop": "安全停止", "open": "處理中", "answered": "已回答"}
+FOLLOW_UP = {"replanned": "已請 AI 重新規劃", "manual": "人工處理中", "closed": "主管確認結案"}
 
 
 def to_csv(day: dict[str, Any]) -> str:
@@ -149,6 +155,8 @@ def to_csv(day: dict[str, Any]) -> str:
         appr = "；".join(f"{a['decision']}・{a['by']}{'・' + a['via'] if a.get('via') else ''}" for a in r["approvals"])
         w.writerow([r["id"], TYPE_LABEL.get(r["type"], r["type"]), r["machine_id"] or "",
                     r["opened_at"].isoformat() if r["opened_at"] else "", r["closed_at"].isoformat() if r["closed_at"] else "",
-                    r["duration_min"] if r["duration_min"] is not None else "", OUTCOME.get(r["outcome"], r["outcome"]), r["rounds"],
+                    r["duration_min"] if r["duration_min"] is not None else "", OUTCOME.get(r["outcome"], r["outcome"])
+                    + (f"（{FOLLOW_UP.get(r['follow_up']['status'], r['follow_up']['status'])}）" if r.get("follow_up") else ""),
+                    r["rounds"],
                     "→".join(p["state"] for p in r["path"]), appr, r["pending_approvals"], r["title"] or ""])
     return "﻿" + buf.getvalue()      # BOM: Excel opens the Chinese columns as UTF-8

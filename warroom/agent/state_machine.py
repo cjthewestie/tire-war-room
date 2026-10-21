@@ -109,6 +109,7 @@ from warroom.contracts import (
     NotifyKind,
     PlanConstraint,
     PlanStep,
+    PreviousRun,
     RiskLevel,
     SafetyAction,
     Severity,
@@ -825,6 +826,13 @@ class StateMachine:
             except Exception:  # noqa: BLE001
                 pass
 
+    def add_note(self, event_id: str, actor: str, text: str, tag: str = "human") -> Event | None:
+        """A line on an event's timeline from outside a run (a supervisor's resolution step); publishes the event."""
+        ev = self._events.get(event_id)
+        if ev is not None:
+            self._note(ev, actor, text, tag)
+        return ev
+
     def _note(self, ev: Event, actor: str, text: str, tag: str = "info", ts: datetime | None = None) -> None:
         ev.timeline.append(TimelineItem(ts=ts or self._now(), actor=actor, text=text, tag=tag))
         self._publish(WsType.EVENT, ev)
@@ -1267,8 +1275,11 @@ class StateMachine:
         ev = run.ev
         allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
         rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
+        ctx = {**run.base_context, **extra}
+        if ev.previous is not None:              # 「請 AI 重新規劃」: why the last run of this ended in SAFE_STOP
+            ctx["previous_run"] = {"event_id": ev.previous.event_id, "stop_reason": ev.previous.reason_text}
         req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
-                               context={**run.base_context, **extra}, rejected=rejected)
+                               context=ctx, rejected=rejected)
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
@@ -3416,10 +3427,69 @@ class StateMachine:
             if h.status is HypothesisStatus.ACTIVE:
                 h.status = HypothesisStatus.PROPOSED
         ev.outcome = f"安全中止：{reason}；{kept}"
+        ev.stop_reason, ev.stop_reason_text = reason, self.stop_reason_text(reason)
         self._to(ev, EventState.SAFE_STOP, reason)
         ev.closed_at = self._now()
         self._note(ev, "系統", ev.outcome, "dynamic")
 
+
+    def stop_reason_text(self, reason: str) -> str:
+        """The SAFE_STOP reason in the supervisor's words (shown on the card next to the resolution buttons)."""
+        if reason == "核准逾時":
+            s = self.approval_timeout_s
+            return f"{s / 60:.0f} 分鐘內沒核准" if s >= 60 and s % 60 == 0 else f"{s:.0f} 秒內沒核准"
+        m = re.match(r"連續 (\d+) 次失敗", reason)
+        if m:
+            return f"連續失敗 {m.group(1)} 次"
+        m = re.match(r"已重新規劃 (\d+) 次仍未解決", reason)
+        if m:
+            return f"重新規劃 {m.group(1)} 次仍無法驗證"
+        if reason == "指揮官要求安全中止":
+            return "AI 判斷沒有安全的處置方案"
+        if reason.startswith("指揮官") or "模型" in reason or "LLM" in reason:
+            return "AI 模型沒有回應"
+        if reason.startswith("內部錯誤"):
+            return "系統內部錯誤"
+        if reason == "事件處理被取消":
+            return "處理被取消（切換情境或重新啟動）"
+        return reason
+
+    # ------------------------------------------------------------------ SAFE_STOP → 請 AI 重新規劃
+    def open_replan(self, event_id: str, actor: str = "supervisor") -> Event:
+        """「請 AI 重新規劃」 of an event that ended in SAFE_STOP: a NEW event for the same machine, supervisor command or
+        plant input, opened here (DETECTED) and run by the caller (run_event / run_command / run_plant) through the
+        normal state machine, gate and approval. Its `previous` carries the stopped event and why it stopped, and the
+        commander gets it as context.previous_run. Nothing here touches a machine's status beyond what any new event
+        does (_set_status never lifts STOPPED / OUT_OF_SERVICE). KeyError: no such event; ValueError: not safe-stopped,
+        or the machine has another open event, or a plant input that is no longer kept."""
+        old = self._events[event_id]
+        if old.state is not EventState.SAFE_STOP:
+            raise ValueError(f"{event_id} 不是安全停止的事件")
+        prev = PreviousRun(event_id=old.id, reason=old.stop_reason or "",
+                           reason_text=old.stop_reason_text or self.stop_reason_text(old.stop_reason or ""))
+        if old.source == "supervisor":
+            ev = self.open_command(old.command or old.anomaly.message, actor)
+        elif old.source == "plant":
+            pin = self._plant_inputs.get(old.id)
+            if pin is None:
+                raise ValueError("這件工廠事件的原始輸入已不在記憶體，請改用「交給現場處理」")
+            ev = self.open_plant_event(pin)
+        else:
+            if self.open_event_for(old.machine_id) is not None:
+                raise ValueError(f"{machine_label(old.machine_id)}已有處理中的事件")
+            now = self._now()
+            a = old.anomaly.model_copy(update={"id": f"{old.anomaly.id}-R{now.astimezone(TZ):%H%M%S}", "ts": now})
+            ev = self._open_event(a)
+        ev.previous = prev
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "請 AI 重新規劃", "previous_event_id": old.id,
+                                                    "stop_reason": prev.reason, "stop_reason_text": prev.reason_text},
+                          event_id=ev.id)
+        self._note(ev, "主管", f"[人工] 主管要求 AI 重新規劃（上一輪 {old.id} 安全停止：{prev.reason_text}）", "human")
+        return ev
+
+    async def run_event(self, event_id: str) -> Event:
+        """Run a detector event opened outside handle() (open_replan)."""
+        return await self._drive(self._events[event_id], self._run)
 
     def _safe_stop_schedule(self, run: _Run, reason: str) -> str:
         """SAFE_STOP never rolls the store back. Every version this event activated was approved by

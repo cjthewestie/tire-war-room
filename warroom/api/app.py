@@ -78,6 +78,8 @@ from warroom.contracts import (
     ReviewRequest,
     RiskLevel,
     SafetyAction,
+    SafetyCase,
+    SafetyRelease,
     ScenarioName,
     ScheduleVersion,
     Shift,
@@ -597,6 +599,53 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise _404(event_id) from None
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
+
+    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+    # CJ, 2026-10-22: 「安全核心要設計可以被解決 安全停止也要有可以走向解決的按鈕」. Every write here is a HUMAN supervisor
+    # action (same session rule as approvals); none of it is a tool, and the agent / commander cannot reach it.
+    def _resolve_call(session: Session, fn: Callable[[], Any], what: str) -> Any:
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail=f"LAN 中斷：請至現場觸控螢幕{what}")
+        try:
+            return fn()
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=f"not found: {e.args[0] if e.args else ''}") from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/safety/cases", response_model=list[SafetyCase])
+    async def safety_cases() -> list[SafetyCase]:
+        r = rt()
+        return r.cases.view(r._board())
+
+    @app.post("/api/safety/{case_id}/dispatch", response_model=SafetyCase)
+    async def safety_dispatch(case_id: str, session: Session = Depends(supervisor)) -> SafetyCase:
+        """① 派現場檢查: worker tasks from the rule's SOP."""
+        return _resolve_call(session, lambda: rt().safety_dispatch(case_id, session.actor), "派工")
+
+    @app.post("/api/safety/{case_id}/release", response_model=SafetyCase)
+    async def safety_release(case_id: str, body: SafetyRelease, session: Session = Depends(supervisor)) -> SafetyCase:
+        """③ 確認恢復運轉 / QC 合格放行 / 報廢. 409 until the reading is back in range for the core's re-arm count AND the
+        field tasks are done (or 「已現場確認」 with a reason). Audited with the session as actor."""
+        return _resolve_call(session, lambda: rt().safety_release(case_id, body, session.actor), "確認復機")
+
+    @app.post("/api/events/{event_id}/replan", response_model=Event)
+    async def stop_replan(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「請 AI 重新規劃」: returns the NEW event (its `previous` names the stopped one and why)."""
+        return _resolve_call(session, lambda: rt().stop_replan(event_id, session.actor), "操作")
+
+    @app.post("/api/events/{event_id}/handoff", response_model=Event)
+    async def stop_handoff(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「交給現場處理」: worker tasks from the SOP; the event shows 人工處理中."""
+        return _resolve_call(session, lambda: rt().stop_handoff(event_id, session.actor), "派工")
+
+    @app.post("/api/events/{event_id}/close", response_model=Event)
+    async def stop_close(event_id: str, body: ReviewRequest | None = Body(default=None),
+                         session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「確認結案」 (supervisor acknowledge; after the floor's tasks when it was handed over)."""
+        note = ((body.note or "").strip() if body is not None else "") or None
+        return _resolve_call(session, lambda: rt().stop_close(event_id, session.actor, note), "結案")
 
     # ------------------------------------------------------------------ approvals
     @app.get("/api/approvals", response_model=list[ApprovalRequest])
