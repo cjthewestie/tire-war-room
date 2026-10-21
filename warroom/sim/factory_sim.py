@@ -295,16 +295,11 @@ class Factory:
         self._faults.append(_Fault(spec=fault, start=start, end=end))
 
     def clear_faults(self, machine_id: str | None = None) -> None:
+        self._faults = [f for f in self._faults if machine_id is not None and f.spec.machine_id != machine_id]
         if machine_id is None:
-            self._faults, self._pending = [], []
-            return
-        # #76: a scripted fault of the same kind that has not started yet would break the fixed machine again right
-        # away, so it goes too. A later fault of another kind is a new failure and stays (p.11: 回報處置完成 on 7 號
-        # at 02:16 clears 蒸汽壓不足 but keeps the 02:22:55 持續洩壓, which the round-2 card is about).
-        kinds = {f.spec.kind for f in self._faults if f.spec.machine_id == machine_id}
-        self._faults = [f for f in self._faults if f.spec.machine_id != machine_id]
-        self._pending = [(at, st) for at, st in self._pending
-                         if st.fault is None or st.fault.machine_id != machine_id or st.fault.kind not in kinds]
+            self._pending = []
+        else:                                   # #76: the machine's scripted faults that have not started yet go too
+            self._pending = [(at, st) for at, st in self._pending if st.fault is None or st.fault.machine_id != machine_id]
 
     def faults(self, active_only: bool = True) -> list[FaultSpec]:
         t = self._t
