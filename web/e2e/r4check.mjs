@@ -1,5 +1,7 @@
 // Round-4 UI review fixes against a live backend:
-//   uv run python -m warroom.api serve --port 8793   then   node web/e2e/r4check.mjs http://localhost:8793
+//   REPAIR_FAST_S=0 uv run python -m warroom.api serve --port 8793   then   node web/e2e/r4check.mjs http://localhost:8793
+// REPAIR_FAST_S=0: the stopped press (2) is p.11's round 2, 7 號機停用; with fast repair (the demo setting) round 1
+// fixes press 7 and the event closes before it.
 // 1 phone 討論 never runs the plan (changes go through the conversation; no 修改/駁回 buttons since #16); 2 a stopped press shows 扣模待 QC (drawer, Gantt, outcome);
 // 3 bad data is visible on the main screen (預警 row, ③ note, machine marks, drawer; not in the header any more).
 import { createRequire } from 'node:module'
@@ -15,6 +17,8 @@ const OUT = resolve(dirname(fileURLToPath(import.meta.url)), '../../docs/screens
 const results = []
 const check = (n, ok, det = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${det ? `  — ${det}` : ''}`) }
 const errors = []
+const fast = (await (await fetch(BASE + '/api/health')).json()).repair_fast_s ?? 0
+check('server runs without fast repair (REPAIR_FAST_S=0), so p.11 reaches 7 號機停用', !(fast > 0), `repair_fast_s=${fast}`)
 const b = await pw.chromium.launch()
 const ctx = await b.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: 'Asia/Taipei' })
 const d = await ctx.newPage()
