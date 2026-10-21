@@ -397,7 +397,8 @@ def observe(row: dict[str, Any]) -> dict[str, Any] | None:
         orders = _ORDER_RE.findall(p["command"])
     elif kind == "approval_request":
         v = p.get("version") or 1
-        t, title = "event", f"{ml or '計劃'} 計劃 v{v} 送核准"
+        what = ml or _short(str(p.get("title") or ""))[:16]
+        t, title = "event", f"{what + ' ' if what else ''}計劃 v{v} 送核准"
         facts = {"version": v, "reason": p.get("reason"), "actions": (p.get("actions") or [])[:4],
                  "delivery_impact": p.get("delivery_impact")}
         orders = _ORDER_RE.findall(" ".join(p.get("actions") or []))

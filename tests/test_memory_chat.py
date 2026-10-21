@@ -161,3 +161,23 @@ def test_yesterday_questions_go_to_the_daily_summary():
     from warroom.agent.main_agent import QUERY, rule_reads, topic_for
     assert topic_for("昨天發生什麼事") == "daily_summary"
     assert rule_reads("昨天發生什麼事", {}) == [(QUERY, {"topic": "daily_summary"})]
+
+
+async def test_yesterday_in_the_overview_is_the_last_daily_summary_as_written():
+    m = Model(("say", "不該被呼叫"))
+    f = Floor()
+    ctx = {"abnormal": [], "today_index": INDEX, "earlier_days": [{"day": "2026-10-21（循環 1）", "summary": "處理 1 件任務。"}]}
+    out = await MainAgent(_chat_settings(), client=m).turn("昨天發生什麼事", context=ctx, waiting_plan=None, run_tool=f.run_tool,
+                                                           propose=f.propose, discuss=None, memory=Mem())
+    assert out["reply"] == "最近結束的一天是 2026-10-21（循環 1）：處理 1 件任務。" and m.calls == []
+
+
+async def test_a_history_question_with_its_own_subject_is_not_a_follow_up():
+    agent = MainAgent(_chat_settings(), client=Model(("say", "7 號機今天停過一次。"), ("say", "急單 #R-101 已出貨。")))
+    f = Floor()
+    ctx = {"abnormal": [], "today_index": INDEX}
+    for q in ("7 號機今天怎麼了", "早上那張急單後來呢"):
+        await agent.turn(q, context=ctx, waiting_plan=None, run_tool=f.run_tool, propose=f.propose, discuss=None,
+                         memory=Mem(), conversation="c")
+    user = json.loads(agent.client.calls[-1]["messages"][1]["content"])
+    assert "previous_turn" not in user and user["earlier_messages"] == []

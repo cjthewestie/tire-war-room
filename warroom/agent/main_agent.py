@@ -345,7 +345,10 @@ MEMORY_TYPES = {"訂單": "order", "事件": "event", "核准": "approve", "否�
 MEMORY_RULE = ("context.today_index 是今天的紀錄索引（編號 · 時間 · 類型 · 標題，新的在上面），context.earlier_days 是前幾天的每日摘要。"
                "問今天有哪些訂單、今天做過哪些任務、某台機或某張單今天後來怎樣、昨天發生什麼：先直接用它們回答，不用查工具；"
                "要細節才呼叫 memory_get（給編號，最多 5 個），索引裡沒有、或問更早的事才用 memory_search。"
-               "這些是「發生過的事」；現在的讀值、目前排程、庫存仍用 read_sensors／query_plant 查。數字只能用索引、摘要或查到的資料裡有的。")
+               "這些是「發生過的事」；現在的讀值、目前排程、庫存仍用 read_sensors／query_plant 查。數字只能用索引、摘要或查到的資料裡有的。"
+               "回覆最多 3 句、先講重點，不要寫 OB 編號，清單只挑最重要的 2–3 項。")
+_YESTERDAY_RX = re.compile(r"(?:昨天|前天|上一?個?循環|上一天).{0,8}(?:發生|怎樣|如何|做了|處理|什麼事|有什麼|摘要)")
+_SUBJECT_RX = re.compile(r"急單|訂單|#\s?[A-Z]|SO-?\d|號機|任務|事件|出貨")
 # a question about what already happened today / yesterday: the index answers it (no forced plant read)
 _HISTORY_RX = re.compile(r"今天.{0,6}(?:有哪些|做過|處理過|發生|怎麼了|怎樣了|做了什麼)|後來呢|後來怎樣|早上|剛剛|剛才|昨天|前天|上一個?循環")
 
@@ -656,6 +659,15 @@ class MainAgent:
             if _CANCEL_RX.match(text):
                 out.update(reply=f"好，不{CONTROL[pending['action']]}。", intent="control:cancelled", by="control")
                 return self._done(out, text, t0)
+        days = context.get("earlier_days") if self._memory is not None else None
+        if days and _YESTERDAY_RX.search(text):
+            # 「昨天發生什麼事」 in the overview chat: the last daily summary, as written (its numbers were checked against
+            # the day's facts when it was made). With the model in between it mixed today into it (preview run 10-22).
+            d = days[0]
+            out.update(reply=f"最近結束的一天是 {d['day']}：{d['summary']}", intent="daily_summary", by="memory")
+            out["steps"].append({"tool": "daily_summary", "args": {"day": d["day"]}, "ok": True, "summary": d["summary"][:200],
+                                 "label": "看了每日摘要"})
+            return self._done(out, text, t0)
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
         if not (self.llm and self.client is not None) and is_gibberish(text):
@@ -1153,6 +1165,10 @@ class MainAgent:
         if follow and self.notes.get("last_casual") and (wants_lookup(t) or has_object(t)) and not recall:
             # a plant question after small talk stands alone (「7 號機現在溫度多少？」 carried the previous joke, 10-22)
             follow = False
+        if self._memory is not None and _HISTORY_RX.search(t) and _SUBJECT_RX.search(t):
+            # 「早上那張急單後來呢」 names its own subject: the index answers it; with the last turn alongside the model
+            # re-answered 「7 號機今天怎麼了」 (preview run 10-22)
+            follow = about_last = asked = False
         # the supervisor's earlier words, repeats folded (20 × 「7號機現在溫度多少」 crowded out the real question)
         earlier = list(dict.fromkeys(q for q, _a in self.memory)) if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
