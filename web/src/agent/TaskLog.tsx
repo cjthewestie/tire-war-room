@@ -10,7 +10,7 @@ import { plain } from '../plain'
 
 interface Row {
   id: string; opened_at: string; closed_at: string | null; machine_id: string | null; order_id: string | null
-  title: string | null; final: string; outcome: string | null; scenario: string | null; loop: number | null; report: string
+  title: string | null; final: string; qa_demo?: boolean; outcome: string | null; scenario: string | null; loop: number | null; report: string
   approvals: { decision: string; by: string; version: number }[]
 }
 interface Day { date: string; count: number; groups: { loop: number | null; scenario: string | null; rows: Row[] }[] }
@@ -44,7 +44,7 @@ export function TaskLog({ onPick }: { onPick?: (eventId: string) => void }) {
                   <span className="tl-t">{fmtHM(r.opened_at)}{r.closed_at ? `–${fmtHM(r.closed_at)}` : ''}</span>
                   <b>{r.order_id ?? (r.machine_id ? machineLabel(r.machine_id) : '任務')}</b>
                   <span className="tl-what">{plain(r.title ?? r.id).slice(0, 28)}</span>
-                  <span className="tl-final">{r.final}</span>
+                  <span className="tl-final">{r.final}</span>{r.qa_demo && <span className="tl-final" title="QA 模式的現場展示開的事件" data-testid="tasklog-qa-demo">QA 展示</span>}
                   {r.approvals.length > 0 && <small className="muted">{r.approvals.map((a) => `v${a.version} ${a.decision}（${a.by.replace(/@.*/, '')}）`).join('、')}</small>}
                   {r.outcome && <small className="muted tl-out">{plain(r.outcome).slice(0, 60)}</small>}
                 </button>
