@@ -378,10 +378,30 @@ def tasks(r: Any) -> dict[str, Any]:
     return {"count": len(items), "tasks": items}
 
 
+def safety_stops(r: Any) -> dict[str, Any]:
+    """Safety Core stops and their way back: ① 派現場檢查 ② 讀值回安全範圍 ③ 主管放行. The release itself is a button on
+    the 主控台 only (SOP-SD-01 §4: the supervisor on site); the chat can only report where each one stands."""
+    board = getattr(getattr(r.sim, "world", None), "tasks", None)
+    try:
+        cases = r.cases.view(board)
+    except Exception:  # noqa: BLE001 - no Safety Core cases in this sim
+        cases = []
+    items = []
+    for c in cases:
+        if c.status != "open":
+            continue
+        items.append({"machine": c.machine_id, "what": c.message[:40], "since": _hm(c.ts),
+                      "①派現場檢查": f"{c.tasks_done}/{len(c.task_ids)} 完成" if c.task_ids else "還沒派",
+                      "②讀值回安全範圍": f"{c.safe_samples}/{c.safe_needed}" + ("（已達標）" if c.reading_ok else ""),
+                      "③主管放行": "要主管在主控台按「放行」（只能按按鈕）"})
+    return {"count": len(items), "stops": items}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
-          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks}
+          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
+          "safety_stops": safety_stops}
 
 
 def _shrink(d: Any, n: int) -> Any:
