@@ -1,0 +1,127 @@
+[
+ {
+  "run": 1,
+  "h1_rejected": "比對預期：溫度降到 122°C → H1 不成立",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 75.0,
+  "end": "safe_stop",
+  "total_s": 75.5,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "proposed"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:14.7s",
+   "replan:commander:steam_leak_or_sensor_drift:9.0s"
+  ]
+ },
+ {
+  "run": 2,
+  "h1_rejected": "比對預期：溫度降到 122°C → H1 不成立",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 74.2,
+  "end": "safe_stop",
+  "total_s": 74.7,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "proposed"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:10.7s",
+   "replan:commander:steam_leak_or_sensor_drift:13.9s"
+  ]
+ },
+ {
+  "run": 3,
+  "h1_rejected": "比對預期：溫度降到 122°C → H1 不成立",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 68.2,
+  "end": "closed",
+  "total_s": 68.7,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:11.1s",
+   "replan:commander:steam_leak_or_sensor_drift:8.0s"
+  ]
+ },
+ {
+  "run": 4,
+  "h1_rejected": "比對預期：溫度降到 122°C → H1 不成立",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 68.0,
+  "end": "safe_stop",
+  "total_s": 68.5,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "proposed"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:11.0s",
+   "replan:commander:steam_leak_or_sensor_drift:7.7s"
+  ]
+ },
+ {
+  "run": 5,
+  "h1_rejected": "比對預期：溫度降到 122°C → H1 不成立",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 70.5,
+  "end": "closed",
+  "total_s": 71.0,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:13.7s",
+   "replan:commander:steam_leak_or_sensor_drift:9.5s"
+  ]
+ }
+]

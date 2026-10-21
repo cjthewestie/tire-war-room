@@ -1,5 +1,5 @@
 """Audit N9: an event cancelled (or crashing) while it waits in AWAIT_APPROVAL must not leave its
-approval card PENDING. Temporary audit test; reuses tests/test_agent.make_sm."""
+approval card PENDING. Moved from bench/results/spark-lightning-20261021/tests_audit once green; reuses tests/test_agent.make_sm."""
 from __future__ import annotations
 
 import asyncio
@@ -10,7 +10,7 @@ from tests.test_agent import make_sm
 from tests.test_agent_page11 import page11_anomaly
 from warroom.contracts import ApprovalStatus, EventState
 
-stable = lambda m, now: 122.0 if m == "CURE-07" else 128.0     # noqa: E731
+stable = lambda m, now: 122.0 if m == "CURE-07" else 128.0
 
 
 async def _until_pending(approvals):
@@ -19,7 +19,7 @@ async def _until_pending(approvals):
 
 
 async def test_n9_cancel_in_await_approval_leaves_no_pending_card(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable, approval_timeout_s=60.0)
+    _clock, _audit, _sim, _store, _tools, approvals, sm = make_sm(tmp_path, stable, approval_timeout_s=60.0)
     task = asyncio.create_task(sm.handle(page11_anomaly()))
     await asyncio.wait_for(_until_pending(approvals), 10)
     ev = sm.events()[0]
@@ -35,7 +35,7 @@ async def test_n9_cancel_in_await_approval_leaves_no_pending_card(tmp_path):
 
 
 async def test_n9_exception_in_await_approval_leaves_no_pending_card(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable, approval_timeout_s=60.0)
+    _clock, _audit, _sim, _store, _tools, approvals, sm = make_sm(tmp_path, stable, approval_timeout_s=60.0)
 
     async def broken_wait(request_id, timeout_s=None):
         raise RuntimeError("broker connection lost")
