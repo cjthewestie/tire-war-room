@@ -18,10 +18,15 @@ export const yawToward = (x: number, z: number, tx: number, tz: number) => Math.
 
 /** The stations. 7 號機 is CURE-07, in the 硫化 row; the lead stands in the aisle north of it. */
 const P7 = PLACED_BY_ID['CURE-07']
+/** Where the robot stops to meet the lead: in the 硫化 aisle, a little east of 7 號機. */
+export const ROBOT_MEET: [number, number] = [P7.x + 1.6, 3.2]
 export const STATIONS = {
   desk: { x: DESK.x - 0.63, z: DESK.z, yaw: -Math.PI / 2, pitch: -0.3 } as Stand,
   doorway: { x: 5.0, z: 0.15, yaw: yawToward(5.0, 0.15, P7.x, P7.z), pitch: -0.06 } as Stand,
-  press7: { x: P7.x, z: 3.0, yaw: Math.PI, pitch: 0.1 } as Stand,
+  // a step back from the press, looking a little up: the press, its lamp and ring, and the worker in one view
+  press7: { x: P7.x, z: 2.55, yaw: Math.PI, pitch: 0.16 } as Stand,
+  // the same spot, turned to the robot that comes over along the aisle (it plays its show facing the lead)
+  robot: { x: P7.x, z: 2.55, yaw: yawToward(P7.x, 2.55, P7.x + 1.6, 3.2), pitch: -0.12 } as Stand,
   board: { x: BOARD_STAND.x, z: BOARD_STAND.z, yaw: BOARD_STAND.yaw, pitch: 0.06 } as Stand,
 }
 export type StationId = keyof typeof STATIONS
@@ -30,18 +35,21 @@ export type StationId = keyof typeof STATIONS
  *  west doorway, down the east corridor at x 4.2, along the 硫化 aisle). */
 const VIA: Record<string, P[]> = {
   'desk>doorway': [[6.4, 0.1]],
-  'doorway>press7': [[4.35, 0.5], [4.2, 2.6], [4.0, 3.0]],
-  'press7>desk': [[4.0, 3.0], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.4, 0.1]],
+  'doorway>press7': [[4.35, 0.5], [4.2, 2.6], [4.0, 2.7]],
+  'press7>desk': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.4, 0.1]],
+  'robot>desk': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.4, 0.1]],
+  'press7>robot': [],
+  'robot>board': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.6, 0.0]],
   'doorway>desk': [[6.4, 0.1]],
   'desk>board': [[7.55, -0.05]],
-  'press7>board': [[4.0, 3.0], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.6, 0.0]],
+  'press7>board': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.6, 0.0]],
   'doorway>board': [[6.6, 0.0]],
 }
 
 /** Which station each cue walks to (null: stay where the lead is, e.g. the approvals at the doorway). */
 export function stationFor(cueId: string, shot: Shot): StationId | null {
   if (shot.kind === 'establish') return null
-  return ({ rush: 'desk', console: 'desk', event: 'doorway', worker: 'press7', robot: 'press7', agent: 'desk', pitch: 'board', warn: 'board', end: 'board' } as Record<string, StationId>)[cueId] ?? null
+  return ({ rush: 'desk', console: 'desk', event: 'doorway', worker: 'press7', robot: 'robot', agent: 'desk', pitch: 'board', warn: 'board', end: 'board' } as Record<string, StationId>)[cueId] ?? null
 }
 
 class Walker {

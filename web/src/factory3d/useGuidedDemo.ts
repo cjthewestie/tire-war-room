@@ -11,7 +11,7 @@ import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTa
 import type { WarRoomState } from '../store'
 import type { Transport } from '../transport'
 import { demoCam } from './demoCamera'
-import { STATIONS, stationFor, walker, type StationId } from './demoWalk'
+import { ROBOT_MEET, stationFor, walker, type StationId } from './demoWalk'
 import { START } from './layout'
 import { teleport } from './pose'
 import { robot } from './patrol'
@@ -44,7 +44,7 @@ function monitorFor(cueId: string, eventId: string | null): string | null {
 }
 
 interface Snap { tl: DemoRun['tl']; t: number; sig: DemoRun['latched']; eventId: string | null; fallback: boolean; log: LogRow[] }
-const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.latched, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
+const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.arrived === undefined ? r.latched : { ...r.latched, arrived: r.arrived }, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
 
 export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlides }: {
   state: WarRoomState; transport: Transport | null
@@ -146,7 +146,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
         w.enteredAt = now
         w.station = stationFor(c.id, c.shot)
         // the robot comes over to the lead at 7 號機, then plays its show facing the camera
-        if (c.id === 'robot') robot.visitReq = [STATIONS.press7.x + 1.1, 3.2]
+        if (c.id === 'robot') robot.visitReq = ROBOT_MEET
       }
       // camera: the opening overview (orbit), a hand-over onto the lead, then the first-person walk between stations
       if (director.mode === 'orbit') {
@@ -172,7 +172,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       if (r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt
         const w = waiting(r.tl, r.t, r.latched)
-        setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : '等工廠下一件事發生，不能跳過')
+        setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : r.arrived === false ? '還在走過去，到了再按' : '等工廠下一件事發生，不能跳過')
       }
       const d = stateRef.current.demo
       if (d?.running && d.paused !== paused) setPaused(d.paused)
@@ -197,7 +197,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
     w2.__demo3d = () => {
       const x = run.current
       return x ? {
-        running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released, waiting: waiting(x.tl, x.t, x.latched),
+        running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released,
+        waiting: waiting(x.tl, x.t, x.arrived === undefined ? x.latched : { ...x.latched, arrived: x.arrived }),
         simHeld: x.simHeld, paused, slide, slideView, fallback: x.fallback, log: x.log, signals: x.firstSeen, seen: { id: x.seen.id, machine: x.seen.machine },
         walk: { mode: director.mode, at: walker.at, done: walker.done }, monitor: monitorRef.current, arrived: x.arrived,
         camMaxStep: demoCam.maxStep, flying: demoCam.flying, robotPlayed: [...robot.played], camTraceLen: demoCam.trace.length,

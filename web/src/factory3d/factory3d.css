@@ -249,3 +249,7 @@ html, body, #root { height: 100%; overflow: hidden; }
   .f3-alarm-tag.approval, .f3-alarm-arrow.approval { animation-duration: 3s; }
   .f3-cue-go, .f3-pitch-nudge, .f3-pitch-clock.warn { animation: none; }
 }
+
+/* the guided demo's cards and bar stay above the war-room computer it opens (.f3-monitor-wrap is z 20) */
+.f3-cue, .f3-demo-bar, .f3-demo-badge, .f3-pitch-clock, .f3-pitch-nudge { z-index: 26; }
+.f3-cue-big { z-index: 32; }

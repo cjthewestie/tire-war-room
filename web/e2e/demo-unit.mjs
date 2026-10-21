@@ -58,6 +58,8 @@ function drive(script, until, dt = 0.25) {
   const tl = D.startTimeline()
   check('walking: not ready while arrived is false', !D.ready(tl, 20, { arrived: false }) && !D.simPaused(tl, 20, { arrived: false }))
   check('arrived (or no gate, the war room): ready', D.ready(tl, 20, { arrived: true }) && D.ready(tl, 20, {}))
+  const r = D.advance(tl, 20, { arrived: false }, true)
+  check('walking: continue waits for the arrival', r.refused && !r.tl.released)
 }
 
 // rush: an approval checkpoint — continue is refused while the card is up, the approval moves on, sim keeps running

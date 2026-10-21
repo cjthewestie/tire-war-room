@@ -181,7 +181,8 @@ export function advance(tl: Timeline, t: number, sig: Signals, cont = false): St
       if (cont) return canContinue(tl, t, sig) ? { tl: release(tl, t, 'continue') } : { tl, refused: true }
       return { tl }
     }
-    if (cont) return { tl: release(tl, t, 'continue') }
+    // still walking / framing the beat: continue waits for the arrival (CJ presses when the picture is there)
+    if (cont) return sig.arrived === false ? { tl, refused: true } : { tl: release(tl, t, 'continue') }
     if (h.wait === 'auto' && ready(tl, t, sig)) return { tl: release(tl, t, 'auto') }
     if (h.autoAfter != null && e >= h.autoAfter) return { tl: release(tl, t, 'auto') }
     return { tl }
