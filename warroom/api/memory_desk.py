@@ -94,11 +94,14 @@ class MemoryDesk:
         obs = self.today()
         day, loop = self.today_key()
         name = ML.day_name(day, loop)
-        fx = [o["facts"] for o in obs]
+        # an event a scenario reload / reset cancelled ends in safe_stop with reason 事件處理被取消: counted as 取消, never
+        # as a 安全停止 or a 重點 (every demo after a reset showed bogus safe stops)
+        cancelled = {o["id"] for o in obs if "事件處理被取消" in str(o["facts"].get("reason") or "")}
+        fx = [o["facts"] for o in obs if o["id"] not in cancelled]
         open_now = sum(1 for e in (self.rt.events() if hasattr(self.rt, "events") else [])
                        if getattr(getattr(e, "state", None), "value", getattr(e, "state", None)) not in ("closed", "safe_stop"))
         key = [o for o in obs if o["type"] in ("event", "safety", "approve", "reject", "ship", "note")
-               and not str(o["title"]).endswith("送核准")]
+               and not str(o["title"]).endswith("送核准") and o["id"] not in cancelled]
         doc, prev = self.files.read("daily", name), self.daily(before=name)
         return {"name": name, "label": ML.day_label(day, loop), "source": "summary" if doc else "live",
                 "observations": len(obs),
@@ -106,12 +109,13 @@ class MemoryDesk:
                 "rush": sum(1 for f in fx if f.get("kind") == "order_rush"),
                 "shipped": sum(1 for o in obs if o["type"] == "ship"),
                 "events": {"closed": sum(1 for f in fx if f.get("state") == "closed"),
-                           "safe_stop": sum(1 for f in fx if f.get("state") == "safe_stop"), "open": open_now},
+                           "safe_stop": sum(1 for f in fx if f.get("state") == "safe_stop"), "open": open_now,
+                           "cancelled": len(cancelled)},
                 "approvals": {"approve": sum(1 for o in obs if o["type"] == "approve"),
                               "reject": sum(1 for o in obs if o["type"] == "reject"),
                               "sent": sum(1 for o in obs if str(o["title"]).endswith("送核准"))},
                 "key": [{k: o[k] for k in ("id", "ts", "type", "title")} | {"icon": ML.ICON[o["type"]]}
-                        for o in sorted(key, key=ML.cursor, reverse=True)[:5]],
+                        for o in sorted(key, key=lambda o: str(o["ts"]), reverse=True)[:5]],   # newest first
                 "summary": ML.summary_card(doc) if doc else None,
                 "previous": ML.summary_card(prev) if prev and prev["name"] != name else None}
 
