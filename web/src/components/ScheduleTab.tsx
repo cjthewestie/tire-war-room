@@ -7,7 +7,7 @@ import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { heldAt } from './MachineDrawer'
-import { MarkedText, Panel, RISK_LABEL, STATE_LABEL, TimelineTable, useWidth } from './common'
+import { MarkedText, Panel, RISK_LABEL, STATE_LABEL, useWidth } from './common'
 
 const H = 3_600_000
 
@@ -90,9 +90,8 @@ export function ScheduleTab() {
         <PlanPanel ev={ev} events={events} onPick={setEventId} visited={ev ? state.visited[ev.id] ?? [] : []} />
         <LaborPanel shifts={shifts} current={current} now={now} version={active} />
       </div>
-      <Panel title="事件時間軸" num="⑦" className="tl-panel" right={ev ? <span className="muted small">{ev.id}</span> : undefined}>
-        <TimelineTable items={ev?.timeline ?? []} />
-      </Panel>
+      {/* UX declutter: ⑦ 事件時間軸 was removed from this page (生管 plans here; the event's timeline is on 產線監控 ③,
+          「事件時間軸」 with 看全部). The other numbers stay as they are so ⑧ / ⑨ keep matching the docs. */}
       {cap && <CapacityPanel cap={cap} />}
     </div>
   )
@@ -117,7 +116,8 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {}, orders }: {
   const t0 = Math.floor((now - 6 * H) / H) * H
   const t1 = t0 + 90 * H
   const LABEL = 88, ROW = 26, TOP = 22
-  const W = Math.max(320, width)
+  // never narrower than 640 px: on a phone the chart scrolls sideways (.gantt overflow-x) instead of squeezing 90 h into 340 px
+  const W = Math.max(640, width)
   const x = (t: number) => LABEL + ((t - t0) / (t1 - t0)) * (W - LABEL - 6)
   const presses: string[] = CURE_PRESS_IDS
   const Hh = TOP + presses.length * ROW + 6
@@ -218,11 +218,13 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {}, orders }: {
 
 type OrderInfo = Map<string, { customer: string; due: string; rush: boolean }>
 
-/** What a bar says, longest first that fits: 「#A-311 台塑工業車輛・中胎」→「#A-311・中胎」→「#A-311」. */
+/** What a bar says, longest first that fits: 「#A-311 台塑工業車輛・中胎」→「#A-311・中胎」→「#A-311」 (tooltip has all). */
 function barLabel(j: ScheduleJob, who: string | undefined, px: number): string {
   const full = `${j.order_id} ${who ?? ''}・${SIZE_LABEL[j.size]}`
   if (who && px > full.length * 11 + 12) return full
-  if (px > 110) return `${j.order_id}・${SIZE_LABEL[j.size]}`
+  // ScheduleTab SchedHelp: these are order numbers, so the size goes with the code wherever it fits (about 84 px at
+  // 11.5 px bold); a bar narrower than that shows the bare code and its tooltip says 訂單・客戶・胎型.
+  if (px > 84) return `${j.order_id}・${SIZE_LABEL[j.size]}`
   return j.order_id
 }
 
@@ -270,8 +272,11 @@ function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: 
   const cur = ev?.state
   const seen = new Set(visited)
   if (cur) { const idx = CHAIN.indexOf(cur === 'replan' ? 'verify' : cur); CHAIN.slice(0, Math.max(0, idx)).forEach((s) => seen.add(s)) }
+  // UX declutter: folded by default on every width (生管 reads the schedule; the steps are the AI's working detail);
+  // the folded header still says which event and where it stands.
   return (
-    <Panel title="指揮官步驟計畫" num="⑥" className="plan-panel"
+    <Panel title="指揮官步驟計畫" num="⑥" className="plan-panel" fold="always"
+      summary={ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}・${STATE_LABEL[ev.state]}` : '目前沒有事件'}
       right={events.length > 1 ? (
         <select value={ev?.id} onChange={(e) => onPick(e.target.value)} aria-label="選擇事件">
           {events.map((e) => <option key={e.id} value={e.id}>{machineLabel(e.machine_id)}・{STATE_LABEL[e.state]}</option>)}
@@ -353,7 +358,7 @@ function LaborPanel({ shifts, current, now, version }: { shifts: Shift[]; curren
   const demolds = useMemo(() => (version?.schedule.jobs ?? []).map((j) => ms(j.demold)).filter((t) => t >= d0 && t < d1), [version, d0, d1])
   const Hh = TOP + rows.length * ROW + 4
   return (
-    <Panel title="人力與班表（24 h）" num="⑧" className="labor-panel"
+    <Panel title="人力與班表（24 h）" num="⑧" className="labor-panel" fold="phone"
       right={<div className="seg sm"><button className={mode === 'cur' ? 'on' : ''} onClick={() => setMode('cur')}>現況</button><button className={mode === 'opt' ? 'on' : ''} onClick={() => setMode('opt')}>優化班表</button></div>}>
       <div ref={ref} className="labor">
         <svg width={W} height={Hh} role="img" aria-label="人力時間軸">
@@ -415,7 +420,7 @@ function CapacityPanel({ cap }: { cap: CapacityReport }) {
     </>
   )
   return (
-    <Panel title="每台硫化機週產量與交期" num="⑨" className="cap-panel" right={<span className="muted small">大字＝提案 p.6・小字＝本機模擬</span>}>
+    <Panel title="每台硫化機週產量與交期" num="⑨" className="cap-panel" fold="phone" right={<span className="muted small">大字＝提案 p.6・小字＝本機模擬</span>}>
       <div className="cap">
         <table>
           <thead><tr><th>方案</th><th>小胎</th><th>中胎</th><th>大胎</th></tr></thead>

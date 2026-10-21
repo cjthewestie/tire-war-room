@@ -828,6 +828,10 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
   background: var(--warn-soft); border: 1px solid rgb(var(--warn-rgb, 245 184 61) / .5); border-top: 0; border-radius: 0 0 var(--radius) var(--radius); font-size: 14px; }
 .apv-fold-rec b { color: var(--warn); margin-right: 8px; }
 .apv-fold .btn-ghost { font-size: 13px; }
+/* 人力排程: ⑥ folded by default sits beside ⑧ as a header-height bar; the gantt keeps a 640 px floor and scrolls sideways */
+.sched-row { align-items: start; }
+.gantt { overflow-x: auto; overflow-y: hidden; }
+.plan-panel.fold .fold-right select { max-width: 100%; }
 @media (max-width: 899px) { .world-main { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 599px) {
   .world-more { padding: 10px 14px; }
