@@ -59,9 +59,10 @@ const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: str
 }
 
 /** Demo answer card (Kyle 10-22 art direction): one sentence first answers what the supervisor has to do now, in their
- *  words (「7 號硫化機溫度掉了，等你核准」), the line under it is Agent Nemo's action and time (AiStatusLine compact). */
+ *  words (veteran 10-22: 「7 號硫化機 溫度下降・待核准」, the 產線監控 and phone words, never 「等你核准」), the line under it
+ *  is Agent Nemo's action and time (AiStatusLine compact). */
 const PROBLEM: Partial<Record<AnomalyKind, string>> = {
-  temp_drop: '溫度掉了', overheat: '溫度太高', pressure_low: '壓力不足', water_flow_low: '冷卻水不足', steam_low: '蒸汽壓不足',
+  temp_drop: '溫度下降', overheat: '溫度過高', pressure_low: '壓力不足', water_flow_low: '冷卻水不足', steam_low: '蒸汽壓不足',
   sensor_fault: '感測器異常', multi_machine: '多台機台異常',
 }
 function headline(ev: Event | null, stage: RepairStage | null, waiting: boolean): string {
@@ -72,7 +73,7 @@ function headline(ev: Event | null, stage: RepairStage | null, waiting: boolean)
   if (stage === 'recovering') return `${m} 回溫中`
   if (stage === 'repairing') return `${m} 維修中`
   const what = PROBLEM[ev.anomaly.kind] ? `${m} ${PROBLEM[ev.anomaly.kind]}` : plain(ev.alert_card?.title ?? ev.anomaly.message)
-  return waiting ? `${what}，等你核准` : what
+  return waiting ? `${what}・待核准` : what
 }
 
 const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -85,8 +86,8 @@ function demoToast(fire: AlertItem[], pending: ApprovalRequest[], events: Event[
   const evOf = (a: AlertItem) => events.find((e) => (a.notice ? a.id.startsWith(`${a.notice}:${e.id}:`) : pending.find((p) => p.id === a.id)?.event_id === e.id))
   const what = (a: AlertItem) => { const e = evOf(a); return e ? headline(e, null, false) : plain(a.title) }
   if (asks.length) {
-    return asks.length === 1 ? { title: what(asks[0]), body: '等你核准', tone: 'bad' }
-      : { title: `${asks.length} 件異常等你核准`, body: asks.map(what).join('；'), tone: 'bad' }
+    return asks.length === 1 ? { title: what(asks[0]), body: '待核准', tone: 'bad' }
+      : { title: `${asks.length} 件異常待核准`, body: asks.map(what).join('；'), tone: 'bad' }
   }
   if (!fixed.length) return null
   const e = evOf(fixed[0])
@@ -152,7 +153,7 @@ export function FactoryApp() {
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
-  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean; tone?: 'bad' | 'warm' } | null>(null)
+  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean; tone?: 'bad' | 'warm'; ids?: string[] } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
@@ -204,7 +205,7 @@ export function FactoryApp() {
   const evStage = storyEv ? repairStage(storyEv, tasks) : null
   const big = headline(storyEv, evStage, !!storyEv && pending.some((p) => p.event_id === storyEv.id))
   const tone = big === '目前沒有異常' ? '' : evStage === 'recovered' || evStage === 'report' ? ' ok' : evStage === 'recovering' ? ' warm' : ' bad'
-  const ask = [pending.length ? `${pending.length} 件等你核准` : '', unread ? `${unread} 份異常報告` : ''].filter(Boolean).join('、')
+  const ask = [pending.length ? `${pending.length} 件待核准` : '', unread ? `${unread} 份異常報告` : ''].filter(Boolean).join('、')
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
@@ -215,7 +216,7 @@ export function FactoryApp() {
     const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
     if (!out.fire.length) return
     const t = DEMO_MODE ? demoToast(out.fire, pending, eventsRef.current) : alertText(out.fire, out.flushed)
-    if (t) setToast({ ...t, at: Date.now(), notice: out.fire.every((a) => a.notice) })
+    if (t) setToast({ ...t, at: Date.now(), notice: out.fire.every((a) => a.notice), ids: out.fire.filter((a) => !a.notice).map((a) => a.id) })
     // demo: the report (back to normal) takes down an amber 維修完成 still up, so the green ending stands alone
     else setToast((x) => (x?.tone === 'warm' ? null : x))
     setBuzzUntil(performance.now() + 2200)
@@ -233,6 +234,8 @@ export function FactoryApp() {
     const t = setTimeout(() => setToast(null), 6000)
     return () => clearTimeout(t)
   }, [toast])
+  // a 「待核准」 toast goes as soon as its cards are decided (on the phone, by P): the answer card already says 維修中
+  const toastUp = toast && !(!toast.notice && toast.ids?.length && toast.ids.every((id) => !pending.some((p) => p.id === id))) ? toast : null
 
   useEffect(() => {
     const m = success.latest
@@ -462,10 +465,10 @@ export function FactoryApp() {
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
       )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
-      {toast && (
-        <div className={`f3-toast${toast.tone ? ` ${toast.tone}` : ''}`} role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
-          <b>{DEMO_MODE ? '' : '📱 '}{toast.title}</b><span>{toast.body}</span>
-          <i>{TOUCH_DEVICE ? (DEMO_MODE ? '點這裡' : '點這裡拿起手機') : DEMO_MODE ? '按 P ' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
+      {toastUp && (
+        <div className={`f3-toast${toastUp.tone ? ` ${toastUp.tone}` : ''}`} role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
+          <b>{DEMO_MODE ? '' : '📱 '}{toastUp.title}</b><span>{toastUp.body}</span>
+          <i>{TOUCH_DEVICE ? (DEMO_MODE ? '點這裡' : '點這裡拿起手機') : DEMO_MODE ? '按 P ' : '按 P 拿起手機'}{toastUp.notice ? '查看' : '核准'}</i>
         </div>
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
