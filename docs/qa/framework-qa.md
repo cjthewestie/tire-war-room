@@ -61,7 +61,7 @@ A: 目標是讀值到動作 < 0.2 秒。Mac 上量到 28 台機台一輪的決�
 關鍵詞: 延遲, latency, 0.2 秒, 反應時間, p99, 安全核心速度, 確認取樣, confirm_samples
 
 ## Q: 安全核心停機後，AI 可以把機台開回來嗎？
-A: AI 自己不行，只有人能恢復。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫；Agent Nemo 沒有放行工具，被要求時會拒絕，只能報告①派現場檢查②讀值回安全範圍③主管放行各到哪一步。CJ 2026-10-22 決定「開放」在對話裡確認「好」也能放行（同一條路徑、同樣前提），但目前主線還沒做，測試仍保證對話碰不到放行。
+A: AI 自己不行，只有人能恢復。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫；Agent Nemo 沒有放行工具，被要求時會拒絕，只能報告①派現場檢查②讀值回安全範圍③主管放行各到哪一步。CJ 2026-10-22 決定「開放」在對話裡確認「好」也能放行（同一條路徑、同樣前提），這段在 nemo-reads 的下一個 PR（分支 cj/nemo-fixes-4，待合併）；在那之前主線只能按按鈕，測試保證對話碰不到放行。
 證據: `warroom/agent/state_machine.py:37`, `warroom/api/app.py:651`, `warroom/api/runtime.py:1249`, `warroom/agent/main_agent.py:268`, `tests/test_chat_control.py:74`
 關鍵詞: 解除停機, release, 人工復歸, 恢復運轉, 確認復機, 對話確認, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
 
