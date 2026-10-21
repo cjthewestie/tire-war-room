@@ -82,7 +82,9 @@ check('worker not on an order approval', S.signals({ ...base, resolved: [ok('EV-
 check('worker after the incident approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R'), ok('EV-7')] }, seen).worker === true)
 const tiles = (repaired) => ({ machines: [{ machine_id: 'CURE-07', status: 'out_of_service', repaired }] })
 check('workerDone not before the repair (停用, not green)', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(false) } }, seen).workerDone === false)
-check('workerDone on machines[].repaired (green 檢修完成・待恢復運轉)', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === true)
+const afterH2 = { ...base, resolved: [ok('EV-OLD'), { id: 'AP-7-1', ...ok('EV-7') }, { id: 'AP-7-2', ...ok('EV-7') }] }
+check('workerDone needs this incident approved', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === false)
+check('workerDone on machines[].repaired (green 檢修完成・待恢復運轉)', S.signals({ ...afterH2, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === true)
 check('worker beat spotlights the 7 號機 tile', B.beatView('worker', { snapshot: { events } }).anchors[0] === '[data-machine="CURE-07"]')
 check('incident followed', seen.id === 'EV-7' && seen.machine === 'CURE-07')
 
