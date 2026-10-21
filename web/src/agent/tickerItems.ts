@@ -6,6 +6,7 @@ import type { DashboardSnapshot, Line, ScheduleVersion, Shift, WorldEvent, World
 import { LINE_SHORT, MACHINE_META, machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, ms } from '../format'
 import { plain } from '../plain'
+import { ended } from './homeItems'
 
 export type Tone = 'bad' | 'warn' | 'ok' | 'info' | 'good'
 export interface TickItem { key: string; text: string; tone: Tone; machine?: string; line?: Line }
@@ -86,6 +87,12 @@ export function tickerItems(snap: DashboardSnapshot | null, schedule: ScheduleVe
       : { key: 'staff', tone: 'ok', text: '本班人力足 ✓' })
   }
   const closed = [...(snap?.events ?? [])].filter((e) => e.state === 'closed').sort((a, b) => ((a.closed_at ?? '') < (b.closed_at ?? '') ? 1 : -1))[0]
-  if (closed) out.push({ key: `ev-${closed.id}`, tone: 'good', machine: MACHINE_META[closed.machine_id] ? closed.machine_id : undefined, text: `✓ 已結案：${plain(closed.alert_card?.title ?? closed.command ?? closed.anomaly.message)}` })
+  // the latest finished event in the supervisor's words (結案 is a state-machine word): 「✓ 7 號硫化機已恢復正常」
+  if (closed) {
+    const own = MACHINE_META[closed.machine_id] ? closed.machine_id : undefined
+    const how = ended(closed).pill
+    out.push({ key: `ev-${closed.id}`, tone: !own || how === '已恢復正常' ? 'good' : 'info', machine: own,
+      text: own ? (how === '已恢復正常' ? `✓ ${machineLabel(own)}已恢復正常` : `${machineLabel(own)}：${how}`) : `✓ 已完成：${plain(closed.alert_card?.title ?? closed.command ?? closed.anomaly.message)}` })
+  }
   return out
 }

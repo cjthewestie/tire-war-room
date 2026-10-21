@@ -58,7 +58,7 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
               {before.length > 0 && <li className="ov-sub" aria-hidden="true">上一輪（切換情境前）</li>}
               {before.map((r) => <HistLine key={r.key} r={r} now={now} href={null} old onClick={full} />)}
             </ul>
-          ) : <p className="muted ov-empty">今天還沒有處理過的事；事件結案或你做了決定，會記在這裡</p>}
+          ) : <p className="muted ov-empty">今天還沒有處理過的事；異常處理完或你做了決定，會記在這裡</p>}
         </Sec>
 
         {w && (
