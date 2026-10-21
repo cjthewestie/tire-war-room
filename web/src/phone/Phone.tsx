@@ -61,7 +61,9 @@ export function Phone() {
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const noticeCards = notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
-  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines)], connected && !lanDown)
+  // a report rings once Agent Nemo wrote it (Event.ai_report comes a moment after the close; until then the card says 整理中)
+  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices.filter((e) => e.state !== 'closed' || e.ai_report), state.snapshot?.machines)],
+    connected && !lanDown)
   // 「已核准 10 號硫化機」 for 3 s, only once the server confirmed it (a stale card can still come back to be approved again)
   const [flash, setFlash] = useState<{ id: string; text: string } | null>(null)
   const decided = useRef<Set<string> | null>(null)

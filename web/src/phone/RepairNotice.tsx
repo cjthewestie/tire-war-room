@@ -5,7 +5,8 @@
 //   temperature every 0.5 s; other channels from the machine's last reading), what the crew did on one line
 // - closed with its report unread (Event.review pending): 「7 號硫化機已恢復正常」 「溫度回到 128°C（02:17 維修完成）。Agent
 //   Nemo 異常報告已產生。」, 「看報告」 (/report?event=<id>) and a small 「知道了」 (POST /api/events/{id}/review = 主管已讀報告,
-//   PIN like approvals)
+//   PIN like approvals). The review is set at the close and the report (Event.ai_report) a moment later
+//   (warroom/agent/reporter.py): until it is there the card says 「異常報告整理中…」, with nothing to read or dismiss
 import { useState } from 'react'
 import type { Event } from '../contracts'
 import { CH_LABEL, expectationOf, normalOf, readingText, recoverWord, targetText } from '../aiStatus'
@@ -44,17 +45,18 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
   const name = machineLabel(ev.machine_id)
   if (report) {
     const back = backText(ev)
+    const ready = !!ev.ai_report
     return (
       <div className="ph-card ph-review" data-testid="phone-report" data-event={ev.id}>
         <h2 className="ph-title">{name}已恢復正常</h2>
-        <p className="ph-lead">{back ? `${back}。` : ''}Agent Nemo 異常報告已產生。</p>
+        <p className="ph-lead">{back ? `${back}。` : ''}Agent Nemo 異常報告{ready ? '已產生。' : '整理中…'}</p>
         {err && <p className="err">{err}</p>}
-        <div className="ph-acts ph-report-acts">
+        {ready && <div className="ph-acts ph-report-acts">
           <a className="ph-approve" href={`/report?event=${encodeURIComponent(ev.id)}`} target="_blank" rel="noopener" data-testid="phone-report-link">看報告</a>
           <button className="ph-sec" disabled={disabled || busy || !transport?.review} onClick={() => void read()} data-testid="phone-report-read">
             {busy ? '送出中…' : '知道了'}
           </button>
-        </div>
+        </div>}
       </div>
     )
   }
