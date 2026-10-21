@@ -1,6 +1,6 @@
 """FastAPI app: REST per contracts.REST_ENDPOINTS (+ a few demo-control extras), one WebSocket
 /ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone, 3D factory at /factory,
-floor worker's tasks at /worker, shift handover at /handover).
+floor worker's tasks at /worker, shift handover at /handover, incident report at /report).
 
 Everything is local: no CDN, no outbound calls except the optional LLM health probe.
 
@@ -1086,6 +1086,11 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     @app.get("/handover.html", include_in_schema=False)
     async def handover():                   # issue #49: shift handover (read-only; built in the page from the APIs)
         return page("handover.html")
+
+    @app.get("/report", include_in_schema=False)
+    @app.get("/report.html", include_in_schema=False)
+    async def report():                     # issue #59: incident report (read-only; built in the page from the APIs)
+        return page("report.html")
 
     @app.get("/favicon.svg", include_in_schema=False)
     async def favicon():
