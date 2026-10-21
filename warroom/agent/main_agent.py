@@ -974,6 +974,7 @@ class MainAgent:
         editing = vague or edits                      # the message is about changing the selected plan
         howto = (bool(_HOWTO_RX.search(t)) and not small and not recall and not inject and waiting_plan is None
                  and not wants_task(t) and not out["event_id"])
+        sop_asked = False
         if howto:
             # the SOP search runs first, as if the model had called it; its result (or 「知識庫沒有相關 SOP」) is above
             args = {"query": t, "k": 3}
@@ -1091,6 +1092,19 @@ class MainAgent:
                     and (made_up := uncited_sops(reply, out["steps"], source))):
                 # an SOP the search did not return (the nearest unrelated one, or made up): the honest line instead
                 out.update(reply=NO_SOP_REPLY, error=f"reply cited SOP not returned by sop_search: {made_up}")
+                return
+            found = howto and any(st["tool"] == "sop_search" and st["ok"] and _SOP_ID_RX.search(st["summary"])
+                                  for st in out["steps"])
+            if found and not _SOP_ID_RX.search(reply):
+                # an SOP was found but the reply does not answer from it (「我是主 agent，可以幫你查 SOP。」): once more,
+                # then code names the SOP
+                if not sop_asked and not last:
+                    sop_asked = True
+                    msgs += [{"role": "assistant", "content": reply},
+                             {"role": "user", "content": "請依上面查到的 SOP 回覆主管（2–3 句），寫出 SOP 編號。"}]
+                    continue
+                out.update(reply=self._results_reply(out["steps"]) or reply, fell_back=True,
+                           error="how-to reply did not use the SOP found")
                 return
             read = [st for st in out["steps"] if st["ok"]]
             if howto and read and "沒有相關 SOP" not in reply and all(
