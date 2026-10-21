@@ -61,8 +61,14 @@ MAX_STEPS = 6
 MAX_CALLS_PER_STEP = 4
 MAX_SOP_SEARCHES = 2   # real run 10-21: 「硫化機溫度掉下來要怎麼處理？」 → 6 sop_search with reworded queries, then no words
 BUDGET_S = 60.0
-MEMORY_TURNS = 8
+MEMORY_TURNS = 20         # CJ 2026-10-22: 「我覺得有點太少」 (it was 8)
 MAX_CONVERSATIONS = 64
+SUMMARY_MAX = 300         # 前情摘要: the turns that fell out of the 20, condensed
+MAX_PINS = 10             # constraints the supervisor said in chat, always sent
+# 「不要動 9 號機」「#A-311 優先」「擔心 #M-201 晚交」: a constraint, when it names an order or a machine
+_PIN_RX = re.compile(r"不要|別再|不可|不能|優先|先做|擔心|注意|一定要|必須")
+SUMMARY_SYSTEM = ("把下面這段主管和 Agent Nemo 的舊對話濃縮成一段「前情摘要」，繁體中文，最多 300 字。只寫談過的主題、"
+                  "提到的訂單和機台編號、主管的要求和決定；不要加新內容，不要寫數字以外的推測。")
 READ_TOOLS = sorted(t.value for t in ASK_TOOLS)
 PROPOSE = "propose_plan"
 DISCUSS = "discuss_waiting_plan"
@@ -82,6 +88,9 @@ PLANT_TOPICS: dict[str, str] = {
     "quality": "今天品質：檢驗數、不良數、良率",
     "maintenance": "保養：進行中、接下來的保養",
     "energy": "用電：目前用電、契約容量、今天度數",
+    # CJ 2026-10-22: 「我有沒有地方可以詢問之前的訂單」
+    "orders_history": "之前的訂單：已完成、已出貨的訂單，出貨日、是否準時、遲交的有哪些，和每天產量紀錄",
+    "order_lookup": "單張訂單紀錄（要給 order_id）：建立、排程、硫化、完成、出貨，以及相關事件",
 }
 CHAT_READS = [*READ_TOOLS, QUERY]           # every read the chat agent can make
 ALL_TOOLS = [*CHAT_READS, PROPOSE, DISCUSS]
@@ -187,6 +196,11 @@ MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: �
 # a plant question that query_plant answers (「明天要出幾台車」「原料還夠嗎」「今天處理過什麼」): keyword -> topic, used for
 # the one reminder and the rules' read. First match wins: 「今天排程」 is the schedule, not today's work.
 _TOPIC_RX: list[tuple[str, re.Pattern[str]]] = [
+    # past orders first: 「上週 #A-311 什麼時候出貨的」 is the order's history, not the next truck
+    ("order_lookup", re.compile(r"(?:#\s?[A-Z]-?\d{2,4}|SO-?\d{1,3}).{0,12}(?:什麼時候|何時|幾號|哪天|出貨|完成|紀錄|歷史|之前|上週|上周)"
+                                r"|(?:上週|上周|之前|以前|前幾天).{0,8}(?:#\s?[A-Z]-?\d{2,4}|SO-?\d{1,3})", re.IGNORECASE)),
+    ("orders_history", re.compile(r"(?:之前|以前|過去|上週|上周|前幾天|歷史|已經出貨|出過|遲交過).{0,10}訂單|訂單.{0,6}(?:歷史|紀錄)|"
+                                  r"(?:之前|以前|過去|上週|上周).{0,10}遲交|遲交過")),
     ("shipments", re.compile(r"出貨|出車|貨車|卡車|台車|班車|車.{0,4}(?:走|出|來|到|離)|物流|碼頭")),
     ("schedule", re.compile(r"排程|工單|入模|出模|下一模")),
     ("materials", re.compile(r"原料|庫存|缺料|補料|進貨|採購|橡膠|碳黑|鋼絲|尼龍|硫化劑")),
@@ -219,6 +233,7 @@ SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁
 1. 你不能直接改任何東西，沒有任何機台或 PLC 的寫入工具。
 2. 這座工廠的數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
 3. 回覆最多 5 句，純文字。資料是一長串清單時，先說總數，再挑最重要的 2–3 項，不要全部列出（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+   pinned_constraints 是主管在這段對話裡講過的要求（例如「不要動 9 號機」），回答和擬計劃時都要遵守；earlier_summary 是更早對話的前情摘要。
    有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_said 是你上一句的回答，you_asked 是你上一句最後問主管的問題）：接著上一輪往下講（例如「為什麼」就解釋你上一句的理由，「那 8 號呢」就照同樣的問法查 8 號），不要重複你上一句。
 5. 有 waiting_plan（計劃標題、要做的事、A／B 人力方案），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
    {PROCESS_RULE}，也不可以說你會改溫度。
@@ -246,7 +261,8 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
         _fn("query_orders_shifts", "訂單交期、班表、人力缺口、每台硫化機的下一模", {"order_ids": ids, "press_ids": ids}, []),
         _fn("sop_search", "查知識庫（SOP）。問「怎麼處理」一定先查", {"query": {"type": "string"}, "k": {"type": "integer"}}, ["query"]),
         _fn(QUERY, "查工廠其他資料（只讀）。topic：" + "；".join(f"{k}＝{v}" for k, v in PLANT_TOPICS.items()),
-            {"topic": {"type": "string", "enum": list(PLANT_TOPICS)}}, ["topic"]),
+            {"topic": {"type": "string", "enum": list(PLANT_TOPICS)},
+             "order_id": {"type": "string", "description": "order_lookup 用：訂單編號，例如 #A-311、SO-004"}}, ["topic"]),
         _fn(PROPOSE, "主管要做一件會動到現場的事：擬計劃送主管核准（核准前不執行）", {"task": {"type": "string",
             "description": "要完成的事，一句話，含對象"}}, ["task"]),
     ]
@@ -309,6 +325,18 @@ def wants_task(text: str) -> bool:
     return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t)) and has_object(t) and not re.search(r"[?？]\s*$", t)
 
 
+def _order_id(v: Any) -> str | None:
+    """「A-311」「#a-311」「so-4」 → the plant's spelling (#A-311, SO-004); None when nothing looks like an order."""
+    s = str(v or "").strip().upper().replace("＃", "#")
+    if not s:
+        return None
+    m = re.fullmatch(r"SO-?0*(\d{1,3})", s)
+    if m:
+        return f"SO-{int(m.group(1)):03d}"
+    found = orders_in(s if s.startswith("#") else f"#{s}")
+    return found[0] if found else s
+
+
 def topic_for(text: str) -> str | None:
     """The query_plant topic a plant question is about (「明天要出幾台車」 → shipments), or None."""
     return next((k for k, rx in _TOPIC_RX if rx.search(text)), None)
@@ -328,6 +356,10 @@ def rule_reads(text: str, context: dict[str, Any]) -> list[tuple[str, dict[str, 
     """The reads the rules make for a plant question: a machine / order / SOP question keeps the 問戰情室 plan
     (read_sensors, query_orders_shifts, sop_search); anything else a query_plant topic answers goes there."""
     topic = topic_for(text)
+    if topic == "order_lookup":                     # 「上週 #A-311 什麼時候出貨的」: the order's own history
+        ids = orders_in(text) or re.findall(r"SO-?\d{1,3}", text, re.IGNORECASE)
+        if ids:
+            return [(QUERY, {"topic": topic, "order_id": _order_id(ids[0])})]
     if topic and not (machines_in(text) or _ORDER_RX.search(text) or re.search(r"SOP|怎麼處理|處置", text)):
         return [(QUERY, {"topic": topic})]
     return [(str(st.tool), st.args) for st in mock_plan(text, context).steps if st.tool in ASK_TOOLS]
@@ -420,6 +452,10 @@ class MainAgent:
         # memory per conversation (actor + the page's conversation_id, as #99's convo.py): one shared buffer let a
         # 「謝謝」 in one chat answer 「好累」 said in another. `memory` is the current turn's conversation.
         self._memories: dict[str, deque[tuple[str, str]]] = {}
+        self._notes: dict[str, dict[str, Any]] = {}
+        self._key = ""
+        self._slot_fn: Any = None
+        self._tasks: set[asyncio.Task] = set()
         self.memory: deque[tuple[str, str]] = self._mem(None)
         self._ids = itertools.count(1)
         self._turns = -1                   # rotation index of the canned replies (the first call picks variant 0)
@@ -440,6 +476,7 @@ class MainAgent:
                                "fell_back": False, "error": None, "intent": None}
         self._read_plant = read_plant
         self.memory = self._mem(conversation)
+        self._slot_fn = slot
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
         if not (self.llm and self.client is not None) and is_gibberish(text):
@@ -501,20 +538,87 @@ class MainAgent:
         key = conversation or ""
         if key not in self._memories:
             if len(self._memories) >= MAX_CONVERSATIONS:          # the oldest conversation goes first
-                self._memories.pop(next(iter(self._memories)))
+                old = next(iter(self._memories))
+                self._memories.pop(old)
+                self._notes.pop(old, None)
             self._memories[key] = deque(maxlen=MEMORY_TURNS)
+            self._notes[key] = {"summary": "", "pins": [], "overflow": []}
+        self._key = key
         return self._memories[key]
+
+    @property
+    def notes(self) -> dict[str, Any]:
+        """The current conversation's 前情摘要, pinned constraints and the turns waiting to be summarised."""
+        return self._notes.setdefault(self._key, {"summary": "", "pins": [], "overflow": []})
+
+    def _pin(self, text: str) -> None:
+        """A constraint said in chat (「不要…」「優先…」「擔心…」 with an order or machine id) is pinned for the
+        conversation, at most MAX_PINS, newest kept."""
+        t = text.strip()
+        if not (_PIN_RX.search(t) and (machines_in(t) or orders_in(t))):
+            return
+        pins = self.notes["pins"]
+        line = t[:60]
+        if line in pins:
+            pins.remove(line)
+        pins.append(line)
+        del pins[:-MAX_PINS]
+
+    @staticmethod
+    def code_summary(turns: list[tuple[str, str]], prev: str = "") -> str:
+        """Rule mode's 前情摘要: the topics (first words of each supervisor message) and the ids named."""
+        ids = list(dict.fromkeys(i for q, a in turns for i in [*orders_in(q), *machines_in(q), *orders_in(a)]))
+        topics = "；".join(q.strip()[:14] for q, _a in turns)
+        out = (prev + "；" if prev else "") + f"談過：{topics}" + (f"。提到：{'、'.join(ids[:12])}" if ids else "")
+        return out[-SUMMARY_MAX:]
+
+    async def _compact(self, notes: dict[str, Any], slot: Any = None) -> None:
+        """Fold the turns that left the 20-turn window into the conversation's 前情摘要. With a model: one call at the
+        lowest queue priority, run after the reply went out (never blocking it); otherwise (or on failure) by code."""
+        turns, notes["overflow"] = list(notes["overflow"]), []
+        if not turns:
+            return
+        if self.llm and self.client is not None:
+            from warroom.agent.commander import thinking_off
+            extra = thinking_off(self.server_kind)
+            body = "\n".join(f"主管：{q}\nAgent Nemo：{a}" for q, a in turns)
+            try:
+                async with (_slot(slot, True) if slot else contextlib.nullcontext()):
+                    r = await self.client.chat.completions.create(
+                        model=self.settings.model, temperature=0.0, max_tokens=400,
+                        messages=[{"role": "system", "content": SUMMARY_SYSTEM},
+                                  {"role": "user", "content": (f"之前的摘要：{notes['summary']}\n" if notes["summary"] else "") + body}],
+                        **({"extra_body": extra} if extra else {}))
+                text = (r.choices[0].message.content or "").strip()
+                if text:
+                    notes["summary"] = text[:SUMMARY_MAX]
+                    return
+            except Exception:  # noqa: BLE001, S110 - the code summary below takes over
+                pass
+        notes["summary"] = self.code_summary(turns, notes["summary"])
 
     def clear(self) -> None:
         """Forget every conversation (a scenario was loaded or reset: 「你好」 → 「您剛才說『降到 120』…」 from the
         previous rehearsal). Turn ids keep counting so the console never mixes an old turn with a new one."""
         self._memories.clear()
+        self._notes.clear()
         self.memory = self._mem(None)
 
     def _done(self, out: dict[str, Any], text: str, t0: float) -> dict[str, Any]:
         out["reply"] = (out["reply"] or UNCLEAR_REPLY).strip()
         out["ms"] = round((time.perf_counter() - t0) * 1000, 1)
+        notes = self.notes
+        if len(self.memory) == self.memory.maxlen:
+            notes["overflow"].append(self.memory[0])          # leaving the window: into the 前情摘要
         self.memory.append((text, out["reply"]))
+        self._pin(text)
+        if notes["overflow"]:
+            if self.llm and self.client is not None:
+                task = asyncio.ensure_future(self._compact(notes, self._slot_fn))   # after the reply, never blocking it
+                self._tasks.add(task)
+                task.add_done_callback(self._tasks.discard)
+            else:
+                notes["summary"], notes["overflow"] = self.code_summary(notes["overflow"], notes["summary"]), []
         return out
 
     # ---------------------------------------------------------------- tools (shared by model and rules)
@@ -592,19 +696,25 @@ class MainAgent:
         step keeps a short line for the reply's tool line."""
         steps = out["steps"]
         topic = str((args or {}).get("topic") or "")
+        oid = _order_id((args or {}).get("order_id"))
+        if topic == "order_lookup" and not oid:
+            steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": False, "summary": "失敗：沒有訂單編號",
+                          "label": "查了工廠資料（單張訂單紀錄）"})
+            return "失敗：order_lookup 要給 order_id（例如 #A-311、SO-004）。"
+        qargs = {"topic": topic, **({"order_id": oid} if oid else {})}
         label = f"查了工廠資料（{PLANT_TOPICS[topic].split('：')[0]}）" if topic in PLANT_TOPICS else "查了工廠資料"
         if topic not in PLANT_TOPICS:
             err = f"沒有這個 topic：{topic or '（空）'}"
         elif self._read_plant is None:
             err = "工廠資料讀不到"
         else:
-            r = await self._read_plant(topic, f"{tid}:T{len(steps) + 1}")
+            r = await self._read_plant(topic, f"{tid}:T{len(steps) + 1}", **({"order_id": oid} if oid else {}))
             err = None if r.get("ok") else str(r.get("error") or "讀取失敗")
             if err is None:
                 text = json.dumps(r.get("data") or {}, ensure_ascii=False, default=str)
-                steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": True, "summary": text[:200], "label": label})
+                steps.append({"tool": QUERY, "args": qargs, "ok": True, "summary": text[:200], "label": label})
                 return text
-        steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": False, "summary": f"失敗：{err}", "label": label})
+        steps.append({"tool": QUERY, "args": qargs, "ok": False, "summary": f"失敗：{err}", "label": label})
         return f"失敗：{err}。可用的 topic：{'、'.join(PLANT_TOPICS)}"
 
     @staticmethod
@@ -674,6 +784,11 @@ class MainAgent:
         follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked)
         earlier = [q for q, _a in self.memory] if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
+        notes = self.notes
+        if notes["pins"]:
+            ctx["pinned_constraints"] = list(notes["pins"])    # always: what the supervisor asked for earlier
+        if follow and notes["summary"]:
+            ctx["earlier_summary"] = notes["summary"]           # 前情摘要 of the turns before the last 20
         if follow and prev is not None:
             asked = _LAST_Q_RX.search(prev[1].strip())
             ctx["previous_turn"] = {"supervisor": prev[0], "you_asked": asked.group(0).strip() if asked else None}
@@ -708,7 +823,8 @@ class MainAgent:
             msgs[-1]["content"] = json.dumps({**ctx, "instruction": "這是閒聊：只針對主管這一句回一句溫暖自然的話（問吃的就推薦一樣吃的，要笑話就講一個很短的"
                                               "笑話）；不要提主管沒說過的事或心情，不要編天氣或新聞，不要提工廠、數字或機台，不要問問題。"}, ensure_ascii=False, default=str)
         # numbers the reply may use: the message, what rode along with it, the context, the plan and the tool results
-        source = " ".join([text, *earlier, " ".join(prev) if follow and prev is not None else "",
+        source = " ".join([text, *earlier, " ".join(prev) if follow and prev is not None else "", *notes["pins"],
+                           notes["summary"] if follow else "",
                            json.dumps(context, ensure_ascii=False, default=str), waiting_plan or "", PROCESS_RULE])
         nudged = waiting_plan is not None and not fresh   # a message about the selected plan is a discussion, not a new task
         looked = waiting_plan is not None and not other
@@ -771,7 +887,8 @@ class MainAgent:
                 if not looked and read and not last:
                     # a plant question answered without looking: remind the model once which tool answers it
                     looked = True
-                    hint = f"{read[0][0]}（topic={read[0][1]['topic']}）" if read[0][0] == QUERY else read[0][0]
+                    hint = (f"{read[0][0]}（" + "，".join(f"{k}={v}" for k, v in read[0][1].items()) + "）"
+                            if read[0][0] == QUERY else read[0][0])
                     msgs += [{"role": "assistant", "content": reply},
                              {"role": "user", "content": f"主管在問這座工廠的事。先呼叫 {hint} 查資料，再依結果回覆。"}]
                     continue

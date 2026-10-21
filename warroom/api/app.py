@@ -990,17 +990,18 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
                                      "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
-        async def read_plant(topic: str, call_id: str) -> dict[str, Any]:
+        async def read_plant(topic: str, call_id: str, order_id: str | None = None) -> dict[str, Any]:
             # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
             # refuses it); audited here like an ask read (tool_call / tool_result, R0), read-only by construction.
             # Called on the loop, not in a thread: it walks live runtime state the loop also changes
             eid, step = call_id.split(":")[0], call_id.split(":")[-1]
             row = {"call_id": f"{eid}:Q{step[1:]}", "step_id": f"Q{step[1:]}", "attempt": 1, "risk": "R0"}
-            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic}, "state": "ASK"},
+            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic, **({"order_id": order_id} if order_id else {})},
+                                                                 "state": "ASK"},
                            event_id=eid)
             t0 = time.perf_counter()
             try:
-                data, err = plant_query.query(r, topic), None
+                data, err = plant_query.query(r, topic, order_id), None
             except Exception as e:  # noqa: BLE001 - a failed read is said in the reply, never a 500
                 data, err = None, f"{type(e).__name__}: {e}"[:200]
             r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",

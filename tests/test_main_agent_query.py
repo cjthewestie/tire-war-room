@@ -34,8 +34,9 @@ class Reader:
     def __init__(self, data=None, ok=True):
         self.topics, self.data, self.ok = [], data or SHIP, ok
 
-    async def __call__(self, topic, call_id):
+    async def __call__(self, topic, call_id, **kw):
         self.topics.append(topic)
+        self.kw = kw
         return {"ok": True, "data": self.data, "error": None} if self.ok else {"ok": False, "data": None, "error": "boom"}
 
 
@@ -60,7 +61,7 @@ async def test_every_topic_returns_compact_data_and_writes_nothing(tmp_path):
         version = p.rt.c.store.current().version
         before = len(p.rt.audit.tail(0, 1_000_000))
         for topic in PLANT_TOPICS:
-            d = plant_query.query(p.rt, topic)
+            d = plant_query.query(p.rt, topic, "#W-0391" if topic == "order_lookup" else None)
             text = json.dumps(d, ensure_ascii=False, default=str)
             assert d and "error" not in d, (topic, d)
             assert len(text) <= plant_query.MAX_CHARS + 60, (topic, len(text))
@@ -298,3 +299,60 @@ async def test_api_conversations_are_separate_and_reset_on_scenario_load(tmp_pat
         ok = await p.http.post("/api/sim/control", json={"action": "scenario", "scenario": "normal"})
         assert ok.status_code == 200
         assert p.rt.memory_resets                                           # the agent registered its clear
+
+
+
+# ---------------------------------------------------------------- past orders (CJ 2026-10-22: 「我有沒有地方可以詢問之前的訂單」)
+async def test_orders_history_and_one_orders_lookup(tmp_path):
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        h = plant_query.query(p.rt, "orders_history")
+        ids = [o["id"] for o in h["completed_or_shipped"]]
+        assert "#W-0391" in ids and "#W-0392" in ids and h["team_dataset_plan"]["orders"]
+        one = plant_query.query(p.rt, "order_lookup", "#W-0391")
+        assert one["world"]["status"] == "已出貨" and one["world"]["shipped"]
+        a311 = plant_query.query(p.rt, "order_lookup", "#A-311")
+        assert a311["world"]["shipped"] is None and ("schedule" in a311 or "team_dataset" in a311)
+        assert plant_query.query(p.rt, "order_lookup", "#Z-999")["note"] == "沒有找到這張訂單的任何紀錄"
+        assert len(json.dumps(h, ensure_ascii=False, default=str)) <= plant_query.MAX_CHARS + 60
+
+
+async def test_the_model_looks_up_an_orders_history_with_its_id():
+    m = Model(("tool", QUERY, {"topic": "order_lookup", "order_id": "a-311"}), ("say", "#A-311 還沒出貨。"))
+    reader = Reader({"order_id": "#A-311", "world": {"shipped": None}})
+    out, _ = await _turn(m, "上週 #A-311 什麼時候出貨的", reader)
+    assert reader.topics == ["order_lookup"] and reader.kw == {"order_id": "#A-311"} and out["reply"] == "#A-311 還沒出貨。"
+    assert topic_for("之前有哪些訂單遲交") == "orders_history" and topic_for("上週 #A-311 什麼時候出貨的") == "order_lookup"
+
+
+# ---------------------------------------------------------------- longer memory (CJ 2026-10-22: 「我覺得有點太少」)
+async def test_turn_25_still_knows_a_constraint_from_turn_2_and_conversations_stay_apart():
+    m = Model(*[("say", f"好的，第 {i} 句。") for i in range(40)])
+    agent = MainAgent(_settings(), client=m)
+    f = Floor()
+
+    async def say(text, conv="A"):
+        return await agent.turn(text, context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool, propose=f.propose,
+                                discuss=None, read_plant=Reader(), conversation=conv)
+    await say("好")
+    await say("#A-311 優先，不要動 9 號機")                                  # turn 2: a constraint
+    for i in range(22):
+        await say(f"嗯嗯 {i}")
+    await asyncio.sleep(0.05)                                               # the summary runs after the reply
+    await say("那接下來呢？")                                                # turn 25
+    sent = json.loads(m.calls[-1]["messages"][1]["content"])
+    assert "#A-311 優先，不要動 9 號機" in sent["pinned_constraints"]
+    assert sent.get("earlier_summary"), "the turns past 20 were summarised"
+    assert len(agent.memory) == 20
+    await say("你好", conv="B")
+    other = json.loads(m.calls[-1]["messages"][1]["content"])
+    assert "pinned_constraints" not in other and not other["earlier_messages"]
+
+
+async def test_rule_mode_summarises_by_code():
+    agent = MainAgent(None)
+    f = Floor()
+    for i in range(23):
+        await agent.turn(f"7 號機現在怎樣 {i}" if i == 0 else f"嗯 {i}", context={"abnormal": []}, waiting_plan=None,
+                         run_tool=f.run_tool, propose=f.propose, discuss=None)
+    s = agent.notes["summary"]
+    assert s and len(s) <= 300 and "CURE-07" in s
