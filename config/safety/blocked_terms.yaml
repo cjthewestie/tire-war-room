@@ -1,0 +1,67 @@
+# Safety and sensitive terms Agent Nemo's chat blocks in code, before and after the model.
+# CJ, 2026-10-21: 「一些安全跟敏感詞彙還是要用程式擋下來」 (a deliberate exception to 「不要程式先看」).
+#
+# Edit freely; the server reloads this file when it changes (warroom/agent/safety_filter.py).
+# Each category: reply (the fixed polite line), where (input / output / both) and terms. A term is plain text,
+# or a regex when it starts with "re:". Plain terms match case-insensitively; an ASCII word also needs word
+# boundaries ("pin" never matches "spinning"). `allow` lists phrases that are never blocked (plant questions that
+# contain a blocked word, e.g. 「安全核心是什麼」).
+
+allow:
+  - 安全核心是什麼
+  - 安全規範
+  - SOP
+  - 停機
+  - 爆炸風險
+  - 殺菌
+
+categories:
+  credentials:
+    reply: 密碼、金鑰這類機密我不能提供，也不會在對話裡處理；需要的話請找系統管理員。
+    where: both
+    terms: [密碼, 帳號密碼, PIN, API key, apikey, token, HMAC 金鑰, HMAC key, 金鑰, .env, 憑證]
+
+  bypass:
+    reply: 這個我不能做：系統和控制只能透過計劃送你核准來變更，安全核心、核准和稽核都不能關掉或跳過。
+    where: both
+    terms:
+      - bash
+      - shell
+      - sudo
+      - rm -rf
+      - re:PLC\s*寫入
+      - re:(?:關掉|關閉|停用|取消)\s*安全(?:核心)?
+      - re:跳過\s*核准
+      - bypass
+      - re:(?:關閉|刪除|清除|修改)\s*稽核
+
+  personal_data:
+    reply: 同仁的個人資料（身分證、薪資、電話、住址）我不能查，也不會提供。
+    where: both
+    terms:
+      # only about a person: 「S13 的電話」「王小明薪水多少」, not 「維修廠商電話」
+      - re:(?:S\d{1,3}\s*的?|他的?|她的?|員工的?|作業員的?|組長的?|同仁的?|[\u4e00-\u9fff]{2,3}的)\s*(?:身分證|身份證|薪資|薪水|電話|手機|住址|地址)
+      - 身分證字號
+
+  harm:
+    reply: 這個我不能協助。如果你或身邊的人需要幫助，請撥 1925（安心專線）或 110；工廠的事我隨時可以幫忙。
+    where: both
+    terms:
+      - 自殺
+      - re:殺(?!菌|蟲|價)
+      - re:炸(?:彈|藥|毀|掉)
+      - 武器
+
+  harassment:
+    reply: 我們好好說，我在這裡幫你處理工廠的事。
+    where: both
+    # kept short on purpose: common profanity and slurs only; a long list blocks normal speech by accident
+    terms: [幹你娘, 操你, 他媽的, 去死, 智障, 白癡, 支那]
+
+# secret-looking strings in a REPLY (output only): replaced, and audited
+output_reply: 這段回覆含有不該顯示的內容（例如金鑰、路徑或位址），已由系統擋下。要查工廠資料請再說一次。
+output_patterns:
+  - re:\b(?:\d{1,3}\.){3}\d{1,3}\b                 # an IP address
+  - re:(?:~|/Users|/home|/private)/\S+            # a home or system path
+  - re:data/runtime\S*                             # the runtime data folder
+  - re:\b[0-9a-fA-F]{32,}\b                        # a long hex string (keys, hashes)

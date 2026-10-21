@@ -1008,12 +1008,25 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                             "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
             return {"ok": err is None, "data": data, "error": err}
 
+        # safety and sensitive terms, by code on both sides of the model (CJ 2026-10-21: 「一些安全跟敏感詞彙還是要用程式擋下來」)
+        from warroom.agent import safety_filter
+        sf = safety_filter.default()
+        hit = sf.check_input(text)
+        if hit is not None:
+            r.audit.append(AuditKind.SYSTEM, "safety_filter", {**hit.audit(), "turn": None}, event_id=None)
+            return {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
+                    "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
                                         read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}")
+        key = getattr(r.audit, "_key", None)
+        out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+        if out_hit is not None:
+            r.audit.append(AuditKind.SYSTEM, "safety_filter", {**out_hit.audit(), "turn": res["id"]}, event_id=None)
+            res.update(reply=out_hit.reply, error=f"output blocked: {out_hit.category}")
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
