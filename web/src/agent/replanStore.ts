@@ -9,7 +9,7 @@ export interface Replan { orderId: string; state: 'sending' | 'planning' | 'read
 }
 
 /** The one line a ② item shows before anyone asked the AI. */
-export const REPLAN_HINT = '主 agent 會請子 agent 擬計劃；好了這裡會出現「核准並派發」'
+export const REPLAN_HINT = 'NemoClaw 會擬計劃；好了這裡會出現「核准並派發」'
 
 let replans: Record<string, Replan> = {}
 const subs = new Set<() => void>()

@@ -195,7 +195,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
     <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
       <header className="apv-h">
         <div className="apv-tags">
-          <span className="apv-main" data-testid="main-plan-tag">主 agent 的計劃</span>
+          <span className="apv-main" data-testid="main-plan-tag">NemoClaw 的計劃</span>
           <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
           <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
           {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
@@ -226,14 +226,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
         )}
 
       <footer className="apv-act">
-        {done ? <p className="apv-done" role="status">{done}・主 agent 已派發子 agent 執行，完成後回報；決定已寫入稽核日誌</p> : <>
+        {done ? <p className="apv-done" role="status">{done}・NemoClaw 已派人執行，完成後回報；決定已寫入稽核日誌</p> : <>
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
               {busy ? '送出中…' : `核准並派發${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">核准後主 agent 派子 agent 執行並回報；要改，按「討論」跟主 agent 說</span>
+            <span className="apv-hint">核准後 NemoClaw 派人執行並回報；要改，按「討論」跟NemoClaw 說</span>
           </div>
         </>}
       </footer>

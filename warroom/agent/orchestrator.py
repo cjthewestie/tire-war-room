@@ -334,7 +334,7 @@ class Orchestrator:
     async def dispatch_command(self, text: str, actor: str, start: Callable[[str, str], Event]) -> tuple[Event, dict[str, Any]]:
         """A supervisor's free-text task: pick ONE dispatch (model in its queue slot, or rules), then start the run
         (`start` = Runtime.start_command). The dispatch is R0: it only starts a run."""
-        async with self.queue.slot(PRIORITY["task"], "dispatch", None, "主 agent 派發"):
+        async with self.queue.slot(PRIORITY["task"], "dispatch", None, "NemoClaw 派發"):
             d = await self.dispatcher.choose(text)
         self._pending_dispatch.append(d)
         ev = start(text, actor)
@@ -393,10 +393,10 @@ class Orchestrator:
         name = self._name(self._event(ev_id))
         gap = " " if name[:1].isascii() and name[:1].isalnum() else ""
         if kind in ("approve", "modify"):
-            text = (f"已核准{gap}{name}，{TYPES.get(t, t)} agent 開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}"
+            text = (f"已核准{gap}{name}，NemoClaw（{TYPES.get(t, t)}）開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}"
                     "；完成後回報")
         elif kind == "reject":
-            text = f"主管駁回{gap}{name}{'的' if name else ''}{TYPES.get(t, t)} agent 計劃，不執行"
+            text = f"主管駁回{gap}{name}{'的' if name else ''}NemoClaw（{TYPES.get(t, t)}）計劃，不執行"
         else:
             return
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
@@ -444,7 +444,7 @@ class Orchestrator:
         name = self._name(ev)
         if ev.source == "supervisor" and (ev.command or "").strip()[:10] in outcome:
             name = ""                                       # the outcome already quotes the command
-        parts = [f"{name}{'・' if name else ''}{TYPES[sub.type]} agent {head}：{outcome or '無需動作'}"]
+        parts = [f"{name}{'・' if name else ''}NemoClaw（{TYPES[sub.type]}）{head}：{outcome or '無需動作'}"]
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
         parts.append(f"核准：{'、'.join(decided)}" if decided else "沒有核准")
         return "。".join(parts), {"writes": writes, "approvals": decided, "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
@@ -498,7 +498,7 @@ class Orchestrator:
         detail = {"orch": "interrupt", "by": by, "reason": reason, "cancelled_run": cancelled_run,
                   "superseded_approvals": superseded, "cancelled_tasks": cancelled_tasks, "schedule_kept": kept,
                   "state": ev.state.value, "type": sub.type,
-                  "text": f"主管中斷{self._name(ev)}{'的' if self._name(ev) else ''}{TYPES[sub.type]} agent：停止新的工具呼叫"
+                  "text": f"主管中斷{self._name(ev)}{'的' if self._name(ev) else ''}NemoClaw（{TYPES[sub.type]}）：停止新的工具呼叫"
                           f"{f'，作廢核准卡 {len(superseded)} 張' if superseded else ''}"
                           f"{f'，取消人員任務 {len(cancelled_tasks)} 件' if cancelled_tasks else ''}"
                           f"，排程維持{f' v{kept}' if kept else '原樣'}"}

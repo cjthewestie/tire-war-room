@@ -144,7 +144,7 @@ async def test_page11_unchanged_under_the_main_agent(tmp_path):
     d, rep = rows[0], rows[-1]
     assert d["type"] == "machine" and d["by"] == "code" and "新任務：機台處理（7 號機" in d["text"]
     # the report names the machine (the 主控台 showed 「機台處理 agent 完成：…」 for every event alike)
-    assert rep["text"].startswith("7 號機・機台處理 agent 完成") and rep["writes"] and rep["approvals"] and not rep["interrupted"]
+    assert rep["text"].startswith("7 號機・NemoClaw（機台處理）完成") and rep["writes"] and rep["approvals"] and not rep["interrupted"]
     sub = o.subagents()[0]
     assert sub["status"] == "done" and sub["round"] == 2 and sub["tools_called"] >= 4
 
@@ -218,7 +218,7 @@ async def test_supervisor_task_dispatch_then_report(tmp_path):
     disp = next(r for r in rows if r["orch"] == "dispatch")
     assert disp["type"] == "order" and disp["dispatch"] == "dispatch_order_task" and disp["by"] == "rules"
     # the outcome already quotes the command, so the report does not name it twice
-    assert rows[-1]["orch"] == "report" and rows[-1]["text"].startswith("訂單處理 agent 完成：主管指令「#A-311 可能晚交")
+    assert rows[-1]["orch"] == "report" and rows[-1]["text"].startswith("NemoClaw（訂單處理）完成：主管指令「#A-311 可能晚交")
 
 
 # ---------------------------------------------------------------- API
@@ -247,7 +247,7 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent"]
         assert rows[0]["orch"] == "dispatch" and rows[0]["type"] == "order"
-        assert rows[-1]["text"].startswith("訂單處理 agent 完成：主管指令「#M-201")
+        assert rows[-1]["text"].startswith("NemoClaw（訂單處理）完成：主管指令「#M-201")
         execute = next(x for x in rows if x["orch"] == "dispatch" and x.get("phase") == "execute")
         assert execute["text"].startswith("已核准主管指令「#M-201")          # 「已核准，…」 named nothing
         subs = (await p.http.get("/api/subagents")).json()

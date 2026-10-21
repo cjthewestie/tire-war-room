@@ -39,7 +39,7 @@ try {
   d.on('pageerror', (e) => errors.push(e.message))
   await d.goto(BASE + '/#agent', { waitUntil: 'networkidle' })
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
-  check('agent tab opens on the live backend', (await d.locator('[aria-label="主 agent 對話"]').count()) === 1)
+  check('agent tab opens on the live backend', (await d.locator('[aria-label="NemoClaw 對話"]').count()) === 1)
 
   const r = [await sim(d, { action: 'scenario', scenario: 'press7_temp_drop' }), await sim(d, { action: 'speed', speed: 30 }), await sim(d, { action: 'play' })]
   check('press-7 scenario started (POST /api/sim/control)', r.every((s) => s === 200), r.join(','))
