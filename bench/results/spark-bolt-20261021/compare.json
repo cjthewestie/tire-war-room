@@ -1,0 +1,839 @@
+{
+ "summary": {
+  "lightning_replay": {
+   "ids": [
+    45,
+    82
+   ],
+   "main": {
+    "calls": 36,
+    "prompt_tokens": {
+     "n": 36,
+     "min": 3185,
+     "median": 3411.0,
+     "max": 4965
+    },
+    "system_tokens": {
+     "n": 36,
+     "min": 1621,
+     "median": 1621.0,
+     "max": 1621
+    },
+    "completion_tokens": {
+     "n": 36,
+     "min": 17,
+     "median": 36.0,
+     "max": 202
+    },
+    "ttft_s": null,
+    "total_s": {
+     "n": 36,
+     "min": 0.84,
+     "median": 1.12,
+     "max": 3.1
+    },
+    "decode_tps": null
+   },
+   "commander": {
+    "calls": 2,
+    "prompt_tokens": {
+     "n": 2,
+     "min": 5710,
+     "median": 5933.0,
+     "max": 6156
+    },
+    "system_tokens": {
+     "n": 2,
+     "min": 4897,
+     "median": 4897.0,
+     "max": 4897
+    },
+    "completion_tokens": {
+     "n": 2,
+     "min": 582,
+     "median": 632.0,
+     "max": 682
+    },
+    "ttft_s": {
+     "n": 2,
+     "min": 1.12,
+     "median": 1.17,
+     "max": 1.23
+    },
+    "total_s": {
+     "n": 2,
+     "min": 6.39,
+     "median": 6.7,
+     "max": 7.01
+    },
+    "decode_tps": {
+     "n": 2,
+     "min": 110.4,
+     "median": 114.2,
+     "max": 118.0
+    }
+   }
+  },
+  "bolt_replay": {
+   "ids": [
+    98,
+    124
+   ],
+   "main": {
+    "calls": 26,
+    "prompt_tokens": {
+     "n": 26,
+     "min": 3185,
+     "median": 3340.5,
+     "max": 4965
+    },
+    "system_tokens": {
+     "n": 26,
+     "min": 1621,
+     "median": 1621.0,
+     "max": 1621
+    },
+    "completion_tokens": {
+     "n": 26,
+     "min": 11,
+     "median": 54.5,
+     "max": 189
+    },
+    "ttft_s": null,
+    "total_s": {
+     "n": 26,
+     "min": 2.19,
+     "median": 3.29,
+     "max": 5.08
+    },
+    "decode_tps": null
+   },
+   "commander": {
+    "calls": 1,
+    "prompt_tokens": {
+     "n": 1,
+     "min": 5610,
+     "median": 5610,
+     "max": 5610
+    },
+    "system_tokens": {
+     "n": 1,
+     "min": 4897,
+     "median": 4897,
+     "max": 4897
+    },
+    "completion_tokens": {
+     "n": 1,
+     "min": 725,
+     "median": 725,
+     "max": 725
+    },
+    "ttft_s": {
+     "n": 1,
+     "min": 3.48,
+     "median": 3.48,
+     "max": 3.48
+    },
+    "total_s": {
+     "n": 1,
+     "min": 12.1,
+     "median": 12.1,
+     "max": 12.1
+    },
+    "decode_tps": {
+     "n": 1,
+     "min": 84.1,
+     "median": 84.1,
+     "max": 84.1
+    }
+   }
+  },
+  "bolt_manual": {
+   "ids": [
+    83,
+    97
+   ],
+   "main": {
+    "calls": 14,
+    "prompt_tokens": {
+     "n": 14,
+     "min": 3193,
+     "median": 3437.5,
+     "max": 4623
+    },
+    "system_tokens": {
+     "n": 14,
+     "min": 1621,
+     "median": 1621.0,
+     "max": 1621
+    },
+    "completion_tokens": {
+     "n": 14,
+     "min": 26,
+     "median": 77.5,
+     "max": 248
+    },
+    "ttft_s": null,
+    "total_s": {
+     "n": 14,
+     "min": 2.39,
+     "median": 4.07,
+     "max": 8.88
+    },
+    "decode_tps": null
+   },
+   "commander": {
+    "calls": 1,
+    "prompt_tokens": {
+     "n": 1,
+     "min": 5737,
+     "median": 5737,
+     "max": 5737
+    },
+    "system_tokens": {
+     "n": 1,
+     "min": 4897,
+     "median": 4897,
+     "max": 4897
+    },
+    "completion_tokens": {
+     "n": 1,
+     "min": 805,
+     "median": 805,
+     "max": 805
+    },
+    "ttft_s": {
+     "n": 1,
+     "min": 3.95,
+     "median": 3.95,
+     "max": 3.95
+    },
+    "total_s": {
+     "n": 1,
+     "min": 13.02,
+     "median": 13.02,
+     "max": 13.02
+    },
+    "decode_tps": {
+     "n": 1,
+     "min": 88.8,
+     "median": 88.8,
+     "max": 88.8
+    }
+   }
+  }
+ },
+ "per_question": [
+  {
+   "q": "SO-004 什摸時候完成",
+   "lightning": {
+    "q": "SO-004 什摸時候完成",
+    "calls": 4,
+    "ids": [
+     45,
+     46,
+     47,
+     48
+    ],
+    "total_s": 4.7,
+    "in_sum": 14565,
+    "out_sum": 171,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "query_orders_shifts",
+     "memory_read"
+    ],
+    "final": "SO-004（小胎 20 條）交期是 2026-11-09 17:00，依目前進度預計 2026-11-05 09:00 前完成，餘裕約 104 小時，屬於正常工時完成。"
+   },
+   "bolt": {
+    "q": "SO-004 什摸時候完成",
+    "calls": 2,
+    "ids": [
+     98,
+     99
+    ],
+    "total_s": 5.9,
+    "in_sum": 7690,
+    "out_sum": 135,
+    "nudges": [],
+    "tools": [
+     "recall_today",
+     "memory_read"
+    ],
+    "final": "SO-004（客戶D，小胎 20 條）預計 2026-11-05 09:00 完成，交期是 2026-11-09 17:00，目前餘裕 104 小時，不需加班。"
+   }
+  },
+  {
+   "q": "之前大開煉機出過什麼事？",
+   "lightning": {
+    "q": "之前大開煉機出過什麼事？",
+    "calls": 2,
+    "ids": [
+     49,
+     50
+    ],
+    "total_s": 2.3,
+    "in_sum": 8160,
+    "out_sum": 79,
+    "nudges": [],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "A03 大開煉機曾因膠溫偏高導致，降低轉速並檢查水路，停機 15 分鐘，部分胎延長硫化後放行。"
+   },
+   "bolt": {
+    "q": "之前大開煉機出過什麼事？",
+    "calls": 2,
+    "ids": [
+     100,
+     101
+    ],
+    "total_s": 7.0,
+    "in_sum": 8160,
+    "out_sum": 139,
+    "nudges": [],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "大開煉機（A03）在 9/23 出過膠溫偏高的事，後來降低轉速並檢查水路，停機 15 分，部分胎延長硫化後放行。另外 A04 也有過冷卻水流量偏低的事故，清洗過濾網後恢復，無報廢。你想看詳細的時間或後續處理嗎？"
+   }
+  },
+  {
+   "q": "今天排程改了幾版？",
+   "lightning": {
+    "q": "今天排程改了幾版？",
+    "calls": 2,
+    "ids": [
+     51,
+     52
+    ],
+    "total_s": 1.9,
+    "in_sum": 6571,
+    "out_sum": 63,
+    "nudges": [],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "今天的作業計劃一共 1 版，目前生效中的是 v1（初始版本，65 個模次）。"
+   },
+   "bolt": {
+    "q": "今天排程改了幾版？",
+    "calls": 2,
+    "ids": [
+     102,
+     103
+    ],
+    "total_s": 5.4,
+    "in_sum": 6580,
+    "out_sum": 74,
+    "nudges": [],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "今天排程只改了一版，現在生效的是 v1，是 00:00 初始排程，共 65 個模次。"
+   }
+  },
+  {
+   "q": "現在有什麼在等我核准？",
+   "lightning": {
+    "q": "現在有什麼在等我核准？",
+    "calls": 6,
+    "ids": [
+     53,
+     54,
+     55,
+     56,
+     57,
+     58
+    ],
+    "total_s": 5.8,
+    "in_sum": 21204,
+    "out_sum": 151,
+    "nudges": [],
+    "tools": [
+     "recall_today",
+     "recall_today",
+     "recall_today",
+     "query_orders_shifts",
+     "memory_read"
+    ],
+    "final": "現在沒有任何卡片在等你核准，今日卡的「等主管核准」區是空的。"
+   },
+   "bolt": {
+    "q": "現在有什麼在等我核准？",
+    "calls": 1,
+    "ids": [
+     104
+    ],
+    "total_s": 2.2,
+    "in_sum": 3194,
+    "out_sum": 15,
+    "nudges": [],
+    "tools": [],
+    "final": "現在沒有任何任務在等你核准。"
+   }
+  },
+  {
+   "q": "我筆記寫了什麼？",
+   "lightning": {
+    "q": "我筆記寫了什麼？",
+    "calls": 4,
+    "ids": [
+     59,
+     60,
+     61,
+     62
+    ],
+    "total_s": 7.1,
+    "in_sum": 13975,
+    "out_sum": 343,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "recall_today",
+     "memory_read"
+    ],
+    "final": "筆記檔（notes.md）目前是空的，主管還沒寫任何內容。如果是想看其他檔案（如 today.md、schedule-today.md 等），請告訴具體是哪一本，我可以再讀一遍。"
+   },
+   "bolt": {
+    "q": "我筆記寫了什麼？",
+    "calls": 3,
+    "ids": [
+     105,
+     106,
+     107
+    ],
+    "total_s": 7.9,
+    "in_sum": 9908,
+    "out_sum": 69,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "你的筆記檔目前是空的，還沒寫任何內容。你想先記什麼？"
+   }
+  },
+  {
+   "q": "哈摟",
+   "lightning": {
+    "q": "哈摟",
+    "calls": 1,
+    "ids": [
+     63
+    ],
+    "total_s": 1.3,
+    "in_sum": 3185,
+    "out_sum": 46,
+    "nudges": [],
+    "tools": [],
+    "final": "哈！我是戰情室的 agent，平常負貫查機台、查 SOP、擬送核准的計畫。今天有什麼事要跟我提？"
+   },
+   "bolt": {
+    "q": "哈摟",
+    "calls": 1,
+    "ids": [
+     108
+    ],
+    "total_s": 2.2,
+    "in_sum": 3185,
+    "out_sum": 11,
+    "nudges": [],
+    "tools": [],
+    "final": "哈摟，有什麼事？"
+   }
+  },
+  {
+   "q": "有啥要處理的",
+   "lightning": {
+    "q": "有啥要處理的",
+    "calls": 3,
+    "ids": [
+     64,
+     65,
+     66
+    ],
+    "total_s": 2.9,
+    "in_sum": 10408,
+    "out_sum": 89,
+    "nudges": [],
+    "tools": [
+     "recall_today",
+     "memory_read"
+    ],
+    "final": "沒有等核准的卡，今天開案 0 件，限制也沒有。"
+   },
+   "bolt": {
+    "q": "有啥要處理的",
+    "calls": 1,
+    "ids": [
+     109
+    ],
+    "total_s": 3.2,
+    "in_sum": 3292,
+    "out_sum": 56,
+    "nudges": [],
+    "tools": [],
+    "final": "沒有在等核准的事，也沒有進行中的任務。你想看什麼？可以問我訂單、班表、機台狀況，或是今天的排程改了幾版。"
+   }
+  },
+  {
+   "q": "不市一個 代理一個畫面媽",
+   "lightning": {
+    "q": "不市一個 代理一個畫面媽",
+    "calls": 3,
+    "ids": [
+     67,
+     68,
+     69
+    ],
+    "total_s": 5.2,
+    "in_sum": 11147,
+    "out_sum": 253,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "主管是想問「你是哪個代理嗎？」這類的自我介紹。我是實心胎工廠戰情室的 agent，能查狀況、查 SOP、擬送核准的計畫，還有看今天的任務紀錄。"
+   },
+   "bolt": {
+    "q": "不市一個 代理一個畫面媽",
+    "calls": 3,
+    "ids": [
+     110,
+     111,
+     112
+    ],
+    "total_s": 9.1,
+    "in_sum": 10877,
+    "out_sum": 93,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "你是想看哪個畫面？我可以幫你查記憶檔、看任務列表或查機台狀況，你說要看什麼。"
+   }
+  },
+  {
+   "q": "#M-201 可能晚交，請重排保交期",
+   "lightning": {
+    "q": "#M-201 可能晚交，請重排保交期",
+    "calls": 4,
+    "ids": [
+     70,
+     71,
+     72,
+     73
+    ],
+    "total_s": 6.1,
+    "in_sum": 13776,
+    "out_sum": 300,
+    "nudges": [
+     "主管是要你「做」這件事，不只"
+    ],
+    "tools": [
+     "query_orders_shifts",
+     "propose_plan"
+    ],
+    "final": "已擬計劃送您核准：重排 #M-201 訂單至 7 號硫化機，明天早上 08:00 前出模，以保交期。核准後才會執行。"
+   },
+   "bolt": {
+    "q": "#M-201 可能晚交，請重排保交期",
+    "calls": 4,
+    "ids": [
+     113,
+     114,
+     115,
+     116
+    ],
+    "total_s": 14.9,
+    "in_sum": 16150,
+    "out_sum": 394,
+    "nudges": [
+     "主管是要你「做」這件事，不只"
+    ],
+    "tools": [
+     "query_orders_shifts",
+     "read_sensors",
+     "propose_plan"
+    ],
+    "final": "已擬計劃送你核准（任務 EV-20261021-000135-CMD），重排 #M-201 硫化排程以保交期 11-11。核准後才會執行。"
+   }
+  },
+  {
+   "q": "（子 agent）指揮官",
+   "lightning": {
+    "q": "（子 agent）指揮官",
+    "calls": 1,
+    "ids": [
+     74
+    ],
+    "total_s": 6.4,
+    "in_sum": 5710,
+    "out_sum": 582,
+    "nudges": [],
+    "tools": [],
+    "final": "{\"alert_card\":{\"title\":\"主管指令：7 號機重排 #M-201 訂單\",\"summary\":\"保交期：7 號機明天 08:00 前出模，重排 #M-201 訂單\"},\"goal\":\"依主管指令重排 #M-201 至 7 號機，保明天 08:00 前出模\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"主管指令：重排 #M-201 訂單至 7 號機，保交期\",\"cause_code\":\"supervisor_command\",\"expectation\":null,\"status\":\"active\",\"evidence\":[\"context.source=supervisor\",\"context.command：重排 #M-201 訂單至 7 號硫化機，明天早上 08:00 前出模\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"query_orders_shifts\",\"args\":{\"order_ids\":[\"#M-201\"],\"from_ts\":\"2026-10-21T00:01:19+08:00\",\"to_ts\":\"2026-10-22T00:00:00+08:00\"},\"depends_on\":[],\"purpose\":\"查 #M-201 訂單交期與 7 號機班表缺口\"},{\"id\":\"S2\",\"tool\":\"solve_schedule\",\"args\":{\"unavailable_presses\":[],\"cure_overrides_h\":{},\"horizon_days\":2,\"time_limit_s\":10.0, \"allow_overtime\":true,\"allow_cross_team\":true},\"depends_on\":[\"S1\"],\"purpose\":\"依主管指令重排 #M-201 至 7 號機，求解可行方案\"},{\"id\":\"S3\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S2.schedule_version\",\"reason\":\"主管指令：重排 #M-201 訂單至 7 號機，保明天 08:00 前出模\"},\"depends_on\":[\"S2\"],\"purpose\":\"確認新排程（需主管核准）\"}],\"safe_stop\":false,\"rationale\":\"supervisor_command 類型：依主管指令執行重排，工具鏈 query_orders_shifts → solve_schedule → confirm_schedule。\"}"
+   },
+   "bolt": {
+    "q": "（子 agent）指揮官",
+    "calls": 1,
+    "ids": [
+     117
+    ],
+    "total_s": 12.1,
+    "in_sum": 5610,
+    "out_sum": 725,
+    "nudges": [],
+    "tools": [],
+    "final": "{\"alert_card\":{\"title\":\"主管指令：重排 #M-201 硫化排程\",\"summary\":\"主管要求重排 #M-201 硫化排程，提前入模以保交期 11-11。\"},\"goal\":\"依主管指令重排 #M-201 硫化排程，提前入模保交期 11-11\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"主管指令：重排 #M-201 硫化排程，提前入模以保交期 11-11\",\"cause_code\":\"supervisor_command\",\"status\":\"active\",\"evidence\":[\"主管指令：重排 #M-201 硫化排程，提前入模以保交期 11-11\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"query_orders_shifts\",\"args\":{\"order_ids\":[\"#M-201\"]},\"depends_on\":[],\"purpose\":\"查 #M-201 訂單、交期、班表與相關硫化機\"},{\"id\":\"S2\",\"tool\":\"solve_schedule\",\"args\":{\"horizon_days\":7,\"time_limit_s\":10.0,\"allow_overtime\":true,\"allow_cross_team\":true},\"depends_on\":[\"S1\"],\"purpose\":\"重新求解排程，提前 #M-201 入模\"},{\"id\":\"S3\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S2.schedule_version\",\"reason\":\"主管指令：重排 #M-201 硫化排程，提前入模以保交期 11-11\"},\"depends_on\":[\"S2\"],\"purpose\":\"確認新排程（需主管核准）\"},{\"id\":\"S4\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\",\"supervisor\"],\"kind\":\"info\",\"message\":\"主管指令：重排 #M-201 硫化排程，提前入模以保交期 11-11。新排程已確認，請依新排程出入模。\"},\"depends_on\":[\"S3\"],\"purpose\":\"通知硫化組、胎體組與主管新排程\"},{\"id\":\"S5\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\",\"supervisor\"],\"kind\":\"dispatch\",\"message\":\"主管指令：重排 #M-201 硫化排程，提前入模以保交期 11-11。請依新排程完成出入模。\"},\"depends_on\":[\"S3\"],\"purpose\":\"派工：依新排程完成 #M-201 出入模（需主管核准）\"}],\"safe_stop\":false,\"rationale\":\"主管指令非機台異常，是排程變更。先查訂單與班表，再由求解器重排，確認後通知相關組與派工。\"}"
+   }
+  },
+  {
+   "q": "看一下目前有哪些風險",
+   "lightning": {
+    "q": "看一下目前有哪些風險",
+    "calls": 2,
+    "ids": [
+     75,
+     76
+    ],
+    "total_s": 3.8,
+    "in_sum": 7342,
+    "out_sum": 234,
+    "nudges": [],
+    "tools": [
+     "read_sensors"
+    ],
+    "final": "目前硫化機溫度都在 127.8~128.2°C 範圍內，蒸汽壓都穩在 4.9~5 kgf/cm²，沒有異常溫度波動或壓力不足的情形。今天只開 1 張排程（EV-20261021-000119-CMD，7 號機重排），其餘機台都在正常運作中。"
+   },
+   "bolt": {
+    "q": "看一下目前有哪些風險",
+    "calls": 2,
+    "ids": [
+     118,
+     119
+    ],
+    "total_s": 8.2,
+    "in_sum": 7537,
+    "out_sum": 325,
+    "nudges": [],
+    "tools": [
+     "read_sensors",
+     "query_orders_shifts"
+    ],
+    "final": "目前沒有異常。11 號硫化機溫度 127.8–128.1°C、蒸汽壓 4.9–5 kgf/cm²，趨勢平穩；A 線大開煉機 93.7°C、水流 37.9 L/分，也正常。人力缺口為零，下一模 6 號 #S-101 03:00、9 號 #M-201 04:30、5 號 #S-101 06:00 入模，最近交期 #A-311 10-24。"
+   }
+  },
+  {
+   "q": "交期預警呢",
+   "lightning": {
+    "q": "交期預警呢",
+    "calls": 2,
+    "ids": [
+     77,
+     78
+    ],
+    "total_s": 2.8,
+    "in_sum": 6916,
+    "out_sum": 134,
+    "nudges": [],
+    "tools": [
+     "recall_today"
+    ],
+    "final": "目前沒有任何交期預警卡在等核准（waiting_approval 為空），今天只有一張開啟中的重排任務（EV-20261021-000119-CMD，7 號機 #M-201 訂單，明天早上 08:00 前出模）。其他的風險或限制目前都還沒被標記。"
+   },
+   "bolt": {
+    "q": "交期預警呢",
+    "calls": 2,
+    "ids": [
+     120,
+     121
+    ],
+    "total_s": 8.9,
+    "in_sum": 7920,
+    "out_sum": 363,
+    "nudges": [],
+    "tools": [
+     "read_sensors",
+     "query_orders_shifts",
+     "recall_today"
+    ],
+    "final": "目前 #M-201 交期 11-11，下一模是 9 號 04:30 入模，8 號 22:15 入模，9 號 10-22 08:30 入模，人力沒缺口。全廠機台溫度都在 127.7–128.1°C，蒸汽壓 4.9–5 kgf/cm²，沒有異常。唯一開放的任務是「重排 #M-201 硫化排程，提前入模以保交期 11-11」，還在等你核准。"
+   }
+  },
+  {
+   "q": "狀態機頁在看什麼？",
+   "lightning": {
+    "q": "狀態機頁在看什麼？",
+    "calls": 3,
+    "ids": [
+     79,
+     80,
+     81
+    ],
+    "total_s": 5.9,
+    "in_sum": 11509,
+    "out_sum": 305,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "狀態機頁顯示今天開著一件任務：7 號機的重排，目標明天早上 08:00 前出模，以保 M-201 訂單的交期。目前沒有等核准的卡，也沒有其他開中任務。"
+   },
+   "bolt": {
+    "q": "狀態機頁在看什麼？",
+    "calls": 3,
+    "ids": [
+     122,
+     123,
+     124
+    ],
+    "total_s": 10.0,
+    "in_sum": 11218,
+    "out_sum": 169,
+    "nudges": [
+     "這要看記憶檔。先呼叫 mem"
+    ],
+    "tools": [
+     "memory_read"
+    ],
+    "final": "狀態機頁是每個任務的進度看板，顯示這件事走到哪一步（偵測、分類、計劃、模擬、核准、執行、驗證、結案），也會標出異常的預分類。你想看哪一件事的進度？"
+   }
+  },
+  {
+   "q": "（子 agent）指揮官",
+   "lightning": {
+    "q": "（子 agent）指揮官",
+    "calls": 1,
+    "ids": [
+     82
+    ],
+    "total_s": 7.0,
+    "in_sum": 6156,
+    "out_sum": 682,
+    "nudges": [],
+    "tools": [],
+    "final": "{\n  \"alert_card\": {\n    \"title\": \"主管指令：7 號機重排 #M-201\",\n    \"summary\": \"主管指令：重排 #M-201 訂單至 7 號硫化機，明天早上 08:00 前出模，以保交期\"\n  },\n  \"goal\": \"依主管指令重排 #M-201 至 7 號機，保明天 08:00 前出模交期\",\n  \"hypothesis\": {\n    \"id\": \"H1\",\n    \"statement\": \"主管指令：重排 #M-201 訂單至 7 號機，保交期\",\n    \"cause_code\": \"supervisor_command\",\n    \"expectation\": null,\n    \"status\": \"active\",\n    \"evidence\": [\"context.source=supervisor，context.command 為重排指令\"]\n  },\n  \"rejected_hypothesis_ids\": [],\n  \"steps\": [\n    {\n      \"id\": \"S1\",\n      \"tool\": \"query_orders_shifts\",\n      \"args\": {\n        \"press_ids\": [\"CURE-07\"],\n        \"from_ts\": \"2026-10-21T00:01:19+08:00\",\n        \"to_ts\": \"2026-10-22T00:00:00+08:00\"\n      },\n      \"depends_on\": [],\n      \"purpose\": \"查 #M-201 訂單、當前硫化狀態與班表缺口\"\n    },\n    {\n      \"id\": \"S2\",\n      \"tool\": \"solve_schedule\",\n      \"args\": {\n        \"unavailable_presses\": [],\n        \"cure_overrides_h\": {},\n        \"horizon_days\": 1,\n        \"time_limit_s\": 10,\n        \"allow_overtime\": true,\n        \"allow_cross_team\": true\n      },\n      \"depends_on\": [\"S1\"],\n      \"purpose\": \"依主管指令與當前排程求解可行方案\"\n    },\n    {\n      \"id\": \"S3\",\n      \"tool\": \"confirm_schedule\",\n      \"args\": {\n        \"schedule_version\": \"$S2.schedule_version\",\n        \"reason\": \"主管指令：重排 #M-201 訂單至 7 號機，明天 08:00 前出模，以保交期\"\n      },\n      \"depends_on\": [\"S2\"],\n      \"purpose\": \"確認新排程（需主管核准）\"\n    }\n  ],\n  \"safe_stop\": false,\n  \"rationale\": \"context.source=supervisor，此為主管下達之指令而非機台異常。步驟先查訂單班表，再求解排程，最後由主管核准確認。\"\n}"
+   },
+   "bolt": null
+  }
+ ],
+ "bolt_manual_turns": [
+  {
+   "q": "狀態機頁在看什麼？",
+   "calls": 3,
+   "ids": [
+    83,
+    84,
+    85
+   ],
+   "total_s": 16.2,
+   "in_sum": 10931,
+   "out_sum": 177,
+   "nudges": [
+    "這要看記憶檔。先呼叫 mem"
+   ],
+   "tools": [
+    "memory_read"
+   ],
+   "final": "狀態機頁是每個任務的進度面板，會顯示它走到哪一步（偵測、分類、計劃、模擬、核准、執行、驗證、結案），以及異常的預分類。你剛才問的應該是想知道這個頁面在看什麼，是這樣嗎？"
+  },
+  {
+   "q": "#M-201 可能晚交，請重排保交期",
+   "calls": 3,
+   "ids": [
+    86,
+    87,
+    88
+   ],
+   "total_s": 16.3,
+   "in_sum": 12136,
+   "out_sum": 545,
+   "nudges": [],
+   "tools": [
+    "query_orders_shifts",
+    "read_sensors",
+    "propose_plan"
+   ],
+   "final": "已擬計劃送你核准（EV-20261021-000149-CMD）：把 #M-201 提前到 10-21 04:30 入模，將原本那時段的單往後挪，保 11-11 交期。機台溫度都正常，沒有異常。你同意就核准，核准後才執行。"
+  },
+  {
+   "q": "（子 agent）指揮官",
+   "calls": 1,
+   "ids": [
+    89
+   ],
+   "total_s": 13.0,
+   "in_sum": 5737,
+   "out_sum": 805,
+   "nudges": [],
+   "tools": [],
+   "final": "{\"alert_card\":{\"title\":\"主管指令：重排 #M-201 入模\",\"summary\":\"主管要求 #M-201 10-21 04:30 入模，原 04:30 入模單往後挪，保 11-11 交期。\"},\"goal\":\"依主管指令重排 #M-201 入模，保 11-11 交期\",\"hypothesis\":{\"id\":\"H1\",\"statement\":\"主管指令：重排 #M-201 到 10-21 04:30 入模，原單往後挪，保 11-11 交期\",\"cause_code\":\"supervisor_command\",\"expectation\":null,\"status\":\"active\",\"evidence\":[\"主管指令：重排 #M-201 到 10-21 04:30 入模，將 10-21 04:30 入模的原單往後挪，保 #M-201 11-11 交期\"]},\"rejected_hypothesis_ids\":[],\"steps\":[{\"id\":\"S1\",\"tool\":\"query_orders_shifts\",\"args\":{\"order_ids\":[\"#M-201\"],\"from_ts\":\"2026-10-21T00:00:00+08:00\",\"to_ts\":\"2026-10-21T06:00:00+08:00\"},\"depends_on\":[],\"purpose\":\"查 #M-201 訂單與 10-21 04:30 入模的原單、班表\"},{\"id\":\"S2\",\"tool\":\"solve_schedule\",\"args\":{\"horizon_days\":7,\"time_limit_s\":10.0,\"allow_overtime\":true,\"allow_cross_team\":true},\"depends_on\":[\"S1\"],\"purpose\":\"依主管指令重排 #M-201 入模，原單往後挪，保 11-11 交期\"},{\"id\":\"S3\",\"tool\":\"confirm_schedule\",\"args\":{\"schedule_version\":\"$S2.schedule_version\",\"reason\":\"主管指令：重排 #M-201 到 10-21 04:30 入模，原單往後挪，保 11-11 交期\"},\"depends_on\":[\"S2\"],\"purpose\":\"確認新排程（需主管核准）\"},{\"id\":\"S4\",\"tool\":\"notify_teams\",\"args\":{\"teams\":[\"curing\",\"body\",\"side\",\"bead_nylon\",\"bigopen\",\"bond\",\"maintenance\",\"qc\",\"supervisor\"],\"kind\":\"dispatch\",\"message\":\"主管指令：#M-201 10-21 04:30 入模，原 04:30 入模單往後挪，保 11-11 交期。請依新排程調整出模／入模與投料。\"},\"depends_on\":[\"S3\"],\"purpose\":\"通知各組執行新排程（派工，需核准）\"}],\"safe_stop\":false,\"rationale\":\"主管指令非機台異常，是排程變更。先查訂單與班表，再由求解器重排，確認後通知各組。\"}"
+  },
+  {
+   "q": "不是一個代理一個畫面嗎？",
+   "calls": 3,
+   "ids": [
+    90,
+    91,
+    92
+   ],
+   "total_s": 11.9,
+   "in_sum": 11359,
+   "out_sum": 227,
+   "nudges": [
+    "這要看記憶檔。先呼叫 mem"
+   ],
+   "tools": [
+    "memory_read"
+   ],
+   "final": "是的，我是這個系統的代理，跟你在同一個對話裡，沒有多個畫面。你可以在這裡問狀況、查紀錄、交辦新事；要動到現場的事會開成一個新任務，由那個任務的 agent 處理。你想查什麼，或是要我擬什麼計劃？"
+  },
+  {
+   "q": "7 號機現在怎樣？",
+   "calls": 2,
+   "ids": [
+    93,
+    94
+   ],
+   "total_s": 5.7,
+   "in_sum": 6990,
+   "out_sum": 100,
+   "nudges": [],
+   "tools": [
+    "read_sensors"
+   ],
+   "final": "7 號機溫度 128.1°C，30 分最低 127.9°C，趨勢微升，蒸汽壓 4.9 kgf/cm²，目前沒有異常。"
+  },
+  {
+   "q": "核准之後誰去做？",
+   "calls": 3,
+   "ids": [
+    95,
+    96,
+    97
+   ],
+   "total_s": 9.4,
+   "in_sum": 11234,
+   "out_sum": 157,
+   "nudges": [
+    "這要看記憶檔。先呼叫 mem"
+   ],
+   "tools": [
+    "memory_read"
+   ],
+   "final": "核准後由這個任務的 agent 依計劃執行：排程版本由程式生效、通知送給計劃裡寫的組別、現場人員在手機 /worker 頁看到任務並回報完成。執行完程式會驗證，成立就結案回報；不成立就換假設、出第二輪計劃再送核准。"
+  }
+ ]
+}
