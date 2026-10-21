@@ -1,13 +1,13 @@
-// The whole plant around the 28 machines (issue #11; was the 工廠全貌 tab, merged into 產線監控 by issue #37):
-// goods, people by zone, worker tasks, raw materials against their reorder points, the loading dock, quality,
-// energy and maintenance. Orders live in 產線監控's 訂單 panel and the 訂單 tab. Read only; data comes from
-// GET /api/world and the WS "world" deltas (warroom/sim/world.py).
+// The whole plant around the 28 machines (issue #11; was the 工廠全貌 tab, merged into 產線監控 by issue #37, folded
+// into 「更多全廠資訊」 by issue #102): goods, people by zone, worker tasks, raw materials against their reorder points,
+// the loading dock, quality, energy and maintenance. Read only; data comes from GET /api/world and the WS "world"
+// deltas (warroom/sim/world.py).
+import type { ReactNode } from 'react'
 import type { WorldSnapshot, WorldZone, WorkerState } from '../contracts'
 import { LINE_LABELS } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { PHONE_QUERY, useMediaQuery } from '../media'
 import { Panel } from './common'
 import { GoodsCounts, GoodsQueue } from './GoodsQueue'
 import { movedText } from './goods'
@@ -23,41 +23,34 @@ const ZONE_ORDER: WorldZone[] = ['war_room', 'line_A', 'line_B', 'line_C', 'line
 const STATE_ORDER: WorkerState[] = ['在機台', '搬運', '待命', '休息', '請假', '下班']
 const MAT_STATUS = { ok: '充足', reorder: '已達再訂購點', low: '偏低', out: '缺料' } as const
 
-export function PlantPanels() {
+/** 「更多全廠資訊」 on 產線監控 (issue #102): a 現場主管 does not need these at a glance, so everything folds into one
+ *  closed panel — `children` (訂單進度, 半成品進度) first, then people, materials and the rest of the plant. Low
+ *  materials, late purchases and maintenance starting soon are already rows in 預警 at the top of the page. */
+export function PlantPanels({ children }: { children?: ReactNode }) {
   const { state, transport } = useWarRoom()
-  const phone = useMediaQuery(PHONE_QUERY)
   const w = state.world
-  if (!w) {
-    return <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>
-  }
-  // UX declutter: 人員分布 and 原料庫存 stay open (a supervisor's first look); the other seven fold into
-  // 「更多全廠資訊」, closed by default. On a phone the whole section folds into its heading.
-  const body = (
-    <>
-      <div className="world world-main">
-        <PeoplePanel w={w} />
-        <MaterialsPanel w={w} />
-      </div>
-      <details className="world-more" data-testid="plant-more">
-        <summary>更多全廠資訊（7 項）：貨品、任務、碼頭、品質、用電、保養、動態</summary>
-        <div className="world">
-          <GoodsPanel w={w} />
-          <TasksPanel w={w} />
-          <DockPanel w={w} />
-          <QualityPanel w={w} />
-          <EnergyPanel w={w} />
-          <MaintenancePanel w={w} />
-          <FeedPanel w={w} />
-        </div>
-      </details>
-    </>
-  )
   return (
-    <section className="world-wrap" data-testid="plant-panels" data-rev={w.rev} aria-label="全廠：人、料、貨、車">
-      {phone
-        ? <details className="world-fold"><summary className="section-h">全廠：人、料、貨、車</summary>{body}</details>
-        : <><h2 className="section-h">全廠：人、料、貨、車</h2>{body}</>}
-      <p className="foot-note" data-testid="world-sources">資料來源：人員、班表、換模、異常紀錄、每日產出來自<b>團隊資料集</b>；訂單、採購、出貨、用電、檢驗、保養為<b>模擬資料</b>。</p>
+    <section className="mon-more-wrap" data-testid="plant-panels" data-rev={w?.rev ?? 0} aria-label="更多全廠資訊">
+      <details className="panel mon-more" data-testid="plant-more">
+        <summary><h2>更多全廠資訊</h2><span className="mon-more-sum">訂單、半成品、人員、原料、貨品、任務、碼頭、品質、用電、保養、動態</span></summary>
+        <div className="world">
+          {children}
+          {w && <>
+            <PeoplePanel w={w} />
+            <MaterialsPanel w={w} />
+            <GoodsPanel w={w} />
+            <TasksPanel w={w} />
+            <DockPanel w={w} />
+            <QualityPanel w={w} />
+            <EnergyPanel w={w} />
+            <MaintenancePanel w={w} />
+            <FeedPanel w={w} />
+          </>}
+        </div>
+        {w
+          ? <p className="foot-note" data-testid="world-sources">資料來源：人員、班表、換模、異常紀錄、每日產出來自<b>團隊資料集</b>；訂單、採購、出貨、用電、檢驗、保養為<b>模擬資料</b>。</p>
+          : <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>}
+      </details>
     </section>
   )
 }
