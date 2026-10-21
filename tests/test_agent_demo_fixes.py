@@ -207,3 +207,19 @@ async def test_stale_reapproval_with_one_option_says_run_the_new_schedule(tmp_pa
     assert [o.label for o in v2.options] == ["照新排程執行"] and v2.version == 2
     assert not any("人力方案" in c for c in v2.changes), v2.changes       # a lone approve-all is no 人力方案
     assert ev.state is EventState.CLOSED
+
+
+async def test_card_delivery_line_says_how_late(tmp_path):
+    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable)
+    real_solve = tools._solve_schedule
+
+    def late_solve(a):
+        d = real_solve(a)
+        d["deliveries_met"], d["late_orders"] = False, ["#A-311"]
+        d["moves"] = [{**d["moves"][0], "late_h": 129.25}]
+        return d
+    tools._solve_schedule = late_solve
+    sup = asyncio.create_task(auto_approve(approvals, 1))
+    await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
+    await sup
+    assert approvals.all()[0].delivery_impact == "延誤：#A-311（晚 129 小時）"

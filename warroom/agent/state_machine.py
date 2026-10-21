@@ -2167,7 +2167,11 @@ class StateMachine:
         if solves:
             data = solves[-1][1]
             late = data.get("late_orders") or []
-            verdict = "不受影響" if data.get("deliveries_met") else f"延誤：{'、'.join(late) or '有'}"
+            hours = self._late_hours(data)
+            # how late, not just who (concurrent_3: 「延誤：#A-311」 hid that it was 129 h behind its due date)
+            verdict = "不受影響" if data.get("deliveries_met") else "延誤：" + ("、".join(
+                o + (f"（晚 {fmt_num(round(hours[o]) if hours[o] >= 10 else round(hours[o], 1))} 小時）" if hours.get(o) else "")
+                for o in late) or "有")
             if run.ev.source == "plant":
                 shifts = order_shifts(data.get("moves"), (data.get("schedule") or {}).get("jobs"))
                 if shifts:
@@ -2183,6 +2187,29 @@ class StateMachine:
                 except Exception:  # noqa: BLE001
                     pass
         return "排程未變更（本事件未重排，未經排程模擬）"
+
+    def _late_hours(self, data: dict[str, Any]) -> dict[str, float]:
+        """Hours each late order finishes after the end of its due date in this solve: the solver's own late_h
+        for a moved tyre, else the order's last de-mold in the schedule against its due date (sim orders)."""
+        out: dict[str, float] = {}
+        for m in data.get("moves") or []:
+            if (m.get("late_h") or 0) > 0:
+                out[str(m.get("order_id"))] = max(out.get(str(m.get("order_id")), 0.0), float(m["late_h"]))
+        try:
+            due = {o.id: o.due for o in self.sim.orders()} if self.sim is not None and hasattr(self.sim, "orders") else {}
+        except Exception:  # noqa: BLE001 - a fake plant without orders
+            due = {}
+        for oid in data.get("late_orders") or []:
+            if oid in out or oid not in due:
+                continue
+            ends = [datetime.fromisoformat(str(j["demold"])) for j in (data.get("schedule") or {}).get("jobs") or []
+                    if j.get("order_id") == oid and j.get("demold")]
+            if ends:
+                end_of_due = datetime.combine(due[oid], datetime.max.time(), tzinfo=TZ)
+                h = (max(ends) - end_of_due).total_seconds() / 3600
+                if h > 0:
+                    out[oid] = h
+        return out
 
     def _action_text(self, run: _Run, step: PlanStep, short: bool = False) -> str:
         """One line per gated write, from its validated args (what will actually run), with the
