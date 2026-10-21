@@ -5,22 +5,15 @@
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
 import type { Channel, Event, Expectation } from '../contracts'
-import { repairEstimate } from '../aiStatus'
+import { repairEstimate, targetText } from '../aiStatus'
 import { fmtHM, fmtMD } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
 
-const CH: Record<Channel, { label: string; unit: string }> = {
-  temp_c: { label: '溫度', unit: '°C' },
-  pressure_kgf_cm2: { label: '壓力', unit: ' kgf/cm²' },
-  water_flow_lpm: { label: '水流', unit: ' L/min' },
-  steam_kgf_cm2: { label: '蒸汽壓', unit: ' kgf/cm²' },
-}
+const CH_LABEL: Record<Channel, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽壓' }
 
 function expectationText(x: Expectation): string {
-  const c = CH[x.channel]
-  const target = x.op === 'between' ? `${x.value}–${x.value_hi}${c.unit}` : `${x.op === '>=' ? '≥' : '≤'}${x.value}${c.unit}`
-  return `${x.within_min} 分內${c.label}回到 ${target}`
+  return `${x.within_min} 分內${CH_LABEL[x.channel]}回到 ${targetText(x)}`
 }
 
 export function RepairEta({ ev }: { ev: Event | null }) {
@@ -32,9 +25,9 @@ export function RepairEta({ ev }: { ev: Event | null }) {
     let alive = true
     loadSopSteps(machine, ev).then((s) => { if (alive) setSop(s) }, () => alive && setSop(null))
     return () => { alive = false }
-    // the SOP depends on which event this is, not on every refresh of it
+    // the SOP depends on which event and round this is (round 2 of p.11 → SOP-CP-01), not on every refresh of it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ev?.id, machine])
+  }, [ev?.id, ev?.replans, machine])
   if (!ev) return null
   // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
   const { x, tasks, lastEta, decided, doneBy } = repairEstimate(ev, state)
