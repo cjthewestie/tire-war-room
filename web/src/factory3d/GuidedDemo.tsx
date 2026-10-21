@@ -54,7 +54,7 @@ export function DemoOverlay({ demo, slides, onPhone }: { demo: GuidedDemo; slide
       {pitch && <div className={`f3-pitch-clock ${warn ? 'warn' : ''}`} data-testid="demo-pitch-clock">{left > 0 ? <>Pitch 剩 <b>{mss(left)}</b></> : <b>時間到</b>}</div>}
       <div className="f3-demo-bar" data-testid="demo-bar">
         <span className="f3-demo-time"><b>{mss(t)}</b> / 6:00</span>
-        <span className="f3-demo-next">{next ? <>下一步 <b>{mss(next.at)}</b> {next.title}</> : '最後一步'}</span>
+        <span className="f3-demo-next">{next ? <>下一步 {next.on ? '約 ' : ''}<b>{mss(next.at)}</b> {next.title}</> : '最後一步'}</span>
         {demo.note && <span className="f3-demo-warn">{demo.note}</span>}
         <button onClick={demo.togglePause} title="暫停／繼續（B）" data-testid="demo-pause">{paused ? '▶ 繼續' : '❚❚ 暫停'}</button>
         <button onClick={demo.skip} title="下一步（N）" data-testid="demo-next" disabled={!next}>⏭ 下一步</button>

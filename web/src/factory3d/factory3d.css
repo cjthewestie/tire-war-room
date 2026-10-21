@@ -202,7 +202,7 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-slides-bar button:disabled { opacity: .4; cursor: default; }
 
 @media (max-width: 640px) {
-  .f3-cue { top: auto; bottom: 120px; padding: 12px 16px 14px; }
+  .f3-cue, .f3-cue.pitch { top: auto; bottom: 120px; padding: 12px 16px 14px; }
   .f3-cue b { font-size: 22px; } .f3-cue span { font-size: 15px; }
   .f3-pitch-clock { top: auto; bottom: 120px; right: 16px; }
 }

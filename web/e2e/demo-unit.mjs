@@ -37,41 +37,41 @@ check('one scenario constant', D.DEMO_SCENARIO === 'morning_rush' && D.MAIN_LOAD
   const tl = run(() => ({}))
   check('no events: every cue fires', tl.fired.length === D.CUES.length, tl.fired.map((f) => f.id).join(','))
   check('no events: all by time', tl.fired.slice(1).every((f) => f.reason === 'time'))
-  check('no events: event cue waits its grace (75 + 10)', at(tl, 'event').t === 85, String(at(tl, 'event').t))
+  check('no events: event cue waits its grace (100 + 15)', at(tl, 'event').t === 115, String(at(tl, 'event').t))
   check('no events: pitch at 3:00', at(tl, 'pitch').t === 180, String(at(tl, 'pitch').t))
   check('no events: warn at 5:00, end at 6:00', at(tl, 'warn').t === 300 && at(tl, 'end').t === 360)
 }
 
-// the plant runs early: cues follow the real events (not before minAt, each cue up ≥ 10 s), pitch still at 180
-{
-  const sig = (t) => ({ event: t >= 55, approval: t >= 70, worker: t >= 90, closed: t >= 100 })
-  const tl = run(sig)
-  check('early: event cue on the event at minAt', at(tl, 'event').reason === 'event' && at(tl, 'event').t === 55, JSON.stringify(at(tl, 'event')))
-  check('early: phone cue on the approval, not before its minAt', at(tl, 'phone').reason === 'event' && at(tl, 'phone').t === 85, JSON.stringify(at(tl, 'phone')))
-  check('early: worker cue ≥ minAt and 10 s after phone', at(tl, 'worker').t === 112 && at(tl, 'worker').reason === 'event', JSON.stringify(at(tl, 'worker')))
-  check('early: agent cue', at(tl, 'agent').t === 142 && at(tl, 'agent').reason === 'event', JSON.stringify(at(tl, 'agent')))
-  check('early: pitch still at 3:00', at(tl, 'pitch').t === 180 && at(tl, 'pitch').reason === 'time')
+// the two measured runs (morning_rush 40×, the real model): cues follow the events, each up ≥ 10 s, pitch at 3:00
+const latched = (f) => { let l = {}; return (t) => (l = D.latch(l, f(t))) }
+for (const [name, ev, card, crew, closed, want] of [
+  ['run A', 84.6, 101.9, 108.6, 111.4, { event: 84.6, phone: 101.9, worker: 111.9, agent: 121.9 }],
+  ['run B', 103.4, 135.1, 142.4, 145.1, { event: 103.4, phone: 135.1, worker: 145.1, agent: 155.1 }],
+]) {
+  // the card is pending only until the presenter approves it 6 s later: the latch keeps the signal
+  const tl = run(latched((t) => ({ event: t >= ev && t < closed, approval: t >= card && t < card + 6, worker: t >= crew && t < closed, closed: t >= closed })), 400)
+  const got = Object.fromEntries(['event', 'phone', 'worker', 'agent'].map((id) => [id, at(tl, id).t]))
+  const near = (a, b) => Math.abs(a - b) < 0.51
+  check(`${name}: cues on the events`, Object.keys(want).every((k) => near(got[k], want[k]) && at(tl, k).reason === 'event'), JSON.stringify(got))
+  check(`${name}: pitch at 3:00`, at(tl, 'pitch').t === 180)
 }
 
-// a slow model: the approval card shows at 1:47 (after its planned 1:40 but inside the grace) → phone cue on the event
+// without the latch an approved card would be missed (the reason latch() exists)
 {
-  const sig = (t) => ({ event: t >= 70, approval: t >= 107 })
-  const tl = run(sig)
-  check('slow: event cue at 70 on the event', at(tl, 'event').t === 70 && at(tl, 'event').reason === 'event')
-  check('slow: phone cue waits for the card (107)', at(tl, 'phone').t === 107 && at(tl, 'phone').reason === 'event', JSON.stringify(at(tl, 'phone')))
-  check('slow: later cues fall back on time', at(tl, 'worker').t === 138 && at(tl, 'worker').reason === 'time', JSON.stringify(at(tl, 'worker')))
+  const tl = run((t) => ({ event: t >= 100, approval: t >= 102 && t < 108 }))
+  check('unlatched: approved card inside the dwell is missed → fallback', at(tl, 'phone').reason === 'time' && at(tl, 'phone').t === 145, JSON.stringify(at(tl, 'phone')))
 }
 
-// a very slow model: no approval by 1:50 → the phone cue shows anyway on its fallback (100 + 10)
+// a very slow model: no card by 2:25 → the phone cue shows anyway on its fallback (130 + 15)
 {
-  const tl = run((t) => ({ event: t >= 60, approval: t >= 150 }))
-  check('very slow: phone cue by time at 110', at(tl, 'phone').t === 110 && at(tl, 'phone').reason === 'time', JSON.stringify(at(tl, 'phone')))
+  const tl = run((t) => ({ event: t >= 90, approval: t >= 170 }))
+  check('very slow: phone cue by time at 145', at(tl, 'phone').t === 145 && at(tl, 'phone').reason === 'time', JSON.stringify(at(tl, 'phone')))
   check('very slow: pitch still at 3:00', at(tl, 'pitch').t === 180)
 }
 
 // signals already true at the start don't fire event cues before their minAt
 {
-  const tl = run(() => ({ event: true, approval: true, worker: true, closed: true }), 60)
+  const tl = run(() => ({ event: true, approval: true, worker: true, closed: true }), 55)
   check('stale signals: no event cue before minAt 50', at(tl, 'event')?.t === 50, JSON.stringify(at(tl, 'event')))
   check('stale signals: one cue per step', tl.fired.map((f) => f.id).join(',') === 'start,console,event', tl.fired.map((f) => f.id).join(','))
 }

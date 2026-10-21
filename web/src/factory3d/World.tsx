@@ -23,7 +23,7 @@ import { PatrolRobot } from './PatrolRobot'
 import { Whiteboard } from './Whiteboard'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
-  ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
+  PLACED_BY_ID, ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
 } from './layout'
 
 const CREAM = '#f3ead8', STEEL = '#a9b2ba', DARK = '#5d636b', YELLOW = '#f2c14e', ROLL = '#6b7078', WOOD = '#c89a6a'
@@ -717,7 +717,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board }: {
   // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
   // the patrol robot goes to the newest open event's machine
   const incident = useMemo(() => {
-    const open = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
+    const open = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop' && !!PLACED_BY_ID[e.machine_id])
     return primaryEvent(open)?.machine_id ?? null
   }, [state.snapshot?.events])
   const now = Date.parse(state.clock?.factory_time ?? state.world?.factory_time ?? '') || 0

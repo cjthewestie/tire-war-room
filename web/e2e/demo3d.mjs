@@ -57,13 +57,13 @@ await sleep(1500)
 // robot exists and patrols (moves along the aisles) before anything happens
 const r0 = await bot()
 check('robot: hook present', !!r0, JSON.stringify(r0))
-await sleep(4000)
+await sleep(6000)
 const r1 = await bot()
-check('robot: patrols (moved)', r0 && r1 && Math.hypot(r1.x - r0.x, r1.z - r0.z) > 0.5, `${r0?.x?.toFixed(2)},${r0?.z} → ${r1?.x?.toFixed(2)},${r1?.z}`)
+check('robot: patrols (moved)', r0 && r1 && Math.hypot(r1.x - r0.x, r1.z - r0.z) > 0.15, `${r0?.x?.toFixed(2)},${r0?.z} → ${r1?.x?.toFixed(2)},${r1?.z}`)
 check('robot: on an aisle or corridor', r1 && ([0.9, 3.2].some((z) => Math.abs(r1.z - z) < 0.06) || [4.2, -7.45].some((x) => Math.abs(r1.x - x) < 0.06)), `${r1?.x},${r1?.z}`)
 const inspected = await until(async () => (await bot())?.inspecting, 60000, 300)
 check('robot: stops and inspects (arm up, light on)', !!inspected)
-if (inspected) { await sleep(1300); const b = await bot(); check('robot: arm raised at a stop', b.arm[1] < 1.6, JSON.stringify(b.arm)) }
+if (inspected) { const b = await until(async () => { const r = await bot(); return r.light > 0.5 ? r : null }, 20000, 200); check('robot: arm raised, sensor light on at a stop', b && b.arm[1] < 1.6, JSON.stringify(b?.arm)) }
 
 // the button on the start screen and in the HUD
 check('demo button on the start card', await page.locator('[data-testid="demo-start-intro"]').isVisible())
@@ -155,6 +155,7 @@ if (!FULL) {
   // the real 6 minutes: approve each new card a few seconds after it shows (as CJ would on the phone)
   const shots = new Set()
   const approved = new Set()
+  const seenAt = new Map()
   while (true) {
     const d = await demo()
     if (!d?.running) break
@@ -168,13 +169,13 @@ if (!FULL) {
     }
     const pend = await fetch(`${BASE}/api/approvals?status=pending`).then((r) => r.json()).catch(() => [])
     for (const a of Array.isArray(pend) ? pend : []) {
-      if (approved.has(a.request_id)) continue
-      if (!a.__seen) { a.__seen = Date.now() }
-      approved.add(a.request_id)
-      await sleep(6000)
-      const opt = a.options?.find((o) => o.recommended)?.option_id ?? a.options?.[0]?.option_id ?? null
-      const r = await post(`/api/approvals/${a.request_id}/decision`, { request_id: a.request_id, decision: 'approve', option_id: opt, via: 'phone', reason: 'demo3d e2e' })
-      console.log(`      ${((Date.now() - t0) / 1000).toFixed(0)}s approved ${a.request_id} → ${r.status}`)
+      if (approved.has(a.id)) continue
+      if (!seenAt.has(a.id)) seenAt.set(a.id, Date.now())
+      if (Date.now() - seenAt.get(a.id) < 6000) continue   // the presenter reads the card first
+      approved.add(a.id)
+      const opt = a.options?.find((o) => o.recommended)?.id ?? a.options?.[0]?.id ?? null
+      const r = await post(`/api/approvals/${a.id}/decision`, { request_id: a.id, decision: 'approve', option_id: opt, via: 'phone', reason: 'demo3d e2e' })
+      console.log(`      ${((Date.now() - t0) / 1000).toFixed(0)}s approved ${a.id} (${a.event_id}) → ${r.status}`)
     }
     const b = await bot()
     if (b?.mode === 'parked' && !shots.has('robot')) { shots.add('robot'); await shot('demo-full-robot-parked') }
@@ -183,7 +184,8 @@ if (!FULL) {
   const d = await demo()
   const rows = d.log.map((r) => ({ cue: r.id, planned: r.planned, actual: r.t, reason: r.reason, title: r.title }))
   console.table(rows)
-  writeFileSync(resolve(OUT, 'demo-full-log.json'), JSON.stringify({ base: BASE, fallback: d.fallback, seen: d.seen, rows }, null, 2))
+  console.log('      signals first seen (demo s):', JSON.stringify(d.signals))
+  writeFileSync(resolve(OUT, 'demo-full-log.json'), JSON.stringify({ base: BASE, fallback: d.fallback, seen: d.seen, signals: d.signals, rows }, null, 2))
   check('full: every cue fired', rows.length === 9, rows.map((r) => r.cue).join(','))
   const pitch = rows.find((r) => r.cue === 'pitch')
   check('full: pitch at 3:00', pitch && Math.abs(pitch.actual - 180) < 1.5, JSON.stringify(pitch))

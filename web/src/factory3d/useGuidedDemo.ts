@@ -15,7 +15,7 @@ import { director } from './pose'
 import { robot } from './patrol'
 import {
   CUES, DEMO_TOTAL, FALLBACK_LOADS, MAIN_LOADS, clockPause, clockRead, clockResume, clockSet, clockStart,
-  current, inPitch, mss, skip, skipTime, startTimeline, step, upcoming, type DemoClock, type DemoLoad, type Shot, type Signals, type Timeline,
+  current, inPitch, latch, mss, skip, skipTime, startTimeline, step, upcoming, type DemoClock, type DemoLoad, type Shot, type Signals, type Timeline,
 } from './demoCues'
 
 const OVERVIEW = { x: 1.6, z: 0.4 }
@@ -56,7 +56,8 @@ function aim(shot: Shot, machine: string | null) {
 
 /** The live facts the cues wait for. `seen` remembers the incident the demo is following. */
 function signals(state: WarRoomState, seen: { id: string | null; machine: string | null }): Signals {
-  const events = state.snapshot?.events ?? []
+  // machine incidents only: 開工 / 急單 plant events (machine PLANT) and their cards belong to the 主控台 beat
+  const events = (state.snapshot?.events ?? []).filter((e) => !!PLACED_BY_ID[e.machine_id])
   const open = events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
   const ev = primaryEvent(open)
   if (ev && !seen.id) { seen.id = ev.id; seen.machine = ev.machine_id }
@@ -66,7 +67,7 @@ function signals(state: WarRoomState, seen: { id: string | null; machine: string
   return {
     orders: (state.world?.orders.new_today ?? 0) > 0,
     event: !!ev,
-    approval: state.pending.length > 0,
+    approval: !!seen.id && state.pending.some((a) => a.event_id === seen.id),
     worker: onTask || (!!followed && (followed.state === 'execute' || followed.state === 'verify')),
     closed: !!seen.id && (!followed || followed.state === 'closed'),
   }
@@ -94,6 +95,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
   const armedAt = useRef(Infinity)
   const seen = useRef<{ id: string | null; machine: string | null }>({ id: null, machine: null })
   const log = useRef<DemoLogRow[]>([])
+  /** demo second at which each signal was first seen (for retiming the cues against the real run) */
+  const firstSeen = useRef<Record<string, number>>({})
+  const latched = useRef<Signals>({})
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
 
@@ -101,6 +105,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
     if (!transport) return
     armedAt.current = Infinity
     seen.current = { id: null, machine: null }
+    latched.current = {}
     await transport.control({ action: 'scenario', scenario: l.scenario as ScenarioName, speed: l.speed, preroll: true })
     await transport.control({ action: 'play' })
     armedAt.current = performance.now() + 1500   // the new plant's snapshot replaces the old one's events
@@ -112,6 +117,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
     chime()
     loaded.current = new Set([0])
     log.current = []
+    firstSeen.current = {}
     setTl(startTimeline()); setSlide(0); setSlideView(false); setT(0); setBigUntil(0)
     const now = performance.now()
     setClock(clockStart(now))
@@ -172,7 +178,10 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
       if (plan) plan.loads.forEach((l, i) => {
         if (i > 0 && tt >= l.at && !loaded.current.has(i)) { loaded.current.add(i); void load(l).catch((e) => console.warn(e)) }
       })
-      const sig = now >= armedAt.current ? signals(stateRef.current, seen.current) : {}
+      const live = now >= armedAt.current ? signals(stateRef.current, seen.current) : {}
+      for (const [k, v] of Object.entries(live)) if (v && firstSeen.current[k] == null) firstSeen.current[k] = Math.round(tt * 10) / 10
+      latched.current = latch(latched.current, live)
+      const sig = latched.current
       setTl((cur) => step(cur, tt, sig))
     }, 250)
     return () => clearInterval(id)
@@ -202,7 +211,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
-    w.__demo3d = () => ({ running, t, cue: cue.id, paused, slide, slideView, fallback: plan?.fallback ?? null, log: log.current, seen: seen.current, director: { ...director } })
+    w.__demo3d = () => ({ running, t, cue: cue.id, paused, slide, slideView, fallback: plan?.fallback ?? null, log: log.current, signals: firstSeen.current, seen: seen.current, director: { ...director } })
     return () => { delete w.__demo3d }
   }, [running, t, cue.id, paused, slide, slideView, plan])
 
