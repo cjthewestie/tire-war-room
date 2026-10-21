@@ -109,15 +109,16 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   const p = await page(390, 844, '/phone?mock=1&scenario=press7_temp_drop&at=02:31:15&speed=1')
   await p.waitForSelector('.ph-card')
   const t = await text(p)
-  // the briefing (briefing.ts) shows the decision first; the long action lines (119.5°C, #A-311 改 9 號) live in 查看處置依據
-  check('phone card', t.includes('第二輪核准') && t.includes('待核准') && t.includes('請核准') && t.includes('夜班缺 1 名操作員') && t.includes('不受影響'))
+  // the card (veteran 10-22) says what happened and what 核准 does first; the long action lines (119.5°C, #A-311 改 9 號)
+  // live in 看依據
+  check('phone card', t.includes('請核准・第 2 輪') && t.includes('7 號硫化機溫度降到 122°C') && t.includes('夜班缺 1 名操作員，選一個方案') && t.includes('不受影響'))
   check('phone options', t.includes('夜班加班') && t.includes('從 2 線調 1 人'))
   await p.click('.ph-opt >> nth=0')
   await p.screenshot({ path: `${OUT}/phone-p11-390.png`, fullPage: true })
   await p.click('.ph-approve')
   await p.waitForTimeout(800)
   const t2 = await text(p)
-  check('phone approve → resolved', t2.includes('目前沒有待核准事項') && t2.includes('已核准'), t2.slice(0, 200).replace(/\n/g, ' | '))
+  check('phone approve → resolved', t2.includes('沒有要你核准的事') && t2.includes('已核准'), t2.slice(0, 200).replace(/\n/g, ' | '))
   await p.screenshot({ path: `${OUT}/phone-after-390.png`, fullPage: true })
   await p.context().close()
 }

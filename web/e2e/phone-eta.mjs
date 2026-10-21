@@ -1,5 +1,6 @@
-// #73 修復預估 on /phone, headless: fire 硫化機蒸汽壓不足 on a normal plant; the approval card must say how long
-// (verification window), by when, and how (SOP steps); after 核准 (over the API) the idle card lists the field tasks and their ETA.
+// #73 修復預估 on /phone, headless: fire 硫化機蒸汽壓不足 on a normal plant; the approval card's 看依據 must say how long
+// (verification window, or the fast-repair seconds) and how (SOP steps), and no 預計完成 before the decision (veteran
+// 10-22); after 核准 (over the API) the idle card's 看執行明細 lists the field tasks, their ETA and 預計完成.
 // Run against a live server: PORT=8010 ./start.sh & node web/e2e/phone-eta.mjs http://localhost:8010
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
@@ -31,30 +32,34 @@ const api = async (path, body) => {
   return r.json()
 }
 const text = (page, id) => page.$eval(`[data-testid=${id}]`, (el) => el.innerText).catch(() => null)
+// 修復預估 sits in a folded <details> (看依據 on the card, 看執行明細 once approved): open it before reading
+const unfold = (page, card) => page.$eval(`${card} details.ph-why`, (el) => { el.open = true; return true }).catch(() => false)
 
 await api('/api/sim/control', { action: 'scenario', scenario: 'normal', speed: 10, preroll: false })
 const fired = (await api('/api/sim/events/fire', { kind: 'steam_low' })).fired
 const browser = await chromium.launch()
 const page = await browser.newPage({ viewport: { width: 390, height: 844 } })
 await page.goto(`${BASE}/phone`)
-const win = await until(() => text(page, 'phone-eta-window'), 90000, 1000)
+const win = await until(async () => (await unfold(page, '.ph-approval')) && text(page, 'phone-eta-window'), 90000, 1000)
 check('核准卡：多久修好', !!win, win ?? '')
 await until(() => page.$('[data-testid=phone-eta-sop]'), 60000)
-const done = await text(page, 'phone-eta-done')
 const sop = await text(page, 'phone-eta-sop')
-// fast repair (GET /api/health repair_fast_s > 0): wall seconds, 「現在核准的話，約 N 秒後」
-check('核准卡：預計完成', !!done && /\d{2}:\d{2}|約 \d+(\.\d)? 秒後/.test(done), done ?? '')
+// before the decision 多久修好 already says it (fast repair: 「約 16 秒（維修 12 秒＋回溫 4 秒）」); no 預計完成 line
+check('核准卡：核准前不寫預計完成', !(await page.$('[data-testid=phone-eta-done]')))
 check('核准卡：怎麼做（SOP）', !!sop && /SOP-/.test(sop), (sop ?? '').split('\n')[0])
 await page.screenshot({ path: `${OUT}/phone-eta-390-card.png`, fullPage: true })
 // 核准 over the API (the button itself is the existing card; headless has no supervisor PIN prompt)
 const ap = await until(async () => (await api('/api/approvals?status=pending'))[0], 60000, 1000)
 await api(`/api/approvals/${ap.id}/decision`, { request_id: ap.id, decision: 'approve', via: 'phone' })
-const tasks = await until(() => text(page, 'phone-eta-tasks'), 60000, 1000)
-check('核准後：現場任務與預計時間', !!tasks, (tasks ?? '').replace(/\n/g, '／'))
+const tasks = await until(async () => (await unfold(page, '.ph-card.idle')) && text(page, 'phone-eta-tasks'), 60000, 1000)
+check('核准後：現場工作與預計時間', !!tasks, (tasks ?? '').replace(/\n/g, '／'))
+const done = await text(page, 'phone-eta-done')
+// fast repair (GET /api/health repair_fast_s > 0): wall seconds 「約 N 秒後」 / 「維修已完成，回溫中」; else a factory time
+check('核准後：預計完成', !!done && /\d{2}:\d{2}|約 \d+(\.\d)? 秒後|維修已完成/.test(done), done ?? '')
 await page.screenshot({ path: `${OUT}/phone-eta-390-after.png`, fullPage: true })
 const wide = await browser.newPage({ viewport: { width: 1440, height: 900 } })
 await wide.goto(`${BASE}/phone`)
-await until(() => text(wide, 'phone-eta'), 15000)
+await until(async () => (await unfold(wide, '.ph-card')) && text(wide, 'phone-eta'), 15000)
 await wide.screenshot({ path: `${OUT}/phone-eta-1440.png` })
 console.log(`machine ${fired.ref}`)
 await browser.close()
