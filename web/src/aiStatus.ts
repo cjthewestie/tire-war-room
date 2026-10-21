@@ -82,16 +82,29 @@ export function repairEstimate(ev: Event, state: WarRoom) {
   return { now, x, tasks, open, lastEta, decided, doneBy }
 }
 
-/** 「溫度回升中」 / 「溫度回降中」: which way the reading must go to meet the expectation. */
-export function recoverWord(x: Expectation | null, now: number | null = null): string {
+/** The machine's normal value the readings ramp back to after a fast repair: the detector's baseline of the anomaly
+ *  (≈ the simulator's nominal: 7 號 128°C, B 線開煉機 94°C) when it is the expectation's channel; null otherwise (a
+ *  supervisor or plant event has no baseline). */
+export function normalOf(ev: Event, x: Expectation | null = expectationOf(ev)): number | null {
+  const a = ev.anomaly
+  return x && a && a.channel === x.channel && a.baseline > 0 ? a.baseline : null
+}
+
+/** 「溫度回升中」 / 「溫度回降中」: which way the reading goes, toward the normal value when known, else to meet the
+ *  expectation. */
+export function recoverWord(x: Expectation | null, now: number | null = null, normal: number | null = null): string {
   if (!x) return '讀值恢復中'
-  const down = x.op === '<=' || (x.op === 'between' && now != null && now > (x.value_hi ?? x.value))
+  const down = normal != null && now != null ? now > normal
+    : x.op === '<=' || (x.op === 'between' && now != null && now > (x.value_hi ?? x.value))
   return `${CH_LABEL[x.channel]}${down ? '回降中' : '回升中'}`
 }
 
-/** 「溫度回升中 112.3°C → ≥121°C」 (the reading left out while unknown). */
-export function recoverText(x: Expectation | null, now: number | null): string {
-  return `${recoverWord(x, now)}${x && now != null ? ` ${readingText(x.channel, now)} → ${targetText(x)}` : ''}`
+/** 「溫度回升中 122.1°C → 128°C」: the reading toward the machine's normal value (the ramp ends there; Kyle: 恢復正常溫度
+ *  後轉綠燈), or toward the expectation's target (「→ ≥121°C」) when that is unknown; the reading left out while unknown.
+ *  Not the expectation when the normal value is known: a temperature drop 128 → 122°C already meets 「≥121°C」. */
+export function recoverText(x: Expectation | null, now: number | null, normal: number | null = null): string {
+  const to = x ? (normal != null ? readingText(x.channel, normal) : targetText(x)) : ''
+  return `${recoverWord(x, now, normal)}${x && now != null ? ` ${readingText(x.channel, now)} → ${to}` : ''}`
 }
 
 /** Where a fast repair stands: the crew working (after the supervisor's decision), the readings coming back after the

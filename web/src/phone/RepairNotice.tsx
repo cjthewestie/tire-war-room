@@ -6,7 +6,7 @@
 //   small 「知道了」 (POST /api/events/{id}/review = 主管已讀報告, PIN like approvals)
 import { useState } from 'react'
 import type { Event } from '../contracts'
-import { REPAIR_KINDS, expectationOf, recoverText } from '../aiStatus'
+import { REPAIR_KINDS, expectationOf, normalOf, recoverText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtHMS } from '../format'
 import { plain } from '../plain'
@@ -56,7 +56,7 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
         <span className="ph-risk ph-ok">維修完成</span>
         <span className="muted small">{fmtHMS(ev.repaired_at)} 故障排除</span>
       </div>
-      <h2 className="ph-title" data-testid="phone-repaired-title">維修完成：{name}，{recoverText(x, now)}</h2>
+      <h2 className="ph-title" data-testid="phone-repaired-title">維修完成：{name}，{recoverText(x, now, normalOf(ev, x))}</h2>
       <dl className="ph-info">
         <dt>做了什麼</dt>
         <dd data-testid="phone-repaired-tasks">{repairs.length ? (
