@@ -39,7 +39,8 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
     <section className="plan-area panel plan-other home-ov" aria-label="今日工廠概況" data-testid="home-overview">
       <div className="po-body">
         <header className="ov-head">
-          <h2 data-testid="ov-answer">{(snap?.header.abnormal_count ?? 0) > 0 ? '沒有要你處理的事' : '全廠正常，沒有要你處理的事'}</h2>
+          {/* 全廠正常 only from a snapshot: before the first one arrives nothing is known yet */}
+          <h2 data-testid="ov-answer">{!snap ? '讀取工廠資料中…' : snap.header.abnormal_count > 0 ? '沒有要你處理的事' : '全廠正常，沒有要你處理的事'}</h2>
           {next[0] && <p className="ov-next1">下一件：{next[0].when} {next[0].text}</p>}
         </header>
         {stripEv && <ResultStrip ev={stripEv} subject={last?.subject} onFull={onFull} />}
