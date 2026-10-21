@@ -52,7 +52,7 @@ def test_proof_runs_tagged_and_never_decides(app_rt, pid):
         res = c.post(f"/api/qa/proofs/{pid}/run")
         assert res.status_code == 200, res.text
         out = res.json()
-        assert out["status"] in ("ok", "failed", "pending"), out
+        assert out["status"] in ("ok", "failed", "pending", "needs_run"), out
         assert out["steps"]
         assert _decided(rt) == decided0                                   # no approval decided by a proof
         if pid != "hypothesis":
@@ -142,3 +142,21 @@ def test_safety_proof_cleans_up_its_fault_even_without_a_stop(app_rt, monkeypatc
     assert not [f for f in rt.sim.faults(active_only=False) if f.machine_id == "B-OPEN" and f.id.startswith("F-QA-")]
     assert _decided(rt) == decided0
     assert any(e.payload.get("msg") == "faults cleared" and e.payload.get("machine_id") == "B-OPEN" for e in rt.audit.tail(limit=0))
+
+
+def test_rag_proof_uses_the_sop_no_answer_gate(app_rt):
+    """#122's QdrantSopKB.retrieve is on main: proof 10 runs instead of 待補."""
+    app, _ = app_rt
+    with TestClient(app) as c:
+        view = {p["id"]: p for p in c.get("/api/qa/proofs").json()["proofs"]}
+        assert view["rag_no_answer"]["status"] == "ready"
+        out = c.post("/api/qa/proofs/rag_no_answer/run").json()
+    assert out["status"] == "ok", out
+    assert out["data"]["hits"] == [] and "知識庫沒有相關 SOP" in out["data"]["reason"]
+
+
+def test_hypothesis_proof_offers_the_p11_walk_when_none_exists(app_rt):
+    app, _ = app_rt
+    with TestClient(app) as c:
+        out = c.post("/api/qa/proofs/hypothesis/run").json()
+    assert out["status"] == "needs_run" and out["status_hint"] == "walk:p11"

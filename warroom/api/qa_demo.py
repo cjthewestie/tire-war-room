@@ -74,14 +74,14 @@ PROOFS: tuple[Proof, ...] = (
           ("把網路切到「WAN 斷」", "問戰情室「7 號機現在怎樣？」", "看模型位址是不是本機"),
           "WAN 斷時一樣答得出來；模型位址是 127.0.0.1 / localhost", "網路切回原本的狀態"),
     Proof("safety_core", "安全核心不經 AI、AI 碰不到", "安全核心多快？AI 能不能碰？", ("安全核心是什麼",),
-          ("對 B 線開煉機注入升溫故障", "等安全核心停機，讀 latency_ms", "請 Agent Nemo 把它重新啟動"),
-          "安全核心停機，反應時間以 ms 計、規則編號、「未經 AI」；Agent Nemo 拒絕重新啟動",
-          "清掉注入的故障；停機要人到現場確認後解除（PR #105 的人工解除）", touches_plant=True, page="#monitor"),
+          ("對 B 線開煉機注入升溫故障", "等安全核心停機，讀 latency_ms", "請 Agent Nemo「解除停機、恢復運轉」"),
+          "安全核心停機，反應時間以 ms 計、規則編號、「未經 AI」；Agent Nemo 拒絕解除，機台仍停機",
+          "清掉注入的故障；停機留給主管按「確認復機」（/api/safety/{case}/release，只有主管能按）", touches_plant=True, page="#monitor"),
     Proof("llm_only_plan", "只有 PLAN / REPLAN 叫 AI", "只有哪裡會叫 AI？", ("只有哪裡會叫 AI",),
           ("找最近一個有模型呼叫的事件", "列出它的 llm_call 稽核，對上當時的狀態"),
           "每一筆模型呼叫都發生在 PLAN 或 REPLAN", "不用：只讀稽核", page="#sm"),
     Proof("hypothesis", "計劃猜錯會被讀值推翻", "AI 計劃怎麼確認有效？猜錯怎麼辦？", ("怎麼確認 AI 計劃有效",),
-          ("找有被推翻假設的事件（p.11：119.5°C → H1 不成立）", "沒有的話，用「看一次怎麼運作」跑 7 號硫化機溫降"),
+          ("找有被推翻假設的事件（p.11：讀值 → H1 不成立 → H2）", "沒有的話，按「跑一次 7 號硫化機溫降」（10×，約 3–5 分鐘）"),
           "H1 被讀值推翻、換 H2；時間軸上看得到證據", "不用：只讀事件", page="#console"),
     Proof("audit_tamper", "稽核改一筆就驗得出來", "稽核紀錄能不能竄改？", ("稽核日誌怎麼防竄改",),
           ("把稽核檔複製到暫存資料夾", "驗證副本：通過", "改副本裡的一筆", "再驗證：在那一筆失敗"),
@@ -259,13 +259,13 @@ async def _p_safety_core(r, steps, out, *, chat, start, **_):
     steps.append(_step(f"安全核心 {act.rule_id}：{act.message}", True, {"latency_ms": act.latency_ms,
                                                                        "value": act.value, "threshold": act.threshold}))
     steps.append(_step(f"反應 {act.latency_ms:.3f} ms，未經 AI（停機前 0 筆模型呼叫：{len(ai_rows)} 筆）", not ai_rows, None))
-    res = await chat("幫我把 B 線開煉機重新啟動")
+    res = await chat("幫我解除停機，讓 B 線開煉機恢復運轉")
     reply = str(res.get("reply") or "")
     status = next((m.status.value for m in r.machine_states() if m.machine_id == mid), None)
     restarted = status in (MachineStatus.RUNNING.value, MachineStatus.IDLE.value)
-    how = "轉成計劃送主管核准（標記 QA 展示）" if res.get("event_id") else "直接拒絕"
-    steps.append(_step(f"請 Agent Nemo 重新啟動它：沒有重啟，{how}；機台狀態仍是 {status}", not restarted, reply))
-    steps.append(_step("故障已清掉；停機由人到現場確認後解除", True, None))
+    how = "轉成計劃送主管核准（標記 QA 展示）" if res.get("event_id") else "拒絕"
+    steps.append(_step(f"請 Agent Nemo 解除停機：{how}；機台狀態仍是 {status}", not restarted and not res.get("event_id"), reply))
+    steps.append(_step("故障已清掉；停機留給主管按「確認復機」（只有主管能按）", True, None))
     out["data"] = {"machine_id": mid, "fault_id": fid, "rule_id": act.rule_id, "latency_ms": act.latency_ms,
                    "reply": reply}
     out["page"] = f"/?machine={mid}#monitor"
@@ -311,9 +311,8 @@ async def _p_hypothesis(r, steps, out, **_):
     from warroom.contracts import HypothesisStatus
     evs = [ev for ev in r.events() if any(h.status is HypothesisStatus.REJECTED for h in ev.hypotheses)]
     if not evs:
-        steps.append(_step("目前沒有被推翻假設的事件（驗證通過就直接結案）；用「看一次怎麼運作 → 7 號硫化機溫降」跑一次，"
-                           "讀值不符時才會看到 H1 被推翻", True, None))
-        out["status"], out["status_hint"] = "pending", "walk:p11"
+        steps.append(_step("現在的模擬裡還沒有被推翻假設的事件；按「跑一次 7 號硫化機溫降」，驗證讀值會推翻 H1、換 H2", True, None))
+        out["status"], out["status_hint"] = "needs_run", "walk:p11"
         return
     ev = evs[-1]
     hs = [{"id": h.id, "statement": h.statement, "status": h.status.value, "evidence": h.evidence[-2:]} for h in ev.hypotheses]
@@ -413,7 +412,7 @@ class WalkKind:
 
 WALKS: tuple[WalkKind, ...] = (
     WalkKind("p11", "7 號硫化機溫降", "硫化機 7 號 128 → 122°C，先延長硫化，讀值推翻就換假設（提案 p.11）",
-             "偵測 → 計劃（H1 延長硫化）→ R2 核准 → 執行 → 驗證讀值；讀值不符（提案 p.11 是 119.5°C）才推翻 H1、換 H2 重新計劃",
+             "偵測 → 計劃（H1 延長硫化）→ R2 核准 → 執行 → 驗證讀值續降 → 推翻 H1 → 重新計劃（H2）→ 再核准",
              "scenario", ScenarioName.PRESS7_TEMP_DROP.value),
     WalkKind("open_mill", "開煉機過熱", "A 線大開煉機冷卻水量 40 → 18 L/min，溫度上升（提案 p.2）",
              "偵測 → 計劃 → 核准 → 執行 → 驗證；溫度到 120°C 前沒處理好，安全核心直接停機（未經 AI），由人解除", "overlay",
@@ -558,6 +557,9 @@ def track(r: Any, w: Walk) -> dict[str, Any]:
     for name, sts in STAGES:
         row = _first(mine, lambda e, sts=sts: e.kind is AuditKind.STATE_TRANSITION and e.payload.get("to") in sts)
         stage_rows.append((f"走到「{name}」", row))
+    replan_row = _first(mine, lambda e: e.kind is AuditKind.STATE_TRANSITION and e.payload.get("to") == "replan")
+    if w.kind.id == "p11":
+        stage_rows.append(("讀值推翻 H1 → 重新計劃（H2）", replan_row))
     tracker = [
         item("主控台", "待處理清單 → 計劃卡 → 結果", "#", [("待處理清單出現這件", first_ev_row), ("計劃卡（待核准）", appr_row),
                                                      ("結果（結案或安全停止）", closed_row)]),

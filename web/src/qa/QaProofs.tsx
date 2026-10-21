@@ -5,7 +5,7 @@ import type { ProofsApi } from './useProofs'
 
 
 
-const STATUS: Record<string, string> = { ok: '展示成功', failed: '有一步沒過', pending: '待補', error: '出錯' }
+const STATUS: Record<string, string> = { ok: '展示成功', failed: '有一步沒過', pending: '待補', needs_run: '先跑一次', error: '出錯' }
 
 function detailText(d: unknown): string | null {
   if (d == null) return null
@@ -13,7 +13,7 @@ function detailText(d: unknown): string | null {
   return JSON.stringify(d, null, 1)
 }
 
-export function ProofResultView({ r }: { r: ProofResult }) {
+export function ProofResultView({ r, onWalk }: { r: ProofResult; onWalk?: (kind: string) => void }) {
   const external = r.page.startsWith('/')
   return (
     <div className={`qa-proof-res ${r.status}`} data-testid="qa-proof-result">
@@ -23,6 +23,9 @@ export function ProofResultView({ r }: { r: ProofResult }) {
         {r.page && r.page !== '#qa' && <a className="qa-live" href={r.page} target={external ? '_blank' : undefined} rel="noopener">去看 →</a>}
       </div>
       {r.error && <p className="qa-err">{r.error}</p>}
+      {r.status_hint?.startsWith('walk:') && onWalk && (
+        <button className="qa-proof-btn" onClick={() => onWalk(r.status_hint!.slice(5))} data-testid="qa-proof-walk">▶ 跑一次 7 號硫化機溫降（10×）</button>
+      )}
       <ol className="qa-proof-steps">
         {r.steps.map((s, i) => {
           const d = detailText(s.detail)
@@ -48,7 +51,7 @@ export function ProofButton({ p, api }: { p: Proof; api: ProofsApi }) {
   )
 }
 
-export function ProofIndex({ api }: { api: ProofsApi }) {
+export function ProofIndex({ api, onWalk }: { api: ProofsApi; onWalk?: (kind: string) => void }) {
   const { reg, results, err } = api
   return (
     <section className="qa-sec" aria-labelledby="qa-proofs-h" data-testid="qa-proofs">
@@ -67,7 +70,7 @@ export function ProofIndex({ api }: { api: ProofsApi }) {
                 </div>
                 <ProofButton p={p} api={api} />
               </div>
-              {results[p.id] && <ProofResultView r={results[p.id]} />}
+              {results[p.id] && <ProofResultView r={results[p.id]} onWalk={onWalk} />}
             </li>
           ))}
         </ol>

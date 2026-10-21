@@ -26,7 +26,7 @@ const QA_CHIPS: { label: string; q: string }[] = [
   { label: '跟 OpenClaw 差在哪', q: '跟 OpenClaw、Hermes、Claude Code 這類 agent 差在哪？' },
   { label: '安全核心是什麼', q: '安全核心是什麼？' },
   { label: '模型多大跑在哪', q: '用的是什麼模型？模型多大、跑在哪裡？' },
-  { label: '為什麼工具要模組化', q: '為什麼工具要模組化、做成固定的白名單？' },
+  { label: 'AI 能做／做不到什麼', q: '指揮官（AI）可以做哪些事？做不到什麼？' },
   { label: 'context 怎麼控制', q: 'context 太長怎麼控制？' },
   { label: '怎麼確認 AI 計劃有效', q: '怎麼確認 AI 的計劃有效、是對的？' },
   { label: '怎麼導入新工廠', q: '換一間新工廠要怎麼導入？' },
@@ -112,6 +112,8 @@ export function QaPage() {
   const proofs = useProofs()
   const [sec, setSec] = useState<'ask' | 'proofs' | 'walk'>(() => (/#qa\/(proofs|walk)/.exec(location.hash)?.[1] as 'proofs' | 'walk') ?? 'ask')
   const pick = (s: 'ask' | 'proofs' | 'walk') => { setSec(s); history.replaceState(null, '', `${location.search}#qa${s === 'ask' ? '' : `/${s}`}`) }
+  const [autoWalk, setAutoWalk] = useState<string | null>(null)
+  const walkNow = (kind: string) => { setAutoWalk(kind); pick('walk') }
   const [cur, ...past] = answers
   const curProofs = cur ? proofsFor(cur.question).map((id) => proofs.reg?.proofs.find((p) => p.id === id)).filter((p) => p != null) : []
   return (
@@ -129,8 +131,8 @@ export function QaPage() {
         <button role="tab" aria-selected={sec === 'proofs'} className={sec === 'proofs' ? 'on' : ''} onClick={() => pick('proofs')} data-testid="qa-tab-proofs">評審疑問 → 展示</button>
         <button role="tab" aria-selected={sec === 'walk'} className={sec === 'walk' ? 'on' : ''} onClick={() => pick('walk')} data-testid="qa-tab-walk">看一次怎麼運作</button>
       </div>
-      {sec === 'proofs' && <ProofIndex api={proofs} />}
-      {sec === 'walk' && <QaWalk />}
+      {sec === 'proofs' && <ProofIndex api={proofs} onWalk={walkNow} />}
+      {sec === 'walk' && <QaWalk autostart={autoWalk} onStarted={() => setAutoWalk(null)} />}
       {sec === 'ask' && <>
       <form className="qa-ask" onSubmit={(e) => { e.preventDefault(); void ask(q) }}>
         <label htmlFor="qa-q" className="sr-only">評審的問題</label>
@@ -156,7 +158,7 @@ export function QaPage() {
           {curProofs.length > 0 && (
             <div className="qa-card-proofs" data-testid="qa-card-proofs">
               {curProofs.map((p) => <ProofButton key={p.id} p={p} api={proofs} />)}
-              {curProofs.map((p) => proofs.results[p.id] && <ProofResultView key={`r-${p.id}`} r={proofs.results[p.id]} />)}
+              {curProofs.map((p) => proofs.results[p.id] && <ProofResultView key={`r-${p.id}`} r={proofs.results[p.id]} onWalk={walkNow} />)}
               {proofs.err && <p className="qa-err">{proofs.err}</p>}
             </div>
           )}

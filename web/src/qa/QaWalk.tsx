@@ -23,7 +23,7 @@ function Stepper({ w }: { w: WalkView }) {
   )
 }
 
-export function QaWalk() {
+export function QaWalk({ autostart, onStarted }: { autostart?: string | null; onStarted?: () => void } = {}) {
   const { state } = useWarRoom()
   const [kinds, setKinds] = useState<WalkKind[]>([])
   const [speed, setSpeed] = useState(5)
@@ -50,7 +50,7 @@ export function QaWalk() {
     return () => clearInterval(t)
   }, [walk, refresh])
 
-  const start = async (k: WalkKind) => {
+  const start = async (k: WalkKind, at?: number) => {
     if (busy) return
     const reg = await getRegistry().catch(() => null)
     const reload = k.how === 'scenario'
@@ -59,8 +59,15 @@ export function QaWalk() {
       : `現在有 ${reg?.open_events.length ?? 0} 件處理中、${reg?.pending_approvals.length ?? 0} 張待核准。「${k.title}」會疊加在目前的模擬上。要繼續嗎？`
     if ((reload || reg?.busy) && !window.confirm(msg)) return
     setBusy(true); setErr(null); setView(null)
-    try { setWalk(await startWalk(k.id, speed, pauseAt)) } catch (e) { setErr(`沒有開始：${String(e instanceof Error ? e.message : e)}`) } finally { setBusy(false) }
+    if (at) setSpeed(at)
+    try { setWalk(await startWalk(k.id, at ?? speed, pauseAt)) } catch (e) { setErr(`沒有開始：${String(e instanceof Error ? e.message : e)}`) } finally { setBusy(false) }
   }
+  useEffect(() => {                         // 「▶ 跑一次」 from a proof: start that event once the cards are loaded
+    const k = autostart ? kinds.find((x) => x.id === autostart) : undefined
+    if (!k) return
+    onStarted?.()
+    queueMicrotask(() => void start(k, 10))
+  }, [autostart, kinds])  // eslint-disable-line react-hooks/exhaustive-deps
   const control = async (action: 'play' | 'pause' | 'speed', s?: number) => {
     if (!walk) return
     if (s) setSpeed(s)

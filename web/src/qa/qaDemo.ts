@@ -9,7 +9,7 @@ export interface Proof {
 export interface WalkKind { id: string; title: string; line: string; path: string; how: string; arg: string | null; status: string }
 export interface Registry { proofs: Proof[]; walks: WalkKind[]; busy: boolean; open_events: string[]; pending_approvals: string[] }
 export interface ProofStep { label: string; ok: boolean; detail: unknown }
-export interface ProofResult { id: string; title: string; status: 'ok' | 'failed' | 'pending' | 'error'; page: string; steps: ProofStep[]; ms: number; error?: string; data: Record<string, unknown> }
+export interface ProofResult { id: string; title: string; status: 'ok' | 'failed' | 'pending' | 'needs_run' | 'error'; page: string; steps: ProofStep[]; ms: number; error?: string; status_hint?: string; data: Record<string, unknown> }
 export interface Check { what: string; done: boolean; at: string | null }
 export interface TrackItem { page: string; label: string; href: string; external: boolean; checks: Check[] }
 export interface StateStep { state: string; at: string; seconds: number; llm_calls: number }

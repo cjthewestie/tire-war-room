@@ -209,7 +209,7 @@ class QaAgent:
                                                       "ms": out["ms"]})
             return out
 
-        hit = self.sf.check_input(q)
+        hit = self.sf.check_input(q, qa=True)        # qa_allow: CJ, 2026-10-22: 「QA 放行」 (input side only)
         if hit is not None:
             out.update(answer=hit.reply, by="safety_filter", gate=f"blocked:{hit.category}")
             return done()

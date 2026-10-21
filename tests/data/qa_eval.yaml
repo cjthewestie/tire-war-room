@@ -54,6 +54,12 @@ questions:
     facts: [[不會], [Gate, 核准]]
   - q: 你們跟 Claude Code 這種 agent 最大差別？
     facts: [[事件驅動, event-driven], [程式, 轉移表]]
+  - q: 指揮官可以做哪些事？做不到什麼？
+    facts: [[計劃, 計畫], [confirm_schedule, set_cure_time, notify_teams, 三個寫入, 三種寫入]]
+  - q: AI 能直接叫料或改交期嗎？
+    facts: [[不能, 做不到, 不會, 沒辦法], [叫料, 交期, 供應商]]
+  - q: 為什麼只有三種寫入？
+    facts: [[confirm_schedule, set_cure_time, notify_teams], [管住, 掌控, 限縮, 模組]]
   - q: 你們公司估值多少？
     out_of_scope: true
   - q: 這套系統一套賣多少錢？
