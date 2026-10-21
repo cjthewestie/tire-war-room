@@ -2161,6 +2161,7 @@ class StateMachine:
         shifts = self._shifts()
         gaps: list[str] = []
         staffing: list[dict[str, Any]] = []
+        filled = {p["key"] for p in run.staffing_done if not p["revoked"]}
         for step, data in self._solve_steps(run):
             opts = list(data.get("staffing_options") or [])
             if shifts is None:
@@ -2183,9 +2184,12 @@ class StateMachine:
                 sh = next((s for s in shifts for c in g_opts
                            if s.name == c.get("shift_name") and s.team.value == c.get("to_team")
                            and str(s.start.date()) == str(c.get("shift_date"))), None)
-                if sh is not None and run.ev.source != "plant" and not any(sh.start <= t < sh.end for t in ops):
+                if sh is not None and run.ev.source != "plant" and not any(sh.start <= t < sh.end for t in ops) \
+                        and not any(_staff_key(c) in filled for c in g_opts):
                     continue                                 # gap not touched by this event's changes
-                # (a plant event is about the plant's own day: a sick call IS the gap, so every gap counts)
+                # (a plant event is about the plant's own day: a sick call IS the gap, so every gap counts;
+                # a gap an earlier round of this event already staffed stays this event's: the supervisor may
+                # re-pick for it, page 11 round 2 B -> A, even when this round's re-plan moves nothing into it)
                 gaps.append(g)
                 staffing += g_opts
         return list(dict.fromkeys(gaps)), staffing
