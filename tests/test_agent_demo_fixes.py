@@ -10,7 +10,7 @@ from tests.test_agent_page11 import page11_anomaly
 from warroom.agent import MockCommander
 from warroom.contracts import AuditKind, EventState, NotifyKind, ToolName
 
-stable = lambda m, now: 122.0 if m == "CURE-07" else 128.0         # noqa: E731
+stable = lambda m, now: 122.0 if m == "CURE-07" else 128.0
 
 
 class NoOverride(MockCommander):
@@ -26,7 +26,7 @@ class NoOverride(MockCommander):
 
 
 async def test_solve_without_cure_override_gets_the_formula_value(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable, commander=NoOverride())
+    _clock, audit, _sim, _store, tools, approvals, sm = make_sm(tmp_path, stable, commander=NoOverride())
     sup = asyncio.create_task(auto_approve(approvals, 1))
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
@@ -45,7 +45,7 @@ async def test_solve_without_cure_override_gets_the_formula_value(tmp_path):
 async def test_solve_that_takes_the_press_out_gets_no_cure_override(tmp_path):
     """Round 2 (H2, press out of service) has no formula result and takes the press out: nothing is filled."""
     from tests.test_agent_page11 import press7_temp
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, press7_temp, commander=NoOverride())
+    _clock, audit, _sim, _store, tools, approvals, sm = make_sm(tmp_path, press7_temp, commander=NoOverride())
     sup = asyncio.create_task(auto_approve(approvals, 2))
     await asyncio.wait_for(sm.handle(page11_anomaly()), 20)
     await sup
@@ -86,7 +86,7 @@ async def test_press_h1_notifies_maintenance_once_without_an_option(tmp_path):
     """The rule plan (and a real model's) has no maintenance step for a press: code adds the R1 notice, it runs
     before the card (no extra option), and a supervisor reject that re-plans H1 does not send it again."""
     from warroom.contracts import ApprovalDecision, DecisionKind
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable)
+    _clock, _audit, sim, _store, tools, approvals, sm = make_sm(tmp_path, stable)
     board = _with_board(sim)
 
     async def sup():
@@ -116,7 +116,7 @@ async def test_press_out_withdraws_the_open_h1_repair_task(tmp_path):
     """Page 11: H1's 檢修 must not finish (and clear the fault) while the 7 號機停用 card waits; the press-out
     notice creates 停用檢修 instead."""
     from tests.test_agent_page11 import press7_temp
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, press7_temp)
+    _clock, _audit, sim, _store, tools, approvals, sm = make_sm(tmp_path, press7_temp)
     board = _with_board(sim)
     sup = asyncio.create_task(auto_approve(approvals, 2))
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 20)
@@ -129,7 +129,7 @@ async def test_press_out_withdraws_the_open_h1_repair_task(tmp_path):
 
 async def test_mill_event_gets_no_press_maintenance_step(tmp_path):
     from tests.test_agent import mill_anomaly
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, lambda m, now: 115.0)
+    _clock, audit, _sim, _store, _tools, approvals, sm = make_sm(tmp_path, lambda m, now: 115.0)
     sup = asyncio.create_task(auto_approve(approvals, 3))
     await asyncio.wait_for(sm.handle(mill_anomaly()), 10)
     sup.cancel()
@@ -173,7 +173,7 @@ def _stale_rig(tmp_path, staffing: bool = True):
 
 
 async def test_stale_reapproval_is_v2_of_the_same_card_and_keeps_the_staffing_choice(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = _stale_rig(tmp_path)
+    _clock, _audit, _sim, _store, _tools, approvals, sm = _stale_rig(tmp_path)
     sup = asyncio.create_task(auto_approve(approvals, 1, option="A"))     # the supervisor picks 夜班加班
     task = asyncio.create_task(sm.handle(page11_anomaly()))
     await sup
@@ -198,7 +198,7 @@ async def test_stale_reapproval_is_v2_of_the_same_card_and_keeps_the_staffing_ch
 
 
 async def test_stale_reapproval_with_one_option_says_run_the_new_schedule(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = _stale_rig(tmp_path, staffing=False)
+    _clock, _audit, _sim, _store, _tools, approvals, sm = _stale_rig(tmp_path, staffing=False)
     sup = asyncio.create_task(auto_approve(approvals, 2))
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
@@ -210,7 +210,7 @@ async def test_stale_reapproval_with_one_option_says_run_the_new_schedule(tmp_pa
 
 
 async def test_card_delivery_line_says_how_late(tmp_path):
-    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable)
+    _clock, _audit, _sim, _store, tools, approvals, sm = make_sm(tmp_path, stable)
     real_solve = tools._solve_schedule
 
     def late_solve(a):

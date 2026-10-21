@@ -108,8 +108,8 @@ REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
 # one run and #A-311 → 6 號 in the next, round 2 differed run to run, and concurrent_3 once kept the greedy hint
 # with #A-311 129 h late. The interleaved search (fixed workers + seed) is reproducible and stops at the first
 # batch boundary past this budget: 0.5 sits between the hint batch (~0.35) and the next (~1.8-2.6), so it
-# includes the first improving batch of every demo solve. On the page-11 solves it ends in about the same
-# wall time as the old stall stop.
+# includes the first improving batch of every demo solve. On the page-11 solves it ends 1-2 s after the old stall
+# stop did (Mac at load ~20: round 1 2.9 -> 4.7 s, round 2 5.0 -> 6.2 s); the start-up seed solves got faster.
 DET_TIME = 0.5
 GRID_MIN = 15           # mold-in times on a 15-min wall-clock grid (both solvers)
 MIN_HORIZON_DAYS = 1    # a degenerate horizon is clamped (and CP-SAT is skipped for it)
