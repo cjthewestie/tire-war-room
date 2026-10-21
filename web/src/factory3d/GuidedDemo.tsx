@@ -10,7 +10,9 @@ import type { GuidedDemo } from './useGuidedDemo'
 const LINK: Record<CueLink, { label: string; win: string }> = {
   console: { label: '主控台', win: 'tw-console' }, phone: { label: '手機頁', win: 'tw-phone' }, agent: { label: 'Agent 頁面', win: 'tw-agent' },
 }
-const CIRCLED = '①②③④⑤⑥⑦⑧⑨'
+const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
+/** Beats seen from the war-room doorway with 7 號機 glowing mid-frame: the card sits low and compact, off the press. */
+const LOW_CARD = new Set(['event', 'h1', 'verify', 'h2'])
 
 /** Where a cue's 「開啟」 button goes. */
 function href(link: CueLink, eventId: string | null) {
@@ -47,7 +49,7 @@ export function DemoOverlay({ demo, deck, onPhone, pad }: {
       {big ? (
         <div className={`f3-cue-big ${cue.id}`} role="status" data-testid="demo-cue-big"><div><b>{cue.title}</b><span>{cue.body}</span></div></div>
       ) : (
-        <div className={`f3-cue ${pitch ? 'pitch' : ''} ${pitch && left <= 60 ? 'warn' : ''}`} role="status" data-testid="demo-cue" key={cue.id}>
+        <div className={`f3-cue ${pitch ? 'pitch' : ''} ${pitch && left <= 60 ? 'warn' : ''} ${LOW_CARD.has(cue.id) ? 'low' : ''}`} role="status" data-testid="demo-cue" key={cue.id}>
           <i>{mss(t)}{demo.checkpoint >= 0 && ` ・ ${CIRCLED[demo.checkpoint]}`}</i>
           <b>{cue.title}</b>
           <span>{cue.body}</span>
