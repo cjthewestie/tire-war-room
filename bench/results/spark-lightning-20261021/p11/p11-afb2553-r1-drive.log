@@ -1,0 +1,18 @@
+[18:20:17] health {'ok': True, 'llm_mode': 'llm', 'model': 'lightning', 'llm_reachable': True, 'qdrant_ok': True, 'strict': False, 'sim_running': True, 'factory_time': '2026-10-03T02:46:59+08:00', 'uptime_s': 298.45950574600283}
+[18:20:17] load {'ok': True, 'factory_time': '2026-10-03T02:13:00+08:00', 'speed': 10.0, 'paused': False, 'scenario': 'press7_temp_drop', 'day_loop': None, 'random_events': {'enabled': False, 'every_min': 30.0, 'seed': 36, 'fired': 0, 'last': None}}
+[18:20:26] EVENT EV-20261003-021400-CURE-07 CURE-07 None -> plan
+[18:20:38] EVENT EV-20261003-021400-CURE-07 CURE-07 plan -> simulate
+[18:20:41] EVENT EV-20261003-021400-CURE-07 CURE-07 simulate -> replan
+[18:20:53] EVENT EV-20261003-021400-CURE-07 CURE-07 replan -> simulate
+[18:20:59] APPROVAL AP-EV-20261003-021400-CURE-07-1 round=1 7 號機溫度下降 128→122°C | actions: ['S4 排程 v3 生效（7 號硫化 28.5 h；#A-311 改 5 號）', 'S4b 7 號機硫化總時數 28.5 h（公式 28.5 h）', '人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）'] | pick: B | options: [('A', '夜班加班'), ('B', '從 2 線調 1 人')]
+[18:20:59]   -> approved
+[18:20:59] EVENT EV-20261003-021400-CURE-07 CURE-07 simulate -> execute
+[18:21:02] EVENT EV-20261003-021400-CURE-07 CURE-07 execute -> verify
+[18:22:36] EVENT EV-20261003-021400-CURE-07 CURE-07 verify -> replan
+[18:22:45] EVENT EV-20261003-021400-CURE-07 CURE-07 replan -> safe_stop
+[18:24:15] all events terminal, quiet 90 s -> stop
+[18:24:15] elapsed_s 237
+[18:24:15] audit rows 86 kinds {'system': 12, 'anomaly': 1, 'state_transition': 15, 'tool_call': 17, 'tool_result': 17, 'llm_call': 3, 'gate': 6, 'approval_request': 1, 'approval_decision': 1, 'task': 12, 'safety_action': 1}
+[18:24:15] LLM 104 EV-20261003-021400-CURE-07 {"mode": "llm", "model": "lightning", "fell_back_to_mock": false, "prompt_tokens": 6405, "completion_tokens": 1208, "plan_source": "commander"}
+[18:24:15] LLM 129 EV-20261003-021400-CURE-07 {"mode": "llm", "model": "lightning", "fell_back_to_mock": false, "prompt_tokens": 6487, "completion_tokens": 1187, "plan_source": "commander"}
+[18:24:15] LLM 177 EV-20261003-021400-CURE-07 {"mode": "llm", "model": "lightning", "fell_back_to_mock": false, "prompt_tokens": 6770, "completion_tokens": 1118, "plan_source": "commander"}

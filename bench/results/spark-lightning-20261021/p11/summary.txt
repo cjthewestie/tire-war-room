@@ -1,0 +1,15 @@
+p11-afb2553 LLM:plan/steam_valve_minor > FAIL:動作未完成 > LLM:replan/steam_valve_minor > FAIL:H1 不成立 > LLM:replan/steam_pressure_low > ERR:commander re-proposed a rejected hypothesis > END:safe_stop
+   plan    prompt=6405 out=1182 ttft=1.17s total=10.17s  decode≈131.4 tok/s
+   replan  prompt=6503 out=1100 ttft=1.20s total=9.21s  decode≈137.3 tok/s
+   replan  prompt=6718 out=1198 ttft=1.18s total=9.90s  decode≈137.3 tok/s
+p11-afb2553-r1 LLM:plan/single_press_issue > FAIL:動作未完成 > LLM:replan/single_press_issue > FAIL:H1 不成立 > LLM:replan/steam_pressure_low > ERR:commander re-proposed a rejected hypothesis > END:safe_stop
+   plan    prompt=6405 out=1208 ttft=1.13s total=10.96s  decode≈123.0 tok/s
+   replan  prompt=6487 out=1187 ttft=1.21s total=10.70s  decode≈125.0 tok/s
+   replan  prompt=6770 out=1118 ttft=1.22s total=9.47s  decode≈135.6 tok/s
+p11-afb2553-r2 LLM:plan/single_machine_issue > FAIL:動作未完成 > LLM:replan/single_machine_issue > FAIL:H1 不成立 > LLM:replan/steam_pressure_low > ERR:commander re-proposed a rejected hypothesis > END:safe_stop
+   plan    prompt=6405 out=1150 ttft=1.15s total=10.46s  decode≈123.5 tok/s
+   replan  prompt=6492 out=1187 ttft=1.19s total=10.13s  decode≈132.6 tok/s
+   replan  prompt=6712 out=1140 ttft=1.32s total=9.87s  decode≈133.4 tok/s
+p11-afb2553-r3 LLM:plan/single_machine_valve_issue > FAIL:H1 不成立 > LLM:replan/steam_pressure_low_or_sensor_drift > ERR:commander re-proposed a rejected hypothesis > END:safe_stop
+   plan    prompt=6405 out=1270 ttft=1.14s total=11.41s  decode≈123.6 tok/s
+   replan  prompt=6653 out=1113 ttft=1.16s total=9.37s  decode≈135.7 tok/s
