@@ -356,3 +356,21 @@ async def test_rule_mode_summarises_by_code():
                          run_tool=f.run_tool, propose=f.propose, discuss=None)
     s = agent.notes["summary"]
     assert s and len(s) <= 300 and "CURE-07" in s
+
+
+
+async def test_a_question_about_the_conversation_is_answered_from_its_record():
+    """Real run 10-22: 「我剛剛說哪台不要動？」 after 20 temperature questions re-answered the temperature."""
+    agent = MainAgent(_settings(), client=Model(*[("say", "好的。") for _ in range(12)]))
+    f = Floor()
+    for q in ("#A-311 優先，不要動 9 號機", "7號機現在溫度多少", "7號機現在溫度多少"):
+        await agent.turn(q, context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool, propose=f.propose,
+                         discuss=None, read_plant=Reader())
+    agent.client = m = Model(("say", "你說 9 號機不要動，#A-311 優先。"))
+    n = 0
+    out = await agent.turn("我剛剛說哪台不要動？", context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool,
+                           propose=f.propose, discuss=None, read_plant=Reader())
+    sent = json.loads(m.calls[n]["messages"][1]["content"])
+    assert "tools" not in m.calls[n] and "previous_turn" not in sent and "instruction" in sent
+    assert sent["pinned_constraints"] == ["#A-311 優先，不要動 9 號機"] and m.calls[n]["temperature"] == 0.0
+    assert "9 號機" in out["reply"]

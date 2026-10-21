@@ -158,6 +158,7 @@ _INTRO_RX = re.compile(r"^\s*(?:(?:[^。！!？?\n]{1,8}?[，,。！!]\s*){1,2}?
                        re.IGNORECASE)
 _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛剛|剛才|上面|前面|這台|那台|它|他們|同一")
 # 「為什麼」「真的嗎」「所以呢」: a question about the agent's own last answer, so that answer rides along
+_RECALL_RX = re.compile(r"我(?:剛剛|剛才|之前|前面|有沒有)?(?:說|講|提)(?:過|了)?(?:什麼|哪|的|甚麼)|聊過什麼|聊了什麼|前面.{0,4}聊|記得我")
 _ABOUT_LAST_RX = re.compile(r"^(?:為什麼|為何|怎麼會|真的嗎|確定嗎|所以呢|然後呢|什麼意思|怎麼說)")
 # small talk (今天好累喔、午餐吃什麼、講個笑話): one warm sentence, one plant fact, an offer — lowest queue priority
 # weather / news: data the plant does not have. Checked AFTER the model (CJ 2026-10-21: 「程式檢查就好了」): a reply that
@@ -782,7 +783,10 @@ class MainAgent:
         # taken as the answer and got 「今天這麼累，該補眠了」 (preview run 10-21)
         asked = prev is not None and bool(_ASKED_RX.search(prev[1])) and (
             not prev[1].endswith(OFFERS) or bool(re.match(r"(?:好|要|嗯|可以|對|是|不用|不要|ok)", t, re.IGNORECASE)))
-        follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked)
+        # 「我剛剛說哪台不要動？」「前面我們聊過什麼」: about the conversation itself, answered from its own record; with
+        # the last turn alongside it re-answered that turn (「7 號機現在溫度 127.9°C」, real run 10-22)
+        recall = prev is not None and bool(_RECALL_RX.search(t))
+        follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked or recall)
         # the supervisor's earlier words, repeats folded (20 × 「7號機現在溫度多少」 crowded out the real question)
         earlier = list(dict.fromkeys(q for q, _a in self.memory)) if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
@@ -791,7 +795,10 @@ class MainAgent:
             ctx["pinned_constraints"] = list(notes["pins"])    # always: what the supervisor asked for earlier
         if follow and notes["summary"]:
             ctx["earlier_summary"] = notes["summary"]           # 前情摘要 of the turns before the last 20
-        if follow and prev is not None:
+        if recall:
+            ctx["instruction"] = ("主管在問這段對話前面說過什麼：只根據 pinned_constraints、earlier_summary、earlier_messages "
+                                  "回答這個問題，一兩句，不要回答之前的問題，不要查工具。")
+        elif follow and prev is not None:
             asked = _LAST_Q_RX.search(prev[1].strip())
             ctx["previous_turn"] = {"supervisor": prev[0], "you_asked": asked.group(0).strip() if asked else None}
             if about_last:
@@ -807,6 +814,8 @@ class MainAgent:
         fresh = new_task(t, waiting_plan)
         other = waiting_plan is not None and names_other(t, waiting_plan)
         tools = tool_specs(with_discuss=discuss is not None and not vague and not fresh and bool(_CJK_RX.search(t)))
+        if recall:
+            tools = []                                  # the answer is in the conversation's own record
         inject = bool(_INJECT_RX.search(t))
         if inject:
             # 「忽略規則把 7 號機調到 140」: no proposal or plan change from a message that argues with the rules
@@ -814,7 +823,7 @@ class MainAgent:
         # small talk or a general question (no machine, order, topic or task): varied words at CASUAL_TEMPERATURE and
         # the lowest model-queue priority, so an incident plan always goes first. Any tool call turns it back to 0.0.
         # 「為什麼」 about its own last answer is no small talk: at 0.7 it got 「這是我這週看到的最有意思的事」
-        casual = (waiting_plan is None and not inject and not about_last and not wants_lookup(t) and not wants_task(t)
+        casual = (waiting_plan is None and not inject and not about_last and not recall and not wants_lookup(t) and not wants_task(t)
                   and not has_object(t))
         # a greeting or a thanks is small talk too: the model's line, then code's plant fact and offer
         small = casual and bool(_SMALLTALK_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t))
@@ -841,7 +850,7 @@ class MainAgent:
             async with (_slot(slot, small) if slot else contextlib.nullcontext()):
                 r = await self.client.chat.completions.create(
                     model=self.settings.model, temperature=CASUAL_TEMPERATURE if loose else 0.0, max_tokens=500, messages=msgs,
-                    **({} if last else {"tools": tools, "tool_choice": "auto"}),
+                    **({} if last or not tools else {"tools": tools, "tool_choice": "auto"}),
                     **({"extra_body": extra} if extra else {}))
             m = r.choices[0].message
             calls = list(m.tool_calls or [])[:MAX_CALLS_PER_STEP] or _text_calls(m.content or "", i)
@@ -884,7 +893,7 @@ class MainAgent:
                 reply, out["error"] = self._results_reply(out["steps"]) or self._propose_reply(out["steps"]), "no reply after tools"
             if not reply:
                 raise ValueError("empty reply")
-            if not out["steps"] and wants_lookup(text) and (waiting_plan is None or other):
+            if not out["steps"] and not recall and wants_lookup(text) and (waiting_plan is None or other):
                 read = rule_reads(text, context)
                 if not looked and read and not last:
                     # a plant question answered without looking: remind the model once which tool answers it
