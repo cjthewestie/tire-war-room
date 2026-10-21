@@ -75,6 +75,7 @@ from warroom.contracts import (
     MachineDetail,
     MachineState,
     Order,
+    ReviewRequest,
     RiskLevel,
     SafetyAction,
     ScenarioName,
@@ -495,7 +496,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         return HealthStatus(ok=True, llm_mode=r.llm_mode, model=r.settings.model, strict=getattr(r, "strict", False),
                             llm_reachable=await r.llm_reachable(), qdrant_ok=r.kb_ok(),
                             sim_running=r.running and not r.paused, factory_time=r.now(), uptime_s=r.uptime_s(),
-                            agent_runtime=os.environ.get("WARROOM_AGENT_RUNTIME") or None)
+                            agent_runtime=os.environ.get("WARROOM_AGENT_RUNTIME") or None,
+                            repair_fast_s=float(r.settings.repair_fast_s))
 
     @app.get("/api/health/components")
     async def health_components() -> dict[str, Any]:
@@ -573,6 +575,25 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if ev is None:
             raise _404(event_id)
         return r.focus_panel(ev)
+
+    @app.post("/api/events/{event_id}/review", response_model=Event)
+    async def event_review(event_id: str, body: ReviewRequest | None = Body(default=None),
+                           session: Session = Depends(supervisor)) -> Event:
+        """主管覆核: the supervisor confirms an event that closed after its repair (review pending → done). Same
+        session rule as approvals; 409 when the event has no pending review. Clients get it as any event change."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕覆核")
+        sm = r.state_machine
+        if not callable(getattr(sm, "review", None)):
+            raise HTTPException(status_code=503, detail="agent unavailable (degraded mode)")
+        note = (body.note or "").strip() if body is not None else ""
+        try:
+            return sm.review(event_id, session.actor, note or None)
+        except KeyError:
+            raise _404(event_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
 
     # ------------------------------------------------------------------ approvals
     @app.get("/api/approvals", response_model=list[ApprovalRequest])

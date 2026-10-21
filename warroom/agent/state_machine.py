@@ -95,6 +95,7 @@ from warroom.contracts import (
     CommanderRequest,
     DecisionKind,
     Event,
+    EventReview,
     EventState,
     Expectation,
     FactorySim,
@@ -261,6 +262,9 @@ class _Run:
     supersede: dict[str, Any] | None = None                  # {"old": card, "text", "by"} set by a discussion
     discuss_future: Any = None                               # asyncio.Future: the next card (or None) for discuss()
     card_snaps: dict[str, dict[str, Any]] = field(default_factory=dict)  # card id -> what it proposed (diff v1 -> v2)
+    # fast repair (Settings.repair_fast_s): the runtime reported the crew's fix (on_repaired); VERIFY wakes on it
+    repaired: asyncio.Event = field(default_factory=asyncio.Event)
+    repair_reading: float | None = None                      # the reading VERIFY confirmed right after the fix
 
 
 class StateMachine:
@@ -335,6 +339,40 @@ class StateMachine:
         if ev is not None:
             ev.safety_actions.append(action)
             self._note(ev, "安全核心", f"[規則] {action.message}（直接處置，不等 AI）", "safety", ts=action.ts)
+
+    def on_repaired(self, event_id: str, machine_id: str, at: datetime) -> None:
+        """Fast repair (runtime, Settings.repair_fast_s): every repair task of this event on `machine_id` is done and
+        its fault was cleared (readings back to normal). VERIFY tests the readings at once instead of waiting for the
+        expectation's within_min; an event that had already closed asks for the supervisor's review now."""
+        ev = self._events.get(event_id)
+        if ev is None or ev.repaired_at is not None:
+            return
+        ev.repaired_at = at
+        self._note(ev, "系統", f"[人工] 維修完成：{machine_label(machine_id)}故障排除", "human", ts=at)
+        run = self._runs.get(event_id)
+        if run is not None:
+            run.repaired.set()
+        elif ev.state is EventState.CLOSED:
+            self._request_review(ev)
+
+    def review(self, event_id: str, by: str, note: str | None = None) -> Event:
+        """主管覆核 (POST /api/events/{id}/review) of an event closed after a repair. KeyError: no such event;
+        ValueError: it has no pending review."""
+        ev = self._events[event_id]
+        if ev.review is None or ev.review.status != "pending":
+            raise ValueError(f"{event_id} has no pending review")
+        ev.review = EventReview(status="done", requested_at=ev.review.requested_at, done_at=self._now(), by=by)
+        self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "主管覆核", "note": note}, event_id=ev.id)
+        self._note(ev, "主管", "[人工] 主管覆核完成" + (f"：{note}" if note else ""), "human")
+        return ev
+
+    def _request_review(self, ev: Event) -> None:
+        """請主管覆核: the event closed after its repair; it waits for the supervisor's confirmation."""
+        if ev.review is not None:
+            return
+        ev.review = EventReview(status="pending", requested_at=self._now())
+        self.audit.append(AuditKind.SYSTEM, "state_machine", {"msg": "請主管覆核"}, event_id=ev.id)
+        self._note(ev, "系統", "請主管覆核：維修完成，事件已結案", "decision")
 
     async def handle(self, anomaly: Anomaly) -> Event:
         existing = self.open_event_for(anomaly.machine_id)
@@ -3045,13 +3083,18 @@ class StateMachine:
     # ------------------------------------------------------------------ VERIFY (code, no LLM)
     VERIFY_SMOOTH_S = 30.0     # verify compares a 30-second mean, so one noisy sample cannot flip the verdict
 
-    def _read_value(self, machine_id: str, channel: Channel) -> float | None:
+    def _read_value(self, machine_id: str, channel: Channel, since: datetime | None = None) -> float | None:
+        """30-second mean of the machine's readings; `since` (fast repair): only readings from the fix on (the sim
+        refreshes the reading of that second), None while there is none yet."""
         if self.sim is not None and hasattr(self.sim, "history"):
             try:
                 hist = self.sim.history(machine_id, self.VERIFY_SMOOTH_S / 60.0)
-                vals = [getattr(r, channel.value) for r in hist if getattr(r, channel.value, None) is not None]
+                vals = [getattr(r, channel.value) for r in hist if getattr(r, channel.value, None) is not None
+                        and (since is None or r.ts >= since)]
                 if vals:
                     return round(sum(vals) / len(vals), 2)
+                if since is not None:
+                    return None
             except Exception:  # noqa: BLE001 - fall back to the latest reading
                 pass
         st = self._machine_state(machine_id)
@@ -3127,15 +3170,21 @@ class StateMachine:
         # not depend on when the supervisor happened to approve (page 11: 02:31:00 = 02:14:00 + 17 min).
         wait = self._grid_wait()
         if wait > 0:
-            await self._sleep(wait)
+            await self._verify_wait(run, wait)
         while True:
             now = self._now()
-            v = self._read_value(exp.machine_id, exp.channel) if use_sim else \
+            repaired = ev.repaired_at is not None
+            v = self._read_value(exp.machine_id, exp.channel, since=ev.repaired_at) if use_sim else \
                 await self._read_value_via_tool(run, exp.machine_id, exp.channel)
             if v is not None:
                 last = v
                 if self._satisfied(exp, v):
                     violated_since = None
+                    if repaired:
+                        # fast repair: the crew's fix is in and the readings meet the expectation: confirmed now,
+                        # not at the within_min deadline
+                        run.repair_reading = v
+                        return self._verify_result(run, h, exp, True, v)
                 else:
                     violated_since = violated_since or now
                     if (now - violated_since).total_seconds() >= self.verify_confirm_s:
@@ -3143,7 +3192,22 @@ class StateMachine:
             if now >= deadline:
                 ok = violated_since is None and last is not None
                 return self._verify_result(run, h, exp, ok, last)
-            await self._sleep(self._grid_wait() or self.verify_poll_s)
+            await self._verify_wait(run, self._grid_wait() or self.verify_poll_s)
+
+    async def _verify_wait(self, run: _Run, seconds: float) -> None:
+        """VERIFY's wait between reads (sim seconds). A repair reported meanwhile (on_repaired) cuts it short; after
+        it, reads come every sim second until one taken after the fix is in."""
+        if run.ev.repaired_at is not None:
+            await self._sleep(min(seconds, 1.0))
+            return
+        sleeper = asyncio.ensure_future(self._sleep(seconds))
+        woken = asyncio.ensure_future(run.repaired.wait())
+        try:
+            await asyncio.wait({sleeper, woken}, return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            for t in (sleeper, woken):
+                if not t.done():
+                    t.cancel()
 
     def _stopped_by_safety(self, ev: Event) -> bool:
         """The safety core stopped this machine or held its batch (a stopped mill cools by itself)."""
@@ -3204,12 +3268,27 @@ class StateMachine:
             if not run.executed:
                 outcome = "沒有可執行的動作" + (f"（{run.plan.rationale}）" if run.plan and run.plan.rationale else "")
         ev.outcome = f"{head}：{outcome}"
+        if verified and ev.repaired_at is not None and run.repair_reading is not None:
+            outcome = ev.outcome = self._repaired_outcome(ev, run.repair_reading)
         self._to(ev, EventState.CLOSED, ev.outcome)
         ev.closed_at = self._now()
         st = self._machine_state(ev.machine_id)
         if (verified if clear_alarm is None else clear_alarm) and st is not None and st.status is MachineStatus.ALARM:
             self._set_status(ev.machine_id, MachineStatus.RUNNING, None)
         self._note(ev, "系統", f"事件結案：{outcome}" + ("" if verified else f"（{why}）"), "info")
+        if ev.repaired_at is not None:
+            self._request_review(ev)
+
+    def _repaired_outcome(self, ev: Event, v: float) -> str:
+        """「已修復：A 線大開煉機 膠溫回到 100°C（維修完成 14:32）」"""
+        exp = ev.hypotheses[-1].expectation if ev.hypotheses else None
+        ch = exp.channel if exp is not None else Channel.TEMP
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        label = "膠溫" if ch is Channel.TEMP and mdef is not None and mdef.handles_compound else \
+            CHANNEL_LABELS.get(ch, "讀值")
+        unit = "°C" if ch is Channel.TEMP else ""
+        at = ev.repaired_at.astimezone(TZ) if ev.repaired_at is not None else self._now()
+        return f"已修復：{machine_label(ev.machine_id)} {label}回到 {fmt_num(v)}{unit}（維修完成 {at:%H:%M}）"
 
     def _safe_stop(self, run: _Run, reason: str) -> None:
         ev = run.ev

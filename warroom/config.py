@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     # Plays the dataset's sensor curves in the NORMAL scenario; see warroom/sim/team_replay.py.
     replay: str = Field("", validation_alias=AliasChoices("replay", "WARROOM_REPLAY"))
     approval_timeout_s: float = 600.0
+    # REPAIR_FAST_S: demo fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒). A repair task (檢修 / 停用檢修 / 放慢投料 /
+    # 暫停投料) is assigned at once and done this many WALL seconds after it was created, at any sim speed; the
+    # machine's readings then go straight back to normal. 0 = the real task durations (work.WORK_MIN).
+    repair_fast_s: float = 3.0
 
     @property
     def api_key_effective(self) -> str:
