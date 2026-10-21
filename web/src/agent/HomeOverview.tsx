@@ -3,10 +3,10 @@
 // One home per piece of info: summaries and links only — machine detail stays on 產線監控 (the ticker already counts
 // 正常／異常), each event's full process on the Agent page (#console?event=<id>). The answer first (veteran 10-22 for HY):
 // 「全廠正常，沒有要你處理的事」 and the next thing that happens, then the result strip of the latest decision (until
-// something new arrives), 生產進度 in one line, 接下來, 今天處理過的事 (history.ts, kept across scenario switches) and, live
+// something new arrives), 接下來, 今天處理過的事 (history.ts, kept across scenario switches) and, live
 // only, 人力・出貨・品質.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { OrderProgress, Shift } from '../contracts'
+import type { Shift } from '../contracts'
 import { factoryMidnight, fmtHM, fmtNum, ms } from '../format'
 import { useHistory, type HistRow } from '../history'
 import { useWarRoom } from '../useWarRoom'
@@ -14,8 +14,6 @@ import { upcoming, when } from './overviewModel'
 import { ResultStrip } from './ResultStrip'
 
 const H = 3_600_000
-/** 「6.5 小時」; past two days in days (「11 天」), which an operator reads faster than 265 小時. */
-const left = (h: number) => (h < 48 ? `${fmtNum(h)} 小時` : `${Math.round(h / 24)} 天`)
 
 export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }) {
   const { state, transport } = useWarRoom()
@@ -46,13 +44,6 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
         </header>
         {stripEv && <ResultStrip ev={stripEv} subject={last?.subject} onFull={onFull} />}
 
-        {/* not today's output: the whole order book per size (p.6), so one line under its real name */}
-        {snap?.orders.length ? (
-          <Sec title="生產進度" testId="ov-progress">
-            <p className="ov-line">{progressLine(snap.orders)}</p>
-          </Sec>
-        ) : null}
-
         <Sec title="接下來" testId="ov-next">
           {next.length > 1 ? (
             <ul className="ov-list">{next.slice(1).map((u) => <li key={u.key}><span className="ov-time">{u.when}</span><span>{u.text}</span></li>)}</ul>
@@ -82,17 +73,6 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
       </div>
     </section>
   )
-}
-
-/** 「小／中／大胎各 100 條：已完成 23／9／8 條・剩餘約 11／53／90 天」 */
-function progressLine(orders: OrderProgress[]): string {
-  const labels = orders.map((o) => o.label.replace(/胎$/, '')).join('／')
-  const same = orders.every((o) => o.total === orders[0].total)
-  const totals = same ? `各 ${orders[0].total} 條` : orders.map((o) => `${o.total}`).join('／') + ' 條'
-  const days = orders.every((o) => o.done < o.total && o.remaining_h >= 48)
-  const rest = days ? `剩餘約 ${orders.map((o) => Math.round(o.remaining_h / 24)).join('／')} 天`
-    : `剩餘約 ${orders.map((o) => (o.done >= o.total ? '完成' : left(o.remaining_h))).join('／')}`
-  return `${labels}胎${totals}：已完成 ${orders.map((o) => o.done).join('／')} 條・${rest}`
 }
 
 function Sec({ title, testId, children }: { title: string; testId: string; children: ReactNode }) {
