@@ -53,11 +53,12 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
       </span>
       <span className="hl-s">{i.sub}</span>
       {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
-      {rp === null && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
+      {i.checked && <span className="hl-hint" data-testid="item-prechecked">{i.checked}</span>}
+      {rp === null && !i.checked && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />Agent Nemo 規劃中…好了會自動切到核准卡</span>}
       {rp?.state === 'ready' && <span className="hl-hint">Agent Nemo 的計劃已送出，見 ③ 的待核准卡</span>}
       {rp?.state === 'failed' && <span className="hl-hint err">Agent Nemo 沒有開始規劃：{rp.error}</span>}
-      {rp?.state === 'closed' && <span className="hl-hint" data-testid="item-replan-closed">Agent Nemo 規劃完，沒有需要核准的變更：{rp.outcome ?? '已結案'}</span>}
+      {rp?.state === 'closed' && !i.checked && <span className="hl-hint" data-testid="item-replan-closed">Agent Nemo 規劃完，沒有需要核准的變更：{rp.outcome ?? '已結案'}</span>}
     </button>
   )
 }

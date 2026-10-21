@@ -821,6 +821,18 @@ class Factory:
         if note is not None:
             m.note = note
 
+    def needs_takeout(self, machine_id: str) -> bool:
+        """A steam leak on the machine, running or scripted and still to come (page 11's 持續洩壓): an inspection (檢修)
+        does not stop it, only taking the press out and fixing the line (停用檢修) does. Fast repair keys on this."""
+        leak = FaultKind.STEAM_LEAK
+        return any(f.spec.machine_id == machine_id and f.spec.kind is leak for f in self._faults) or \
+            any(st.fault is not None and st.fault.machine_id == machine_id and st.fault.kind is leak
+                for _, st in self._pending)
+
+    def status_of(self, machine_id: str) -> MachineStatus:
+        """The machine's current status (KeyError for an unknown id)."""
+        return self._m[machine_id].status
+
     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
         self._m[machine_id].active_event_id = event_id
 

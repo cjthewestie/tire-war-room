@@ -1,12 +1,13 @@
 """Issue #104 一早訂單湧入 (morning_rush), the finals demo, cut to ~3 real minutes at 30×: 07:00–07:07 eight orders
-arrive (SO-012 can never make its due date, SO-017 is the rush order), 07:24 page 11 on press 7, fixed by the approved
-repair; 10:00 the truck leaves. MORNING_RUSH_LEAK=1 adds page 11's leak (H1 rejected -> H2), MORNING_RUSH_SAFETY=1
-the 08:30 Safety Core stop on B 線開煉機.
+arrive (SO-012 can never make its due date, SO-017 is the rush order), 07:15 page 11 on press 7 (H1 rejected -> H2,
+fixed by H2's 停用檢修 also under fast repair); 10:00 the truck leaves. MORNING_RUSH_LEAK=0 drops the leak,
+MORNING_RUSH_SAFETY=1 adds the 08:30 Safety Core stop on B 線開煉機 (no false 溫度下降 card while it is stopped).
 
 CJ, 2026-10-22: 「因為我demo 是以一天的開始就是訂單湧進來 然後事件 然後 我還沒想到完整展示流程」.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 
 import pytest
@@ -55,14 +56,14 @@ def test_scenario_loads_with_its_beats(monkeypatch):
     assert len(orders) == 7 and len(rush) == 1 and rush[0].plant.order.id == MR_RUSH_ORDER
     assert 6 <= len(orders) + len(rush) <= 10
     assert all(_at(7, 0) <= START + timedelta(seconds=st.at_offset_s) <= _at(7, 7) for st in orders + rush)
-    assert _faults(sc) == {"CURE-07": [_at(7, 24)]}             # the 3-minute cut: steam drop only, no Safety Core step
+    assert _faults(sc) == {"CURE-07": [_at(7, 15), _at(7, 24, 40)]}     # the 3-minute cut: no Safety Core step
 
 
 def test_leak_and_safety_steps_are_toggleable(monkeypatch):
-    monkeypatch.setenv("MORNING_RUSH_LEAK", "1")
+    monkeypatch.setenv("MORNING_RUSH_LEAK", "0")
     monkeypatch.setenv("MORNING_RUSH_SAFETY", "1")
     f = _faults(get_scenario(ScenarioName.MORNING_RUSH))
-    assert f["CURE-07"] == [_at(7, 24), _at(7, 33, 40)] and f["B-OPEN"] == [_at(8, 30)]
+    assert f["CURE-07"] == [_at(7, 15)] and f["B-OPEN"] == [_at(8, 30)]
 
 
 def test_orders_arrive_at_their_times_and_only_the_rush_order_is_a_plant_event():
@@ -116,18 +117,18 @@ async def _run_day(tmp_path, until: datetime, fast_s: float):
             if preplan_at is None and MR_AT_RISK_ORDER in rt._preplanned:
                 preplan_at = rt.now()
         await rt.wait_events(5)
-        return rt.events(), rt.world_snapshot(), list(rt.safety_log), risk_at, preplan_at, rt.PREPLAN_EVERY_S
+        return rt.events(), rt.world_snapshot(), list(rt.safety_log), risk_at, preplan_at, rt.PREPLAN_EVERY_S, rt
     finally:
         await rt.stop()
 
 
 async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
-    """The 3-minute cut: the rush re-plan makes SO-012 a 交期風險 item and the pre-plan starts on it without anyone
-    asking; page 11 fires at 07:24, its approved plan (repair included) closes it with H1 confirmed; the 10:00 truck
-    leaves."""
+    """The 3-minute cut under fast repair: the rush re-plan makes SO-012 a 交期風險 item and the pre-plan starts on it
+    without anyone asking; page 11 fires at 07:15; H1's approved 檢修 finishes fast but the press keeps leaking, so
+    VERIFY still reads 119.5 °C and H1 is rejected; H2's 停用檢修 then fixes it fast; the 10:00 truck leaves."""
     monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
     monkeypatch.delenv("MORNING_RUSH_SAFETY", raising=False)
-    events, world, safety, risk_at, preplan_at, every = await _run_day(tmp_path, _at(10, 1), 0.0)
+    events, world, safety, risk_at, preplan_at, every, rt = await _run_day(tmp_path, _at(10, 1), 0.05)
     assert risk_at is not None and _at(7, 7) < risk_at < _at(7, 12), risk_at
     assert preplan_at is not None and preplan_at - risk_at <= timedelta(seconds=every), preplan_at
     cmd = next(e for e in events if (e.command or "").startswith(f"{MR_AT_RISK_ORDER} "))
@@ -135,20 +136,85 @@ async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
     rush = next(e for e in events if e.anomaly.message.startswith(f"急單 {MR_RUSH_ORDER}"))
     assert _at(7, 7) <= rush.opened_at < _at(7, 8)
     p11 = next(e for e in events if e.machine_id == "CURE-07")
-    assert _at(7, 24) < p11.opened_at < _at(7, 26)
-    assert p11.state is EventState.CLOSED and p11.hypotheses[0].status.value == "confirmed"
+    assert _at(7, 15) < p11.opened_at < _at(7, 17)
+    h1 = p11.hypotheses[0]
+    assert h1.status.value == "rejected" and any("119.5" in x for x in h1.evidence), h1.evidence
+    assert len(p11.hypotheses) >= 2 and p11.state is EventState.CLOSED
+    tasks = [t for t in world.tasks.items if t.event_id == p11.id]
+    assert {"檢修", "停用檢修"} <= {t.kind for t in tasks} and all(t.status == "完成" for t in tasks if t.kind.endswith("檢修"))
+    assert not [f for f in rt.sim.faults(active_only=False) if f.machine_id == "CURE-07"]     # H2 fixed the press
     assert not [a for a in safety if a.machine_id == "B-OPEN"]
     left = [e for e in world.events if e.kind == "shipment_departed"]
     assert left and left[0].ts == _at(10, 0)
 
 
 async def test_morning_rush_long_cut(tmp_path, monkeypatch):
-    """MORNING_RUSH_LEAK=1 + MORNING_RUSH_SAFETY=1: H1 is rejected and H2 follows; the Safety Core stops B 線開煉機."""
-    monkeypatch.setenv("MORNING_RUSH_LEAK", "1")
+    """MORNING_RUSH_SAFETY=1: the Safety Core stops B 線開煉機 and, while it is stopped and cooling, no 溫度下降 card."""
+    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
     monkeypatch.setenv("MORNING_RUSH_SAFETY", "1")
-    events, _world, safety, *_ = await _run_day(tmp_path, _at(8, 45), 0.0)   # fast repair runs on the wall clock
-    p11 = next(e for e in events if e.machine_id == "CURE-07")
-    assert p11.hypotheses[0].status.value == "rejected" and len(p11.hypotheses) >= 2
+    events, _world, safety, *_rest = await _run_day(tmp_path, _at(9, 45), 0.0)
     stops = [a for a in safety if a.machine_id == "B-OPEN" and a.action is SafetyActionKind.STOP_MACHINE]
     assert stops and _at(8, 30) < stops[0].ts < _at(8, 45)
-    assert any(e.machine_id == "B-OPEN" and e.opened_at < stops[0].ts for e in events)
+    bopen = [e for e in events if e.machine_id == "B-OPEN"]
+    assert len(bopen) == 1 and bopen[0].opened_at < stops[0].ts, [(e.id, e.anomaly.message) for e in bopen]
+
+
+def test_detector_ignores_a_stopped_machine_cooling():
+    """A stopped (or out-of-service) machine cools to room temperature: no 溫度下降 anomaly. Running, the same drop is one."""
+    from warroom.detect.detector import StreamDetector
+    from warroom.contracts import FaultKind, FaultSpec, MachineStatus
+
+    def run(stop: bool) -> list:
+        f = Factory(seed=7, scenario=ScenarioName.NORMAL)
+        det = StreamDetector()
+        det.attach_plan(sim=f)
+        for _ in range(300):
+            det.ingest(f.step(1.0))
+        if stop:
+            f.set_machine_status("B-OPEN", MachineStatus.STOPPED)
+        else:
+            f.inject_fault(FaultSpec(id="F-T", machine_id="B-OPEN", kind=FaultKind.TEMP_RAMP,
+                                     params={"target": 40.0, "rate_c_per_min": 5.0}))
+        found = []
+        for _ in range(900):
+            found += [a for a in det.ingest(f.step(1.0)) if a.machine_id == "B-OPEN"]
+        assert f.true_temp("B-OPEN") < 60
+        return found
+    assert run(stop=True) == []
+    assert run(stop=False)
+
+
+async def test_page11_fast_repair_keeps_h1_rejected_until_h2(tmp_path):
+    """press7_temp_drop under fast repair: H1's 檢修 finishes in wall seconds but the scripted leak stays, so VERIFY
+    reads 119.5 °C and H1 is rejected; H2's 停用檢修 is what fixes press 7 (fast), and the event closes."""
+    from warroom.api import Runtime
+    s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
+                 scenario="press7_temp_drop", llm_mode="mock", repair_fast_s=0.05)
+    rt = Runtime(s, allow_fallback=False, run_loop=False)
+    await rt.start()
+    approved: list[str] = []
+    try:
+        for _ in range(60 * 60):
+            await rt.tick(1.0, publish=False)
+            for req in rt.approvals.pending():
+                opt = next((o for o in req.options if o.recommended), req.options[0])
+                rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE, option_id=opt.id,
+                                                     reason="test", via="auto", decided_at=rt.now()))
+                approved.append(req.id)
+            ev = next((e for e in rt.events() if e.machine_id == "CURE-07"), None)
+            if ev is not None and ev.state in (EventState.CLOSED, EventState.SAFE_STOP):
+                break
+        for _ in range(300):                 # H2's people finish after the event closed (fast repair: wall seconds)
+            await rt.tick(1.0, publish=False)
+            await asyncio.sleep(0.005)
+        await rt.wait_events(5)
+        ev = next(e for e in rt.events() if e.machine_id == "CURE-07")
+        tasks = [t for t in rt.world_snapshot().tasks.items if t.event_id == ev.id]
+        faults = [f for f in rt.sim.faults(active_only=False) if f.machine_id == "CURE-07"]
+    finally:
+        await rt.stop()
+    h1 = ev.hypotheses[0]
+    assert h1.status.value == "rejected" and any("119.5" in x for x in h1.evidence), h1.evidence
+    assert len(ev.hypotheses) >= 2 and len(approved) >= 2 and ev.state is EventState.CLOSED
+    assert any(t.kind == "停用檢修" and t.status == "完成" for t in tasks), [(t.kind, t.status) for t in tasks]
+    assert not faults
