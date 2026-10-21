@@ -23,8 +23,8 @@ if (PHASE === 'before') {
   await page.goto(`${BASE}/#console`)
   await page.locator(`[data-testid="tasklog-row"][data-event="${eid}"]`).first().waitFor({ timeout: 30000 })
   await page.screenshot({ path: `${OUT}/1-after-task.png`, fullPage: false })
-  await page.goto(`${BASE}/#agent`)
-  await page.getByRole('button', { name: '↺ 重來' }).click({ timeout: 20000 })
+  // ↺ 重來 left the dashboard with #100 (it is in the 3D 展示 menu): the same reset over the API
+  await api('/api/sim/control', { action: 'reset' })
   await sleep(4000)
   await page.goto(`${BASE}/#console`)
   const kept = await page.locator(`[data-testid="tasklog-row"][data-event="${eid}"]`).first().waitFor({ timeout: 30000 }).then(() => true, () => false)
