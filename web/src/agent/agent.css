@@ -561,8 +561,8 @@ a.ov-row:hover { background: var(--panel-2); }
 .tk-fixed .as-item.bad, .tk-fixed .as-item.bad b { color: var(--alarm); }
 .tk-fixed .as-item.warn, .tk-fixed .as-item.warn b { color: var(--warn); }
 .tk-run { display: flex; align-items: center; min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
-.tk-pinned { display: flex; gap: 4px; padding: 0 6px; flex: none; max-width: 55%; overflow-x: auto; scrollbar-width: none; border-right: 1px solid var(--border); }
-.tk-view { flex: 1; min-width: 0; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
+.tk-pinned { display: flex; flex-wrap: wrap; align-content: center; gap: 0 4px; padding: 0 6px; flex: 0 1 auto; max-width: 72%; border-right: 1px solid var(--border); }   /* every alert in view: wrap, never cut */
+.tk-view { flex: 1; min-width: 120px; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
 .tk-track { display: inline-flex; gap: 4px; padding: 6px 0; white-space: nowrap; animation: tk-scroll linear infinite; will-change: transform; }
 .tk-dup { display: inline-flex; gap: 4px; padding-left: 4px; }
 .tk-run:hover .tk-track, .tk-run:focus-within .tk-track { animation-play-state: paused; }
@@ -590,7 +590,7 @@ a.ov-row:hover { background: var(--panel-2); }
   .tk { grid-template-columns: minmax(0, 1fr) auto; }
   .tk-fixed { justify-content: space-between; }
   .tk-run { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
-  .tk-pinned { max-width: none; width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
+  .tk-pinned { max-width: none; width: 100%; padding-bottom: 4px; border-right: 0; border-bottom: 1px solid var(--border); }
   .tk-view { flex: 1 1 100%; }
   .tk-toast { left: 16px; right: 16px; text-align: center; }
 }

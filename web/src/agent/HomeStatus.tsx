@@ -1,6 +1,7 @@
 // 主控台 status line as a 產線監控 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」). Left, fixed: 正常 / 異常 /
 // 待核准 counts (they never move; click → 產線監控). Right: a scrolling ticker of live plant items (tickerItems.ts);
-// alarm / warning items are pinned first in their colour and also scroll. Hover or keyboard focus pauses it; an item
+// alarm / warning items are pinned first in their colour, all of them in view (they wrap, never cut off), and only the
+// other items scroll, so one alarm is not on screen twice (veteran 10-22 for HY). Hover or keyboard focus pauses it; an item
 // opens 產線監控 on its machine or line. prefers-reduced-motion: no scrolling, the items wrap as a static row.
 // A new order completion / shipment shows a short success toast. data-testid=status-strip is kept for the e2e checks.
 import { useEffect, useMemo, useState } from 'react'
@@ -24,6 +25,7 @@ export function HomeStatus({ onMonitor, onFocus }: { onMonitor?: () => void; onF
   const items = useMemo(() => tickerItems(state.snapshot, state.schedule, state.world, shifts, minute * 60_000),
     [state.snapshot, state.schedule, state.world, shifts, minute])
   const pinned = items.filter((i) => i.tone === 'bad' || i.tone === 'warn')
+  const moving = items.filter((i) => !pinned.includes(i))
   const pend = state.pending.length
   const net = h?.network ?? 'online'
   const abn = h?.abnormal_count ?? 0
@@ -43,9 +45,9 @@ export function HomeStatus({ onMonitor, onFocus }: { onMonitor?: () => void; onF
           </div>
         )}
         <div className="tk-view">
-          <div className="tk-track" style={{ animationDuration: `${Math.max(20, items.length * 3.2)}s` }} data-testid="tk-track">
-            {items.map((i) => <Tick key={i.key} i={i} onClick={open} />)}
-            <span className="tk-dup" aria-hidden>{items.map((i) => <Tick key={`d-${i.key}`} i={i} onClick={open} dup />)}</span>
+          <div className="tk-track" style={{ animationDuration: `${Math.max(20, moving.length * 3.2)}s` }} data-testid="tk-track">
+            {moving.map((i) => <Tick key={i.key} i={i} onClick={open} />)}
+            <span className="tk-dup" aria-hidden>{moving.map((i) => <Tick key={`d-${i.key}`} i={i} onClick={open} dup />)}</span>
           </div>
         </div>
       </div>
