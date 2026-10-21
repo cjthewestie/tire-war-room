@@ -233,6 +233,7 @@ SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁
 1. 你不能直接改任何東西，沒有任何機台或 PLC 的寫入工具。
 2. 這座工廠的數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
 3. 回覆最多 5 句，純文字。資料是一長串清單時，先說總數，再挑最重要的 2–3 項，不要全部列出（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+   主管問「前面聊過什麼」「我剛剛說了什麼」：只根據 earlier_summary、earlier_messages、pinned_constraints 回答這個問題本身，不要再回答之前的問題。
    pinned_constraints 是主管在這段對話裡講過的要求（例如「不要動 9 號機」），回答和擬計劃時都要遵守；earlier_summary 是更早對話的前情摘要。
    有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_said 是你上一句的回答，you_asked 是你上一句最後問主管的問題）：接著上一輪往下講（例如「為什麼」就解釋你上一句的理由，「那 8 號呢」就照同樣的問法查 8 號），不要重複你上一句。
 5. 有 waiting_plan（計劃標題、要做的事、A／B 人力方案），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
@@ -782,7 +783,8 @@ class MainAgent:
         asked = prev is not None and bool(_ASKED_RX.search(prev[1])) and (
             not prev[1].endswith(OFFERS) or bool(re.match(r"(?:好|要|嗯|可以|對|是|不用|不要|ok)", t, re.IGNORECASE)))
         follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked)
-        earlier = [q for q, _a in self.memory] if follow else []
+        # the supervisor's earlier words, repeats folded (20 × 「7號機現在溫度多少」 crowded out the real question)
+        earlier = list(dict.fromkeys(q for q, _a in self.memory)) if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
         notes = self.notes
         if notes["pins"]:
