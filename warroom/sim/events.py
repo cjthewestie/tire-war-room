@@ -50,7 +50,7 @@ CATALOG: tuple[EventDef, ...] = (
 CATALOG_BY_KIND: dict[str, EventDef] = {e.kind: e for e in CATALOG}
 WATER_MILLS = ("A-OPEN", "A-BIGOPEN", "B-OPEN")
 GLITCH_MACHINES = ("A-MIX", "A-CAL", "B-FORM", "C-EXTR", *CURE_PRESS_IDS)
-RUSH_CUSTOMERS = ("客戶甲", "客戶乙", "客戶丙", "客戶丁", "客戶戊")
+RUSH_CUSTOMERS = ("順風順水工業有限公司", "日日興物流股份有限公司", "五路財神企業社", "台灣勇腳機械有限公司", "金好運運輸商社")
 
 
 @dataclass(frozen=True)
