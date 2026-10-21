@@ -61,9 +61,9 @@ A: 目標是讀值到動作 < 0.2 秒。Mac 上量到 28 台機台一輪的決�
 關鍵詞: 延遲, latency, 0.2 秒, 反應時間, p99, 安全核心速度, 確認取樣, confirm_samples
 
 ## Q: 安全核心停機後，AI 可以把機台開回來嗎？
-A: 不行。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫，agent 沒有這個工具；跟 Agent Nemo 說「解除停機」它會直接拒絕。
+A: AI 自己不行，只有人能恢復（按鈕或對話裡確認）。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫。CJ 2026-10-22 決定「開放」：主管也可以在對話裡對 Agent Nemo 確認「好」，走的是同一條放行路徑、同樣的前提（現場確認、連續安全讀值、主管身分），稽核記成「經 Agent Nemo」；這個在 nemo-reads 的 PR（分支 cj/nemo-fixes-3，待合併）。
 證據: `warroom/agent/state_machine.py:37`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1187`, `warroom/agent/main_agent.py:110`, `warroom/agent/main_agent.py:111`
-關鍵詞: 解除停機, release, 人工復歸, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
+關鍵詞: 解除停機, release, 人工復歸, 恢復運轉, 確認復機, 對話確認, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
 
 ## Q: 什麼情況會進 SAFE_STOP？會不會把排程退回去？
 A: 失敗的工具重試 MAX_TOOL_RETRIES = 1 次，再走 SOP 路徑；連續失敗達 MAX_CONSECUTIVE_FAILURES = 2 次就進 SAFE_STOP。SAFE_STOP 不會回滾排程，主管已核准的版本保留生效，只丟掉這個事件自己沒核准的提案。主管駁回不算失敗。
@@ -181,7 +181,7 @@ A: 不會。AI 只產出計畫，寫入只在 EXECUTE 狀態、只有三個寫�
 關鍵詞: 亂改產線, 亂改, 失控, 自己下指令, 控制機台, 自主, autonomous, 改產線, 安全性, 誤動作
 
 ## Q: 指揮官（AI）可以做哪些事？做不到什麼？
-A: 指揮官從不自己執行，它只寫計劃；狀態機在 Gate 把關、主管核准後才去執行。整個系統只有三個寫入工具：confirm_schedule 確認排程、set_cure_time 設硫化時間建議值、notify_teams 通知各組，而且 set_cure_time 只是記在工單上的建議值，不是寫 PLC。它做不到：跟供應商叫料、改客戶交期、直接控制機台或 PLC、解除安全核心停機（只有主管能按確認復機）、找人或加人；遇到這些，計劃只能通知相關的人，或建議主管去做。這是刻意的：寫入少，每一個都能被管住；要加新能力（例如自動叫料），就做成一個新的工具模組，配上自己的風險等級和 Gate 規則，我們的說法是「工具模組化：限縮才能完全掌控」（團隊說法，出自簡報）。目前的缺口：原料缺料只會更新庫存，還不會自動開事件（#38 已關閉）。
+A: 指揮官從不自己執行，它只寫計劃；狀態機在 Gate 把關、主管核准後才去執行。整個系統只有三個寫入工具：confirm_schedule 確認排程、set_cure_time 設硫化時間建議值、notify_teams 通知各組，而且 set_cure_time 只是記在工單上的建議值，不是寫 PLC。它做不到：跟供應商叫料、改客戶交期、直接控制機台或 PLC、自己解除安全核心停機（只有人能恢復：主管按確認復機，或在對話裡確認「好」，後者在 cj/nemo-fixes-3 待合併）、找人或加人；遇到這些，計劃只能通知相關的人，或建議主管去做。這是刻意的：寫入少，每一個都能被管住；要加新能力（例如自動叫料），就做成一個新的工具模組，配上自己的風險等級和 Gate 規則，我們的說法是「工具模組化：限縮才能完全掌控」（團隊說法，出自簡報）。目前的缺口：原料缺料只會更新庫存，還不會自動開事件（#38 已關閉）。
 證據: `warroom/agent/state_machine.py:9`, `warroom/agent/state_machine.py:10`, `warroom/contracts.py:197`, `warroom/tools/impl.py:314`, `warroom/tools/specs.py:73`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1694`
 關鍵詞: 指揮官, commander, 能做什麼, 做不到, 叫料, 採購, 改交期, 交期, 寫入, 三種寫入, 只有三個寫入, 權限, 限縮, 掌控, 工具模組, 新能力, 自動叫料, 缺料
 
