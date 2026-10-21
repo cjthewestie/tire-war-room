@@ -21,8 +21,10 @@ import { useTranscript } from './useTranscript'
 /** `extra`: one node placed among the bubbles by time (the 待核准 notice / briefing: bubbles at or before `at` come first).
  *  `guide`: shown instead of the plain `empty` text when there is nothing yet. `follow`: the 主控台 behaviour — stay at
  *  the newest message only while the reader is at the bottom, a 「跳到最新」 button otherwise, and the order hint. */
-export function Bubbles({ items, empty, extra = null, guide = null, follow = false }: {
+export function Bubbles({ items, empty, extra = null, guide = null, follow = false, onLink }: {
   items: Bubble[]; empty: string; extra?: { at: number; node: ReactNode; alignTop?: boolean } | null; guide?: ReactNode; follow?: boolean
+  /** a reply's task link was clicked (the 總覽 conversation: open that task's board) */
+  onLink?: (eventId: string) => void
 }) {
   const scroller = useRef<HTMLDivElement>(null)
   const extraBox = useRef<HTMLDivElement>(null)
@@ -56,9 +58,9 @@ export function Bubbles({ items, empty, extra = null, guide = null, follow = fal
       <div className="con-body sc" ref={scroller} onScroll={onScroll} data-testid="transcript">
         {follow && !nothing && <p className="con-order small">舊訊息在上 ↓ 新訊息在下</p>}
         {nothing && (guide ?? <p className="muted con-empty">{empty}</p>)}
-        {before.map((b) => <BubbleRow key={b.key} b={b} />)}
+        {before.map((b) => <BubbleRow key={b.key} b={b} onLink={onLink} />)}
         {extra && <div ref={extraBox}>{extra.node}</div>}
-        {after.map((b) => <BubbleRow key={b.key} b={b} />)}
+        {after.map((b) => <BubbleRow key={b.key} b={b} onLink={onLink} />)}
       </div>
       {follow && !pinned && <button className="con-jump" onClick={jump} data-testid="con-jump">↓ 跳到最新</button>}
     </>
@@ -93,7 +95,7 @@ function ReplyText({ text }: { text: string }) {
   )
 }
 
-function BubbleRow({ b }: { b: Bubble }) {
+export function BubbleRow({ b, onLink }: { b: Bubble; onLink?: (eventId: string) => void }) {
   const [open, setOpen] = useState(false)
   const steps = b.steps ?? []
   return (
@@ -110,6 +112,19 @@ function BubbleRow({ b }: { b: Bubble }) {
       )}
       {open && <ul className="sc-tool-list">{steps.map((s, i) => <li key={i} className={s.ok ? '' : 'bad'}>{s.label}：{plain(s.summary)}</li>)}</ul>}
       {b.fellBack && <p className="sc-fb" title={b.error ?? ''} data-testid="sc-fallback">模型沒有回應，這句先用規則處理</p>}
+      {!!b.links?.length && (
+        <ul className="sc-links" aria-label="提到的任務" data-testid="sc-links">
+          {b.links.map((l) => (
+            <li key={l.event_id}>
+              <a href={`#console?event=${encodeURIComponent(l.event_id)}`} data-testid="task-link" data-event={l.event_id}
+                onClick={(e) => { if (onLink) { e.preventDefault(); onLink(l.event_id) } }}>
+                <b>{plain(l.label)}</b><small>{l.state}</small>
+              </a>
+              {l.reason && <span className="sc-link-why">{plain(l.reason)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

@@ -397,11 +397,18 @@ def safety_stops(r: Any) -> dict[str, Any]:
     return {"count": len(items), "stops": items}
 
 
+def questionable(r: Any) -> dict[str, Any]:
+    """有疑問的任務 (warroom/api/overview.py): open tasks the code flags, each with its reasons."""
+    from warroom.api.overview import questionable as q
+    items = q(r)
+    return {"count": len(items), "questionable": items}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
           "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
-          "safety_stops": safety_stops}
+          "safety_stops": safety_stops, "questionable": questionable}
 
 
 def _shrink(d: Any, n: int) -> Any:

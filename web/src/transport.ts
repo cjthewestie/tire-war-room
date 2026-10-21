@@ -5,7 +5,7 @@ import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
   type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
-  type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
+  type SimEventsView, type SubagentsView, type MainReply, type ChatMode, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { DEMO_API, type DemoCommand, type DemoState } from './demo/state'
 import { MockEngine, type Network } from './mock/engine'
@@ -78,7 +78,7 @@ export interface Transport {
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
-  message?(text: string, eventId: string | null): Promise<MainReply>
+  message?(text: string, eventId: string | null, mode?: ChatMode): Promise<MainReply>
   /** Live only (issue #36 模擬事件): the generator's settings and log, change them, fire one event now. */
   simEvents?(): Promise<SimEventsView>
   setSimEvents?(b: SimEventsBody): Promise<SimEventsView>
@@ -238,7 +238,10 @@ export class LiveTransport implements Transport {
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
   returnToService(machineId: string) { return postJSON<{ machine_id: string; status: string }>(apiPath(API.returnToService, { machine_id: machineId }), {}) }
   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
-  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
+  // mode 'overview': the Agent page's 總覽 conversation (no selected task, its own memory, links to task boards)
+  message(text: string, eventId: string | null, mode: ChatMode = 'task') {
+    return postJSON<MainReply>('/api/main/message', { text, event_id: mode === 'overview' ? null : eventId, conversation_id: CONVERSATION_ID, mode })
+  }
   safetyDispatch(caseId: string) { return postJSON<SafetyCase>(apiPath(API.safetyDispatch, { case_id: caseId }), {}) }
   safetyRelease(caseId: string, body: SafetyRelease) { return postJSON<SafetyCase>(apiPath(API.safetyRelease, { case_id: caseId }), body) }
   stopReplan(eventId: string) { return postJSON<Event>(apiPath(API.stopReplan, { event_id: eventId }), {}) }

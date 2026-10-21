@@ -106,6 +106,9 @@ class MainMessage(BaseModel):
     text: str = Field(min_length=1, max_length=300)
     event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
+    # 總覽 (the Agent page's 「Agent Nemo ▸ 處理中的事件」, CJ 2026-10-22): no selected task, every task and the
+    # questionable ones in context, links to task boards in the reply, its own conversation memory
+    mode: Literal["task", "overview"] = "task"
 
 
 class RollbackBody(BaseModel):
@@ -1040,6 +1043,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if r.network == "lan_down" and not session.local:
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
         text = body.text.strip()
+        overview_mode = body.mode == "overview"
+        if overview_mode:
+            body = body.model_copy(update={"event_id": None})     # the overview is about every task, never one
         sm = r.state_machine
         waiting = None
         if body.event_id:
@@ -1091,7 +1097,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",
                            {**row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
                             "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
+            reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
+
+        reads: list[tuple[str, Any]] = []
 
         class Control:
             """Task control from chat (CJ 2026-10-22: 「A」): only existing supervisor actions, on an event that exists,
@@ -1215,6 +1224,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        if overview_mode:
+            from warroom.api import overview
+            context["overview"] = {**_safe(lambda: overview.snapshot(r), {}),
+                                   "note": ("總覽模式：主管在看全部任務，不是某一件。用 overview.tasks 回答任務狀況；問哪些有問題時只列 "
+                                            "overview.questionable 的任務，每件一句原因，沒有就說沒有，不要加工廠概況；過去的資料用 query_plant（handled_today、orders_history、"
+                                            "order_lookup）。提到任務時說機台或訂單，不要寫事件編號，也不要說 topic 或欄位名稱；連結由系統附上。")}
         if body.event_id:
             # the task picked on the Agent page (or the 主控台): the chat talks about it (CJ 2026-10-22: 「A」)
             ev_sel = _safe(lambda: sm.get(body.event_id), None)
@@ -1224,8 +1239,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                                         else ev_sel.anomaly.message))[:60]}
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}",
-                                        control=Control())
+                                        read_plant=read_plant, conversation=f"{'overview|' if overview_mode else ''}{session.actor}|{body.conversation_id or ''}",
+                                        control=Control(), mode=body.mode)
+        if overview_mode:
+            from warroom.api import overview
+            res["links"] = _safe(lambda: overview.links(r, text, res["reply"], reads), [])
+            res["mode"] = "overview"
         key = getattr(r.audit, "_key", None)
         out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
         if out_hit is not None:
@@ -1234,7 +1253,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
-                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
+                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"],
+                                                  **({"mode": "overview", "links": res.get("links", [])} if overview_mode else {})})
         return res
 
     # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)
