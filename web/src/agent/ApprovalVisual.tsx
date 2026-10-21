@@ -152,7 +152,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           )}
         </dd>
         <dt className="no">不同意時</dt>
-        <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
+        <dd>按「討論」跟 Agent Nemo 說，它重排後發新的核准卡；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
       </dl>
     </Block>
   )
@@ -236,13 +236,13 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           <p className="apv-reason">{plain(req.reason)}</p>
         </> : <>
           <div className="apv-tags">
-            <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>
+            <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計畫</span>
             <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
             <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
             {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
             {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
             {expires && <span className="apv-exp">{expires}決定</span>}
-            {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
+            {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 Agent Nemo 怎麼判斷 →</button>}
           </div>
           <h3 className="apv-title">{plain(req.title)}</h3>
           <p className="apv-reason">{plain(req.reason)}</p>
