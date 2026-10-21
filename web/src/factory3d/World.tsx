@@ -18,6 +18,7 @@ import { GoodsRings } from './GoodsRings'
 import { MaterialStock } from './MaterialStock'
 import { MachineRings } from './MachineRings'
 import { machineRing } from './machineRing'
+import { useRingRecoveries } from './recovery'
 import { DockCelebration } from './DockCelebration'
 import { PatrolRobot } from './PatrolRobot'
 import { Whiteboard } from './Whiteboard'
@@ -727,6 +728,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board, ala
   }, [state.snapshot?.events])
   const now = Date.parse(state.clock?.factory_time ?? state.world?.factory_time ?? '') || 0
   const speed = state.clock?.speed ?? 1
+  const recs = useRingRecoveries(state.snapshot?.events, now, speed)   // 回溫中 / 已恢復 after a fast repair
   const R = ROOMS
   return (
     <group visible={active}>
@@ -740,7 +742,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board, ala
       <Roof b={BUILDING} y={2.5} wallTop={1.85} lamps={HALL_LAMPS} />
       <Machines />
       {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
-        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed).label : null} />)}
+        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />)}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
@@ -760,7 +762,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board, ala
       {state.world && <WorldPeople world={state.world} />}
       {state.world?.goods && <GoodsRings goods={state.world.goods} />}
       {active && state.world && <MaterialStock materials={state.world.materials} events={state.snapshot?.events ?? []} />}
-      <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} />
+      <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} recs={recs} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />
       <PatrolRobot incident={incident} />

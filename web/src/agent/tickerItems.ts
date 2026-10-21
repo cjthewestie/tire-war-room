@@ -4,7 +4,7 @@
 // carry their tone so the ticker can pin them first.
 import type { DashboardSnapshot, Line, ScheduleVersion, Shift, WorldEvent, WorldSnapshot } from '../contracts'
 import { LINE_SHORT, MACHINE_META, machineLabel } from '../factory'
-import { factoryMidnight, fmtHM, ms } from '../format'
+import { clock12, factoryMidnight, fmtHM, ms } from '../format'
 import { plain } from '../plain'
 
 export type Tone = 'bad' | 'warn' | 'ok' | 'info' | 'good'
@@ -69,7 +69,7 @@ export function tickerItems(snap: DashboardSnapshot | null, schedule: ScheduleVe
     if (wait.length) {
       const g = wait[0]
       const ln = g.machine_id ? MACHINE_META[g.machine_id]?.line : undefined
-      out.push({ key: 'refill', tone: 'warn', line: ln, machine: g.machine_id ?? undefined, text: `${ln ? `${LINE_SHORT[ln]}${ln.length === 1 ? ' 線' : ''} ` : ''}待補料 ${wait.length} 條${g.note ? `：${plain(g.note)}` : ''}` })
+      out.push({ key: 'refill', tone: 'warn', line: ln, machine: g.machine_id ?? undefined, text: `${ln ? `${LINE_SHORT[ln]}${ln.length === 1 ? ' 線' : ''} ` : ''}待補料 ${wait.length} 條${g.note ? `：${clock12(plain(g.note))}` : ''}` })
     }
     for (const mt of world.materials.filter((x) => x.status !== 'ok')) {
       out.push({ key: `mat-${mt.key}`, tone: mt.status === 'reorder' ? 'warn' : 'bad', text: `原料 ${mt.name} 剩 ${mt.days_left ?? '—'} 天${mt.on_order ? '・已下單' : ''}` })

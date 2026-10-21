@@ -9,10 +9,10 @@ import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
+import { PendingApprovalAlert } from './components/PendingApprovalAlert'
 import { ScheduleTab } from './components/ScheduleTab'
 import { OrdersTab } from './components/OrdersTab'
 import { EarlyWarnings } from './components/EarlyWarnings'
-import { TodayPlan } from './components/TodayPlan'
 import { openFolds } from './media'
 import { useWarRoom, WarRoomProvider } from './useWarRoom'
 import { readConsoleEvent } from './agent/consoleHash'
@@ -29,6 +29,9 @@ const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default:
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
 
+/** `#approve?event=<id>` (the 待核准 bar on /factory, /report, /handover): 主控台 with that card selected. */
+const readApproveEvent = (): string | null => (location.hash.startsWith('#approve') ? readConsoleEvent() : null)
+
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
   return h === '#schedule' ? 'schedule' : h === '#monitor' || h === '#world' ? 'monitor' : h === '#orders' ? 'orders'
@@ -40,8 +43,9 @@ function Dashboard() {
   const [consoleEvent, setConsoleEvent] = useState<string | null>(readConsoleEvent)
   const [machine, setMachine] = useState<string | null>(() => new URLSearchParams(location.search).get('machine'))
   const { state } = useWarRoom()
+  const [agentEvent, setAgentEvent] = useState<string | null>(readApproveEvent)
   useEffect(() => {
-    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()) }
+    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()); const a = readApproveEvent(); if (a) setAgentEvent(a) }
     window.addEventListener('hashchange', f)
     return () => window.removeEventListener('hashchange', f)
   }, [])
@@ -50,7 +54,6 @@ function Dashboard() {
     setTab(t); window.scrollTo(0, 0)
   }
   const [asks, setAsks] = useState<LocalItem[]>([])
-  const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
   // a ticker item: 產線監控 on that machine (its drawer) or line, scrolled into view and flashed
   const focusPlant = (m?: string, line?: Line) => {
@@ -60,6 +63,15 @@ function Dashboard() {
       const el = document.querySelector(m ? `[data-machine="${m}"]` : line ? `[data-line="${line}"]` : '.machines')
       openFolds(el)   // on a phone ④ is folded into its header
       el?.scrollIntoView({ block: 'center' })
+      el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
+    }, 120)
+  }
+  // the 待核准 bar: 主控台 with the oldest card selected, its row scrolled into view and flashed
+  const goApprove = (eventId: string) => {
+    openAgent(eventId)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-testid="home-item-${CSS.escape(eventId)}"]`)
+      el?.scrollIntoView({ block: 'nearest' })
       el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
     }, 120)
   }
@@ -87,6 +99,7 @@ function Dashboard() {
     <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''} ${demo.running ? 'demo-on' : ''}`}>
       {demo.running && <DemoOverlay d={demo} anchors={beat ? anchorsFor(beat, focusEv) : []} caption={beat?.caption ?? ''} />}
       <Header tab={tab} onTab={go} />
+      <PendingApprovalAlert variant={tab === 'agent' ? 'compact' : 'bar'} onGo={goApprove} stickyBelow=".topbar" />
       <div className="demo-sheet" role="region" aria-label="展示控制">
         <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
         <DemoStrip />
@@ -95,7 +108,7 @@ function Dashboard() {
       {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
-        : tab === 'schedule' ? <><TodayPlan /><ScheduleTab /></> : tab === 'orders' ? <OrdersTab />
+        : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>

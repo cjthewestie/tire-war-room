@@ -37,7 +37,7 @@ try {
   // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
   const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
   check('/ opens the 主控台 and it is the first tab', firstTab.includes('主控台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
-  check('ticker on the console: fixed 正常 / 異常 / 待核准 counts', /正常\s*\d+[\s\S]*異常\s*\d+[\s\S]*待核准\s*\d+/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
+  check('ticker on the console is one full-width row (the count bar is gone, #100)', (await d.locator('[data-testid=status-strip]').count()) === 1 && (await d.locator('[data-testid=tk-fixed]').count()) === 0)
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))
@@ -52,7 +52,7 @@ try {
   check('one 主 agent input (no mode switch) that knows the waiting plan', (await d.locator('[data-testid=mode-discuss]').count()) === 0 && (await d.locator('.console [data-testid=chat-input][data-plan=waiting]').count()) === 1)
   await d.locator('[data-testid=chat-input]').fill('9 號機今晚要保養')
   await d.locator('[data-testid=chat-input]').press('Enter')
-  const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').innerText().catch(() => '')) === 'v2')
+  const gotV2 = await until(d, async () => (await side.locator('[data-testid=approval-visual]').getAttribute('data-version').catch(() => '')) === '2')
   check('card v2 replaced v1 in the side column', gotV2)
   const tr = d.locator('[data-testid=transcript]')
   await d.waitForTimeout(1500)
@@ -61,7 +61,7 @@ try {
   await until(d, async () => !(await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')).includes('思考中'))
   const reply = await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')
   check('agent reply names v2 and the code check', /v2|第 2 版/.test(reply) && reply.includes('程式已檢查'), reply.replace(/\n/g, ' ').slice(0, 160))
-  check('agent shows the latest plan summary (建議處置) for v2', (await d.locator('[data-testid=con-brief]', { hasText: '建議處置' }).count()) >= 1)
+  check('agent shows the short 待核准 notice for v2 (not the big summary)', (await d.locator('[data-testid=con-brief][data-kind=pending-notice][data-version="2"]').count()) >= 1)
   // issue #37: chips, the replan row and the card version are steps, shown on the Agent page (看完整過程)
   await d.locator('[data-testid=see-full]').click()
   await d.waitForSelector('[data-testid=trace-body] [data-kind=state]', { timeout: 10000 }).catch(() => {})
@@ -76,8 +76,12 @@ try {
   }
   await d.locator('[data-testid=tab-agent]').click()
   await d.waitForSelector('[data-testid=transcript]')
-  const changes = await side.locator('[data-testid=card-changes]').innerText().catch(() => '')
-  check('card v2 shows 「與 v1 相比」 and #A-311 off press 9', changes.includes('與 v1 相比') && /#A-311：9 號 →/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
+  // 主控台 no longer shows version tags or the 與 v1 相比 block (CJ, 2026-10-22); the change list stays in the card data
+  const sideText = await side.innerText().catch(() => '')
+  check('主控台 shows no v1/v2 tag and no 第 N 輪核准', !/\bv\d\b/.test(sideText) && !/第[一二三四]輪核准/.test(sideText), sideText.slice(0, 60))
+  const pendNow = (await api(d, '/api/approvals?status=pending')).json ?? []
+  const chg = (pendNow.find((x) => x.version === 2)?.changes ?? []).join(' | ')
+  check('card v2 data still lists the changes (#A-311 off press 9)', /#A-311：9 號 →/.test(chg), chg.slice(0, 120))
   const pend = (await api(d, '/api/approvals?status=pending')).json ?? []
   const v2 = pend.find((x) => x.version === 2)
   check('API: one pending card, v2, supersedes v1', pend.length === 1 && v2?.supersedes === v1?.id, pend.map((x) => `${x.id}/v${x.version}`).join(','))

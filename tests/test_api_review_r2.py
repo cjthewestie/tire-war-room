@@ -56,7 +56,10 @@ async def _run_until(rt: Runtime, machine_id: str, done, max_s: int, approve: bo
 
 
 # ---------------------------------------------------------------- 1. restart keeps press 7 out
-async def test_restart_keeps_press_out_of_service_and_rollback_blocked(tmp_path):
+async def test_restart_keeps_press_out_of_service_and_rollback_blocked(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt = _real(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value)
     await rt.start()
     try:

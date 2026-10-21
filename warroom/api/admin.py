@@ -24,7 +24,10 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from warroom import __version__
 from warroom import factory as F
+from warroom.api import admin_audit as AA
+from warroom.api import admin_params as AP
 from warroom.contracts import AuditKind
 
 ALLOWED_EXT = (".md", ".txt", ".pdf")
@@ -144,20 +147,79 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
 
     # ------------------------------------------------------------------ status, runs
     @app.get(P + "/status")
-    async def status(_: Any = ADMIN) -> dict[str, Any]:
+    async def status(request: Request, _: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         kb = r.c.kb
         llm_host = urlparse(r.settings.base_url).netloc if r.llm_mode.value != "mock" else None
         chain = await asyncio.to_thread(_safe, r.audit.verify_chain, False)
-        tail = r.audit.tail(0, 1)
-        return {"llm_mode": r.llm_mode.value, "model": r.settings.model, "llm_host": llm_host,
-                "llm_reachable": await r.llm_reachable(), "kb_ok": r.kb_ok(),
-                "kb_mode": getattr(kb, "mode", "keyword"), "team_mode": getattr(kb, "team_mode", "off"),
-                "audit_chain_ok": chain, "audit_entries": len(r.audit.tail(0, 100_000)),
-                "audit_last_seq": tail[-1].seq if tail else 0,
-                "degraded": dict(r.degraded), "scenario": r.scenario.value, "factory_time": r.now().isoformat(),
-                "uptime_s": round(r.uptime_s()), "network": r.network, "memory_notes": len(notes().all()),
-                "reindex": job.as_dict()}
+        recent = r.audit.tail(0, 500)
+        last_seq = _audit_len(r.audit)
+        chunks = list(getattr(kb, "_chunks", []) or [])
+        team = list(getattr(kb, "_team_chunks", []) or [])
+        today = r.now().date()
+        main = getattr(request.app.state, "holder", {}).get("main")
+        st = {"llm_mode": r.llm_mode.value, "model": r.settings.model, "llm_host": llm_host,
+              "llm_reachable": await r.llm_reachable(), "kb_ok": r.kb_ok(),
+              "kb_mode": getattr(kb, "mode", "keyword"), "team_mode": getattr(kb, "team_mode", "off"),
+              "kb_docs": len({c.sop_id for c in chunks}), "kb_chunks": len(chunks),
+              "team_docs": len({c.sop_id for c in team}), "team_chunks": len(team),
+              "audit_chain_ok": chain, "audit_entries": last_seq,
+              "audit_last_seq": last_seq, "llm_latency": AP.llm_latency(recent),
+              "degraded": dict(r.degraded), "scenario": r.scenario.value, "factory_time": r.now().isoformat(),
+              "speed": getattr(r, "speed", None), "paused": bool(getattr(r, "paused", False)),
+              "day_loop": _safe(r.day_loop_info, None),
+              "safety_rules": [x.id for x in getattr(r.c.safety, "rules", None) or []],
+              "safety_actions_today": sum(1 for a in getattr(r, "safety_log", []) if a.ts.date() == today),
+              "conversations": len(getattr(main, "_memories", {}) or {}) + _safe(lambda: len(r.ask_memory), 0),
+              "uptime_s": round(r.uptime_s()), "network": r.network, "memory_notes": len(notes().all()),
+              "version": __version__, "commit": AP.commit_sha(), "reindex": job.as_dict()}
+        st["health"] = AP.health(st)
+        return st
+
+    # ------------------------------------------------------------------ 稽核紀錄 (read-only) and 系統參數
+    def audit_filter(kind: str, actor: str, event: str, q: str, t_from: str, t_to: str) -> AA.Filter:
+        if kind and kind not in {k.value for k in AuditKind}:
+            raise HTTPException(status_code=400, detail=f"沒有這種紀錄：{kind}")
+        return AA.Filter(kind, actor, event, q, t_from, t_to)
+
+    @app.get(P + "/audit")
+    async def audit_list(kind: str = Query("", max_length=40), actor: str = Query("", max_length=80),
+                         event: str = Query("", max_length=120), q: str = Query("", max_length=200),
+                         t_from: str = Query("", alias="from", max_length=40), t_to: str = Query("", alias="to", max_length=40),
+                         cursor: int | None = Query(None, ge=1), limit: int = Query(AA.PAGE, ge=1, le=500),
+                         _: Any = ADMIN) -> dict[str, Any]:
+        flt = audit_filter(kind, actor, event, q, t_from, t_to)
+        newest, _ = AA.source(rt().audit)
+        out = await asyncio.to_thread(lambda: AA.page(newest(), flt, cursor, limit))
+        out["kinds"] = AA.kinds()
+        out["last_seq"] = _audit_len(rt().audit)
+        return out
+
+    @app.get(P + "/audit/verify")
+    async def audit_verify(_: Any = ADMIN) -> dict[str, Any]:
+        a = rt().audit
+        if hasattr(a, "verify_report"):
+            return await asyncio.to_thread(a.verify_report)
+        ok = await asyncio.to_thread(_safe, a.verify_chain, False)
+        return {"ok": ok, "checked": None, "last_seq": None, "broken_at": None, "problem": None if ok else "verify failed"}
+
+    @app.get(P + "/audit/export")
+    async def audit_export(kind: str = Query("", max_length=40), actor: str = Query("", max_length=80),
+                           event: str = Query("", max_length=120), q: str = Query("", max_length=200),
+                           t_from: str = Query("", alias="from", max_length=40), t_to: str = Query("", alias="to", max_length=40),
+                           session: Any = ADMIN) -> Response:
+        flt = audit_filter(kind, actor, event, q, t_from, t_to)
+        _, oldest = AA.source(rt().audit)
+        lines, cut = await asyncio.to_thread(lambda: AA.export_lines(oldest(), flt))
+        audit(session, {"action": "audit_export", "rows": len(lines), "cut": cut, "filter": flt.as_dict()})
+        stamp = rt().now().strftime("%Y%m%d-%H%M")
+        return Response("\n".join(lines) + ("\n" if lines else ""), media_type="application/x-ndjson; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="audit-{stamp}.jsonl"',
+                                 "X-Rows": str(len(lines)), "X-Cut": "1" if cut else "0"})
+
+    @app.get(P + "/params")
+    async def params(request: Request, _: Any = ADMIN) -> dict[str, Any]:
+        return await asyncio.to_thread(AP.params, rt(), request.app.state)
 
     @app.get(P + "/runs")
     async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
@@ -344,6 +406,13 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         audit(session, {"action": "memory_note_add", "note_id": note.id, "machine_id": note.machine_id, "text": note.text})
         return {"ok": True, "note": note.__dict__}
 
+
+
+def _audit_len(a: Any) -> int:
+    """The last seq: len() of the file log, the newest entry of a log without it (the in-memory fallback)."""
+    if hasattr(a, "__len__"):
+        return len(a)
+    return max((e.seq for e in a.tail(0, 10**9)), default=0)
 
 
 def _safe(fn, default):

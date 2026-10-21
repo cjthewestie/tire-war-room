@@ -360,8 +360,11 @@ async def test_plant_plan_guard_and_code_bound_args(tmp_path, monkeypatch):
     assert "horizon_days" not in bound["solve_schedule"] and bound["confirm_schedule"]["schedule_version"] >= 1
 
 
-async def test_ev2_replay_follows_page11_path(tmp_path):
+async def test_ev2_replay_follows_page11_path(tmp_path, monkeypatch):
     """Team dataset EV-2 replay: H1 (cure at the 120 °C floor) -> approval -> verify misses -> H2, machine out."""
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     from warroom.api import Runtime
     s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
                  scenario="normal", llm_mode="mock", replay="team_ev2")

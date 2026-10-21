@@ -5,6 +5,7 @@ import { getJSON } from '../api'
 import { API, type ApprovalRequest, type Event } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
 import { buildHandover } from './build'
+import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
 const HOURS = [8, 12, 24]
 const POLL_MS = 5000
@@ -43,6 +44,7 @@ export function Handover() {
   return (
     <div className="ho">
       <header className="ho-top">
+        <PendingApprovalAlert variant="inline" newTab />
         <div className="ho-row">
           <h1>交班報告</h1>
           <span className={`ho-conn ${connected ? 'ok' : ''}`}>{connected ? '即時連線' : '連線中…'}</span>

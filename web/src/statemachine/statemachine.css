@@ -35,7 +35,6 @@
 .sm-card-m { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: 12px; color: var(--ink-dim); }
 .sm-wait { color: var(--info); font-weight: 600; }
 .sm-card.w-主管核准 .sm-wait { color: var(--warn); }
-.sm-id { font-size: 10.5px; word-break: break-all; }
 .sm-more { align-self: flex-start; }
 @keyframes sm-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 .sm-asks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -61,6 +60,41 @@
   .sm-board { flex-direction: column; align-items: stretch; overflow: visible; }
   .sm-col { flex: none; max-width: none; min-height: 0; }
   .sm-col.empty { display: none; }
+}
+/* plain view (CJ, 2026-10-22): 4 stages, one row per open event, the 11-state board behind 看細節 */
+.sm-stages { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.sm-stage { position: relative; background: var(--panel); border: 1px solid var(--border); border-top: 4px solid var(--panel-3); border-radius: 14px; padding: 14px 18px 16px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sm-stage:not(:last-child)::after { content: '→'; position: absolute; right: -18px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); font-size: 18px; }
+.sm-stage-l { font-size: 16px; font-weight: 700; }
+.sm-stage-v { font-size: 40px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.sm-stage-s { font-size: 13.5px; color: var(--ink-dim); }
+.sm-stage-s small { color: var(--ink-faint); }
+.sm-stage.st-ai { border-top-color: var(--info); }
+.sm-stage.st-you { border-top-color: var(--warn); }
+.sm-stage.st-run { border-top-color: var(--accent); }
+.sm-stage.st-end { border-top-color: var(--ink-faint); }
+.sm-stage.hot { background: var(--warn-soft); border-color: var(--warn); border-top-color: var(--warn); }
+.sm-stage.hot .sm-stage-l, .sm-stage.hot .sm-stage-v { color: var(--warn); }
+.sm-pitch { margin: -4px 0 0; font-size: 13px; color: var(--ink-dim); }
+.sm-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.sm-row { display: grid; grid-template-columns: 9em auto minmax(0, 1fr) auto; gap: 4px 12px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--panel-3); border-left: 4px solid var(--panel-3); border-radius: 10px; background: var(--panel-2); color: var(--ink); text-decoration: none; font-size: 14.5px; }
+.sm-row:hover { border-color: var(--accent); }
+.sm-row.st-ai { border-left-color: var(--info); } .sm-row.st-you { border-left-color: var(--warn); } .sm-row.st-run { border-left-color: var(--accent); }
+.sm-row-who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sm-row-t { white-space: nowrap; }
+.sm-pill { font-size: 12px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; background: var(--panel-3); color: var(--ink-dim); }
+.sm-pill.st-ai { color: var(--info); } .sm-pill.st-you { background: var(--warn-soft); color: var(--warn); } .sm-pill.st-run { background: var(--accent-soft); color: var(--accent); }
+.sm-detail-t { align-self: flex-start; }
+.sm-detail-t small { margin-left: 4px; color: var(--ink-faint); }
+@media (max-width: 899px) {
+  .sm-stages { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .sm-stage { padding: 10px 12px 12px; }
+  .sm-stage:not(:last-child)::after { content: none; }
+  .sm-stage-v { font-size: 30px; }
+  .sm-stage-s { font-size: 12.5px; }
+  .sm-row { grid-template-columns: minmax(0, 1fr) auto; padding: 9px 12px; }
+  .sm-row-s { grid-column: 1 / -1; }
+  .sm-row-t { grid-column: 1 / -1; }
 }
 /* 事件預分類 (issue #54) */
 .pre-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
