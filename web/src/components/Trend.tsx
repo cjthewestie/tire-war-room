@@ -7,7 +7,9 @@ import { hypName } from '../plain'
 import { useMachineDetail } from '../useMachineDetail'
 import { useWidth } from './common'
 
-export function TemperatureTrend({ machineId, hypotheses = [], compact = false }: { machineId: string; hypotheses?: Hypothesis[]; compact?: boolean }) {
+/** `fastS`: /api/health repair_fast_s when the event is repaired by the fast flow (MonitorTab): the expectation is drawn
+ *  without its verification window, which is not the time with a repair seconds after the approval (veteran 10-22). */
+export function TemperatureTrend({ machineId, hypotheses = [], compact = false, fastS = null }: { machineId: string; hypotheses?: Hypothesis[]; compact?: boolean; fastS?: number | null }) {
   const d = useMachineDetail(machineId)
   const [ref, width] = useWidth<HTMLDivElement>()
   const h = (d?.history ?? []).filter((r) => r.quality === 'ok' && r.temp_c != null)
@@ -71,7 +73,7 @@ export function TemperatureTrend({ machineId, hypotheses = [], compact = false }
       <p className="trend-legend">
         {isPress && <span><i className="lg-band" />硫化範圍 120–130°C</span>}
         {stopLine != null && <span><i className="lg-stop" />{stopText}</span>}
-        {exp && hyp && <span className={hyp.status === 'rejected' ? 'is-miss' : ''}><i className="lg-exp" />{hypName(hyp.id)}預期 {exp.within_min} 分內 {exp.op === '>=' ? '≥' : exp.op === '<=' ? '≤' : ''}{exp.value}°C{hyp.status === 'rejected' ? '・沒達到' : ''}</span>}
+        {exp && hyp && <span className={hyp.status === 'rejected' ? 'is-miss' : ''}><i className="lg-exp" />{hypName(hyp.id)}預期 {fastS ? '' : `${exp.within_min} 分內 `}{exp.op === '>=' ? '≥' : exp.op === '<=' ? '≤' : ''}{exp.value}°C{fastS ? `・核准後約 ${Math.round(fastS)} 秒維修完成` : ''}{hyp.status === 'rejected' ? '・沒達到' : ''}</span>}
       </p>
     </div>
   )

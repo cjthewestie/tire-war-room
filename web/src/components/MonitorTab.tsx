@@ -3,6 +3,9 @@ import type { AnomalyKind, ApprovalRequest, BadDataMark, DashboardSnapshot, Even
 import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, ML_RANGE, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
+import { aiStatusParts, expectationOf, recoverWord, repairStage, type RepairStage } from '../aiStatus'
+import { useHealth } from '../health'
+import { fastApplies } from '../phone/fastEta'
 import { isAbnormal } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { Panel, QUALITY_LABEL, STATUS_LABEL, TimelineTable } from './common'
@@ -64,6 +67,28 @@ const KIND_WORD: Partial<Record<AnomalyKind, string>> = {
 }
 const STATUS_WORD: Partial<Record<MachineTile['status'], string>> = { out_of_service: '停用', stopped: '停機', warning: '讀值偏離', alarm: '異常' }
 
+/** Where an event stands in the supervisor's words. After the decision the event sits in verify through the whole fast
+ *  repair and the ramp back (Kyle 10-21 flow), so its state is not what the phone and the 3D say: the crew's stage is
+ *  (aiStatus.ts repairStage, the same seconds as aiStatusParts' eta): 「維修中・約 9 秒後維修完成」, 「維修完成・溫度回升中」,
+ *  「已恢復正常」; a card waiting (a recomputed one too) stays 待核准; else how far Agent Nemo got (AI_STEP). */
+function useStepWord(): { word: (ev: Event) => string; stage: (ev: Event) => RepairStage | null; fastS: number | null } {
+  const { state } = useWarRoom()
+  const fastS = useHealth()?.repair_fast_s ?? null
+  const items = state.world?.tasks.items ?? []
+  const stage = (ev: Event) => (ev.state === 'await_approval' ? null : repairStage(ev, items))
+  const word = (ev: Event) => {
+    const st = stage(ev)
+    if (st === 'repairing') {
+      const p = aiStatusParts(ev, state, null, fastS)
+      return [p.phase.replace(/（\d+\/\d+）$/, ''), fastS ? p.eta : ''].filter(Boolean).join('・')
+    }
+    if (st === 'recovering') return `維修完成・${recoverWord(expectationOf(ev))}`
+    if (st) return '已恢復正常'
+    return AI_STEP[ev.state]
+  }
+  return { word, stage, fastS }
+}
+
 interface BadRow { id: string; name: string; problem: string; what: string; ev: Event | null; ended: Event | null; tile?: MachineTile }
 
 const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -96,10 +121,15 @@ function badRows(s: DashboardSnapshot): BadRow[] {
  *  approvals waiting, as one line and one button to 主控台; else what the AI is doing; else the next time someone is
  *  needed at a press. */
 function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: ApprovalRequest[]; onAgent?: (eventId?: string) => void }) {
+  const { word, stage } = useStepWord()
   const rows = badRows(s)
   const mach = rows.filter((r) => r.id !== 'PLANT')
   const plant = rows.find((r) => r.id === 'PLANT')
   const working = rows.filter((r) => r.ev && r.ev.state !== 'await_approval')
+  // the crew repairing (or the readings coming back) vs Agent Nemo still working it out
+  const fixing = working.filter((r) => stage(r.ev!) != null)
+  const thinking = working.filter((r) => stage(r.ev!) == null)
+  const warm = fixing.length > 0 && !thinking.length && fixing.every((r) => stage(r.ev!) !== 'repairing')
   const main = pending.find((a) => a.event_id === rows[0]?.ev?.id) ?? pending[0] ?? null   // the first row of 異常機台
   const who = (a: ApprovalRequest) => { const m = s.events.find((e) => e.id === a.event_id)?.machine_id; return m ? machineLabel(m) : plain(a.title) }
   const rec = main ? main.options.find((o) => o.recommended) ?? main.options[0] ?? null : null
@@ -117,16 +147,21 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
   const names = (rs: BadRow[]) => rs.map((r) => r.name).join('、')
   const said = [
     main && `Agent Nemo 已擬好處理計畫，${pending.length} 件待核准`,
-    working.length > 0 && `${names(working)}${main ? ' Agent Nemo 還在處理' : ' Agent Nemo 正在處理，目前不用你做什麼'}`,
+    working.length > 0 && [...fixing.map((r) => `${r.name}${word(r.ev!).replace('・', '，')}`),
+      ...(thinking.length ? [`${names(thinking)}${main ? ' Agent Nemo 還在處理' : ' Agent Nemo 正在處理'}`] : [])].join('；')
+      + (main ? '' : '，目前不用你做什麼'),
     check.length > 0 && `${names(check)}沒有在處理中，請到現場確認`,
     out.length > 0 && `${names(out)}已停用，等維修；排程不再排入`,
     watch.length > 0 && `${names(watch)}讀值偏離，事件偵測監看中`,
     calm ? '機台全天自動監看，有異常 1 分鐘內交給 Agent Nemo 處理' : `其他 ${s.header.normal_count} 台正常`,
   ].filter(Boolean).join('。') + '。'
-  const k = main ? `要你處理 ${pending.length} 件` : calm ? '全廠正常' : check.length ? '要你到現場確認' : working.length ? 'Agent Nemo 處理中' : out.length ? '停用中，等維修' : '監看中'
+  const k = main ? `要你處理 ${pending.length} 件` : calm ? '全廠正常' : check.length ? '要你到現場確認'
+    : working.length ? (thinking.length ? 'Agent Nemo 處理中' : !warm ? '維修中'
+      : fixing.every((r) => stage(r.ev!) === 'recovering') ? `維修完成・${recoverWord(expectationOf(fixing[0].ev))}` : '已恢復正常')
+    : out.length ? '停用中，等維修' : '監看中'
   const ended = [...check, ...out].find((r) => r.ended?.outcome)?.ended ?? null
   return (
-    <section className={`panel mon-answer ${calm ? 'is-calm' : ''}`} aria-label="產線現在的結論" data-testid="mon-answer">
+    <section className={`panel mon-answer ${calm ? 'is-calm' : !main && !check.length && warm ? 'is-warm' : ''}`} aria-label="產線現在的結論" data-testid="mon-answer">
       <div>
         <span className="mon-k">{k}</span>
         <h1>{h1}</h1>
@@ -141,8 +176,8 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
         </div>
       ) : working.length > 0 ? (
         <div className="mon-fix">
-          <span className="mon-fix-k">Agent Nemo 正在做</span>
-          <b>{working[0].name}：{AI_STEP[working[0].ev!.state]}</b>
+          <span className="mon-fix-k">{stage(working[0].ev!) ? '現場進度' : 'Agent Nemo 正在做'}</span>
+          <b>{working[0].name}：{word(working[0].ev!)}</b>
           <small>目前沒有要你核准的事</small>
         </div>
       ) : calm ? (
@@ -165,6 +200,7 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
  *  under the list: temperature trend, the AI's judgement, the schedule impact and, folded, what was done. */
 function AbnormalPanel({ s, onMachine }: { s: DashboardSnapshot; onMachine: (id: string) => void }) {
   const { state } = useWarRoom()
+  const { word } = useStepWord()
   const rows = badRows(s)
   const focus = s.focus && (rows.some((r) => r.id === s.focus!.machine_id) || (s.focus.state !== 'closed' && s.focus.state !== 'safe_stop')) ? s.focus : null
   return (
@@ -178,7 +214,7 @@ function AbnormalPanel({ s, onMachine }: { s: DashboardSnapshot; onMachine: (id:
                 ? <button type="button" className="mon-m" onClick={() => onMachine(r.id)} title="看溫度、壓力、水流">{r.name}<small>{r.problem}</small></button>
                 : <b className="mon-m">{r.name}<small>{r.problem}</small></b>}
               <span className="mon-what">{r.what}</span>
-              {st && <span className={`mon-step ${st === 'await_approval' ? 'is-wait' : ''}`}>{AI_STEP[st]}</span>}
+              {st && <span className={`mon-step ${st === 'await_approval' ? 'is-wait' : ''}`}>{word(r.ev!)}</span>}
             </li>
           )
         })}
@@ -190,15 +226,18 @@ function AbnormalPanel({ s, onMachine }: { s: DashboardSnapshot; onMachine: (id:
 
 function FocusDetail({ focus, pending }: { focus: FocusPanel; pending: ApprovalRequest[] }) {
   const { state } = useWarRoom()
+  const { fastS } = useStepWord()
   const closed = focus.state === 'closed' || focus.state === 'safe_stop'
   const ev = state.snapshot?.events.find((e) => e.id === focus.event_id) ?? null
+  // fast repair (/api/health repair_fast_s) for a machine the crew fixes: the expectation without its 30-minute window
+  const fast = fastS && fastS > 0 && ev && fastApplies(ev, (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id)) ? fastS : null
   const title = focusTitle(focus, ev, [...pending, ...state.resolved])
   return (
     <div className="mon-fd focus" data-testid="focus-detail">
       <h3 className="mon-fd-h focus-title">{closedTitle(plain(title), closed)}</h3>
       <div className={`mon-fd-grid ${ev && ev.hypotheses.length > 0 ? 'has-judge' : ''}`}>
-        {focus.machine_id in MACHINE_META && <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} compact />}
-        {ev && ev.hypotheses.length > 0 && <JudgmentTrail ev={ev} />}
+        {focus.machine_id in MACHINE_META && <TemperatureTrend machineId={focus.machine_id} hypotheses={ev?.hypotheses} compact fastS={fast} />}
+        {ev && ev.hypotheses.length > 0 && <JudgmentTrail ev={ev} fast={fast} />}
       </div>
       <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
       <FocusTimeline focus={focus} />
@@ -303,8 +342,9 @@ function FocusTimeline({ focus }: { focus: FocusPanel }) {
   )
 }
 
-/** Page 7 "dynamic adjustment": each hypothesis the commander made, what it expected, and what code verified. */
-function JudgmentTrail({ ev }: { ev: Event }) {
+/** Page 7 "dynamic adjustment": each hypothesis the commander made, what it expected, and what code verified. With fast
+ *  repair (/api/health repair_fast_s) the crew fixes it seconds after the approval: no 30-minute window (veteran 10-22). */
+function JudgmentTrail({ ev, fast }: { ev: Event; fast: number | null }) {
   return (
     <section className="judge" aria-label="Agent Nemo 的判斷">
       <h4 className="sub">Agent Nemo 的判斷</h4>
@@ -322,7 +362,7 @@ function JudgmentTrail({ ev }: { ev: Event }) {
               </div>
               <p className="jg-text">{plain(h.statement)}</p>
               {!e && h.status !== 'rejected' && <p className="jg-exp">沒有可量測的預期值，依 SOP 處置並交維修確認</p>}
-              {e && <p className="jg-exp">預期：{e.within_min} 分鐘內{e.op === '>=' ? `回到 ${e.value}°C 以上` : e.op === '<=' ? `降到 ${e.value}°C 以下` : `維持在 ${e.value}–${e.value_hi}°C`}</p>}
+              {e && <p className="jg-exp">預期：{fast ? '' : `${e.within_min} 分鐘內`}{e.op === '>=' ? `回到 ${e.value}°C 以上` : e.op === '<=' ? `降到 ${e.value}°C 以下` : `維持在 ${e.value}–${e.value_hi}°C`}{fast ? `（核准後約 ${Math.round(fast)} 秒維修完成）` : ''}</p>}
               {h.status === 'rejected' && evidence && <p className="jg-ev">程式驗證：{plain(evidence)}</p>}
             </li>
           )

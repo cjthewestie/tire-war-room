@@ -23,6 +23,8 @@ main:has(> .monitor-wrap) > .early { order: 1; margin-bottom: 0; }
 .mon-answer.is-calm { border-left-color: var(--accent); }
 .mon-k { font-size: 14px; font-weight: 700; color: var(--alarm); }
 .mon-answer.is-calm .mon-k { color: var(--accent); }
+.mon-answer.is-warm { border-left-color: var(--warn); }   /* 維修完成, the readings coming back (the 3D's amber) */
+.mon-answer.is-warm .mon-k { color: var(--warn); }
 .mon-answer h1 { margin: 2px 0 6px; font-size: 30px; line-height: 1.3; font-weight: 700; color: var(--ink); letter-spacing: 0; }
 .mon-answer h1 .nw { white-space: nowrap; }
 .mon-answer p { margin: 0; max-width: 46em; font-size: 16px; line-height: 1.6; color: var(--ink-dim); }
