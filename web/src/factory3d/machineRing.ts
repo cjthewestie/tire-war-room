@@ -18,6 +18,7 @@ const ALARM = new Set(['alarm', 'stopped', 'out_of_service'])
 const STATUS_ZH: Record<string, string> = { alarm: '異常', stopped: '停機', out_of_service: '停用', warning: '注意' }
 const DONE_GREEN = '#3fcf5a'      // the status lamp's green (layout.ts LIGHT_HEX)
 const DONE_HOLD_WALL_S = 6        // a finished repair stays green this long (wall seconds; at least one factory minute)
+const DONE_GRACE_WALL_S = 2       // a finished repair over a machine still red stays at 100% this long (the fix landing)
 const clamp = (x: number) => Math.max(0, Math.min(1, x))
 
 /** The task's progress now: the server's (as of the last world step), or where the clock is between assignment and its
@@ -39,8 +40,17 @@ export function machineRing(id: string, tile: MachineTile | undefined, world: Wo
       label: `${task.kind}${task.status === '前往中' ? '（人員前往中）' : ` ${Math.round(p * 100)}%`}` }
   }
   const hold = Math.max(60_000, DONE_HOLD_WALL_S * 1000 * speed)
-  const fixed = items.find((t) => t.machine_id === id && t.status === '完成' && REPAIR_KINDS.has(t.kind) && t.done_at && now - Date.parse(t.done_at) <= hold)
-  if (fixed) return { kind: 'task', progress: 1, color: DONE_GREEN, label: `${fixed.kind}完成` }
+  const fixed = items.filter((t) => t.machine_id === id && t.status === '完成' && REPAIR_KINDS.has(t.kind) && t.done_at && now - Date.parse(t.done_at) <= hold)
+    .sort((a, b) => Date.parse(b.done_at!) - Date.parse(a.done_at!))[0]
+  if (fixed) {
+    // green only once the fix landed (the lamp left 異常): the gate's R1 檢修 finishes while the card still waits and the
+    // runtime lands the fix only after 主管核准, so it must not look 「檢修完成」 over a red machine. Right after 完成 (the
+    // fix landing) it stays at 100% in its own colour, then the alarm ring shows again.
+    if (!ALARM.has(tile?.status ?? '')) return { kind: 'task', progress: 1, color: DONE_GREEN, label: `${fixed.kind}完成` }
+    if (now - Date.parse(fixed.done_at!) <= DONE_GRACE_WALL_S * 1000 * speed) {
+      return { kind: 'task', progress: 1, color: TASK_COLOR[fixed.kind] ?? '#5db2f5', label: `${fixed.kind} 100%` }
+    }
+  }
   const m = world?.maintenance.in_progress.find((x) => x.machine_id === id)
   if (m) {
     const s = Date.parse(m.start), e = m.end ? Date.parse(m.end) : NaN

@@ -67,6 +67,11 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('repair done 2 s ago (10×) → full green ring 檢修完成', g.kind === 'task' && g.progress === 1 && g.color === '#3fcf5a' && g.label === '檢修完成', `${g.label} ${g.color}`)
   const gone = machineRing('B-OPEN', { ...tile, status: 'running' }, world([done]), now + 30_000 + 70_000, 10)
   check('… back to the machine\'s own ring after the hold (6 wall s, at least 1 factory min)', gone.kind !== 'task', `${gone.kind} ${gone.label}`)
+  // the gate's R1 檢修 finishes while the card waits; the fix lands only after 主管核准: never green over a red machine
+  const landing = machineRing('B-OPEN', tile, world([done]), now + 31_000, 10)
+  check('repair done, machine still red: 100% in its own colour for the landing moment', landing.label === '檢修 100%' && landing.color !== '#3fcf5a', `${landing.label} ${landing.color}`)
+  const red = machineRing('B-OPEN', tile, world([done]), now + 30_000 + 25_000, 10)
+  check('… then the alarm ring again, no 檢修完成 over a red machine', red.kind === 'alarm', `${red.kind} ${red.label}`)
   const other = { ...repair, id: 'TK-9', kind: '補料', status: '執行中' }
   const pick = machineRing('B-OPEN', tile, world([other, repair]), now, 10)
   check('a repair task wins over another task on the same machine', pick.label.startsWith('檢修'), pick.label)
