@@ -16,12 +16,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
-import type { SimControl } from '../contracts'
+import type { AnomalyKind, ApprovalRequest, Event, SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useLinkStatus } from '../linkStatus'
-import { alertText, diffPending, repairNotices, type PushState } from '../phone/alert'
-import { repairStage } from '../aiStatus'
+import { alertText, diffPending, repairNotices, type AlertItem, type PushState } from '../phone/alert'
+import { expectationOf, recoverWord, repairStage, type RepairStage } from '../aiStatus'
+import { plain } from '../plain'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -29,8 +30,9 @@ import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
 import { AiStatusLine } from '../AiStatusLine'
+import { recoveryPhase } from './machineRing'
 import { successTitle, useSuccessMoments } from './success'
-import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
+import { OVERVIEW_CENTER, PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
@@ -54,6 +56,42 @@ const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: str
   Digit2: () => ({ c: { action: 'speed', speed: 10 }, label: '10 倍速' }),
   Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
+}
+
+/** Demo answer card (Kyle 10-22 art direction): one sentence first answers what the supervisor has to do now, in their
+ *  words (「7 號硫化機溫度掉了，等你核准」), the line under it is Agent Nemo's action and time (AiStatusLine compact). */
+const PROBLEM: Partial<Record<AnomalyKind, string>> = {
+  temp_drop: '溫度掉了', overheat: '溫度太高', pressure_low: '壓力不足', water_flow_low: '冷卻水不足', steam_low: '蒸汽壓不足',
+  sensor_fault: '感測器異常', multi_machine: '多台機台異常',
+}
+function headline(ev: Event | null, stage: RepairStage | null, waiting: boolean): string {
+  if (!ev) return '目前沒有異常'
+  const m = machineLabel(ev.machine_id)
+  if (stage === 'recovered' || stage === 'report') return `${m} 已恢復正常`
+  if (ev.state === 'closed' || ev.state === 'safe_stop') return '目前沒有異常'
+  if (stage === 'recovering') return `${m} 回溫中`
+  if (stage === 'repairing') return `${m} 維修中`
+  const what = PROBLEM[ev.anomaly.kind] ? `${m} ${PROBLEM[ev.anomaly.kind]}` : plain(ev.alert_card?.title ?? ev.anomaly.message)
+  return waiting ? `${what}，等你核准` : what
+}
+
+const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+
+/** Demo toast (Kyle 10-22 review): the answer card's words, not the phone's engineering text (「R3・假設 H1：…」,
+ *  「待核准：異常：…」), coloured by what it is: a card waiting (red), 維修完成 (amber: the readings coming back). The
+ *  report does not toast (the green 已恢復正常 capsule and the answer card say it); the phone still buzzes and rings. */
+function demoToast(fire: AlertItem[], pending: ApprovalRequest[], events: Event[]): { title: string; body: string; tone: 'bad' | 'warm' } | null {
+  const asks = fire.filter((a) => !a.notice), fixed = fire.filter((a) => a.notice === 'repaired')
+  const evOf = (a: AlertItem) => events.find((e) => (a.notice ? a.id.startsWith(`${a.notice}:${e.id}:`) : pending.find((p) => p.id === a.id)?.event_id === e.id))
+  const what = (a: AlertItem) => { const e = evOf(a); return e ? headline(e, null, false) : plain(a.title) }
+  if (asks.length) {
+    return asks.length === 1 ? { title: what(asks[0]), body: '等你核准', tone: 'bad' }
+      : { title: `${asks.length} 件異常等你核准`, body: asks.map(what).join('；'), tone: 'bad' }
+  }
+  if (!fixed.length) return null
+  const e = evOf(fixed[0])
+  return fixed.length === 1 ? { title: `${e ? machineLabel(e.machine_id) : fixed[0].title} 維修完成`, body: recoverWord(expectationOf(e ?? null)), tone: 'warm' }
+    : { title: `${fixed.length} 台維修完成`, body: fixed.map((a) => a.title).join('；'), tone: 'warm' }
 }
 
 /** The HUD's 已暫停 chip, in the amber tone of the link chip (.f3-conn.t-warn). */
@@ -114,12 +152,12 @@ export function FactoryApp() {
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
-  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean } | null>(null)
+  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean; tone?: 'bad' | 'warm' } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
   const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
-  const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
+  const success = useSuccessMoments(state.world, DEMO_MODE ? state.snapshot?.events : undefined)   // issue #36: 訂單完成 / 出貨已出廠 (+ demo: 已恢復正常)
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
@@ -127,6 +165,8 @@ export function FactoryApp() {
   useEffect(() => { nearRef.current = near }, [near])
   const fadingRef = useRef(false)
   const push = useRef<PushState>({ seen: new Set(), held: [] })
+  const eventsRef = useRef<Event[]>([])     // the demo toast names the events (read when it fires, not a dependency)
+  useEffect(() => { eventsRef.current = state.snapshot?.events ?? [] }, [state.snapshot?.events])
 
   const ev = primaryEvent(state.snapshot?.events)
   const evOpen = ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
@@ -138,6 +178,33 @@ export function FactoryApp() {
   const repairing = stages.filter((x) => x === 'repairing' || x === 'recovering').length
   const unread = stages.filter((x) => x === 'report').length
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+  // demo: the event the story is about (Kyle 10-22 review: concurrent_3 told 10 號's, the newest, while B 線開煉機 was the
+  // card approved, repaired and recovered): the one being repaired or coming back, else the one that just recovered (the
+  // green hold of machineRing's 已恢復 ring), else the phone's first card, else the newest open one
+  const events = state.snapshot?.events ?? []
+  const tasks = state.world?.tasks.items ?? []
+  const nowMs = Date.parse(ft ?? '')
+  const hold = Math.max(60_000, 6_000 * (state.clock?.speed ?? 1))
+  const backAt = (e: Event) => (recoveryPhase(e) === 'recovered' ? Date.parse(e.recovered_at ?? e.closed_at ?? '') : NaN)
+  const storyEv = !DEMO_MODE ? ev
+    : events.find((e) => isOpen(e) && ['repairing', 'recovering'].includes(repairStage(e, tasks) ?? ''))
+      ?? events.filter((e) => nowMs - backAt(e) <= hold).sort((a, b) => backAt(b) - backAt(a))[0]
+      ?? events.find((e) => e.id === pending[0]?.event_id)
+      ?? ev
+  // while open and for the green hold: its reading tag stays up, and the overview (V) centres on it
+  const story = DEMO_MODE && storyEv && (isOpen(storyEv) || nowMs - backAt(storyEv) <= hold) ? storyEv : null
+  // the overview's centre on a wide screen: every open event's machine with the story's (concurrent_3: B 線開煉機 and the
+  // presses both in view), pulled toward the hall's centre (the presses are the west end: the machine alone left the
+  // frame half empty); a portrait phone has room for the story's machine only
+  const wide = window.innerWidth > window.innerHeight, pull = wide ? 0.45 : 0
+  const focusAt = !story ? [] : (wide ? [...new Set([story, ...events.filter(isOpen)].map((e) => e.machine_id))] : [story.machine_id]).flatMap((id) => PLACED_BY_ID[id] ?? [])
+  const mid = (k: 'x' | 'z') => (1 - pull) * focusAt.reduce((a, p) => a + p[k], 0) / focusAt.length + pull * OVERVIEW_CENTER[k]
+  const focus: [number, number] | null = focusAt.length ? [mid('x'), mid('z')] : null
+  // demo answer card: the headline, its tone (the one red / amber / green), and what waits on the phone
+  const evStage = storyEv ? repairStage(storyEv, tasks) : null
+  const big = headline(storyEv, evStage, !!storyEv && pending.some((p) => p.event_id === storyEv.id))
+  const tone = big === '目前沒有異常' ? '' : evStage === 'recovered' || evStage === 'report' ? ' ok' : evStage === 'recovering' ? ' warm' : ' bad'
+  const ask = [pending.length ? `${pending.length} 件等你核准` : '', unread ? `${unread} 份異常報告` : ''].filter(Boolean).join('、')
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
@@ -147,8 +214,10 @@ export function FactoryApp() {
   useEffect(() => {
     const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
     if (!out.fire.length) return
-    const { title, body } = alertText(out.fire, out.flushed)
-    setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
+    const t = DEMO_MODE ? demoToast(out.fire, pending, eventsRef.current) : alertText(out.fire, out.flushed)
+    if (t) setToast({ ...t, at: Date.now(), notice: out.fire.every((a) => a.notice) })
+    // demo: the report (back to normal) takes down an amber 維修完成 still up, so the green ending stands alone
+    else setToast((x) => (x?.tone === 'warm' ? null : x))
     setBuzzUntil(performance.now() + 2200)
     setBuzz(true)
     try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
@@ -242,7 +311,11 @@ export function FactoryApp() {
         }
         // 1 / 5 while paused used to load the scenario and stay paused (the plant looked frozen): loading also plays
         const sent = c.action === 'scenario' ? transport.control(c).then(() => transport.control({ action: 'play' })) : transport.control(c)
-        sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
+        // demo: the T menu's words, 「正在載入：…」 while it loads, then what started
+        const name = DEMO_MODE && c.action === 'scenario' ? label.replace(/^載入情境：/, '') : ''
+        if (name) setDemoNote({ text: `正在載入：${name}`, at: Date.now(), ms: 20_000 })
+        const done = !name ? label : c.scenario === 'normal' ? name : `已觸發：${name}`
+        sent.then(() => setDemoNote({ text: done, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${name || label}：沒有成功`, at: Date.now() }) })
         return
       }
       if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
@@ -295,13 +368,14 @@ export function FactoryApp() {
   }, [raisePhone, goTo])
 
   const prompt = started && !overlay && !fading ? promptText(near) : null
+  const anomaly = <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />
 
   return (
-    <div className="f3-root">
+    <div className={`f3-root${DEMO_MODE ? ' demo' : ''}`}>
       <Canvas
         className="f3-canvas"
         camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
-        dpr={[1, 1.5]}
+        dpr={[1, 1.25]}
         shadows="percentage"
         gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
         onCreated={({ gl, camera }) => {
@@ -312,29 +386,45 @@ export function FactoryApp() {
           gl.toneMappingExposure = 1.05
         }}
       >
-        <color attach="background" args={['#e9dfcf']} />
-        <fog attach="fog" args={['#e9dfcf', 46, 110]} />
+        {/* a step darker than the building's cream walls and floor, so the white hall stands out like a model on a table */}
+        <color attach="background" args={['#ddd2bf']} />
+        <fog attach="fog" args={['#ddd2bf', 46, 110]} />
         <Lights />
-        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} pinId={story?.machine_id ?? null} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
           enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
-          pending={pending.length + notices.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
-          prompt={prompt}
+          pending={pending.length + (DEMO_MODE ? 0 : notices.length)} buzzUntil={buzzUntil} mode={mode} scene={scene}
+          prompt={prompt} focus={focus}
         />
         <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
       </Canvas>
 
-      {/* first person: a small aim dot, and what F does right here */}
-      {fp && !overlay && <div className="f3-cross" aria-hidden />}
+      {/* first person: a small aim dot (not in the demo: a shooter's habit, the prompt below says what F does), and what F does right here */}
+      {fp && !overlay && !DEMO_MODE && <div className="f3-cross" aria-hidden />}
       {fp && prompt && <div className="f3-aim" data-testid="f3-prompt">{!TOUCH_DEVICE && <kbd>F</kbd>} {prompt}</div>}
       {fp && !overlay && !locked && (TOUCH_DEVICE
         ? <div className="f3-look-hint">拖曳畫面看四周</div>
-        : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
+        : DEMO_MODE ? <div className="f3-look-hint">點畫面用滑鼠看四周</div>
+          : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
-      {/* HUD */}
+      {/* HUD; the demo shows one answer card instead (time and link chip as its small print; no role, place or loop chips) */}
       <div className="f3-hud" data-testid="f3-hud">
+        {DEMO_MODE ? (
+          <div className={`f3-answer${tone}`} data-testid="f3-event">
+            <b>{big}</b>
+            {storyEv && tone && <AiStatusLine ev={storyEv} compact className="f3-ai" />}
+            {/* red while a card waits, green when only the report is left (amber means 回溫中 only) */}
+            {ask && <span className={`f3-ask ${pending.length ? 'bad' : 'ok'}`} data-testid="f3-pending">手機上有 {ask}{TOUCH_DEVICE ? '（點「手機」）' : '（按 P）'}</span>}
+            <small>
+              {ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}
+              {scene !== 'factory' && <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>}
+              {paused && <span style={PAUSED_CHIP} role="status" data-testid="f3-paused">❚❚ 已暫停{TOUCH_DEVICE ? '' : '・按 0'}</span>}
+              <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
+            </small>
+          </div>
+        ) : <>
         <div className="f3-hud-top">
           <b>戰情室負責人</b>
           <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
@@ -354,21 +444,28 @@ export function FactoryApp() {
           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length || repairing || unread ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{repairing ? `・維修中 ${repairing} 件` : ''}{unread ? `・報告待讀 ${unread} 件` : ''}{pending.length || unread ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
-        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
+        </>}
+        {started && !phoneUp && !(DEMO_MODE && !TOUCH_DEVICE) && anomaly}
       </div>
+      {/* demo: the presenter's 觸發異常 sits bottom right, away from the story's red (touch keeps it in the HUD: the
+          on-screen buttons hold that corner) */}
+      {started && !phoneUp && DEMO_MODE && !TOUCH_DEVICE && <div className="f3-anom-corner">{anomaly}</div>}
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
+      {/* demo: only the presenter's keys (moving was taught on the start card; 2 / 3 / 0 still work) */}
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
-        <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
-        {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
+        {!DEMO_MODE && <><span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
+          <span><kbd>F</kbd> 操作・進門</span></>}
+        <span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
+        {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> {PRESS7} <kbd>5</kbd> {CONC3.label} <kbd>6</kbd> {NORMAL.label}</span>}
       </div>
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
       )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
-        <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
-          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
+        <div className={`f3-toast${toast.tone ? ` ${toast.tone}` : ''}`} role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
+          <b>{DEMO_MODE ? '' : '📱 '}{toast.title}</b><span>{toast.body}</span>
+          <i>{TOUCH_DEVICE ? (DEMO_MODE ? '點這裡' : '點這裡拿起手機') : DEMO_MODE ? '按 P ' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
         </div>
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
@@ -376,20 +473,25 @@ export function FactoryApp() {
       {!started && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
-            <h1>迷你工廠・戰情室</h1>
-            <p>你是戰情室負責人，從戰情室門口出發。走遍廠房看 28 台機台的即時狀態，坐到戰情室電腦前用真的儀表板。</p>
+            {DEMO_MODE ? <>
+              <h1>實心胎智慧製造戰情室・迷你工廠</h1>
+              <p>你是現場主管。走進廠房看機台現在的狀況，出事時手機上核准，Agent Nemo 會派人去修。</p>
+            </> : <>
+              <h1>迷你工廠・戰情室</h1>
+              <p>你是戰情室負責人，從戰情室門口出發。走遍廠房看 28 台機台的即時狀態，坐到戰情室電腦前用真的儀表板。</p>
+            </>}
             {TOUCH_DEVICE ? (
               <ul>
                 <li>左下搖桿移動，推到底是跑步</li>
                 <li>拖曳畫面轉視角，兩指捏合縮放</li>
-                <li>靠近機台或門，右下會出現操作按鈕</li>
-                <li>「手機」拿起主管手機（真的手機頁，在哪都能核准）・「第一人稱」切換視角</li>
+                <li>{DEMO_MODE ? '靠近機台，右下會出現操作按鈕' : '靠近機台或門，右下會出現操作按鈕'}</li>
+                <li>「手機」拿起主管手機{DEMO_MODE ? '' : '（真的手機頁，在哪都能核准）'}・「第一人稱」切換視角</li>
               </ul>
             ) : <ul>
               <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，滑鼠看四周（<kbd>Q</kbd>/<kbd>E</kbd> 也能轉身）</li>
               <li>機台旁按 <kbd>F</kbd> 看即時讀數；戰情室桌前按 <kbd>F</kbd> 坐下用儀表板</li>
-              <li>牆上的門通往 <b>休息區</b> 和 <b>廁所</b>：走進去或按 <kbd>F</kbd></li>
-              <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
+              {!DEMO_MODE && <li>牆上的門通往 <b>休息區</b> 和 <b>廁所</b>：走進去或按 <kbd>F</kbd></li>}
+              <li><kbd>P</kbd> 拿起主管手機{DEMO_MODE ? '' : '（真的手機頁，在哪都能核准）'}・<kbd>V</kbd> 切換俯瞰</li>
             </ul>}
             <button className="f3-go">點擊開始</button>
           </div>

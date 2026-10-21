@@ -9,9 +9,10 @@ import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
-import { OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
+import { LIGHT_HEX, OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
 import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, player, stick, view } from './pose'
 import { SPACES } from './spaces'
 import { lock, releaseLook, requestLook } from './look'
@@ -43,7 +44,7 @@ function buildLead() {
   const phone = new THREE.Group()
   phone.position.set(0, -0.03, 0.05)
   phone.add(rbox(0.075, 0.012, 0.13, '#22262c', 0, 0, 0, 0.015))
-  const screenMat = new THREE.MeshStandardMaterial({ color: '#000000', emissive: '#3fcf5a', emissiveIntensity: 0.6 })
+  const screenMat = new THREE.MeshStandardMaterial({ color: '#000000', emissive: LIGHT_HEX.green, emissiveIntensity: 0.6 })
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.11), screenMat)
   screen.rotation.x = -Math.PI / 2
   screen.position.y = 0.0135
@@ -61,9 +62,11 @@ function buildLead() {
   return { f, phone, screenMat }
 }
 
-export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzzUntil, phoneUp, mode, scene }: {
+/** `focus` (demo): where the overview centres instead of the lead, the anomaly being told (FactoryApp: its machine with the
+ *  other open ones, pulled toward the hall's centre). */
+export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzzUntil, phoneUp, mode, scene, focus = null }: {
   enabled: boolean; started: boolean; onNear: (n: Near) => void; onDoor: (to: SceneId) => void; prompt: string | null
-  pending: number; buzzUntil: number; phoneUp: boolean; mode: 'first' | 'third'; scene: SceneId
+  pending: number; buzzUntil: number; phoneUp: boolean; mode: 'first' | 'third'; scene: SceneId; focus?: [number, number] | null
 }) {
   const { camera, gl } = useThree()
   const keys = useRef(new Set<string>())
@@ -209,7 +212,8 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
         if (!first) player.yaw += wrap(Math.atan2(-dx, -dz) - player.yaw) * Math.min(1, dt * 12)
         moved = true
       }
-    } else if (!started) {
+    } else if (!started && !DEMO_MODE) {
+      // demo: a still opening shot (circling, the camera crossed the building's sides and whole walls popped to stubs)
       cam.yaw += dt * 0.12
     }
     player.moving = moved
@@ -242,14 +246,17 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     phone.rotation.x = phoneUp ? 1.05 : 0.9
     if (phoneUp) { f.armL.rotation.x = -1.2; f.armL.rotation.z = 0.35 }
     phone.position.x = buzzing ? Math.sin(t * 70) * 0.012 : 0
-    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? '#f5a623' : '#3fcf5a')
+    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? LIGHT_HEX[DEMO_MODE ? 'red' : 'amber'] : LIGHT_HEX.green)
     screenMat.emissiveIntensity = pending > 0 ? 0.9 + Math.sin(t * 5) * 0.4 : 0.6
 
     // orbit camera pose: ease toward the targets (snap after a teleport)
     const vw = orbit.current
     const targetDist = !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist
     const yawT = cam.yaw + (phoneUp ? 0.85 : 0)
-    const tx = started ? player.x : OVERVIEW_CENTER.x, tz = started ? player.z : OVERVIEW_CENTER.z
+    // demo: the overview glides over to the anomaly's machine (slowly, so the presenter keeps their bearings); the
+    // raised phone still zooms in on the lead
+    const onEv = started && !first && !phoneUp && !!focus && scene === 'factory'
+    const tx = onEv ? focus[0] : started ? player.x : OVERVIEW_CENTER.x, tz = onEv ? focus[1] : started ? player.z : OVERVIEW_CENTER.z
     if (cam.snap) {
       vw.yaw = yawT; vw.pitch = cam.pitch; vw.dist = targetDist; vw.tx = tx; vw.tz = tz
     } else {
@@ -257,8 +264,9 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
       vw.yaw += wrap(yawT - vw.yaw) * e
       vw.pitch += (cam.pitch - vw.pitch) * (1 - Math.exp(-dt * 3))
       vw.dist += (targetDist - vw.dist) * (1 - Math.exp(-dt * (started ? 4 : 1)))
-      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
-      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
+      const rate = onEv ? 2 : started ? 10 : 1.5
+      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * rate))
+      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * rate))
     }
     const ty = 0.55
     const hr = Math.cos(vw.pitch) * vw.dist

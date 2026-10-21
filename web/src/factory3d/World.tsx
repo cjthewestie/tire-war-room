@@ -5,11 +5,12 @@
 // Static meshes are merged per material (kit.mergeStatic); only lamps, gears, rollers, belts and people animate.
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
-import { LINES } from '../factory'
+import { DEMO_MODE } from '../components/DemoStrip'
+import { LINES, ML_PRESSES, machineLabel } from '../factory'
 import type { WarRoomState } from '../store'
 import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
@@ -42,7 +43,7 @@ function buildToy(p: Placed): Toy {
   const moving = new THREE.Group()
   const anim: Anim[] = []
   const { w, d, h } = p
-  const col = soften(LINE_HEX[p.line], 0.25)
+  const col = soften(LINE_HEX[p.line], 0.55)   // a hint of the line only: the floor pad and sign carry it, the lamp the status
   const roller = (len: number, r: number, x: number, y: number, z: number, along: 'x' | 'z' = 'x', speed = 2) => {
     const g = new THREE.Group(); g.position.set(x, y, z)
     const c = cyl(r, r, len, ROLL, 0, 0, 0, 10)
@@ -153,9 +154,17 @@ function glowTexture() {
 }
 const GLOW = typeof document !== 'undefined' ? glowTexture() : null
 
+/** A drei <Html> mounted a frame late, like the signs: the very first <Html> mounted with the canvas can lose its root,
+ *  and a tag pinned from the start (demo: the story event's machine, page opened during an anomaly) never showed. */
+function LateHtml(props: ComponentProps<typeof Html>) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  return ready ? <Html {...props} /> : null
+}
+
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
-function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null }) {
+function MachineStatus({ p, tile, hot, focus, work, warm = false }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null; warm?: boolean }) {
   const light: Light = statusLight(tile?.status)
   useEffect(() => { DRAWN_LIGHT[p.id] = light }, [p.id, light])
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
@@ -167,7 +176,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
   const alarm = light === 'red' || light === 'amber'
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
-    const blink = light === 'red' ? 0.5 + 0.5 * Math.sin(t * 9) : light === 'amber' ? 0.5 + 0.5 * Math.sin(t * 4.5) : 1
+    const blink = light === 'red' ? 0.5 + 0.5 * Math.sin(t * 6) : light === 'amber' ? 0.5 + 0.5 * Math.sin(t * 4.5) : 1
     if (lampRef.current) lampRef.current.emissiveIntensity = light === 'grey' ? 0.15 : 0.5 + blink * 1.3
     if (lampMesh.current) lampMesh.current.scale.setScalar(alarm ? 1.5 + blink * 0.25 : 1)
     if (glowRef.current) {
@@ -175,7 +184,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       glowRef.current.scale.set(s, s, 1)
       ;(glowRef.current.material as THREE.SpriteMaterial).opacity = light === 'green' ? 0.45 : 0.45 + blink * 0.5
     }
-    if (shellRef.current) shellRef.current.opacity = 0.12 + blink * (light === 'red' ? 0.22 : 0.14)
+    if (shellRef.current) shellRef.current.opacity = 0.08 + blink * (light === 'red' ? 0.14 : 0.1)   // ≤ 0.22: the machine's shape still shows
     if (ringRef.current) {
       const u = (t * 0.8) % 1
       const s = 1 + u * 0.6
@@ -190,7 +199,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       {alarm && (
         <mesh position={[0, p.h / 2 + 0.02, 0]} renderOrder={1}>
           <boxGeometry args={[p.w + 0.1, p.h + 0.12, p.d + 0.1]} />
-          <meshBasicMaterial ref={shellRef} color={LIGHT_HEX[light]} transparent opacity={0.25} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial ref={shellRef} color={LIGHT_HEX[light]} transparent opacity={0.15} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
       <mesh ref={lampMesh} position={[lx, lampY, lz]} castShadow>
@@ -205,18 +214,21 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       {hot && (
         <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
           <ringGeometry args={[Math.max(p.w, p.d) * 0.7, Math.max(p.w, p.d) * 0.7 + 0.08, 32]} />
-          <meshBasicMaterial color={LIGHT_HEX.red} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
+          {/* demo: amber while the readings come back (回溫中), so that beat is not red and amber at once */}
+          <meshBasicMaterial color={LIGHT_HEX[DEMO_MODE && light === 'amber' ? 'amber' : 'red']} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
       {focus && (
-        <Html position={[0, lampY + 0.2, lz]} zIndexRange={[11, 10]} style={{ pointerEvents: 'none' }}>
+        <LateHtml position={[0, lampY + 0.2, lz]} zIndexRange={[11, 10]} style={{ pointerEvents: 'none' }}>
           <div className={`f3-tag ${light}`} data-testid={`tag-${p.id}`}>
-            <b>{tile?.short_name ?? p.short}</b>
+            <b>{DEMO_MODE ? machineLabel(p.id) : tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
-            <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>
-            {work && <em data-testid={`work-${p.id}`}>{work}</em>}
+            {/* demo: 回溫中 says it already, not 「注意」 above it as well */}
+            {!(DEMO_MODE && warm) && <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>}
+            {/* demo: an alarm ring's 「異常」 under the status 「異常」 said it twice */}
+            {work && !(DEMO_MODE && tile && work === STATUS_LABEL[tile.status]) && <em data-testid={`work-${p.id}`}>{work}</em>}
           </div>
-        </Html>
+        </LateHtml>
       )}
     </group>
   )
@@ -483,25 +495,39 @@ function Building() {
 
 const LOCKERS = [-1.9, -1.5, -1.1, -0.7]
 
-/** CSS size the dashboard is laid out at on the big screen (16:9, the dashboard's desktop layout). */
-const BIG_W = 1600, BIG_H = 900
+/** CSS size the dashboard is laid out at on the big screen (16:9, the dashboard's desktop layout; 1200 wide is a
+ *  little over half the pixels of 1600 and still the desktop layout). */
+const BIG_W = 1200, BIG_H = 675
+/** Camera distance to the screen past which the page is not laid out (display:none, still mounted: one /ws), and the
+ *  nearer distance at which it shows again (the gap keeps it from flickering on the edge). */
+const BIG_HIDE = 9, BIG_SHOW = 8
+const SCREEN_AT = new THREE.Vector3(SCREEN.x, SCREEN.y, SCREEN.z)
 
 /** The big screen on the war-room wall shows the REAL dashboard page (/) live: an iframe in a drei <Html transform>
  *  scaled to the screen. "blending" occlusion puts the page behind the canvas and cuts a hole where the screen is
  *  visible, so the desk, the people and the hand phone still draw in front of it. Mounted once, for the whole visit
  *  (hidden, not unmounted, in the other spaces), so it keeps a single /ws connection. Look only: no pointer events;
- *  the desk's computer (F) opens the same page full-size to use it. */
+ *  the desk's computer (F) opens the same page full-size to use it. From afar (the overview, the far rows) the iframe
+ *  is display:none, so the browser skips laying out a page nobody can read; the screen stays dark. */
 function BigScreen({ active }: { active: boolean }) {
   // mounted a frame late, like the signs (the very first drei <Html> mounted with the canvas can lose its root)
   const [ready, setReady] = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  const frame = useRef<HTMLIFrameElement>(null)
+  const near = useRef(true)
+  useFrame(({ camera }) => {
+    const d = camera.position.distanceTo(SCREEN_AT)
+    near.current = near.current ? d < BIG_HIDE : d < BIG_SHOW
+    const want = near.current ? '' : 'none'
+    if (frame.current && frame.current.style.display !== want) frame.current.style.display = want
+  })
   if (!ready) return null
   return (
     <group position={[SCREEN.x - 0.045, SCREEN.y, SCREEN.z]} rotation={[0, -Math.PI / 2, 0]}>
       <Html transform occlude="blending" distanceFactor={(SCREEN.w / BIG_W) * 400} zIndexRange={[2, 0]} pointerEvents="none"
         geometry={<planeGeometry args={[SCREEN.w, SCREEN.h]} />}>
         <div className="f3-bigscreen" data-testid="f3-bigscreen" style={{ width: BIG_W, height: BIG_H, display: active ? 'block' : 'none' }}>
-          <iframe title="戰情室大螢幕（儀表板）" src={`/${embedSearch()}#monitor`} tabIndex={-1} aria-hidden />
+          <iframe ref={frame} title="戰情室大螢幕（儀表板）" src={`/${embedSearch()}#monitor`} tabIndex={-1} aria-hidden />
         </div>
       </Html>
     </group>
@@ -666,7 +692,7 @@ export function Lights() {
     s.position.set(1.8 + 7, 16, 0.6 + 8)
     s.target.position.set(1.8, 0, 0.6)
     s.castShadow = true
-    s.shadow.mapSize.set(2048, 2048)
+    s.shadow.mapSize.set(1024, 1024)   // the radius-3 blur hides the coarser texels (2048 was 4× the shadow pass)
     Object.assign(s.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 1, far: 45 })
     s.shadow.bias = -0.0005
     s.shadow.normalBias = 0.03
@@ -694,7 +720,7 @@ function signSpot(line: Line): [number, number] {
 export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: number; lamps: number[] }) {
   const g = useMemo(() => {
     const grp = new THREE.Group()
-    grp.add(mergeStatic(trusses(b, y, wallTop, lamps), { castShadow: false, receiveShadow: false }), bulbs(b, y, lamps))
+    grp.add(mergeStatic(trusses(b, y, wallTop, lamps), { castShadow: false, receiveShadow: false }), mergeStatic(bulbs(b, y, lamps), { castShadow: false, receiveShadow: false }))
     return grp
   }, [b, y, wallTop, lamps])
   useFrame(({ camera }) => { g.visible = camera.position.y < y - 0.2 })
@@ -702,11 +728,31 @@ export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: num
 }
 const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 
+/** Demo (?demo=1): number plates on the floor in front of the curing presses, so the audience can find 「7 號」 from the
+ *  overview: the two ends (1 and 11) as a ruler, plus every press with an open event (8–11 號 say 中大胎). A DOM chip like
+ *  the line signs, mounted a frame late like them. */
+function PressNo({ p, hot, warm }: { p: Placed; hot: boolean; warm: boolean }) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  return ready ? (
+    <Html position={[p.x, 0.05, p.z + p.d / 2 + 0.32]} center zIndexRange={[9, 5]} style={{ pointerEvents: 'none' }}>
+      <div className={`f3-sign f3-press-no${warm ? ' warm' : hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號{ML_PRESSES.includes(p.id) ? '・中大胎' : ''}</div>
+    </Html>
+  ) : null
+}
+const PRESSES = PLACED.filter((p) => p.line === 'CURE')
+const RULER = new Set([PRESSES[0].id, PRESSES[PRESSES.length - 1].id])
+/** A fast repair's task label on the demo's reading tag: its % follows the task's ETA, about half the real repair, so it
+ *  sat at 99% for seconds; the tag says 維修中 instead (the ring keeps its %). */
+const FIX_PCT = /^(檢修|停用檢修|放慢投料|暫停投料) \d+%$/
+
 /** Live light per machine as last drawn (read by the e2e test hook). */
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
-/** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
+/** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen.
+ *  `pinId` (demo): the story event's machine keeps its reading tag up without the lead standing at it; one machine only,
+ *  so the three events of concurrent_3 do not stack three tags. */
+export function World({ state, focusId, pinId = null, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; pinId?: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
   // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
@@ -716,25 +762,36 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
   const R = ROOMS
   return (
     <group visible={active}>
-      {/* soft cream ground round the building (no sea: the building sits on the backdrop) */}
+      {/* a darker sand ground round the building (no sea: the building sits on the backdrop), so its walls read */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.3, 0]} receiveShadow>
         <circleGeometry args={[160, 48]} />
-        <meshStandardMaterial color="#e6dac6" roughness={0.95} />
+        <meshStandardMaterial color="#cbbda4" roughness={0.95} />
       </mesh>
       <Building />
       <OuterWalls />
       <Roof b={BUILDING} y={2.5} wallTop={1.85} lamps={HALL_LAMPS} />
       <Machines />
-      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
-        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />)}
+      {PLACED.map((p) => {
+        const tag = active && (focusId === p.id || pinId === p.id)
+        const ring = tag ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null) : null
+        const work = ring && DEMO_MODE && ring.kind === 'task' && FIX_PCT.test(ring.label) ? '維修中' : ring?.label ?? null
+        return <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={tag} work={work}
+          warm={ring?.kind === 'recover' && ring.label !== '已恢復'} />
+      })}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
-        <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
-        <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
-        {WALL_DOORS.map((d) => (
-          <RoomSign key={d.to} id={d.to === 'break' ? 'break' : 'restroom'} label={d.label} door={d.color}
-            x={d.x + d.out[0] * 0.12} z={d.z + d.out[1] * 0.12} y={DOOR_H + 0.22} />
+        {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => (
+          <PressNo key={p.id} p={p} hot={hot.has(p.id)} warm={hot.has(p.id) && statusLight(tiles[p.id]?.status) === 'amber'} />
         ))}
+        <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
+        {/* demo: no 員工待命區 / 休息區 / 廁所 plates (not the supervisor's story; the doors do not lead anywhere either) */}
+        {!DEMO_MODE && <>
+          <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
+          {WALL_DOORS.map((d) => (
+            <RoomSign key={d.to} id={d.to === 'break' ? 'break' : 'restroom'} label={d.label} door={d.color}
+              x={d.x + d.out[0] * 0.12} z={d.z + d.out[1] * 0.12} y={DOOR_H + 0.22} />
+          ))}
+        </>}
       </>}
       <BigScreen active={active} />
       <WarRoomScreen />
@@ -748,8 +805,9 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       {active && state.world && <MaterialStock materials={state.world.materials} events={state.snapshot?.events ?? []} />}
       <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} recs={recs} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
-      <DockCelebration at={celebrate} />
-      <Ambient />
+      {/* demo: no confetti over an open anomaly, and no chimney steam (smoke off a press that is fine reads as trouble) */}
+      <DockCelebration at={celebrate} quiet={DEMO_MODE && hot.size > 0} />
+      {!DEMO_MODE && <Ambient />}
     </group>
   )
 }

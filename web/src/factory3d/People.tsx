@@ -3,12 +3,16 @@
 // says they are: at their machine, in the war room, the staff corner, the dock; going to the 休息區 or 廁所 they
 // walk to that door and step through it. The truck at the dock drives in when a delivery or a shipment arrives
 // and drives off when it leaves. Light on purpose: no pathfinding, a small fixed aisle graph.
+import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
+import { REPAIR_KINDS } from '../aiStatus'
+import { DEMO_MODE } from '../components/DemoStrip'
 import type { WorldSnapshot, WorldTruck, WorldWorker } from '../contracts'
+import { machineLabel } from '../factory'
 import { box, cyl, makeFigure, rbox, restPose, walkCycle, type Figure } from './kit'
-import { DESK, DOCK, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS } from './layout'
+import { DESK, DOCK, LIGHT_HEX, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS, WORK_HEX } from './layout'
 
 type P = [number, number]
 const AISLES = [-3.5, -1.3, 0.9, 3.25, 5.6]
@@ -97,8 +101,18 @@ const ROLE_LOOK: Record<string, number> = { 主管: 2, 維修: 4, 品管: 5 }
 
 interface Walker {
   f: Figure; path: P[]; yaw: number; key: string; phase: 'to' | 'at' | 'back'; task: THREE.Object3D
-  ring: THREE.Mesh; progress: number; target: P; taskId: string
+  ring: THREE.Mesh; progress: number; target: P; taskId: string; rush: boolean
 }
+
+/** Demo (?demo=1): the worker Agent Nemo sent to repair a machine carries a big marker in NVIDIA green (0.22 instead of
+ *  0.09, readable on a projector) and a chip 「維修人員前往 7 號硫化機」 / 「維修中」 (RepairChip). They hurry there
+ *  (RUSH× walking speed): standby → 7 號 is ~17 units, ~15 s at SPEED, longer than the 12-second fast repair, so the
+ *  machine came back before anyone reached it; at RUSH× they are there in ~5 s, about when the task turns 執行中. */
+const NV_GREEN = '#76b900'
+const FIX_MARK = 0.22 / 0.09
+const RUSH = 3.5
+const CHIP_Y = 1.62
+const CHIP_LOW = 1.5      // this close to the machine the chip is at the feet
 
 /** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
  *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
@@ -110,13 +124,14 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
     const [tx, tz] = wk.path[0]
     const dx = tx - r.position.x, dz = tz - r.position.z
     const d = Math.hypot(dx, dz)
-    const step = SPEED * dt
+    const fast = wk.rush && wk.phase === 'to'
+    const step = SPEED * dt * (fast ? RUSH : 1)
     if (d <= step) { r.position.set(tx, 0, tz); wk.path.shift() } else {
       r.position.x += (dx / d) * step
       r.position.z += (dz / d) * step
       r.rotation.y = Math.atan2(dx, dz)
     }
-    walkCycle(wk.f, t, 10, 0.5)
+    walkCycle(wk.f, t, fast ? 16 : 10, 0.5)
     if (!wk.path.length) {
       restPose(wk.f)
       if (wk.phase === 'back') return true
@@ -130,12 +145,21 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
   return false
 }
 
+/** A walker that left the scene: free its own buffers, every geometry of its figure (made per figure) and its marker's
+ *  and ring's materials (the figure's materials are kit's shared cache: kept). */
+function dropWalker(wk: Walker) {
+  wk.f.root.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+  ;((wk.task as THREE.Mesh).material as THREE.Material).dispose()
+  ;(wk.ring.material as THREE.Material).dispose()
+}
+
 const STANDBY: P = [10.45, 0.1]          // 員工待命區: where a task worker comes from and goes back to
 const ON_TASK = new Set(['前往中', '執行中'])
 
-function ringGeo(p: number) {
-  return new THREE.RingGeometry(0.07, 0.1, 24, 1, Math.PI / 2, -Math.max(0.02, Math.min(1, p)) * Math.PI * 2)
-}
+const RING_SEG = 24
+/** A full ring clockwise from 12 o'clock, made once per walker; the progress is how many of its segments are drawn. */
+const ringGeo = () => new THREE.RingGeometry(0.07, 0.1, RING_SEG, 1, Math.PI / 2, -Math.PI * 2)
+const ringTo = (g: THREE.BufferGeometry, p: number) => g.setDrawRange(0, Math.max(1, Math.round(Math.min(1, p) * RING_SEG)) * 6)
 
 /** Workers on a real task (issue #17). Everyone else stands by in the staff corner (StaffCorner) and two patrol the
  *  aisles (Walkers): CJ, 2026-10-20 「恢復人力待命 有一兩個人巡邏」. A worker with a task (world state 前往中 / 執行中 and
@@ -149,24 +173,27 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
     const active = new Set<string>()
     world.people.workers.forEach((w, k) => {
       const t = tasks.find((x) => x.worker_id === w.id && ON_TASK.has(x.status))
-      if (!t || !ON_TASK.has(w.state)) return
+      // demo: a repair worker sets off as soon as the task board names them; the people feed can trail it by seconds
+      // (concurrent_3: no world push while another event's plan holds the plant clock), a third of the 12-second repair
+      const early = DEMO_MODE && !!t?.machine_id && REPAIR_KINDS.has(t.kind) && !ON_TASK.has(w.state)
+      if (!t || (!ON_TASK.has(w.state) && !early)) return
       active.add(w.id)
-      const s = spot(w, k)
+      const s = spot(early ? { ...w, zone: 'line_A', machine_id: t.machine_id } : w, k)   // a line zone: spot reads the machine
       let wk = walkers.current.get(w.id)
       if (!wk) {
         const idx = ROLE_LOOK[w.role] ?? (k % 4)
         const f = makeFigure(LOOKS[idx])
         f.root.scale.setScalar(0.85)
         restPose(f)
-        const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: '#f5b83d' }))
+        const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: WORK_HEX }))
         task.position.set(0, 1.05, 0)
         f.root.add(task)
-        const ring = new THREE.Mesh(ringGeo(0), new THREE.MeshBasicMaterial({ color: '#76b900', side: THREE.DoubleSide }))
+        const ring = new THREE.Mesh(ringGeo(), new THREE.MeshBasicMaterial({ color: LIGHT_HEX.green, side: THREE.DoubleSide }))
         ring.position.set(0, 1.3, 0)
         f.root.add(ring)
         group.add(f.root)
         f.root.position.set(STANDBY[0], 0, STANDBY[1])
-        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id }
+        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id, rush: false }
         walkers.current.set(w.id, wk)
       } else if (wk.phase === 'back' || wk.taskId !== t.id || wk.target[0] !== s.p[0] || wk.target[1] !== s.p[1]) {
         // a new task (or the same one again after starting back): head for its place from where they are
@@ -177,11 +204,16 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       }
       wk.yaw = s.yaw
       wk.key = `${w.state}|${t.id}`
-      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
+      const fix = DEMO_MODE && REPAIR_KINDS.has(t.kind)
+      wk.rush = fix
+      wk.task.visible = wk.ring.visible = true   // hidden while walking back: shown again on the next task
+      wk.task.scale.setScalar(fix ? FIX_MARK : 1)
+      wk.task.position.y = fix ? 1.2 : 1.05
+      wk.ring.position.y = fix ? 1.55 : 1.3
+      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(fix ? NV_GREEN : w.state === '執行中' ? LIGHT_HEX.green : WORK_HEX)
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
-        wk.ring.geometry.dispose()
-        wk.ring.geometry = ringGeo(t.progress)
+        ringTo(wk.ring.geometry, t.progress)
       }
     })
     // task done (or reassigned away): walk back to standby, then join the staff corner
@@ -211,10 +243,53 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
     const dt = Math.min(dt0, 0.05)
     let i = 0
     for (const [id, wk] of walkers.current) {
-      if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); walkers.current.delete(id) }
+      if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); dropWalker(wk); walkers.current.delete(id) }
     }
   })
-  return <primitive object={group} />
+  // one chip per machine (concurrent_3's B 線開煉機 has 檢修 and 放慢投料: two workers on one path, two chips on top of
+  // each other); the 檢修 one keeps it
+  const fixing = DEMO_MODE ? (world.tasks?.items ?? []).filter((t) => t.worker_id && ON_TASK.has(t.status) && REPAIR_KINDS.has(t.kind))
+    .sort((a, b) => Number(!a.kind.includes('檢修')) - Number(!b.kind.includes('檢修')))
+    .filter((t, i, xs) => xs.findIndex((x) => x.machine_id === t.machine_id) === i) : []
+  return <>
+    <primitive object={group} />
+    {fixing.map((t) => <RepairChip key={t.worker_id} id={t.worker_id!} where={machineLabel(t.machine_id ?? '')} walkers={walkers} />)}
+  </>
+}
+
+/** The chip over a repair worker's head: follows the figure (its walker lives in a ref, so the frame loop moves it) and
+ *  reads 「維修人員前往 …」 while they walk, 「維修中」 once there; hidden until the figure exists and once it walks back.
+ *  At the machine it drops to the worker's feet: over the head it sat on the machine's reading tag, which floats at the
+ *  same height right beside them. */
+function RepairChip({ id, where, walkers }: { id: string; where: string; walkers: RefObject<Map<string, Walker>> }) {
+  const at = useRef<THREE.Group>(null)
+  const chip = useRef<HTMLDivElement>(null)
+  // mounted a frame late, like the signs (a page opened mid-repair mounts it with the canvas, and that <Html> can lose its root)
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  useFrame(() => {
+    const wk = walkers.current.get(id)
+    const el = chip.current
+    if (!at.current || !el) return
+    const on = !!wk && wk.phase !== 'back'
+    if (el.style.display !== (on ? '' : 'none')) el.style.display = on ? '' : 'none'
+    if (!wk || !on) return
+    const there = wk.phase === 'at'
+    // drops to the feet on the last steps too: walking in under the tag it crossed it for a moment
+    const low = there || Math.hypot(wk.target[0] - wk.f.root.position.x, wk.target[1] - wk.f.root.position.z) < CHIP_LOW
+    at.current.position.copy(wk.f.root.position)
+    at.current.position.y = low ? -CHIP_Y : 0
+    if (el.classList.contains('below') !== low) el.classList.toggle('below', low)
+    const text = there ? '維修中' : `維修人員前往 ${where}`
+    if (el.textContent !== text) el.textContent = text
+  })
+  return (
+    <group ref={at}>
+      {ready && <Html position={[0, CHIP_Y, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
+        <div ref={chip} className="f3-repair" data-testid="f3-repair-chip" style={{ display: 'none' }} />
+      </Html>}
+    </group>
+  )
 }
 
 /** The dock truck. Live: drives in when a truck is at the dock (crates in, tyres out), off when it leaves.

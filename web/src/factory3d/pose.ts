@@ -8,7 +8,8 @@ export const player = { x: START.x, z: START.z, yaw: START.yaw, pitch: 0, moving
 
 /** Orbit camera for the overview (V): yaw 0 sits south of the lead looking north; pitch is the look-down angle. */
 export const cam = { yaw: START.yaw, pitch: 0.85, dist: 20, snap: true }
-export const CAM_LIMITS = { pitchMin: 0.38, pitchMax: 1.2, distMin: 4.5, distMax: 36 }
+/** pitchMax 1.0 (57°): nearer straight down the toy machines read as their roofs only, a jumble of colour. */
+export const CAM_LIMITS = { pitchMin: 0.38, pitchMax: 1.0, distMin: 4.5, distMax: 36 }
 /** Before start: the whole building from far out, slowly circling its centre. */
 export const OVERVIEW_DIST = 36
 

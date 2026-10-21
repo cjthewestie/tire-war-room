@@ -73,12 +73,12 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('… held under done until the server says 完成', late.progress === 0.99 && late.label === '檢修 99%', late.label)
   const done = { ...repair, status: '完成', done_at: iso(now + 30_000), progress: 1 }
   const g = machineRing('B-OPEN', { ...tile, status: 'running' }, world([done]), now + 32_000, 10)
-  check('repair done 2 s ago (10×) → full green ring 檢修完成', g.kind === 'task' && g.progress === 1 && g.color === '#3fcf5a' && g.label === '檢修完成', `${g.label} ${g.color}`)
+  check('repair done 2 s ago (10×) → full green ring 檢修完成', g.kind === 'task' && g.progress === 1 && g.color === '#2f9e44' && g.label === '檢修完成', `${g.label} ${g.color}`)
   const gone = machineRing('B-OPEN', { ...tile, status: 'running' }, world([done]), now + 30_000 + 70_000, 10)
   check('… back to the machine\'s own ring after the hold (6 wall s, at least 1 factory min)', gone.kind !== 'task', `${gone.kind} ${gone.label}`)
   // the gate's R1 檢修 finishes while the card waits; the fix lands only after 主管核准: never green over a red machine
   const landing = machineRing('B-OPEN', tile, world([done]), now + 31_000, 10)
-  check('repair done, machine still red: 100% in its own colour for the landing moment', landing.label === '檢修 100%' && landing.color !== '#3fcf5a', `${landing.label} ${landing.color}`)
+  check('repair done, machine still red: 100% in its own colour for the landing moment', landing.label === '檢修 100%' && landing.color !== '#2f9e44', `${landing.label} ${landing.color}`)
   const red = machineRing('B-OPEN', tile, world([done]), now + 30_000 + 25_000, 10)
   check('… then the alarm ring again, no 檢修完成 over a red machine', red.kind === 'alarm', `${red.kind} ${red.label}`)
   const other = { ...repair, id: 'TK-9', kind: '補料', status: '執行中' }
@@ -91,7 +91,7 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const rw = recs([warm], { [recoveryKey(warm, 'recovering')]: wall0 }, wall0 + 2000)
   check('repaired 2 wall s ago (4 s ramp) → recovering ~50 %', rw['B-OPEN']?.phase === 'recovering' && Math.abs(rw['B-OPEN'].frac - 0.5) < 0.01, JSON.stringify(rw['B-OPEN']))
   const amber = machineRing('B-OPEN', { ...tile, status: 'warning' }, world([done]), now + 32_000, 10, rw['B-OPEN'])
-  check('… ring 回溫中, amber, not the green 檢修完成', amber.kind === 'recover' && amber.label === '回溫中' && amber.color === '#f5b83d' && amber.progress === 0.5, `${amber.label} ${amber.color} ${amber.progress}`)
+  check('… ring 回溫中, amber, not the green 檢修完成', amber.kind === 'recover' && amber.label === '回溫中' && amber.color === '#e08a00' && amber.progress === 0.5, `${amber.label} ${amber.color} ${amber.progress}`)
   const cure = { ...repair, id: 'TK-8', kind: '設定硫化時間', status: '執行中' }
   const over = machineRing('B-OPEN', { ...tile, status: 'warning' }, world([done, cure]), now + 32_000, 10, rw['B-OPEN'])
   check('… 回溫中 over another task of the plan (設定硫化時間) on the same machine', over.kind === 'recover' && over.label === '回溫中', `${over.kind} ${over.label}`)
@@ -100,7 +100,7 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const back = { ...warm, state: 'closed', closed_at: iso(now + 34_000), recovered_at: iso(now + 34_000), review: { status: 'pending', requested_at: iso(now + 34_000), done_at: null, by: null } }
   const rg = recs([back], { [recoveryKey(back, 'recovered')]: wall0 }, wall0 + 3000, now + 64_000)
   const green = machineRing('B-OPEN', { ...tile, status: 'running' }, world([done]), now + 64_000, 10, rg['B-OPEN'])
-  check('recovered 3 wall s ago → green 已恢復', green.kind === 'recover' && green.label === '已恢復' && green.color === '#3fcf5a', `${green.label} ${green.color}`)
+  check('recovered 3 wall s ago → green 已恢復', green.kind === 'recover' && green.label === '已恢復' && green.color === '#2f9e44', `${green.label} ${green.color}`)
   const later = recs([back], { [recoveryKey(back, 'recovered')]: wall0 }, wall0 + 7000, now + 104_000)
   const own = machineRing('B-OPEN', { ...tile, status: 'running' }, world([done]), now + 104_000, 10, later['B-OPEN'])
   check('… after 6 wall s the machine\'s own ring again (no 檢修完成 after 已恢復)', own.kind !== 'recover' && own.kind !== 'task', `${own.kind} ${own.label}`)

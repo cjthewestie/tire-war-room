@@ -1,6 +1,7 @@
 // The spaces the lead can be in: the factory hall (layout.ts), and two separate small spaces reached through doors
 // on the hall's walls: the 休息區 (half court) and the 廁所. Each space has its own floor plan, colliders, the exit
 // door back to the hall, and where the lead appears. Pure data plus collision, like layout.ts.
+import { DEMO_MODE } from '../components/DemoStrip'
 import {
   PLAYER_R, START, WALL_DOORS, WALL_T, around, doorTouch, collide as factoryCollide, nearest as factoryNearest, pad, pushOut, wall, walkable as factoryWalkable,
   type Box, type Near, type SceneId,
@@ -82,10 +83,14 @@ function roomSpace(r: Room): Space {
   }
 }
 
+/** Demo (?demo=1): the hall's doors to the 休息區 and 廁所 lead nowhere (no walking in, no F), so a presenter cannot end
+ *  up in the restroom in front of the judges. */
+const demoNearest = (x: number, z: number): Near => { const n = factoryNearest(x, z); return n?.kind === 'door' ? null : n }
+
 export const SPACES: Record<SceneId, Space> = {
   factory: {
-    id: 'factory', collide: factoryCollide, walkable: factoryWalkable, nearest: factoryNearest, spawn: START,
-    touch: (x, z) => WALL_DOORS.find((d) => doorTouch(d, x, z))?.to ?? null,
+    id: 'factory', collide: factoryCollide, walkable: factoryWalkable, nearest: DEMO_MODE ? demoNearest : factoryNearest, spawn: START,
+    touch: (x, z) => (DEMO_MODE ? null : WALL_DOORS.find((d) => doorTouch(d, x, z))?.to ?? null),
   },
   break: roomSpace(BREAK_ROOM),
   toilet: roomSpace(TOILET_ROOM),

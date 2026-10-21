@@ -1,23 +1,32 @@
 // Success moments (issue #36, CJ 2026-10-20 「成功出貨或者是單子完成也要顯示」): the world feed's order_completed and
 // shipment_departed events, each shown once. Events already in the feed when the page opens are not replayed.
+// Demo (?demo=1): a repaired machine back to normal (Event.recovered_at, Kyle 10-21 flow) is one too, 「7 號硫化機 已恢復正常」,
+// the positive end of the anomaly story; the same rule, a machine already recovered when the page opens is not replayed
+// (but a scenario loaded again and recovered again is).
 import { useEffect, useRef, useState } from 'react'
-import type { WorldEvent, WorldSnapshot } from '../contracts'
+import type { Event, WorldEvent, WorldSnapshot } from '../contracts'
+import { machineLabel } from '../factory'
+import { recoveryPhase } from './machineRing'
 
-export interface SuccessMoment { key: string; kind: 'order_completed' | 'shipment_departed'; text: string; orderIds: string[]; qty: number | null; onTime: boolean | null; at: number }
+export interface SuccessMoment { key: string; kind: 'order_completed' | 'shipment_departed' | 'recovered'; text: string; orderIds: string[]; qty: number | null; onTime: boolean | null; at: number }
 
 const KINDS = new Set(['order_completed', 'shipment_departed'])
 const keyOf = (e: WorldEvent) => `${e.ts}|${e.kind}|${(e.order_ids ?? []).join(',')}`
+const backKey = (e: Event) => `${e.id}|recovered`
 
 export function successTitle(m: SuccessMoment): string {
+  if (m.kind === 'recovered') return `${m.text} 已恢復正常`
   const id = m.orderIds.join('、') || '—'
   const n = m.qty != null ? `（${m.qty} 條）` : ''
   const late = m.onTime === false ? '・逾期' : ''
   return m.kind === 'order_completed' ? `✅ 訂單 ${id} 完成${n}${late}` : `🚚 出貨 ${id} 已出廠${n}${late}`
 }
 
-/** The newest success moment (null until one happens after the page opened). */
-export function useSuccessMoments(world: WorldSnapshot | null): { latest: SuccessMoment | null; all: SuccessMoment[] } {
+/** The newest success moment (null until one happens after the page opened). `events`: the snapshot's events, for the
+ *  已恢復正常 moment (left out: none). */
+export function useSuccessMoments(world: WorldSnapshot | null, events?: Event[]): { latest: SuccessMoment | null; all: SuccessMoment[] } {
   const seen = useRef<Set<string> | null>(null)
+  const back = useRef<Set<string> | null>(null)
   const [all, setAll] = useState<SuccessMoment[]>([])
   useEffect(() => {
     if (!world) return
@@ -32,5 +41,22 @@ export function useSuccessMoments(world: WorldSnapshot | null): { latest: Succes
       onTime: e.on_time ?? null, at: now + i,
     }))].slice(-20))
   }, [world])
+  useEffect(() => {
+    if (!events) return
+    const done = events.filter((e) => recoveryPhase(e) === 'recovered')
+    if (back.current === null) { back.current = new Set(done.map(backKey)); return }
+    // only events still recovered count as seen: a scenario loaded again opens the same event id again, and when it
+    // recovers again it shows again
+    const still = new Set(done.map(backKey))
+    for (const k of back.current) if (!still.has(k)) back.current.delete(k)
+    const fresh = done.filter((e) => !back.current!.has(backKey(e)))
+    if (!fresh.length) return
+    for (const e of fresh) back.current.add(backKey(e))
+    const now = Date.now()
+    setAll((xs) => [...xs, ...fresh.map((e, i) => ({
+      // a key per recovery: FactoryApp hides a key it has shown, and a replayed scenario recovers the same event id
+      key: `${backKey(e)}@${now + i}`, kind: 'recovered' as const, text: machineLabel(e.machine_id), orderIds: [], qty: null, onTime: null, at: now + i,
+    }))].slice(-20))
+  }, [events])
   return { latest: all.length ? all[all.length - 1] : null, all }
 }

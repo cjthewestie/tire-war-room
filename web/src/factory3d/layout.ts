@@ -205,7 +205,13 @@ export function statusLight(s: MachineStatus | undefined): Light {
   if (s === 'offline' || s === undefined) return 'grey'
   return 'green'
 }
-export const LIGHT_HEX: Record<Light, string> = { green: '#3fcf5a', amber: '#f5a623', red: '#ff3b30', grey: '#8a8f96' }
+/** The one red / amber / green of the whole 3D view (lamps, shells, rings, tags), a step darker than before so they hold
+ *  their shape on a projector: red #c0352a (the schedule draft's --alarm), amber #e08a00, green #2f9e44 (its --accent
+ *  family). NVIDIA green #76b900 is kept for Agent Nemo's success moments only. */
+export const LIGHT_HEX: Record<Light, string> = { green: '#2f9e44', amber: '#e08a00', red: '#c0352a', grey: '#8a8f96' }
+/** Work in progress that is not a status (goods 備料中 / 生產中, a 補料 task): a neutral blue-grey, so amber in the hall
+ *  means only 注意 / 回溫中. */
+export const WORK_HEX = '#7f93a8'
 
 /** Line colours: the dashboard's line hues, softened to pastels for the toy factory. */
 export const LINE_HEX: Record<Line, string> = {
