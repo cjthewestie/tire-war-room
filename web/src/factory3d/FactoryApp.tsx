@@ -14,7 +14,6 @@ import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
-import { STATE_LABEL } from '../components/common'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
@@ -26,6 +25,7 @@ import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
+import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
@@ -323,7 +323,7 @@ export function FactoryApp() {
           <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
-          {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
+          {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
         {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text) => setDemoNote({ text, at: Date.now() })} />}

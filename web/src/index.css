@@ -909,3 +909,11 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-eta dd { margin: 0; min-width: 0; }
 .ph-eta ol, .ph-eta ul { margin: 4px 0 0; padding-left: 18px; }
 .ph-eta li { margin: 2px 0; }
+
+/* 公版 AI 處理狀態 (aiStatus.tsx): 偵測到什麼｜交由誰｜階段｜預計完成, each part on its own line on narrow boxes */
+.ai-status { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; line-height: 1.45; }
+.ai-status > span::before { content: "｜"; margin-right: 10px; opacity: .45; }
+.ph-ai { padding: 10px 12px; margin: 8px 0; border-radius: 10px; background: rgba(46, 158, 91, .08); border-left: 3px solid #2e9e5b; font-size: 14px; }
+.ph-ai > span::before { content: none; }
+.ph-ai > b, .ph-ai > span { flex-basis: 100%; }
+.f3-ai { display: inline-flex; color: inherit; }

@@ -13,6 +13,7 @@ import { useWarRoom } from '../useWarRoom'
 import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
+import { AiStatusLine } from '../AiStatusLine'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -57,6 +58,7 @@ export function Phone() {
             {ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
+            {ev && <AiStatusLine ev={ev} className="ph-ai" />}
             {ev && ev.state !== 'closed' && ev.state !== 'safe_stop' && <RepairEta ev={ev} />}
             {state.resolved.slice(0, 3).map((r) => (
               <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
@@ -168,6 +170,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
           {(a.constraints ?? []).length > 0 && <div className="muted">主管條件：{(a.constraints ?? []).join('、')}</div>}
         </div>
       )}
+      <AiStatusLine ev={ev} className="ph-ai" />
       <dl className="ph-info">
         {a.actions?.length ? (<>
           <dt>建議</dt>

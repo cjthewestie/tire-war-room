@@ -3,6 +3,7 @@
 // dashboard's reset already uses). Nothing here moves a machine: readings recover on their own, and the state machine
 // verifies and closes the event as usual. Ticks are kept per event while the page is open.
 import { useEffect, useState } from 'react'
+import { AiStatusLine } from '../AiStatusLine'
 import { STATE_LABEL } from '../components/common'
 import type { MetricTile } from '../contracts'
 import { loadSopSteps, openEventFor, type SopSteps } from '../sop'
@@ -53,7 +54,7 @@ export function FieldSop({ machineId, tiles }: { machineId: string; tiles: Metri
   return (
     <section className="field-sop" data-testid="field-sop">
       <h4>現場處置 SOP{sop ? <small>{sop.sop_id}・{sop.title}</small> : null}</h4>
-      {ev && <p className="muted small">事件：{ev.alert_card?.title ?? ev.anomaly.message}・{STATE_LABEL[ev.state]}</p>}
+      {ev && <AiStatusLine ev={ev} className="small" />}
       {!sop && !err && <p className="muted small">查 SOP 中…</p>}
       {sop && !steps.length && <p className="muted small">這份 SOP 沒有找到「處置步驟」段落，請依 {sop.sop_id} 現場處置。</p>}
       {steps.length > 0 && (
