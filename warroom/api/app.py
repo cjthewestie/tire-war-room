@@ -51,6 +51,7 @@ from pydantic import BaseModel, Field
 from warroom import factory as F
 from warroom.api.runtime import Runtime
 from warroom.config import ROOT
+from warroom.api.tasks import install_tasks
 from warroom.contracts import (
     Anomaly,
     AskAnswer,
@@ -91,6 +92,12 @@ from warroom.contracts import (
 
 log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
+
+
+class QaAsk(BaseModel):
+    """QA 模式 (warroom/agent/qa.py): a judge's question about the agent framework."""
+    question: str = Field(min_length=1, max_length=300)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
 
 
 class MainMessage(BaseModel):
@@ -935,6 +942,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     from warroom.api.demo import install_demo
     install_admin(app, rt, supervisor)
     demo_state = install_demo(app, rt, demo)
+    install_tasks(app, rt, supervisor, on_site, guard, _audit_pin)   # 人員回報 (/worker 開始・完成)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
@@ -1201,6 +1209,56 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
                                                   "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
         return res
+
+    # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)
+    def _qa_agent(r: Runtime):
+        if "qa" not in holder:
+            from warroom.agent.qa import QaAgent
+            from warroom.kb.framework import FrameworkKB
+            holder["qa"] = QaAgent(r.settings, kb=FrameworkKB.from_settings(r.settings))
+        return holder["qa"]
+
+    @app.post("/api/qa/ask")
+    async def qa_ask(body: QaAsk, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """QA 模式 (warroom/agent/qa.py): a short spoken answer to a judge's question about the agent framework, only
+        from the framework knowledge base (its own collection, not the plant SOPs), with evidence ids. No tool, no event,
+        no write; the model call waits in the ModelQueue at the plant-question priority, behind incidents."""
+        r = rt()
+        from warroom.agent.orchestrator import PRIORITY
+        key = getattr(r.audit, "_key", None)
+        return await _qa_agent(r).ask(
+            body.question, conversation_id=body.conversation_id, audit=r.audit,
+            slot=lambda: r.orch.queue.slot(PRIORITY["task"], "qa", None, "QA 模式"),
+            secrets=[access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+
+    @app.get("/api/qa/doc")
+    async def qa_doc(path: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
+        """The evidence viewer: the text of one file the framework KB indexes or a curated answer cites. Any other
+        path is a 404 (no file browsing)."""
+        from warroom.agent.qa import viewable
+        text = await asyncio.to_thread(viewable, path, _qa_agent(rt())._kb())
+        if text is None:
+            raise _404(path)
+        return {"path": path, "text": text}
+
+    # QA 模式 live proofs + 「看一次怎麼運作」 (warroom/api/qa_demo.py): demo-control rights, everything tagged 「QA 展示」
+    from warroom.api.qa_demo import CHAT_CONVERSATION, install_qa_demo
+
+    async def _qa_chat(text: str, session: Session) -> dict[str, Any]:
+        return await main_message(MainMessage(text=text, conversation_id=CHAT_CONVERSATION), session)
+
+    async def _qa_plant_ask(question: str, session: Session) -> Any:
+        return await ask(AskRequest(question=question), session)
+
+    def _qa_network(network: str, session: Session) -> None:
+        r = rt()
+        r.network = network
+        r.audit.append(AuditKind.SYSTEM, session.actor, {"msg": "network tier", "network": network, "qa_demo": True,
+                                                         "tag": "QA 展示"})
+        r.sync_warning_light()
+        r.bus.publish(WsType.SNAPSHOT, r.snapshot())
+
+    install_qa_demo(app, rt, supervisor, demo, chat=_qa_chat, ask=_qa_plant_ask, set_network=_qa_network)
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")

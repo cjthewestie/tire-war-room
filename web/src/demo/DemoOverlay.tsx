@@ -9,7 +9,8 @@ import './demo.css'
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-const BAR_H = 64
+/** The demo bar's height (one row on a big screen, two on a phone). */
+const barH = () => (document.querySelector<HTMLElement>('.dm-bar')?.offsetHeight ?? 56) + 8
 
 /** The first anchor on screen: one selector, or `a & b` (every part must be on screen, each gets a hole). */
 function findAnchor(sel: string[]): HTMLElement[] {
@@ -25,7 +26,7 @@ function findAnchor(sel: string[]): HTMLElement[] {
 /** An element's box, padded and clipped to the visible page under the demo bar (a long Agent trace stays inside). */
 function clip(el: HTMLElement, pad = 8): Rect | null {
   const r = el.getBoundingClientRect()
-  const top = Math.max(r.top - pad, BAR_H + 6), bottom = Math.min(r.bottom + pad, window.innerHeight - 6)
+  const top = Math.max(r.top - pad, barH() + 6), bottom = Math.min(r.bottom + pad, window.innerHeight - 6)
   const left = Math.max(r.left - pad, 6), right = Math.min(r.right + pad, window.innerWidth - 6)
   return bottom - top < 24 || right - left < 24 ? null : { x: left, y: top, w: right - left, h: bottom - top }
 }
@@ -60,8 +61,8 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
       if (el !== scrolled) {
         // a tall element starts at the top (under the bar), a short one is centred
         scrolled = el
-        const tall = el.getBoundingClientRect().height > window.innerHeight - BAR_H - 40
-        if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - BAR_H - 12, behavior: 'smooth' })
+        const tall = el.getBoundingClientRect().height > window.innerHeight - barH() - 40
+        if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - barH() - 12, behavior: 'smooth' })
         else el.scrollIntoView({ block: 'center', behavior: 'smooth' })
       }
       setHit(els.map((e) => e.dataset.testid ?? e.dataset.demoAnchor ?? e.className).join(' & '))
@@ -83,7 +84,7 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
 
   if (!demo?.running) return null
   const r = rects[0] ?? null
-  const below = r ? r.y + r.h + 64 < window.innerHeight : true
+  const below = r ? r.y + r.h + 64 < window.innerHeight || r.y - 64 < barH() : true
   const wait = demo.waiting_for ? WAIT_TEXT[demo.waiting_for] : null
   return (
     <>
@@ -126,7 +127,7 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
           {rects.map((h, i) => <div key={i} className="dm-spot" style={{ left: h.x, top: h.y, width: h.w, height: h.h }} data-testid="demo-spot" aria-hidden />)}
           {caption && (
             <div className={`dm-cap ${below ? 'below' : 'above'}`} data-testid="demo-caption"
-              style={{ left: Math.max(12, Math.min(r.x, window.innerWidth - 420)), top: below ? r.y + r.h + 12 : r.y - 12 }}>{caption}</div>
+              style={{ left: Math.max(12, Math.min(r.x, window.innerWidth - 420)), top: below ? Math.min(r.y + r.h + 12, window.innerHeight - 64) : r.y - 12 }}>{caption}</div>
           )}
         </>
       ) : caption ? (

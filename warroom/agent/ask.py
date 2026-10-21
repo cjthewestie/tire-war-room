@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom import factory as F
-from warroom.agent import order_ask, plant
+from warroom.agent import budget, order_ask, plant
 from warroom.agent.convo import AskMemory, ConvContext
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
@@ -236,11 +236,11 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
             return "；".join(bits)
         if tool is ToolName.SOP_SEARCH:
             hits = data.get("hits") or []
-            if not hits:
-                return "SOP：查無相關 SOP"
-            # the text itself, so the answer can quote it instead of inventing steps
-            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{' '.join(str(h.get('text', '')).split())[:160]}"
-                                       for h in hits[:2])
+            if not hits:                      # the KB's no-answer gate: say so, never the nearest unrelated SOP
+                return "知識庫沒有相關 SOP"
+            # the text itself, so the answer can quote it instead of inventing steps; the source says house or team SOP
+            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{'（' + h['source_label'] + '）' if h.get('source_label') else ''}"
+                                       f"{' '.join(str(h.get('text', '')).split())[:160]}" for h in hits[:2])
     except (KeyError, TypeError, ValueError):
         pass
     return json.dumps(_brief(data, 300), ensure_ascii=False, default=str)[:300]
@@ -305,8 +305,8 @@ class AskAgent:
 
     async def _llm_plan(self, question: str, context: dict[str, Any]) -> AskPlan:
         user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=400,
+        r = await budget.create(  # metered; over the day's budget it raises and the keyword rules plan
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=400,
             messages=[{"role": "system", "content": PLAN_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "AskPlan", "schema": ask_plan_schema()}},
             **self._extra())
@@ -316,8 +316,8 @@ class AskAgent:
 
     async def _llm_answer(self, question: str, results: list[AskStepResult]) -> str:
         lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=300,
+        r = await budget.create(
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=300,
             messages=[{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
                       {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
             **self._extra())

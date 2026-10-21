@@ -136,7 +136,6 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .seg .sim-ev-list button:hover { background: var(--panel-3); }
 .sim-ev-list small { color: var(--ink-faint); }
 /* 一日循環 beside the factory time (README): small muted text, not a chip */
-.clock-loop { margin-left: -4px; color: var(--ink-faint); font-size: 12px; white-space: nowrap; cursor: help; }
 .demo-loading { color: var(--warn); font-size: 12.5px; white-space: nowrap; }
 .demo-overlay { color: var(--info); font-size: 12.5px; max-width: 560px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }   /* 情境疊加 */
 .sim-ev-note { color: var(--ink-dim); font-size: 12.5px; max-width: 360px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1105,7 +1104,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 
 /* 頂部：現在的日期時間、模擬工廠時間、登入身分 (issue #100) */
 .clock-wrap { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.15; }
-.clock-lbl { font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
 .usermenu { position: relative; }
 .user-btn { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 4px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); cursor: pointer; font-size: 14px; }
 .user-av { width: 26px; height: 26px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--accent-soft); font-weight: 600; font-size: 13px; }
@@ -1118,7 +1116,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 
 /* 核准區「接下來」：一件事一行，照時間排 (issue #100) */
 
-/* phone header (CJ, 2026-10-22): row 1 = title + 主管 + 深色; row 2 = 系統時間 + 連線狀態. Nothing removed. */
+/* phone header (CJ, 2026-10-22): row 1 = title + 主管 + 深色; row 2 = clock + 連線狀態. Nothing removed. */
 @media (max-width: 599px) {
   .topbar { flex-wrap: wrap; gap: 4px 8px; padding: 8px 14px; background: rgb(var(--bar-rgb, 11 13 16) / 1); }
   .top-right { display: contents; }
@@ -1130,7 +1128,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
   .topbar .theme-tog { order: 3; }
   .top-right > .clock-wrap { order: 4; flex-direction: row; align-items: baseline; gap: 6px; flex: 1 1 auto; justify-content: flex-start; }
   .top-right > .mode { order: 5; margin-left: auto; }
-  .top-right > .chip, .top-right > .clock-loop { order: 6; }
+  .top-right > .chip { order: 6; }
 }
 
 /* 訂單頁 (final UI pass): search / customer / sort tools, compact table columns, order card actions, demo-edit dialog, print sheet */
@@ -1193,3 +1191,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
   .print-sheet table { width: 100%; border-collapse: collapse; } .print-sheet th, .print-sheet td { border: 1px solid #999; padding: 6px 8px; text-align: left; }
   .print-sheet th { background: #eee; font-weight: 600; } .ps-info th { width: 16%; } .ps-stages th, .ps-stages td { text-align: center; }
 }
+/* 模型用量 cap crossing (warroom/agent/budget.py): a warning, not an alarm */
+.budget-banner { background: var(--warn-soft); color: var(--ink); border-color: var(--warn); display: flex; align-items: center; gap: 12px; justify-content: space-between; }
+.budget-banner .x { background: none; border: 0; color: inherit; cursor: pointer; font-size: 15px; }

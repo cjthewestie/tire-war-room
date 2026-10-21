@@ -27,11 +27,13 @@ export interface WarRoomState {
   subagents: SubagentsView | null
   /** the guided demo's shared cue (WS "demo", GET /api/demo/state); null = never started on this server */
   demo: DemoState | null
+  /** 模型用量: the latest cap crossing (audit SYSTEM row, actor "budget"; warroom/agent/budget.py) */
+  budgetAlert: { text: string; cap: string; ts: string } | null
 }
 
 export const initialState: WarRoomState = {
   snapshot: null, pending: [], resolved: [], clock: null, schedule: null, scheduleRev: 0,
-  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null, subagents: null, demo: null,
+  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null, subagents: null, demo: null, budgetAlert: null,
 }
 
 /** Apply a WS "world" message: a full one replaces, a delta overwrites only the sections it carries.
@@ -111,8 +113,12 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
       }
     case 'schedule':
       return { ...base, schedule: msg.data, scheduleRev: s.scheduleRev + 1 }
-    case 'audit':
-      return { ...base, audit: [...s.audit, msg.data].slice(-300) }
+    case 'audit': {
+      const p = msg.data.payload ?? {}
+      const cap = msg.data.actor === 'budget' && typeof p.cap === 'string' && typeof p.text === 'string'
+        ? { text: p.text, cap: p.cap, ts: msg.data.ts } : null
+      return { ...base, audit: [...s.audit, msg.data].slice(-300), budgetAlert: cap ?? s.budgetAlert }
+    }
     case 'clock':
       return {
         ...base,

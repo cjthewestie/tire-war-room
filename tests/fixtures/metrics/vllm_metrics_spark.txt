@@ -1,0 +1,12 @@
+# HELP vllm:num_requests_running Number of requests currently running on GPU.
+# TYPE vllm:num_requests_running gauge
+vllm:num_requests_running{model_name="nvidia/Nemotron-3.5-Lightning-30B-A3B-NVFP4"} 1.0
+# HELP vllm:num_requests_waiting Number of requests waiting to be processed.
+# TYPE vllm:num_requests_waiting gauge
+vllm:num_requests_waiting{model_name="nvidia/Nemotron-3.5-Lightning-30B-A3B-NVFP4"} 2.0
+# HELP vllm:gpu_cache_usage_perc GPU KV-cache usage. 1 means 100 percent usage.
+# TYPE vllm:gpu_cache_usage_perc gauge
+vllm:gpu_cache_usage_perc{model_name="nvidia/Nemotron-3.5-Lightning-30B-A3B-NVFP4"} 0.137
+# HELP vllm:generation_tokens_total Number of generation tokens processed.
+# TYPE vllm:generation_tokens_total counter
+vllm:generation_tokens_total{model_name="nvidia/Nemotron-3.5-Lightning-30B-A3B-NVFP4"} 18342.0

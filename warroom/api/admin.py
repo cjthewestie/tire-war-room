@@ -176,6 +176,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         st["health"] = AP.health(st)
         return st
 
+    @app.get(P + "/metrics")
+    async def metrics(request: Request, _: Any = ADMIN) -> dict[str, Any]:
+        """Live machine + model numbers for 狀態 (warroom/api/metrics.py); the page polls it every few seconds."""
+        from warroom.api.metrics import metrics_view
+        return await metrics_view(request.app, rt)
+
     # ------------------------------------------------------------------ 稽核紀錄 (read-only) and 系統參數
     def audit_filter(kind: str, actor: str, event: str, q: str, t_from: str, t_to: str) -> AA.Filter:
         if kind and kind not in {k.value for k in AuditKind}:
@@ -221,6 +227,13 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
     async def params(request: Request, _: Any = ADMIN) -> dict[str, Any]:
         return await asyncio.to_thread(AP.params, rt(), request.app.state)
 
+    @app.get(P + "/usage")
+    async def usage(_: Any = ADMIN) -> dict[str, Any]:
+        """模型用量 (warroom/agent/budget.py): today's totals by kind, the top events and conversations, the caps, % used
+        and the degradation state."""
+        from warroom.agent import budget
+        return (getattr(rt(), "budget", None) or budget.get()).view()
+
     @app.get(P + "/runs")
     async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
         r = rt()
@@ -242,8 +255,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
             t = time.perf_counter()
             hits = kb.search(q, k)
             team = kb.search_team(q, k) if hasattr(kb, "search_team") else []
+            # what the agents get: both collections on one score, through the no-answer gate
+            r = kb.retrieve(q, k) if hasattr(kb, "retrieve") else None
             return {"q": q, "hits": [h.model_dump(mode="json") for h in hits],
                     "team_hits": [h.model_dump(mode="json") for h in team],
+                    "answer": None if r is None else {"hits": [h.model_dump(mode="json") for h in r.hits],
+                                                      "reason": r.reason},
                     "mode": getattr(kb, "mode", "keyword"), "ms": round((time.perf_counter() - t) * 1000, 1)}
         return await asyncio.to_thread(run)
 

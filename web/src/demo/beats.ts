@@ -29,8 +29,8 @@ export const BEATS: Record<string, Beat> = {
     anchors: ['[data-testid="home-overview"]', '[data-testid="approval-list"]', '[data-testid="status-strip"]'],
   },
   rush: {
-    tab: 'agent', focus: null, caption: '先核准急單',
-    anchors: ['[data-testid="approval-list"]', '[data-testid="home-overview"]', '[data-testid="status-strip"]'],
+    tab: 'agent', focus: 'order', caption: '急單進來：先核准',
+    anchors: ['?[data-demo-anchor="approve-bar"]', '[data-testid="home-item-{id}"]', '[data-testid="approval-list"]'],
   },
   console: {
     tab: 'agent', focus: 'order', caption: '計劃已經先擬好，只等核准或討論',
@@ -43,6 +43,19 @@ export const BEATS: Record<string, Beat> = {
   phone: {
     tab: 'agent', focus: 'incident', caption: '📱 主管手機核准（R2 以上一定要人）',
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]', '[data-testid="status-strip"]'],
+  },
+  // AI 猜錯換假設 H1→H2 (CJ, 2026-10-22): the H1 card, the code's verdict on it, the H2 card
+  h1: {
+    tab: 'agent', focus: 'incident', caption: '核准 H1（第一個假設）',
+    anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]', '[data-testid="status-strip"]'],
+  },
+  verify: {
+    tab: 'agent', focus: 'incident', caption: '程式驗證讀值：H1 不成立',
+    anchors: ['?[data-testid="result-strip"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
+  },
+  h2: {
+    tab: 'agent', focus: 'incident', caption: 'AI 換假設：程式驗證失敗才會換',
+    anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
   },
   worker: {
     tab: 'agent', focus: 'incident', caption: '員工完成，程式驗證讀值',

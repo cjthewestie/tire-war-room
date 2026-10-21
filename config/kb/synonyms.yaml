@@ -1,0 +1,22 @@
+# SOP knowledge-base synonyms (warroom/kb/store.py, the key-term check). Each line is one group: a query that
+# names any member is looking for the same thing, so a chunk holding any member of the group counts as on topic.
+# Keep groups narrow: a broad group lets an unrelated question through the no-answer gate.
+groups:
+  - [缺料, 斷料, 原料不足, 原料短缺, 待補料, 補料, 缺貨, 沒料]
+  - [溫降, 掉溫, 溫度偏低, 溫度下降, 溫度掉, 降溫, 溫度不夠]
+  - [過熱, 溫度過高, 太熱, 溫度太高, 膠溫異常]
+  - [蒸汽壓不足, 蒸汽壓力異常, 蒸汽壓低, 壓力不足, 蒸汽不夠]
+  - [冷卻水, 冷卻水路, 水路異常, 水流量]
+  - [請假, 缺工, 缺人, 調人, 人力, 調班, 加班, 支援]
+  - [復機, 重新開機, 恢復運轉, 停機]
+  - [漂移, 讀值怪, 讀值不準, 感測器]
+  - [換模, 模具更換, 入模, 出模]
+  - [扣模, 報廢判定, 判定報廢, 品質放行, 重工]
+  - [抽驗, 抽檢, 品質檢驗, 品管]
+  - [疏水閥, 疏水器]
+  - [胎側膠, 胎側]
+  - [鋼絲圈, 胎圈, 鋼絲]
+  - [尼龍布, 簾布]
+  - [不斷火, 週末]
+  - [密煉機, 密煉]
+  - [開煉機, 開煉]

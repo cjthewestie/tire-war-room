@@ -6,7 +6,7 @@ import { ThemeToggle } from './ThemeToggle'
 import { useLinkStatus } from '../linkStatus'
 import { useWarRoom } from '../useWarRoom'
 
-export type Tab = 'monitor' | 'schedule' | 'orders' | 'console' | 'sm' | 'admin' | 'agent'
+export type Tab = 'monitor' | 'schedule' | 'orders' | 'console' | 'sm' | 'admin' | 'qa' | 'agent'
 
 const NET_LABEL = { online: '網路正常', weak: '弱網・延後推播（Agent 不受影響）', wan_down: 'WAN 中斷・手機走廠內 LAN', lan_down: 'LAN 中斷・現場觸控螢幕＋警示燈' }
 
@@ -40,12 +40,6 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
           </span>
         )}
         <RealClock />
-        {/* README: 「畫面時間旁顯示一日循環・第 n 輪」 — kept beside the time, small and muted; full wording in the tooltip */}
-        {state.clock?.day_loop && (
-          <span className="clock-loop" data-testid="chip-loop" title={`一日循環・第 ${state.clock.day_loop.loop} 輪：團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>
-            <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
-          </span>
-        )}
         <UserMenu />
         <ThemeToggle />
         {/* .live = connected to the backend (e2e waits on it); tone: ok | warn | mock | down */}
@@ -57,7 +51,7 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   )
 }
 
-/** 系統時間: the real clock (Taipei), small label above. The plant's data runs on the simulated factory time, which is
+/** The real clock (Taipei), no label (CJ, 2026-10-22). The plant's data runs on the simulated factory time, which is
  *  labelled 模擬工廠時間 where it is shown (今日工廠概況). On a phone the date is the short 10/21 so it never wraps. */
 function RealClock() {
   const [now, setNow] = useState(() => Date.now())
@@ -66,7 +60,6 @@ function RealClock() {
   const short = `${fmtMD(now).slice(5)} ${fmtHM(now)}`
   return (
     <span className="clock-wrap">
-      <small className="clock-lbl">系統時間</small>
       <span className="clock" data-testid="clock" title="現在的日期與時間（台北）">
         <span className="clock-full">{full}</span><span className="clock-short" aria-hidden>{short}</span>
       </span>

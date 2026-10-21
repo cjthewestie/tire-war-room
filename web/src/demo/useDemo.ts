@@ -6,6 +6,7 @@ import { useWarRoom } from '../useWarRoom'
 import { CUES } from './cues'
 import { beatFor } from './beats'
 import { DemoRun } from './driver'
+import { PAD_A, PAD_MENU, padEdges } from './gamepad'
 import type { DemoCommand, DemoState } from './state'
 
 /** This tab's driver id: the war room drives only the demo it started, in the tab that started it. */
@@ -35,7 +36,13 @@ export function useDemo() {
     if (note) setErr(note)
   }, [transport])
   const cont = useCallback(() => send({ action: 'continue' }), [send])
-  const togglePause = useCallback(() => send({ action: demo?.paused ? 'resume' : 'pause' }), [send, demo?.paused])
+  // the paused flag the server last sent (a quick P-P must not send pause twice before the push arrives)
+  const pausedRef = useRef(false)
+  useEffect(() => { pausedRef.current = !!demo?.paused }, [demo?.paused])
+  const togglePause = useCallback(async () => {
+    const out = await send({ action: pausedRef.current ? 'resume' : 'pause' })
+    if (out) pausedRef.current = out.paused
+  }, [send])
   const exit = useCallback(async () => { if (run.current) await run.current.exit(); else await send({ action: 'exit' }) }, [send])
 
   const driving = running && demo?.driver === ME
@@ -50,6 +57,28 @@ export function useDemo() {
     }, 250)
     return () => clearInterval(id)
   }, [driving])
+
+  // ---------------------------------------------------------------- Xbox pad: A continue, Menu pause (Gamepad API)
+  useEffect(() => {
+    if (!running || typeof navigator === 'undefined' || !navigator.getGamepads) return
+    let prev = new Set<number>()
+    const id = setInterval(() => {
+      const { held, pressed } = padEdges(prev, [...navigator.getGamepads()])
+      prev = held
+      if (pressed.includes(PAD_A)) void cont()
+      if (pressed.includes(PAD_MENU)) void togglePause()
+    }, 80)
+    return () => clearInterval(id)
+  }, [running, cont, togglePause])
+
+  // ---------------------------------------------------------------- html[data-demo]: other overlays (the global
+  // pending-approval bar) go compact while the demo runs
+  useEffect(() => {
+    const el = document.documentElement
+    if (running && demo?.cue_id) el.dataset.demo = demo.cue_id
+    else delete el.dataset.demo
+    return () => { delete el.dataset.demo }
+  }, [running, demo?.cue_id])
 
   // ---------------------------------------------------------------- keys: Space / N continue, P pause, Esc exit
   useEffect(() => {

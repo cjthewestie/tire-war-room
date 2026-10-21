@@ -13,11 +13,20 @@ Team dataset SOPs (data/team_dataset/sop_chunks.jsonl, 60 chunks / 12 SOPs, synt
 2026-10-20: the team's official dataset) are indexed alongside, in their own collection
 `<collection>_team`, every chunk tagged source="team_dataset". `search()` still ranks only the
 15 house SOPs (the page-11 answers stay exactly as they were); `search_team()` ranks the team
-chunks with the same hybrid score, and the sop_search tool returns both (`hits`, `team_hits`).
+chunks with the same hybrid score.
+
+`retrieve()` is what the agents get (through the sop_search tool): both collections ranked on the
+same hybrid scale, then a no-answer gate, so a question the KB does not cover gets no hit and a
+reason instead of the nearest unrelated SOP (CJ, 2026-10-22: 「修 RAG」; 「缺料怎麼辦」 used to
+return SOP-ST-01 at 0.20). A chunk passes when its score reaches `min_score` and it holds one of
+the query's key terms (or a synonym from config/kb/synonyms.yaml), or when its score reaches
+`strong_score` on its own. Both thresholds are calibrated on tests/data/rag_eval.yaml
+(scripts/rag_eval.py --curve) and live in Settings (kb_min_score, kb_strong_score).
 """
 from __future__ import annotations
 
 import atexit
+import functools
 import hashlib
 import itertools
 import logging
@@ -27,6 +36,8 @@ import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+
+import yaml
 
 from warroom.contracts import SopHit
 
@@ -39,6 +50,11 @@ DEFAULT_EMBED_MODEL = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-
 DEFAULT_CACHE_DIR = ROOT / "data" / "runtime" / "fastembed_cache"
 MAX_CHUNK_CHARS = 450
 TEAM_SOURCE = "team_dataset"
+SOURCE_LABELS = {"house": "工廠 SOP", TEAM_SOURCE: "團隊資料集"}
+SYNONYMS_PATH = ROOT / "config" / "kb" / "synonyms.yaml"
+NO_SOP = "知識庫沒有相關 SOP"
+# Defaults of Settings.kb_min_score / kb_strong_score (see retrieve()).
+MIN_SCORE, STRONG_SCORE = 0.18, 0.9
 
 _TITLE_RE = re.compile(r"^#\s*(SOP-[A-Z]+-\d+)\s+(.+?)\s*$")
 _SECTION_RE = re.compile(r"^##\s+(.+?)\s*$")
@@ -150,6 +166,59 @@ def _norm(s: str) -> str:
     return "".join(_TOKEN_RE.findall(s))
 
 
+# ---------------------------------------------------------------- key terms (the no-answer gate)
+# Question words and filler: what is left of the query is its subject (「缺料怎麼辦」 → 「缺料」).
+_ASK_RX = re.compile(r"怎麼辦|怎麼處理|怎麼做|怎麼排|怎麼調|要怎麼|怎麼|如何|是什麼|是不是|什麼時候|要注意什麼|注意什麼|"
+                     r"在哪裡|在哪|哪裡|多少|請問|可以|應該|需要|一下|處理|處置|步驟|方法|流程|嗎|呢|吧|了|的")
+_CJK_RUN_RX = re.compile(r"[一-鿿]+")
+_ASCII_RX = re.compile(r"[A-Za-z0-9]{2,}")
+# Bigrams too common to say what a question is about: 「印表機壞了」 must not match an SOP on 「壞了」.
+GENERIC_BIGRAMS = frozenset({"壞了", "故障", "異常", "問題", "今天", "現在", "員工", "公司", "時候", "申請", "判定",
+                             "檢查", "製作", "作業", "狀況", "情況", "辦法", "工廠", "機台", "注意", "不是", "一個"})
+
+
+@functools.cache
+def synonym_groups(path: Path = SYNONYMS_PATH) -> tuple[tuple[str, ...], ...]:
+    """config/kb/synonyms.yaml as tuples of terms ((), when the file is absent)."""
+    if not Path(path).exists():
+        return ()
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return tuple(tuple(str(t) for t in g) for g in data.get("groups") or [] if g)
+
+
+def subject(query: str) -> str:
+    """The query without its question words: 「硫化機溫度掉下來怎麼處理」 → 「硫化機溫度掉下來」."""
+    return _ASK_RX.sub(" ", query).strip()
+
+
+def key_terms(query: str, groups: tuple[tuple[str, ...], ...] | None = None) -> set[str]:
+    """What a chunk must hold to be on topic: the subject's content bigrams and ASCII words, plus every member of a
+    synonym group the query names (「缺料」 → 斷料、原料不足、待補料…)."""
+    groups = synonym_groups() if groups is None else groups
+    subj = subject(query)
+    terms = {w.lower() for w in _ASCII_RX.findall(subj)}
+    for run in _CJK_RUN_RX.findall(subj):
+        terms |= ({a + b for a, b in itertools.pairwise(run)} or {run}) - GENERIC_BIGRAMS
+    q = query.lower()
+    for g in groups:
+        if any(t.lower() in q for t in g):
+            terms |= {t.lower() for t in g}
+    return terms
+
+
+def on_topic(terms: set[str], c: SopChunk) -> bool:
+    text = f"{c.title} {c.section} {c.body}".lower()
+    return any(t in text for t in terms)
+
+
+@dataclass(frozen=True)
+class Retrieval:
+    """retrieve()'s answer: the passing hits (house and team SOPs on one scale), or none and why."""
+    hits: list[SopHit]
+    reason: str = ""
+    terms: tuple[str, ...] = ()
+
+
 # One embedded Qdrant client per path per process: the local mode takes a file lock.
 _CLIENTS: dict[str, object] = {}
 _EMBEDDERS: dict[tuple[str, str], object] = {}
@@ -199,7 +268,8 @@ class QdrantSopKB:
 
     def __init__(self, path: Path | str | None = None, url: str | None = None, sop_dir: Path | None = None,
                  embed_model: str | None = None, collection: str = "sop", team: bool = True,
-                 team_dataset_dir: Path | None = None):
+                 team_dataset_dir: Path | None = None, min_score: float = MIN_SCORE,
+                 strong_score: float = STRONG_SCORE):
         self.path = path if path is not None else DEFAULT_QDRANT_PATH
         self.url = url
         self.sop_dir = Path(sop_dir) if sop_dir else DEFAULT_SOP_DIR
@@ -214,13 +284,16 @@ class QdrantSopKB:
         self.team_mode = "unloaded"      # "vector" | "lexical" | "off"
         self._team_chunks: list[SopChunk] = []
         self._team_ready = False
+        self.min_score = min_score
+        self.strong_score = strong_score
         self._lock = threading.RLock()
 
     @classmethod
     def from_settings(cls, settings=None) -> QdrantSopKB:
         from warroom.config import get_settings
         s = settings or get_settings()
-        return cls(path=s.qdrant_path, url=s.qdrant_url, sop_dir=s.sop_dir, embed_model=s.embed_model)
+        return cls(path=s.qdrant_path, url=s.qdrant_url, sop_dir=s.sop_dir, embed_model=s.embed_model,
+                   min_score=s.kb_min_score, strong_score=s.kb_strong_score)
 
     # ---------------------------------------------------------------- build
     def _embed(self, texts: list[str]) -> list[list[float]]:
@@ -329,7 +402,42 @@ class QdrantSopKB:
         self._ensure_team()
         return self._rank(query, k, self._team_chunks, self.team_collection, self.team_mode)
 
+    def retrieve(self, query: str, k: int = 3) -> Retrieval:
+        """The agents' search: house and team chunks scored on the same hybrid scale, gated, best chunk per SOP.
+        A chunk passes with score >= min_score and a key term (or synonym) of the query in its title / section /
+        body, or with score >= strong_score alone (an SOP asked for by its title). Nothing passes -> no hits and the
+        reason, so the caller says 「知識庫沒有相關 SOP」 instead of citing the nearest unrelated SOP."""
+        self._ensure_ready()
+        self._ensure_team()
+        scored = (self._scored(query, self._chunks, self.collection, self.mode)
+                  + self._scored(query, self._team_chunks, self.team_collection, self.team_mode))
+        terms = key_terms(query)
+        if not scored:
+            return Retrieval([], f"{NO_SOP}（問題是空的）", tuple(sorted(terms)))
+        passing = [(sc, c) for sc, c in scored
+                   if sc >= self.strong_score or (sc >= self.min_score and on_topic(terms, c))]
+        if not passing:
+            top, c = max(scored, key=lambda t: t[0])
+            why = (f"最接近的是 {c.sop_id}（{top:.2f}），低於門檻 {self.min_score:.2f}" if top < self.min_score else
+                   f"沒有 SOP 提到「{'、'.join(sorted(terms)[:6]) or subject(query)}」（最接近 {c.sop_id} {top:.2f}）")
+            return Retrieval([], f"{NO_SOP}：{why}", tuple(sorted(terms)))
+        return Retrieval(self._best_per_sop(passing, k), "", tuple(sorted(terms)))
+
     def _rank(self, query: str, k: int, chunks: list[SopChunk], collection: str, mode: str) -> list[SopHit]:
+        return self._best_per_sop(self._scored(query, chunks, collection, mode), k)
+
+    @staticmethod
+    def _best_per_sop(scored: list[tuple[float, SopChunk]], k: int) -> list[SopHit]:
+        best: dict[str, tuple[float, SopChunk]] = {}
+        for score, c in scored:
+            if c.sop_id not in best or score > best[c.sop_id][0]:
+                best[c.sop_id] = (score, c)
+        ranked = sorted(best.values(), key=lambda t: -t[0])[:max(1, k)]
+        return [SopHit(sop_id=c.sop_id, title=c.title, source=c.source, score=round(s, 4), text=c.cited_text)
+                for s, c in ranked]
+
+    def _scored(self, query: str, chunks: list[SopChunk], collection: str, mode: str) -> list[tuple[float, SopChunk]]:
+        """Every chunk with its hybrid score (cosine, lexical, title, exact-title boost); [] for an empty query."""
         if not chunks or not query.strip():
             return []
         cos: dict[tuple[str, int], float] = {}
@@ -344,19 +452,15 @@ class QdrantSopKB:
                 log.warning("vector search failed (%s); lexical only for this query", e)
 
         qn = _norm(query)
-        best: dict[str, tuple[float, SopChunk]] = {}
+        out = []
         for c in chunks:
             tn = _norm(c.title)
             exact = EXACT_TITLE_BOOST if tn and (tn in qn or (len(qn) >= 4 and qn in tn)) else 0.0
-            score = (W_COS * cos.get((c.source, c.n), 0.0)
-                     + W_LEX * lexical_score(query, c.embed_text)
-                     + W_TITLE * lexical_score(query, c.title)
-                     + exact)
-            if c.sop_id not in best or score > best[c.sop_id][0]:
-                best[c.sop_id] = (score, c)
-        ranked = sorted(best.values(), key=lambda t: -t[0])[:max(1, k)]
-        return [SopHit(sop_id=c.sop_id, title=c.title, source=c.source, score=round(s, 4), text=c.cited_text)
-                for s, c in ranked]
+            out.append((W_COS * cos.get((c.source, c.n), 0.0)
+                        + W_LEX * lexical_score(query, c.embed_text)
+                        + W_TITLE * lexical_score(query, c.title)
+                        + exact, c))
+        return out
 
     # ---------------------------------------------------------------- extras
     def titles(self) -> dict[str, str]:

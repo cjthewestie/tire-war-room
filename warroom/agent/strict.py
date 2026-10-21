@@ -24,7 +24,9 @@ class PromptTooLong(ValueError):
 
 
 def failure_cause(e: BaseException) -> str:
-    """timeout | truncated | too_long | invalid_output | error, for the LLM_CALL audit record."""
+    """timeout | truncated | too_long | invalid_output | budget | error, for the LLM_CALL audit record."""
+    if type(e).__name__ == "BudgetExceeded":     # warroom/agent/budget.py: refused before sending
+        return "budget"
     if isinstance(e, TruncatedOutput):
         return "truncated"
     if isinstance(e, PromptTooLong):
@@ -40,5 +42,5 @@ def failure_cause(e: BaseException) -> str:
 def strict_reason(e: BaseException, what: str = "計劃") -> str:
     """Plain Chinese reason shown on the timeline / reply, e.g. 模型逾時，未產生計劃（strict 模式不使用規則備援）."""
     head = {"timeout": "模型逾時", "truncated": "模型輸出超過長度上限", "too_long": "提示超過模型的 context 上限",
-            "invalid_output": "模型輸出無效"}.get(failure_cause(e), f"模型呼叫失敗（{type(e).__name__}）")
+            "invalid_output": "模型輸出無效", "budget": str(e)}.get(failure_cause(e), f"模型呼叫失敗（{type(e).__name__}）")
     return f"{head}，未產生{what}{STRICT_NOTE}"

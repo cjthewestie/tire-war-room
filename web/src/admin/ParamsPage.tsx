@@ -4,6 +4,7 @@
 import { useState } from 'react'
 import { Err } from './adminCommon'
 import { useLoad } from './adminData'
+import { WorkerReportSwitch } from './WorkerReportSwitch'
 
 interface Param { key: string; value: unknown; enabled: boolean; meaning: string; source: string; runtime: boolean }
 interface Params { groups: { id: string; label: string; rows: Param[] }[]; note: string }
@@ -26,6 +27,7 @@ export function ParamsPage() {
     <section className="admin-body" data-testid="params-page">
       <Err err={err} />
       {data && <p className="note">{data.note}</p>}
+      <div className="admin-cards"><WorkerReportSwitch /></div>
       <div className="admin-row">
         <form className="order-search" role="search" onSubmit={(e) => e.preventDefault()}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋參數，例如 timeout、溫度、Nemo" aria-label="搜尋參數" />

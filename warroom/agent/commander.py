@@ -426,9 +426,15 @@ class OpenAICommander:
         est: int | None = None                 # this call's #33 numbers, local: concurrent events share self
         trimmed: list[str] = []
         caught: list[dict[str, Any]] = []
+        from warroom.agent import budget
+        kind, sent = budget.get().commander_kind(req), False
         try:
+            # a REPLAN over the per-event cap (or a pre-plan past 90 % of the day) is refused before sending: the
+            # except below gives the rule plan (or, --strict, the reason). An incident's PLAN is never refused.
+            budget.get().check(kind, event_id=req.event_id, phase=req.phase)
             kw = self.request_kwargs(req)
             est, trimmed = self.last_prompt_est, list(self.last_trimmed)   # read before the first await
+            sent = True
             stream = await self.client.chat.completions.create(**kw)
             async for chunk in stream:
                 if getattr(chunk, "usage", None):
@@ -476,6 +482,12 @@ class OpenAICommander:
                                valid_json=False, fell_back_to_mock=True,
                                prompt_tokens_est=est, trimmed=trimmed)
             return plan, info
+        finally:
+            if sent:
+                pin, pout = getattr(usage, "prompt_tokens", None), getattr(usage, "completion_tokens", None)
+                budget.get().record(kind, pin if pin is not None else int((est or 0) * self.settings.prompt_token_factor),
+                                    pout if pout is not None else approx_tokens(text), time.perf_counter() - t0,
+                                    event_id=req.event_id, estimated=pin is None or pout is None, phase=req.phase)
 
     async def ping(self) -> bool:
         try:

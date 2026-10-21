@@ -11,13 +11,13 @@ import { machineLabel } from '../factory'
 import { plain } from '../plain'
 import { TOOL_LABEL, stepLabel } from '../stepText'
 import { TaskList } from '../components/TaskList'
+import { SafetyCaseCard } from '../components/Resolve'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalVisual } from './ApprovalVisual'
 import { ResultStrip } from './ResultStrip'
 import type { HomeItem } from './homeItems'
 import { expectationText, type Item } from './transcript'
 import { REPLAN_HINT, setReplan, useReplans, type Replan } from './replanStore'
-import { SafetyCaseCard } from '../components/Resolve'
 
 const STEP_STATE: Record<string, string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '未執行' }
 
