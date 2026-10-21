@@ -360,6 +360,26 @@ class Orchestrator:
         except Exception:  # noqa: BLE001
             return ev.anomaly.message[:28]
 
+    @staticmethod
+    def _name(ev: Event | None) -> str:
+        """What a line is about, so the 主控台 says which one (「已核准 10 號機，…」, not 「已核准，機台處理 agent…」)."""
+        if ev is None:
+            return ""
+        if ev.source == "supervisor":
+            cmd = (ev.command or "").strip()
+            return f"主管指令「{cmd[:14]}{'…' if len(cmd) > 14 else ''}」"
+        from warroom.agent.narrate import machine_label
+        try:
+            return machine_label(ev.machine_id) if ev.source == "detector" else ev.anomaly.message[:16]
+        except Exception:  # noqa: BLE001
+            return str(ev.machine_id or "")
+
+    def _event(self, event_id: str) -> Event | None:
+        try:
+            return self.sm.get(event_id)
+        except Exception:  # noqa: BLE001 - a state machine without the event: the line names no machine
+            return None
+
     def on_decided(self, req: Any) -> None:
         """The supervisor approved a plan (核准並派發): the main agent dispatches its subagent to execute it — the
         run continues with the writes this approval covers, each still through its gate. A rejection is noted."""
@@ -370,10 +390,13 @@ class Orchestrator:
         sub = self.subs.get(ev_id)
         t = sub.type if sub else "machine"
         kind = d.decision.value
+        name = self._name(self._event(ev_id))
+        gap = " " if name[:1].isascii() and name[:1].isalnum() else ""
         if kind in ("approve", "modify"):
-            text = f"已核准，{TYPES.get(t, t)} agent 開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}；完成後回報"
+            text = (f"已核准{gap}{name}，{TYPES.get(t, t)} agent 開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}"
+                    "；完成後回報")
         elif kind == "reject":
-            text = f"主管駁回{TYPES.get(t, t)} agent 的計劃，不執行"
+            text = f"主管駁回{gap}{name}{'的' if name else ''}{TYPES.get(t, t)} agent 計劃，不執行"
         else:
             return
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
@@ -418,7 +441,10 @@ class Orchestrator:
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
         head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "已停止"
         outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
-        parts = [f"{TYPES[sub.type]} agent {head}：{outcome or '無需動作'}"]
+        name = self._name(ev)
+        if ev.source == "supervisor" and (ev.command or "").strip()[:10] in outcome:
+            name = ""                                       # the outcome already quotes the command
+        parts = [f"{name}{'・' if name else ''}{TYPES[sub.type]} agent {head}：{outcome or '無需動作'}"]
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
         parts.append(f"核准：{'、'.join(decided)}" if decided else "沒有核准")
         return "。".join(parts), {"writes": writes, "approvals": decided, "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
@@ -472,7 +498,7 @@ class Orchestrator:
         detail = {"orch": "interrupt", "by": by, "reason": reason, "cancelled_run": cancelled_run,
                   "superseded_approvals": superseded, "cancelled_tasks": cancelled_tasks, "schedule_kept": kept,
                   "state": ev.state.value, "type": sub.type,
-                  "text": f"主管中斷{TYPES[sub.type]} agent：停止新的工具呼叫"
+                  "text": f"主管中斷{self._name(ev)}{'的' if self._name(ev) else ''}{TYPES[sub.type]} agent：停止新的工具呼叫"
                           f"{f'，作廢核准卡 {len(superseded)} 張' if superseded else ''}"
                           f"{f'，取消人員任務 {len(cancelled_tasks)} 件' if cancelled_tasks else ''}"
                           f"，排程維持{f' v{kept}' if kept else '原樣'}"}

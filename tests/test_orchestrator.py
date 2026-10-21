@@ -142,8 +142,9 @@ async def test_page11_unchanged_under_the_main_agent(tmp_path):
     kinds = [r["orch"] for r in rows]
     assert kinds[0] == "dispatch" and kinds[-1] == "report" and kinds.count("queue") >= 2
     d, rep = rows[0], rows[-1]
-    assert d["type"] == "machine" and d["by"] == "code" and "已請子 agent 規劃：機台處理" in d["text"]
-    assert "機台處理子 agent 完成" in rep["text"] and rep["writes"] and rep["approvals"] and not rep["interrupted"]
+    assert d["type"] == "machine" and d["by"] == "code" and "新任務：機台處理（7 號機" in d["text"]
+    # the report names the machine (the 主控台 showed 「機台處理 agent 完成：…」 for every event alike)
+    assert rep["text"].startswith("7 號機・機台處理 agent 完成") and rep["writes"] and rep["approvals"] and not rep["interrupted"]
     sub = o.subagents()[0]
     assert sub["status"] == "done" and sub["round"] == 2 and sub["tools_called"] >= 4
 
@@ -216,7 +217,8 @@ async def test_supervisor_task_dispatch_then_report(tmp_path):
     rows = [e.payload for e in audit.tail(0, 100_000) if e.actor == "main_agent" and e.event_id == ev.id]
     disp = next(r for r in rows if r["orch"] == "dispatch")
     assert disp["type"] == "order" and disp["dispatch"] == "dispatch_order_task" and disp["by"] == "rules"
-    assert rows[-1]["orch"] == "report" and "訂單處理子 agent" in rows[-1]["text"]
+    # the outcome already quotes the command, so the report does not name it twice
+    assert rows[-1]["orch"] == "report" and rows[-1]["text"].startswith("訂單處理 agent 完成：主管指令「#A-311 可能晚交")
 
 
 # ---------------------------------------------------------------- API
@@ -236,7 +238,7 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
         r = await p.http.post("/api/command", json={"text": "#M-201 可能晚交，請重排保交期"})
         assert r.status_code == 200, r.text
         eid = r.json()["event_id"]
-        assert "主 agent 已請子 agent 規劃：訂單處理" in r.json()["reply"]
+        assert "已開新任務：訂單處理" in r.json()["reply"]
         await p.until(lambda: p.pending(eid) or p.rt.state_machine.get(eid).state.value in ("closed", "safe_stop"))
         if p.pending(eid):
             d = await p.http.post(f"/api/approvals/{p.pending(eid)[0].id}/decision",
@@ -245,7 +247,9 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent"]
         assert rows[0]["orch"] == "dispatch" and rows[0]["type"] == "order"
-        assert "訂單處理子 agent" in rows[-1]["text"]
+        assert rows[-1]["text"].startswith("訂單處理 agent 完成：主管指令「#M-201")
+        execute = next(x for x in rows if x["orch"] == "dispatch" and x.get("phase") == "execute")
+        assert execute["text"].startswith("已核准主管指令「#M-201")          # 「已核准，…」 named nothing
         subs = (await p.http.get("/api/subagents")).json()
         me = next(x for x in subs["items"] if x["id"] == eid)
         assert me["status"] in ("done", "waiting_tasks", "running") and me["parent"] == "main" and me["type_label"] == "訂單處理"
@@ -313,13 +317,17 @@ async def test_detector_preclass_fields():
 
 
 # ---------------------------------------------------------------- the 主 agent conversation (PR #58 review)
+# Ported to CJ's 10-21 single agent (native tool calling; propose_plan opens a 下新任務 event, no subagent dispatch).
+from tests.test_main_agent_demo import Model
 from warroom.agent.main_agent import (GIBBERISH_REPLY, IDENTITY_REPLY, MainAgent, is_gibberish)  # noqa: E402
 from warroom.contracts import ToolResult as _TR  # noqa: E402
+
+PROPOSED = "好，已擬計劃送你核准（AI 指揮官正在排），核准後才執行。"
 
 
 class _Harness:
     def __init__(self):
-        self.tools, self.dispatched, self.discussed = [], [], []
+        self.tools, self.proposed, self.discussed = [], [], []
 
     async def run_tool(self, name, args, call_id):
         self.tools.append(name)
@@ -327,9 +335,9 @@ class _Harness:
             else {"summary": {"CURE-07": {"temp_c_now": 122.3}}} if name == "read_sensors" else {}
         return _TR(call_id=call_id, tool=ToolName(name), ok=True, data=data)
 
-    async def dispatch(self, t, task):
-        self.dispatched.append((t, task))
-        return {"event_id": f"EV-{len(self.dispatched)}"}
+    async def propose(self, task):
+        self.proposed.append(task)
+        return {"event_id": f"EV-{len(self.proposed)}"}
 
     async def discuss(self, text):
         self.discussed.append(text)
@@ -337,7 +345,7 @@ class _Harness:
 
     async def turn(self, agent, text, waiting=None):
         return await agent.turn(text, context={"abnormal": []}, waiting_plan=waiting, run_tool=self.run_tool,
-                                dispatch=self.dispatch, discuss=self.discuss if waiting else None)
+                                propose=self.propose, discuss=self.discuss if waiting else None)
 
 
 def test_gibberish_detector():
@@ -345,19 +353,19 @@ def test_gibberish_detector():
     assert not any(is_gibberish(t) for t in ("你好", "CURE-07 怎樣", "#M-201", "ok", "who are you", "7 號機"))
 
 
-@pytest.mark.parametrize("text,tools,dispatch,want", [
+@pytest.mark.parametrize("text,tools,proposed,want", [
     ("vu04y94u.3s83uv,", [], [], GIBBERISH_REPLY),
     ("妳是誰", [], [], IDENTITY_REPLY),
     ("你好", [], [], None), ("謝謝", [], [], None),
     ("大開煉機過熱怎麼處理", ["read_sensors", "sop_search"], [], "SOP-OM-01"),
     ("7 號機現在怎樣", ["read_sensors"], [], "122.3"),
-    ("#M-201 可能晚交，請重排保交期", [], [("order", "#M-201 可能晚交，請重排保交期")], "訂單處理"),
+    ("#M-201 可能晚交，請重排保交期", [], ["#M-201 可能晚交，請重排保交期"], PROPOSED),
     ("幫我處理一下", [], [], None),
 ])
-async def test_main_agent_rules(text, tools, dispatch, want):
+async def test_main_agent_rules(text, tools, proposed, want):
     h = _Harness()
     out = await h.turn(MainAgent(), text)
-    assert h.tools == tools and h.dispatched == dispatch, (text, h.tools, h.dispatched)
+    assert h.tools == tools and h.proposed == proposed, (text, h.tools, h.proposed)
     assert out["reply"] and "我不確定要查什麼" not in out["reply"]
     if want:
         assert want in out["reply"], out["reply"]
@@ -366,29 +374,11 @@ async def test_main_agent_rules(text, tools, dispatch, want):
 async def test_main_agent_discusses_the_selected_plan():
     h = _Harness()
     out = await h.turn(MainAgent(), "不要跨組調人", waiting="7 號機溫度下降")
-    assert h.discussed == ["不要跨組調人"] and not h.dispatched and "加進計劃" in out["reply"]
-
-
-class _SeqLLM:
-    """A fake model that answers each step from a list."""
-    def __init__(self, steps):
-        self.steps, self.calls = list(steps), []
-        self.chat = SimpleNamespace(completions=SimpleNamespace(create=self._create))
-
-    async def _create(self, **kw):
-        self.calls.append(kw)
-        s = self.steps.pop(0)
-        if isinstance(s, Exception):
-            raise s
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(s, ensure_ascii=False)))])
-
-
-def _step(tool="", args=None, reply=""):
-    return {"action": "tool" if tool else "reply", "tool": tool, "args": args or {}, "reply": reply}
+    assert h.discussed == ["不要跨組調人"] and not h.proposed and "加進計劃" in out["reply"]
 
 
 async def test_main_agent_model_loop_calls_the_knowledge_base_then_replies():
-    llm = _SeqLLM([_step("sop_search", {"query": "大開煉機過熱", "k": 2}), _step(reply="依 SOP-OM-01：先降速、檢查冷卻水。")])
+    llm = Model(("tool", "sop_search", {"query": "大開煉機過熱", "k": 2}), ("say", "依 SOP-OM-01：先降速、檢查冷卻水。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
     assert h.tools == ["sop_search"] and out["by"] == "model" and "SOP-OM-01" in out["reply"]
@@ -398,35 +388,36 @@ async def test_main_agent_model_loop_calls_the_knowledge_base_then_replies():
 async def test_main_agent_has_no_write_tools():
     from warroom.agent.main_agent import ALL_TOOLS
     assert not {"set_cure_time", "confirm_schedule", "notify_teams", "solve_schedule"} & set(ALL_TOOLS)
-    llm = _SeqLLM([_step("set_cure_time", {"press_id": "CURE-07"}), _step(reply="不能直接改，我可以派子 agent 擬計劃。")])
+    llm = Model(("tool", "set_cure_time", {"press_id": "CURE-07"}), ("say", "不能直接改，我可以擬計劃送你核准。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "把 7 號機硫化時間改 36 小時")
-    assert h.tools == [] and not h.dispatched and out["steps"][0]["ok"] is False
+    assert h.tools == [] and out["steps"][0]["ok"] is False and out["steps"][0]["tool"] == "set_cure_time"
 
 
-async def test_main_agent_dispatch_needs_an_object_and_happens_once():
-    llm = _SeqLLM([_step("dispatch_order_task", {"task": "處理一下"}), _step(reply="要派人做事，請告訴我是哪張訂單。")])
+async def test_main_agent_propose_needs_an_object_and_happens_once():
+    llm = Model(("tool", "propose_plan", {"task": "處理一下"}), ("say", "要安排事情，請告訴我是哪張訂單。"))
     h = _Harness()
     await h.turn(MainAgent(_settings(), client=llm), "處理一下")
-    assert not h.dispatched
-    llm = _SeqLLM([_step("dispatch_order_task", {"task": "#M-201 重排保交期"}), _step("dispatch_order_task", {"task": "#M-201"}),
-                   _step(reply="好，已請訂單處理子 agent 擬計劃，擬好會送你核准。")])
+    assert not h.proposed
+    llm = Model(("tool", "propose_plan", {"task": "#M-201 重排保交期"}), ("tool", "propose_plan", {"task": "#M-201"}),
+                ("say", "好，已擬計劃送你核准。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "#M-201 可能晚交，請重排保交期")
-    assert len(h.dispatched) == 1 and out["event_id"] == "EV-1"
+    assert len(h.proposed) == 1 and out["event_id"] == "EV-1" and out["reply"] == PROPOSED
 
 
 async def test_main_agent_numbers_only_from_tools_and_fallback():
-    llm = _SeqLLM([_step("read_sensors", {"machine_ids": ["CURE-07"]}), _step(reply="7 號機現在 118°C，很危險。")])
+    llm = Model(("tool", "read_sensors", {"machine_ids": ["CURE-07"]}), ("say", "7 號機現在 118°C，很危險。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
     assert "118" not in out["reply"] and "122.3" in out["reply"]          # an invented number is replaced by the results
     h = _Harness()
-    out = await h.turn(MainAgent(_settings(), client=_SeqLLM([TimeoutError("slow")])), "妳是誰")
-    assert out["fell_back"] and out["reply"] == IDENTITY_REPLY and out["by"] == "rules"
+    llm = Model()
+    out = await h.turn(MainAgent(_settings(), client=llm), "妳是誰")
+    assert out["reply"] == IDENTITY_REPLY and not llm.calls                # fixed reply, no model call
     h = _Harness()
-    out = await h.turn(MainAgent(_settings(), client=_SeqLLM([])), "vu04y94u.3s83uv,")
-    assert out["reply"] == GIBBERISH_REPLY and not h.tools and not h.dispatched     # never reaches the model
+    out = await h.turn(MainAgent(_settings(), client=Model(("say", "這句我看不懂，你要查哪台機台？"))), "vu04y94u.3s83uv,")
+    assert not h.tools and not h.proposed                                 # reaches the model, opens nothing
 
 
 async def test_main_message_api(tmp_path):
@@ -434,9 +425,10 @@ async def test_main_message_api(tmp_path):
     async with Plant(_rt(tmp_path, "normal")) as p:
         def tool_calls():
             return len([e for e in p.rt.audit.tail(0, 100_000) if e.kind is AuditKind.TOOL_CALL])
-        n0, subs0 = tool_calls(), len(p.rt.orch.subagents())
+        n0 = tool_calls()
         r = (await p.http.post("/api/main/message", json={"text": "妳是誰"})).json()
         assert r["reply"] == IDENTITY_REPLY and not r["steps"] and tool_calls() == n0
+        subs0 = len(p.rt.orch.subagents())
         g = (await p.http.post("/api/main/message", json={"text": "vu04y94u.3s83uv,"})).json()
         assert g["reply"] == GIBBERISH_REPLY and g["event_id"] is None and len(p.rt.orch.subagents()) == subs0
         for t in ("你好", "謝謝"):
@@ -445,9 +437,9 @@ async def test_main_message_api(tmp_path):
         assert tool_calls() == n0
         q = (await p.http.post("/api/main/message", json={"text": "大開煉機過熱怎麼處理"})).json()
         assert "sop_search" in [s["tool"] for s in q["steps"]] and not q["event_id"]
-        t = (await p.http.post("/api/main/message", json={"text": "#M-201 可能晚交，請重排保交期"})).json()
+        t = (await p.http.post("/api/main/message", json={"text": "#A-311 可能晚交，請重排保交期"})).json()
         eid = t["event_id"]
-        assert eid and t["steps"][0]["tool"] == "dispatch_order_task"
+        assert eid and t["steps"][0]["tool"] == "propose_plan"
         await p.until(lambda: p.pending(eid))
         ch = (await p.http.post("/api/main/message", json={"text": "不要跨組調人", "event_id": eid})).json()
         assert ch["steps"] and ch["steps"][0]["tool"] == "discuss_waiting_plan"
@@ -459,29 +451,40 @@ async def test_main_message_api(tmp_path):
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent" and e.payload.get("orch") == "dispatch"]
         assert any(x.get("phase") == "execute" for x in rows)
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
+        # a scenario load starts a new conversation (「你好」 got 「您剛才說『降到 120』…」 from the last rehearsal)
+        assert len(MainAgentOf(p).memory) > 0
+        assert (await p.http.post("/api/sim/control", json={"action": "reset"})).status_code == 200
+        assert len(MainAgentOf(p).memory) == 0
 
 
-async def test_main_agent_never_claims_a_dispatch_it_did_not_make():
-    llm = _SeqLLM([_step(reply="已請機台處理子 agent 擬計劃。"), _step(reply="已請機台處理子 agent 擬計劃。")])
+def MainAgentOf(p):
+    """The app's MainAgent: create_app keeps it in the `holder` dict its handlers close over."""
+    route_ = next(r for r in p.http._transport.app.routes if getattr(r, "path", "") == "/api/main/message")
+    seen, todo = set(), [route_.endpoint]
+    while todo:
+        fn = todo.pop()
+        for c in getattr(fn, "__closure__", None) or ():
+            v = c.cell_contents
+            if isinstance(v, dict) and "main" in v and "rt" in v:
+                return v["main"]
+            if callable(v) and id(v) not in seen:
+                seen.add(id(v))
+                todo.append(v)
+    raise AssertionError("no MainAgent in the app")
+
+
+async def test_main_agent_never_claims_a_plan_it_did_not_make():
+    llm = Model(("say", "已擬計劃送你核准。"), ("say", "已擬計劃送你核准。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "9 號機明天保養，幫我安排")
-    assert h.dispatched == [("machine", "9 號機明天保養，幫我安排")] and out["event_id"] and out["fell_back"]
+    assert h.proposed == ["9 號機明天保養，幫我安排"] and out["event_id"] and out["fell_back"]
 
 
-async def test_main_agent_reads_a_tool_named_in_a_reply_step_as_a_call():
-    # Nemotron (real run, 2026-10-21): {"action": "reply", "tool": "read_sensors", "args": {...}, "reply": ""}
-    bad = {"action": "reply", "tool": "read_sensors", "args": {"machine_ids": ["CURE-07"]}, "reply": ""}
-    llm = _SeqLLM([bad, _step(reply="7 號機讀值正常。")])
-    h = _Harness()
-    out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
-    assert h.tools == ["read_sensors"] and out["by"] == "model" and not out["fell_back"]
-
-
-async def test_main_agent_dispatch_reply_is_written_by_code():
-    llm = _SeqLLM([_step("dispatch_order_task", {"task": "#M-201 重排保交期"}), _step(reply="好的，子 agent 已擬好計劃。")])
+async def test_main_agent_propose_reply_is_written_by_code():
+    llm = Model(("tool", "propose_plan", {"task": "#M-201 重排保交期"}), ("say", "好的，計劃已經完成了。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "#M-201 可能晚交，請重排保交期")
-    assert out["reply"] == "好，已請訂單處理子 agent 擬計劃，擬好會送你核准，核准後才執行。"
+    assert out["reply"] == PROPOSED
 
 
 async def test_rule_reply_names_the_sop_without_pasting_it():
@@ -491,27 +494,28 @@ async def test_rule_reply_names_the_sop_without_pasting_it():
 
 
 async def test_main_agent_does_not_repeat_a_call_and_keeps_memory_as_reference():
-    rs = _step("read_sensors", {"machine_ids": ["CURE-07"]})
-    llm = _SeqLLM([rs, rs, _step(reply="7 號機讀值正常。")])
+    rs = ("tool", "read_sensors", {"machine_ids": ["CURE-07"]})
+    llm = Model(rs, rs, ("say", "7 號機讀值正常。"))
     h = _Harness()
     agent = MainAgent(_settings(), client=llm)
     out = await h.turn(agent, "7 號機現在怎樣")
     assert h.tools == ["read_sensors"] and out["reply"] == "7 號機讀值正常。"
-    llm.steps = [_step(reply="你好，我是主 agent。")]
-    await h.turn(agent, "你好")
-    sent = llm.calls[-1]["messages"]
-    assert [m["role"] for m in sent] == ["system", "user"] and "earlier_messages" in sent[1]["content"]
+    llm.script = [("tool", "read_sensors", {"machine_ids": ["CURE-08"]}), ("say", "8 號機讀值正常。")]
+    n = len(llm.calls)
+    await h.turn(agent, "那 8 號呢？")
+    sent = llm.calls[n]["messages"]
+    assert [m["role"] for m in sent] == ["system", "user"] and "7 號機現在怎樣" in sent[1]["content"]
     assert "7 號機讀值正常" not in sent[1]["content"]          # its own answers are not replayed (the model copied them)
 
 
 async def test_main_agent_looks_up_a_plant_question_before_answering():
     # real run 2026-10-21: 「大開煉機過熱怎麼處理」 answered with the greeting, no tool
-    llm = _SeqLLM([_step(reply="我是主 agent，可以幫你查 SOP。"), _step("sop_search", {"query": "大開煉機過熱", "k": 2}),
-                   _step(reply="依 SOP-OM-01 處理。")])
+    llm = Model(("say", "我是主 agent，可以幫你查 SOP。"), ("tool", "sop_search", {"query": "大開煉機過熱", "k": 2}),
+                ("say", "依 SOP-OM-01 處理。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
     assert h.tools == ["sop_search"] and out["reply"] == "依 SOP-OM-01 處理。" and not out["fell_back"]
-    llm = _SeqLLM([_step(reply="我是主 agent。"), _step(reply="我是主 agent。")])
+    llm = Model(("say", "我是主 agent。"), ("say", "我是主 agent。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
     assert "sop_search" in h.tools and "SOP-OM-01" in out["reply"] and out["fell_back"]

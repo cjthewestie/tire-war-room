@@ -1,5 +1,7 @@
 // The 主 agent's thread as plain bubbles (issue #54): its turns (audit kind=system actor=main_agent orch=chat, backfilled
 // once from GET /api/audit, then live over WS), its execute dispatches, reports and interrupts, and what is being sent now.
+// Only what happened since the scenario was last loaded (the runtime's system row {"msg": "scenario loaded"}): the 主控台
+// showed earlier rehearsals, and every reload added 「機台處理 agent 已停止：事件處理被取消」.
 import { useEffect, useMemo, useState } from 'react'
 import type { AuditEntry } from '../contracts'
 import { apiGet } from '../transport'
@@ -15,6 +17,8 @@ export interface Bubble {
 
 type D = Record<string, unknown>
 
+const isLoad = (e: AuditEntry) => e.kind === 'system' && (e.payload as D | null)?.msg === 'scenario loaded'
+
 /** Audit rows of the 主 agent → bubbles. */
 function fromAudit(e: AuditEntry): Bubble[] {
   const p = (e.payload ?? {}) as D
@@ -25,6 +29,8 @@ function fromAudit(e: AuditEntry): Bubble[] {
     return [{ key: `a${e.seq}-me`, ts: e.ts, who: 'me', text: String(p.text ?? ''), about },
       { key: `a${e.seq}`, ts: e.ts, who: 'agent', text: String(p.reply ?? ''), steps, fellBack: p.fell_back === true, error: (p.error as string) ?? null, about }]
   }
+  // an event the scenario switch (or the day loop) cancelled is not news for the supervisor
+  if (o === 'report' && /事件處理被取消/.test(String(p.outcome ?? p.text ?? ''))) return []
   if (o === 'report' || o === 'interrupt' || (o === 'dispatch' && p.phase === 'execute')) {
     return [{ key: `a${e.seq}`, ts: e.ts, who: 'agent', text: shortText(String(p.text ?? '')) }]
   }
@@ -43,15 +49,20 @@ export function useMainThread(asks: LocalItem[]): Bubble[] {
   useEffect(() => {
     if (transport?.mode !== 'live' || !connected) return
     let off = false
-    apiGet<AuditEntry[]>('/api/audit?kind=system&limit=5000').then((es) => { if (!off) setBackfill(es.filter((e) => e.actor === 'main_agent')) }).catch(() => {})
+    apiGet<AuditEntry[]>('/api/audit?kind=system&limit=5000').then((es) => { if (!off) setBackfill(es.filter((e) => e.actor === 'main_agent' || isLoad(e))) }).catch(() => {})
     return () => { off = true }
   }, [transport, connected])
   return useMemo(() => {
     const bySeq = new Map<number, AuditEntry>()
-    for (const e of [...backfill, ...state.audit]) if (e.actor === 'main_agent' && e.kind === 'system') bySeq.set(e.seq, e)
-    const rows = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
-    const turns = new Set(rows.map((e) => String((e.payload as D)?.turn ?? '')).filter(Boolean))
-    const out: Bubble[] = rows.flatMap(fromAudit)
+    let loaded = 0
+    for (const e of [...backfill, ...state.audit]) {
+      if (isLoad(e)) loaded = Math.max(loaded, e.seq)
+      else if (e.actor === 'main_agent' && e.kind === 'system') bySeq.set(e.seq, e)
+    }
+    const all = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
+    // every turn the server has, so a message sent before the switch does not come back as a local bubble
+    const turns = new Set(all.map((e) => String((e.payload as D)?.turn ?? '')).filter(Boolean))
+    const out: Bubble[] = all.filter((e) => e.seq > loaded).flatMap(fromAudit)
     // what is being sent now (and answers whose audit row has not arrived yet)
     for (const it of asks) {
       if (it.k !== 'chat' || (it.turn && turns.has(it.turn))) continue

@@ -29,6 +29,8 @@ export interface HomeItem {
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+/** 「主管指令：…」 once: a supervisor task's card title may already start with it (「主管指令：主管指令：…」). */
+const titled = (head: string, title: string) => (title.startsWith(`${head}：`) ? title : `${head}：${title}`)
 
 export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalRequest[], schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): HomeItem[] {
   const out: HomeItem[] = []
@@ -52,13 +54,13 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
       const done = tasks.length - tasksOpen
       out.push({ ...base, rank: 4, tone: 'run', progress: tasks.length ? done / tasks.length : ok / Math.max(1, total), pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
-        title: `${task ? (ev.source === 'plant' ? who : '主管指令') : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+        title: titled(task ? (ev.source === 'plant' ? who : '主管指令') : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
     } else {
-      out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`,
+      out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
     }
   }
