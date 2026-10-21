@@ -14,8 +14,8 @@ import {
 import { machineLabel } from './factory'
 import { fmtHM, fmtMD } from './format'
 import { hypLabel, plain } from './plain'
-import { NOTIFY_LABEL, resultText } from './stepText'
-import { cureChange, optionViews, type OptionView } from './agent/approvalView'
+import { NOTIFY_LABEL, resultText, staffingChoice } from './stepText'
+import { cureChange, deliveryFacts, optionViews, type OptionView } from './agent/approvalView'
 import { expectationText, repairWindow } from './phone/RepairEta'
 
 export type BriefState = 'pending' | 'running' | 'done' | 'stopped'
@@ -67,7 +67,7 @@ export function eventName(ev: Event): string {
 function optionText(o: OptionView | undefined, opt: ApprovalOption | undefined, kind: 'transfer' | 'overtime' | null): string {
   if (!o && !opt) return '待確認'
   if (o?.who && o.kind === 'transfer' && kind === 'transfer') return `從 ${o.who.split(' → ')[0]}調 ${o.people ?? 1} 人${o.shift ? `（${o.shift}）` : ''}`
-  if (o?.who && o.kind === 'overtime') return `${o.who}${o.shift ? `・${o.shift}` : ''}`
+  if (kind === 'overtime') return plain(opt?.label ?? '夜班加班')
   return plain(opt?.label ?? '待確認')
 }
 
@@ -92,22 +92,35 @@ export function optionBriefs(req: ApprovalRequest, ev: Event | null): OptionBrie
       const from = v.who ? v.who.split(' → ')[0] : '來源組'
       effect.push(`${from}少 ${v.people ?? 1} 人${v.shift ? `（${v.shift}）` : ''}，可能影響該組產能`)
     } else if (kind === 'overtime') {
-      effect.push(`${v.who?.replace('（原班人員加班）', '') ?? '原班人員'}原班加班${v.shift ? `（${v.shift}）` : ''}，不從其他組調人`)
+      effect.push(`${v.who ?? '原班人員加班'}${v.shift ? `・${v.shift}` : ''}，不從其他組調人`)
     }
     const label = optionText(v, v.opt, kind)
     return { id: v.opt.id, label, recommended: v.opt.recommended, effect, high: kind === 'transfer' && req.risk === 'R3', staffing: kind !== null }
   })
 }
 
-function actionLines(req: ApprovalRequest): string[] {
+/** A long action line (a whole re-plan, a notice with its message) is cut to its first clause; the full text stays
+ *  in 查看處置依據 (fullActionLines). */
+export function shortAction(a: string): string {
+  if (a.length <= 56) return a
+  const colon = a.indexOf('：')
+  if (colon >= 4) return a.slice(0, colon)
+  const paren = a.indexOf('（', 6)
+  return paren > 0 ? `${a.slice(0, paren)}（細節見處置依據）` : `${a.slice(0, 38)}…`
+}
+export function fullActionLines(req: ApprovalRequest): string[] {
+  return (req.actions ?? []).filter((a) => !a.startsWith('人力：依所選')).map((a) => plain(a).replace(/）\s+生效/, '）生效'))
+}
+
+export function actionLines(req: ApprovalRequest): string[] {
   // 「排程生效」 and 「硫化總時數」 usually describe the same change: say it once (only when the hours match)
-  const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：依所選')).map((a) => plain(a))
+  const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：依所選')).map((a) => plain(a).replace(/）\s+生效/, '）生效'))
   const sched = acts.find((a) => /排程.*生效/.test(a))
   return acts.filter((a) => {
     if (!sched || a === sched || !/硫化總時數/.test(a)) return true
     const h = a.match(/(\d+(?:\.\d+)?) h/)
     return !(h && sched.includes(`${h[1]} h`))
-  })
+  }).map(shortAction)
 }
 
 function deliveryLine(text: string | null | undefined): string | null {
@@ -116,6 +129,14 @@ function deliveryLine(text: string | null | undefined): string | null {
   if (t.startsWith('不受影響')) return `預估訂單交期不受影響${t.length > 4 ? t.slice(4) : ''}`
   if (t.startsWith('延誤')) return `預估${t}`
   return t
+}
+
+/** The solver's delivery verdict for an event, when the approval card itself is not at hand (page reloaded). */
+function deliveryFromEvent(ev: Event): string | null {
+  const f = deliveryFacts(ev)
+  if (f.met === true) return '預估訂單交期不受影響'
+  if (f.met === false) return `預估延誤：${f.late.join('、') || '有訂單'}`
+  return null
 }
 
 function gapLines(req: ApprovalRequest | null | undefined): string[] {
@@ -141,7 +162,7 @@ function headline(ev: Event, req: ApprovalRequest | null): string {
 const stepName = (sr: StepRun): string => {
   const a = sr.step.args
   try {
-    return resultText(sr.step.tool, a, sr.result?.data ?? {})
+    return plain(resultText(sr.step.tool, a, sr.result?.data ?? {})).replace(/）\s+生效/, '）生效').replace(/保留\s*第/, '保留第')
   } catch { return NOTIFY_LABEL[String(a.kind)] ?? sr.step.tool }
 }
 const STEP_STATE: Record<StepRun['state'], string> = {
@@ -152,7 +173,7 @@ function writeSteps(ev: Event): StepRun[] {
   return ev.steps.filter((s) => WRITE_TOOLS.includes(s.step.tool))
 }
 const taskLine = (t: WorkTask): string =>
-  `${t.title}（${t.worker_name ?? t.team_label}）：${t.status}${t.status !== '完成' && t.eta ? `，預計 ${fmtHM(t.eta)}` : ''}${t.status === '完成' && t.done_at ? `，${fmtHM(t.done_at)} 完成` : ''}`
+  `${plain(t.title)}：${t.status}${t.status !== '完成' && t.eta ? `，預計 ${fmtHM(t.eta)}` : ''}${t.status === '完成' && t.done_at ? `，${fmtHM(t.done_at)} 完成` : ''}`
 
 function approvedOf(ev: Event, resolved: ApprovalRequest[]): ApprovalRequest | null {
   return resolved.filter((r) => r.event_id === ev.id && r.status === 'approved')
@@ -168,13 +189,23 @@ function approvedLabel(req: ApprovalRequest, ev: Event): string {
   return acts[0] ? `${acts[0]}` : plain(req.title)
 }
 
+/** 「方案 B 已核准：從 2 線調 1 人」: the approved plan, by name. */
+function approvedLead(req: ApprovalRequest, ev: Event): string {
+  const id = req.decision?.option_id
+  if (req.options.length > 1 && id) {
+    const ob = optionBriefs(req, ev).find((o) => o.id === id)
+    return `方案 ${id} 已核准：${ob?.label ?? plain(req.options.find((o) => o.id === id)?.label)}。`
+  }
+  return `${approvedLabel(req, ev)}已核准。`
+}
+
 function equipmentLine(ev: Event, c: BriefCtx): string | null {
   if (!isMachineEvent(ev)) return null
   const m = c.machines.find((t) => t.machine_id === ev.machine_id)
   const fix = c.maintenance?.find((x) => x.machine_id === ev.machine_id)
   const parts: string[] = []
   if (m) parts.push(`${machineLabel(ev.machine_id)}${STATUS_PLAIN[m.status]}${m.temp_c != null ? `（${Math.round(m.temp_c * 10) / 10}°C）` : ''}`)
-  if (fix) parts.push(fix.status === 'in_progress' ? `維修進行中：${fix.title}` : `維修已排入：${fix.title}`)
+  if (fix) { const t = fix.title.split('：'); const short = t.length > 1 ? t[1] : t[0]; parts.push(fix.status === 'in_progress' ? `維修進行中：${short}` : `維修已排入：${short}`) }
   else if (hypLabel('active', ev) === '未驗證・交維修') parts.push('已交維修，尚未回報修復')
   return parts.length ? parts.join('；') : '待確認'
 }
@@ -234,20 +265,25 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
       const t = `人力：${approvedLabel(approved, ev)}`
       if (!result.some((r) => r.includes(approved.decision!.option_id ?? '~'))) result.push(t)
     }
-    const dl = deliveryLine(approved?.delivery_impact)
+    const dl = approved ? deliveryLine(approved.delivery_impact) : deliveryFromEvent(ev)
     if (dl) result.push(dl)
     const eq = equipmentLine(ev, c)
     const openTasks = c.tasks.filter((t) => t.event_id === ev.id && t.status !== '完成')
     const todo = [...openTasks.map((t) => taskLine(t))]
     if (approved && !(approved.options.length > 1 && approved.decision?.option_id)) todo.push(...gapLines(approved).map((g) => `缺口：${g}`))
-    const sections: BriefSection[] = [{ key: 'result', title: '處理結果', lines: result.length ? result : [plain(ev.outcome) || '待確認'] }]
+    const concl = plain(ev.outcome).replace(/\u2060/g, '')
+    if (concl && result.length) result.push(`結論：${concl}`)
+    const sections: BriefSection[] = [{ key: 'result', title: '處理結果', lines: result.length ? result : [concl || '待確認'] }]
     if (eq) sections.push({ key: 'equipment', title: '設備狀態', lines: [eq], plain: true })
     if (todo.length) sections.push({ key: 'todo', title: '後續待辦', lines: todo })
-    return { ...base, state: 'done', stateLabel: '處置完成', lead: plain(ev.outcome) ? `${plain(ev.outcome)}。` : '處置流程已結案。', sections, deadline: null }
+    const did = [...new Set(exec.map(shortAction))].slice(0, 3)
+    return { ...base, state: 'done', stateLabel: '處置完成', lead: did.length ? `已完成：${did.join('、')}。` : (concl ? `${concl}。` : '處置流程已結案。'), sections, deadline: null }
   }
 
   // ------------------------------------------------------------ 執行中 (approved, not closed yet)
-  if (approved) {
+  // the client only holds the approval record for decisions it saw; after a reload the event itself says it ran
+  const ran = !!approved || ev.state === 'execute' || ev.state === 'verify' || (ev.state === 'replan' && ev.approvals.length > 0)
+  if (ran) {
     const steps = writeSteps(ev)
     const progress: string[] = steps.map((s) => `${stepName(s)}：${STEP_STATE[s.state]}`)
     const tasks = c.tasks.filter((t) => t.event_id === ev.id)
@@ -259,19 +295,19 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
       ? `預計 ${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)} 完成${w.lastEta ? '（含現場任務）' : w.x ? `（${expectationText(w.x)}）` : ''}，完成後將通知你。`
       : '待確認，完成後將通知你。'
     const impact: string[] = []
-    const dl = deliveryLine(approved.delivery_impact)
+    const dl = approved ? deliveryLine(approved.delivery_impact) : deliveryFromEvent(ev)
     if (dl) impact.push(dl)
-    const staffed = approved.options.length > 1 && !!approved.decision?.option_id
-    if (staffed) {
+    const staffed = !!approved && approved.options.length > 1 && !!approved.decision?.option_id
+    if (approved && staffed) {
       const ob = optionBriefs(approved, ev).find((o) => o.id === approved.decision?.option_id)
       if (ob?.effect.length) impact.push(...ob.effect.map((e) => `人力：${e}`))
-    } else impact.push(...gapLines(approved).map((g) => `缺口：${g}`))
+    } else if (approved) impact.push(...gapLines(approved).map((g) => `缺口：${g}`))
     const sections: BriefSection[] = [
       { key: 'progress', title: '處理進度', lines: progress.length ? progress : ['待確認'] },
       { key: 'eta', title: '預計完成', lines: [eta], plain: true },
     ]
     if (impact.length) sections.push({ key: 'impact', title: '預期影響', lines: impact })
-    return { ...base, state: 'running', stateLabel: '執行中', lead: `${approvedLabel(approved, ev)} 已核准。`, sections, deadline: null }
+    return { ...base, state: 'running', stateLabel: '執行中', lead: approved ? approvedLead(approved, ev) : (staffingChoice(ev.steps) ? `已核准：${staffingChoice(ev.steps)}。` : '已核准。'), sections, deadline: null }
   }
   return null   // still planning: the existing 「AI 指揮官…中」 line covers it
 }

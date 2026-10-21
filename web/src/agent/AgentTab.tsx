@@ -20,6 +20,8 @@ import { Row } from './TranscriptRows'
 import { setReplan, useReplans } from './replanStore'
 import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
 import { useTranscript } from './useTranscript'
+import { BriefingView } from '../components/BriefingView'
+import { useEventBriefing } from '../useBriefing'
 import './agent.css'
 
 /** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
@@ -70,20 +72,27 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
   all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null; onFull?: (eventId?: string) => void
 }) {
   const { state } = useWarRoom()
-  const talk = useMemo(() => withAsks(items.filter(isDialogue), asks), [items, asks])
+  const brief = useEventBriefing(ev)
+  // the plan-summary chat rows are replaced by ONE briefing that follows the event's state; the rest of the dialogue stays
+  const talk = useMemo(() => withAsks(items.filter(isDialogue), asks).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary')), [items, asks, brief])
   const steps = items.length - items.filter(isDialogue).length
   const scroller = useRef<HTMLDivElement>(null)
+  const briefBox = useRef<HTMLDivElement>(null)
   const [pinned, setPinned] = useState(true)
   const onScroll = () => {
     const el = scroller.current
     if (el) setPinned(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
   }
   const last = talk[talk.length - 1]
-  const tail = `${allView}:${events.length}:${talk.length}:${last?.key}:${last?.k === 'ask' ? !!last.answer : ''}:${last?.k === 'chat' ? last.pending : ''}`
+  const tail = `${allView}:${events.length}:${talk.length}:${last?.key}:${last?.k === 'ask' ? !!last.answer : ''}:${last?.k === 'chat' ? last.pending : ''}:${brief?.state ?? ''}`
   useLayoutEffect(() => {
     const el = scroller.current
-    if (el && pinned) el.scrollTop = el.scrollHeight
-  }, [tail, pinned])
+    if (!el || !pinned) return
+    // the briefing is the newest thing: show it from its heading, not from its last line
+    const box = briefBox.current
+    if (box && !allView) el.scrollTop += box.getBoundingClientRect().top - el.getBoundingClientRect().top - 8
+    else el.scrollTop = el.scrollHeight
+  }, [tail, pinned, allView])
   const jump = () => { const el = scroller.current; if (el) { el.scrollTop = el.scrollHeight; setPinned(true) } }
   const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
   const waiting = open && ev.state === 'await_approval'
@@ -107,11 +116,18 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
         {allView && events.slice().reverse().map((e) => <EventFeed key={e.id} ev={e} onPick={onPick} />)}
         {allView && !events.length && <p className="muted con-empty">目前沒有事件。下方可直接提問。</p>}
         {!allView && ev && steps > 0 && (
-          <p className="con-steps muted small">AI 指揮官處理這件事做了 {steps} 個步驟（狀態、計畫、工具、把關、核准）。<a href="#console" onClick={full(ev.id)}>看完整過程</a></p>
+          <p className="con-steps small"><a href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-analysis">查看分析過程</a></p>
         )}
         {!allView && !talk.length && <p className="muted con-empty">{ev ? '這件事還沒有對話。下方可以討論計劃、下新任務或提問。' : '目前沒有事件。下方可直接提問。'}</p>}
         {(allView ? talk.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)) : talk).map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
-        {!allView && open && (
+        {!allView && ev && brief && (
+          <div className="con-brief" data-testid="con-brief" ref={briefBox}>
+            <BriefingView b={brief} footer={brief.state !== 'pending' ? (
+              <a className="br-link" href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-record">查看處理紀錄</a>
+            ) : null} />
+          </div>
+        )}
+        {!allView && open && !brief && (
           <div className={`con-live ${waiting ? 'wait' : ''}`} role="status" aria-live="polite">
             {waiting ? <><i className="pulse" />等待主管核准…（{state.pending.filter((p) => p.event_id === ev.id).map((p) => RISK_PLAIN[p.risk]).join('、') || '核准卡在中間'}）</>
               : <><i className="spin" />AI 指揮官{STATE_LABEL[ev.state]}中{running ? '・工具執行中' : ''}…</>}
@@ -127,13 +143,15 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
 /** 全部: every event's dialogue in one feed, oldest first, each under a heading that selects it. */
 function EventFeed({ ev, onPick }: { ev: Event; onPick: (id: string) => void }) {
   const { items } = useTranscript(ev)
-  const rows = items.filter(isDialogue)
+  const brief = useEventBriefing(ev)
+  const rows = items.filter(isDialogue).filter((it) => !(brief && it.k === 'chat' && it.kind === 'summary'))
   return (
     <div className="feed-ev">
       <button type="button" className="feed-ev-h" onClick={() => onPick(ev.id)}>
         {ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}・{fmtHMS(ev.opened_at).slice(0, 5)}・{STATE_LABEL[ev.state]}
       </button>
       {rows.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
+      {brief && <div className="con-brief"><BriefingView b={brief} testId="feed-brief" /></div>}
     </div>
   )
 }

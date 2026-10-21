@@ -14,20 +14,9 @@ import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
 import { BriefingView } from '../components/BriefingView'
-import { buildBriefing, optionBriefs, type BriefCtx } from '../briefing'
+import { actionLines, buildBriefing, fullActionLines, optionBriefs } from '../briefing'
+import { useBriefCtx } from '../useBriefing'
 
-
-/** Everything the briefing needs besides the card itself, read from the live store. */
-function useBriefCtx(): Pick<BriefCtx, 'resolved' | 'tasks' | 'machines' | 'now' | 'maintenance'> {
-  const { state } = useWarRoom()
-  return {
-    resolved: state.resolved,
-    tasks: state.world?.tasks.items ?? [],
-    machines: state.snapshot?.machines ?? [],
-    now: state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? null,
-    maintenance: (state.world?.maintenance.in_progress ?? []).map((m) => ({ machine_id: m.machine_id, title: m.title, status: m.status })),
-  }
-}
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -60,7 +49,7 @@ export function Phone() {
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
           <div className="ph-armed muted" data-testid="phone-alerts">
-            <span>核准提醒已開啟{alerts.armed ? '' : '・點一下畫面啟用聲音'}{alerts.permission === 'granted' ? '・系統通知' : ''}{alerts.lastAlert ? `・最近：${alerts.lastAlert}` : ''}</span>
+            <span>核准提醒已開啟{alerts.armed ? '' : '・點一下畫面啟用聲音'}{alerts.permission === 'granted' ? '・系統通知' : ''}</span>
             <button className="ph-arm-off" onClick={(e) => { e.stopPropagation(); alerts.setEnabled(false) }}>關閉</button>
           </div>
         )}
@@ -182,7 +171,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
   const brief = buildBriefing({ ev, req: a, chosen, ...bctx })
   const locked = disabled || busy || submitted
   // what 核准 will run: the schedule/cure actions plus the picked staffing option (named, not just a letter)
-  const scope = [...(a.actions ?? []).filter((x) => !x.startsWith('人力：依所選')).map(plain).filter(Boolean),
+  const scope = [...actionLines(a).filter(Boolean),
     ...(picked && staffing.length ? [`人力${opts.length > 1 ? `方案 ${picked.id}` : ''}：${picked.label}`] : [])]
   return (
     <div className="ph-card ph-approval">
@@ -199,14 +188,6 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
           {(a.constraints ?? []).length > 0 && <div className="muted">主管條件：{(a.constraints ?? []).join('、')}</div>}
         </div>
       )}
-      <details className="ph-why">
-        <summary>查看處置依據</summary>
-        <RepairEta ev={ev} />
-        {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
-        <p className="muted small">判斷依據：{plain(a.reason)}</p>
-        {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
-        {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
-      </details>
       </div>
       <div className="ph-col-b">
       {staffing.length > 0 && <>
@@ -230,11 +211,20 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
       {scope.length > 0 && <p className="ph-scope" data-testid="phone-scope">核准範圍：{scope.join('；')}</p>}
       <div className="ph-acts">
         <button className="ph-approve" disabled={locked || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>
-          {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label}` : ''}`}
+          {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label.replace(/（[^）]*）$/, '')}` : ''}`}
         </button>
         <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
       </div>
       <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
+      <details className="ph-why">
+        <summary>查看處置依據</summary>
+        <RepairEta ev={ev} />
+        {fullActionLines(a).length > 0 && <div className="ph-full"><b>完整處置內容</b><ul>{fullActionLines(a).map((x, i) => <li key={i}>{x}</li>)}</ul></div>}
+        {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
+        <p className="muted small">判斷依據：{plain(a.reason)}</p>
+        {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
+        {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
+      </details>
       </div>
     </div>
   )

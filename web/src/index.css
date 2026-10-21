@@ -946,3 +946,9 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-scope { margin: 10px 0 0; font-size: 14px; color: var(--ink-dim); overflow-wrap: anywhere; }
 .ph-approval .ph-approve { white-space: normal; line-height: 1.3; }
 .ph-approval .br { margin-bottom: 12px; }
+/* the sticky 核准 bar must read as a bar: solid, with an edge, and a one-line label so it hides little */
+.ph-approval .ph-acts { background: var(--panel); border-top: 1px solid var(--border); margin-top: 14px; padding-top: 10px; }
+.ph-approval .ph-approve { font-size: 16px; padding: 8px 10px; min-height: 48px; }
+.ph-full { margin: 8px 0 0; font-size: 14px; }
+.ph-full ul { margin: 4px 0 0; padding-left: 1.2em; }
+.ph-full li { overflow-wrap: anywhere; margin: 2px 0; }
