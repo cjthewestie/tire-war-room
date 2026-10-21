@@ -193,6 +193,14 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const early = fromAudit([made('TK-0104', '檢修'), a('task', 'world', { task_id: 'TK-0104', change: 'assigned', kind: '檢修', worker: 'S05' }, at(1.5)), card()], base)
   check('… a repair somebody took before the card → not held', early.find((i) => i.k === 'task')?.held === false)
 
+  // a confirm another event's schedule beat: 正在重算 until the transcript shows the carried approval or the new card
+  const call = a('tool_call', 'tool:confirm_schedule', { call_id: 'c1', step_id: 'S4', args: {}, attempt: 1 }, at(3))
+  const fail = a('tool_result', 'tool:confirm_schedule', { call_id: 'c1', ok: false, error: 'ToolError: schedule v3 is stale: solved against v1, but v2 is active now' }, at(3))
+  const staleOf = (more) => fromAudit([call, fail, ...more], { ...base, state: 'verify' }).find((i) => i.k === 'tool')?.stale
+  check('stale confirm, nothing after it yet → resolving', staleOf([]) === 'resolving', staleOf([]))
+  check('… a recalculated card follows → ask', staleOf([a('approval_request', 'state_machine', { id: 'AP-9v2', options: [] }, at(4))]) === 'ask')
+  check('… the approval carried over (…-rebased) → carried', staleOf([a('approval_request', 'state_machine', { id: 'AP-9-rebased', options: [] }, at(4))]) === 'carried')
+
   // H1 → the stale H1 round re-solved by code (no 規劃 block) → H2: the second block is H2's own round
   const sr = (id, tool) => ({ step: { id, tool, purpose: 'p', args: {}, depends_on: [] }, state: 'ok', result: null, gate: null })
   const h1 = [sr('S1', 'cure_formula'), sr('S2', 'query_orders_shifts')]

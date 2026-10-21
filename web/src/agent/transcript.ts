@@ -30,6 +30,9 @@ export interface ToolItem extends Base {
   /** true while only the audit's brief copy is known (long fields cut to "<n chars>"); the full result
    *  arrives with the next event snapshot */
   partial: boolean
+  /** a confirm another event's schedule beat (staleOutcome): still re-solving, the approval carried over, a recalculated
+   *  card sent to the supervisor, or the event ended first */
+  stale?: 'resolving' | 'carried' | 'ask' | 'stopped'
 }
 export interface GateItem extends Base {
   k: 'gate'; stepId: string | null; tool: string | null; risk: RiskLevel | null; verdict: string | null
@@ -130,6 +133,18 @@ function holdForApproval(out: Item[]): void {
     const dec = req < 0 ? -1 : out.findIndex((x, n) => n > req && x.k === 'approval' && x.phase === 'decision')
     const sent = out.findIndex((x, n) => n > i && x.k === 'task' && x.taskId === it.taskId && x.phase !== 'created')
     it.held = req >= 0 && (sent < 0 || (dec >= 0 && sent > dec))
+  })
+}
+
+/** What became of a confirm another event's schedule beat (concurrent_3): the state machine re-solves on the schedule in
+ *  force, then carries the approval over when the content is the same (a 「…-rebased」 card decided 自動) or sends a
+ *  recalculated card. Said only once the transcript shows which. */
+function staleOutcome(out: Item[], ev: Event | null): void {
+  out.forEach((it, i) => {
+    if (it.k !== 'tool' || it.status !== 'failed' || !/is stale/.test(it.error ?? '')) return
+    const req = out.find((x, n): x is ApprovalItem => n > i && x.k === 'approval' && x.phase === 'request')
+    it.stale = req ? (/-rebased\d*$/.test(req.requestId) ? 'carried' : 'ask')
+      : ev && (ev.state === 'closed' || ev.state === 'safe_stop') ? 'stopped' : 'resolving'
   })
 }
 
@@ -396,6 +411,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
   }
   createdFirst(out)
   holdForApproval(out)
+  staleOutcome(out, ev)
   for (const it of out) {
     if (it.k !== 'approval' || it.phase !== 'decision') continue
     const req = out.find((x): x is ApprovalItem => x.k === 'approval' && x.phase === 'request' && x.requestId === it.requestId)
@@ -440,7 +456,9 @@ function systemText(actor: string, p: D): { text: string; tone: NoteItem['tone']
     return null
   }
   if (p.failure) return { text: `失敗：${String(p.failure)}（連續 ${String(p.consecutive_failures ?? '?')} 次）`, tone: 'warn' }
-  if (p.rebased_version != null) return { text: `排程已改用第 ${String(p.rebased_version)} 版（第 ${String(p.stale_version)} 版已過期，需重新核准）`, tone: 'warn' }
+  if (p.rebased_version != null) {
+    return { text: `排程已改用第 ${String(p.rebased_version)} 版（第 ${String(p.stale_version)} 版已過期；${p.reused ? '內容跟主管核准的相同，沿用原核准' : '內容不同，要再請主管核准'}）`, tone: p.reused ? 'plain' : 'warn' }
+  }
   if (p.expectation_bounded) return { text: '程式把 Agent Nemo 的預期值限制在安全範圍內', tone: 'plain' }
   if (p.error) return { text: String(p.error), tone: 'warn' }
   return null

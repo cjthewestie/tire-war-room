@@ -185,15 +185,22 @@ function thinkNote(it: ThinkItem): string {
   return '這一輪的計畫與判斷（依事件紀錄重建）。'
 }
 
-/** A confirm_schedule another event beat to it (concurrent_3): the state machine re-solves on the schedule in force and
- *  sends a recalculated card — said in one amber line, the runtime's English error stays under 原始資料. */
+/** A confirm_schedule another event beat to it (concurrent_3), in one amber line: the state machine re-solves on the
+ *  schedule in force, then carries the approval over (same content) or sends a recalculated card (transcript.ts
+ *  staleOutcome). The runtime's English error stays under 原始資料. */
 const isStale = (it: ToolItem) => it.status === 'failed' && /is stale/.test(it.error ?? '')
+const STALE: Record<NonNullable<ToolItem['stale']>, string> = {
+  resolving: '排程剛被另一件異常更新，Agent Nemo 正在依新排程重算',
+  ask: '排程剛被另一件異常更新，Agent Nemo 已依新排程重算，再請主管核准',
+  carried: '排程剛被另一件異常更新，Agent Nemo 已依新排程重算；內容跟主管核准的相同，沿用原核准',
+  stopped: '排程剛被另一件異常更新，這一輪沒有執行',
+}
 
 function ToolRow({ it, open }: { it: ToolItem; open: boolean }) {
   let line = ''
   if (it.status === 'ok' && it.data) { try { line = resultText(it.tool, it.args, it.data) } catch { line = '' } }
   const stale = isStale(it)
-  if (it.status === 'failed') line = stale ? '排程剛被另一件異常更新，Agent Nemo 重排後會再請主管核准' : `失敗：${it.error ?? ''}`
+  if (it.status === 'failed') line = stale ? STALE[it.stale ?? 'resolving'] : `失敗：${it.error ?? ''}`
   const ask = it.phase === 'ASK'
   const step = ask ? '提問' : it.stepId ? stepLabel(it.stepId) : null
   return (
