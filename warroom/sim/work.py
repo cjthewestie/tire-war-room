@@ -57,6 +57,8 @@ WORK_MIN: dict[str, float] = {       # how long each kind of task takes once the
 }
 TASK_KEEP = 40                       # tasks kept in the view (oldest done ones drop first)
 UNASSIGNED_ANY_TEAM_MIN = 5.0        # a task nobody of its team can take goes to any free operator after 5 min
+# (調派支援: to a free person of the receiving team instead; 宣達: anyone free brings the notice. At night 2 線 has
+# nobody on shift, so 「從 2 線調 1 人」 stayed 待派 for good and its ETA kept slipping)
 RUSH_FEED_LOTS = 8                   # SOP-02: 中胎 8 批 (A 線) -> what one 補料 carries for a medium rush tyre
 GOODS_AHEAD_H = 24.0                 # tyres whose mold-in is within the next 24 h are listed
 DONE_KEEP = 6                        # de-molded tyres kept in the view
@@ -186,6 +188,7 @@ class _Task:
     after: str | None = None
     order_ids: list[str] = field(default_factory=list)
     any_team_ok: bool = True
+    fallback_team: TeamId | None = None   # nobody of `team` free after UNASSIGNED_ANY_TEAM_MIN: this team takes it
     status: str = "待派"
     worker_id: str | None = None
     assigned_at: datetime | None = None
@@ -275,9 +278,10 @@ class TaskBoard:
             if t.status == "待派":
                 if t.after and self._tasks.get(t.after) is not None and self._tasks[t.after].status != "完成":
                     continue
-                wid = self.w.pick_worker(t.team, t.machine_id, self.busy_worker_ids(),
-                                         any_team=t.any_team_ok and (now - t.created_at).total_seconds()
-                                         >= UNASSIGNED_ANY_TEAM_MIN * 60)
+                waited = (now - t.created_at).total_seconds() >= UNASSIGNED_ANY_TEAM_MIN * 60
+                wid = self.w.pick_worker(t.team, t.machine_id, self.busy_worker_ids(), any_team=t.any_team_ok and waited)
+                if wid is None and waited and t.fallback_team is not None:
+                    wid = self.w.pick_worker(t.fallback_team, t.machine_id, self.busy_worker_ids())
                 if wid is None:
                     continue
                 t.worker_id, t.assigned_at, t.status = wid, now, "前往中"
@@ -343,10 +347,11 @@ class TaskBoard:
 
 # ------------------------------------------------------------------ step -> tasks (code, never the model)
 def _spec(kind: str, title: str, team: TeamId, machine_id: str | None = None, zone: str | None = None,
-          after: str | None = None, order_ids: list[str] | None = None, any_team_ok: bool = True) -> dict[str, Any]:
+          after: str | None = None, order_ids: list[str] | None = None, any_team_ok: bool = True,
+          fallback_team: TeamId | None = None) -> dict[str, Any]:
     return {"kind": kind, "title": title[:80], "team": team, "machine_id": machine_id,
             "zone": zone or zone_of(machine_id), "after": after, "order_ids": list(order_ids or []),
-            "work_min": WORK_MIN.get(kind, 10.0), "any_team_ok": any_team_ok}
+            "work_min": WORK_MIN.get(kind, 10.0), "any_team_ok": any_team_ok, "fallback_team": fallback_team}
 
 
 def _team(v: Any) -> TeamId | None:
@@ -423,14 +428,15 @@ def plan_tasks(world: World, req: TaskRequest, now: datetime) -> list[dict[str, 
             frm = _team(st.get("from_team")) or (teams[0] if teams else TeamId.SIDE)
             to = _team(st.get("to_team")) or (teams[-1] if teams else TeamId.CURING)
             specs.append(_spec("調派支援", f"從{TEAM_LABELS.get(frm, frm.value)}調 1 人到{TEAM_LABELS.get(to, to.value)}"
-                                         f"{st.get('shift_name') or ''}支援出入模", frm, TEAM_HOME.get(to), any_team_ok=False))
+                                         f"{st.get('shift_name') or ''}支援出入模", frm, TEAM_HOME.get(to), any_team_ok=False,
+                               fallback_team=to))
         elif kind == NotifyKind.INFO.value:
             msg = str(a.get("message", ""))
             for team in teams[:3]:
                 if team in (TeamId.MAINTENANCE, TeamId.QC, TeamId.SUPERVISOR):
                     continue
                 specs.append(_spec("宣達", f"向{TEAM_LABELS.get(team, team.value)}宣達：{msg[:30]}", team,
-                                   TEAM_HOME.get(team), any_team_ok=False))
+                                   TEAM_HOME.get(team)))
     return specs
 
 
@@ -461,8 +467,7 @@ def _dispatch_tasks(world: World, req: TaskRequest, now: datetime, teams: list[T
     else:
         for team in teams[:3]:
             if team in TEAM_HOME:
-                specs.append(_spec("宣達", f"向{TEAM_LABELS.get(team, team.value)}宣達新排程", team, TEAM_HOME.get(team),
-                                   any_team_ok=False))
+                specs.append(_spec("宣達", f"向{TEAM_LABELS.get(team, team.value)}宣達新排程", team, TEAM_HOME.get(team)))
     return specs
 
 

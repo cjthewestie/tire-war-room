@@ -26,7 +26,8 @@ export function EarlyWarnings({ onMachine }: { onMachine?: (id: string) => void 
     const t = ms(m.start)
     if (t > now && t - now < 12 * H) rows.push({ k: machineLabel(m.machine_id), what: `${m.title}（停機保養／換模）`, when: `${fmtHM(m.start)} 開始`, machine: m.machine_id, tone: 'warn' })
   }
-  for (const s of state.schedule?.schedule.warnings ?? []) rows.push({ k: '交期', what: plain(s), when: '排程預估', tone: 'warn' })
+  // only the solver's late-delivery warnings are 交期; the rest (備援排法, 硫化延長中, 停用…) are about the schedule itself
+  for (const s of state.schedule?.schedule.warnings ?? []) rows.push({ k: /延遲|延誤|晚於交期/.test(s) ? '交期' : '排程', what: plain(s), when: '排程預估', tone: 'warn' })
   for (const b of state.snapshot?.header.bad_data ?? []) rows.push({ k: machineLabel(b.machine_id), what: `驗證層攔下 ${b.count} 筆壞資料，未喚醒 AI`, when: fmtHM(b.last_at), machine: b.machine_id, tone: 'warn' })
   return (
     <section className="panel early" aria-label="預警" data-testid="early-warnings">

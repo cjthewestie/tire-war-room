@@ -177,6 +177,9 @@ def test_fallback_to_backup_solver(primary):
     res = FallbackScheduler(primary=primary).solve(SolveRequest(now=now, orders=_orders(now.date()), shifts=[]))
     assert res.fell_back and res.solver is SolverName.HEURISTIC and res.schedule is not None and res.feasible
     assert "備援" in res.schedule.warnings[0]
+    # plain words on 預警 / 人力排程, never the enum values ("cp-sat timeout", "heuristic")
+    want = "排程求解器在時限內沒排出結果" if isinstance(primary, _TimeoutSolver) else "排程求解器這次無法求解"
+    assert res.schedule.warnings[0] == f"{want}，已改用備援排法（仍可行，交期已檢查）"
 
 
 def test_real_cpsat_tiny_time_limit_still_answers():
@@ -347,6 +350,29 @@ def test_page11_against_factory_sim(tmp_path):
     assert "10/03 夜班缺 1 人" in res.gaps
     assert {o.label for o in res.staffing_options} >= {"夜班加班", "從 2 線調 1 人"}
     assert res.solve_ms < 10_000
+
+
+def test_cpsat_same_request_gives_the_same_plan():
+    """The CP-SAT stop is deterministic (fixed workers and seed, interleaved search, DET_TIME budget), not a
+    wall-clock stall: the page-11 round-1 solve gives the same plan every time, whatever the machine load
+    (the wall cap is raised here so a loaded test machine cannot cut it short)."""
+    sim_mod = pytest.importorskip("warroom.sim")
+    from warroom.contracts import ScenarioName
+    from warroom.schedule import seed_schedule
+    sim = sim_mod.Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    now = sim.clock.now()
+    seed = seed_schedule(now, sim.orders(), sim.shifts(), sim.machines(), next_on={"CURE-07": "#A-311"})
+    req = SolveRequest(now=now + timedelta(seconds=145), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
+                       cure_overrides_h={"CURE-07": 28.5}, time_limit_s=120)
+    plans = []
+    for _ in range(3):
+        res = CpSatScheduler().solve(req)
+        assert res.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE), res.gaps
+        plans.append(sorted((j.id, j.press_id, j.mold_in) for j in res.schedule.jobs))
+        # page 11 S3: the tire the 28.5 h cure pushes out of its slot leaves press 7 (it does not wait on the press
+        # whose steam is low); nothing else changes press
+        assert [(m.order_id, m.from_press) for m in res.moves if m.from_press != m.to_press] == [("#A-311", "CURE-07")]
+    assert plans[0] == plans[1] == plans[2]
 
 
 # ---------------------------------------------------------------- review fixes (r2)

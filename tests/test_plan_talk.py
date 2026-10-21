@@ -174,14 +174,16 @@ def test_solver_keeps_new_tires_out_of_a_blackout(page11_inputs, solver):
     from warroom.schedule import CpSatScheduler, HeuristicScheduler
     from warroom.schedule.solver import check_schedule
     now, orders, shifts, prev = page11_inputs
-    a = datetime(2026, 10, 3, 20, tzinfo=F.TZ)
-    b = datetime(2026, 10, 4, 5, tzinfo=F.TZ)
     base = SolveRequest(now=now, orders=orders, shifts=shifts, previous=prev, cure_overrides_h={"CURE-07": 36.5},
                         time_limit_s=10)
     s = CpSatScheduler() if solver == "cp_sat" else HeuristicScheduler()
     before = s.solve(base)
     assert before.feasible
-    assert _overlaps(before.schedule, "CURE-09", a, b), "page 11 v1 cures #A-311 on press 9 tonight"
+    # the 9 h window starts an hour before press 9's next planned tire (which one depends on the seed plan)
+    nxt = min((j for j in before.schedule.jobs if j.press_id == "CURE-09" and not j.frozen), key=lambda j: j.mold_in)
+    a = nxt.mold_in - timedelta(hours=1)
+    b = a + timedelta(hours=9)
+    assert _overlaps(before.schedule, "CURE-09", a, b), "press 9 cures a tire in that window"
     req = base.model_copy(update={"press_blackouts": {"CURE-09": [(a, b)]}})
     after = s.solve(req)
     assert after.feasible

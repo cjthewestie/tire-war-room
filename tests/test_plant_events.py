@@ -194,6 +194,36 @@ def test_task_lifecycle_moves_the_worker_and_reports_every_change():
     assert statuses == ["前往中", "執行中", "完成"]
 
 
+def test_night_transfer_from_an_empty_team_falls_back_to_the_receiving_team():
+    """Page 11 night: 2 線 (胎側膠組) has nobody on shift, so 「從 2 線調 1 人」 found no one and stayed 待派 for good
+    (its ETA kept slipping). After UNASSIGNED_ANY_TEAM_MIN a free person of the receiving team takes it; a 宣達 to
+    the empty team goes to anyone free."""
+    from warroom.contracts import TeamId
+    from warroom.sim.work import UNASSIGNED_ANY_TEAM_MIN
+    f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    assert all(w.state == "下班" for w in f.world.snapshot().people.workers if w.team is TeamId.SIDE)
+    now = f.now()
+    move = f.world.tasks.dispatch(TaskRequest(
+        event_id="EV-T", approval_id="AP-T", step_id="AP-T-B", event_kind="temp_drop", tool="notify_teams",
+        args={"teams": ["side", "curing"], "kind": "staff_move", "message": "10/03 夜班從 2 線調 1 人（1 人）"},
+        staffing={"kind": "transfer", "from_team": "side", "to_team": "curing", "shift_name": "夜班", "label": "從 2 線調 1 人"}),
+        now)
+    notice = f.world.tasks.dispatch(TaskRequest(
+        event_id="EV-T", approval_id="AP-T", step_id="S5", event_kind="temp_drop", tool="notify_teams",
+        args={"teams": ["side"], "kind": "info", "machine_id": "CURE-07", "message": "撤回：從 2 線調 1 人"}), now)
+    ids = [move[0].id, notice[0].id]
+    assert [t.status for t in move + notice] == ["待派", "待派"]
+    _run(f, int(UNASSIGNED_ANY_TEAM_MIN * 60) - 60)
+    assert [t.status for t in f.world.snapshot().tasks.items if t.id in ids] == ["待派", "待派"]
+    _run(f, 120)
+    by = {t.id: t for t in f.world.snapshot().tasks.items}
+    people = {w.id: w for w in f.world.snapshot().people.workers}
+    assert by[ids[0]].status != "待派" and people[by[ids[0]].worker_id].team is TeamId.CURING
+    assert by[ids[1]].status != "待派" and by[ids[1]].worker_id is not None
+    _run(f, 30 * 60)
+    assert all(by.status == "完成" for by in f.world.snapshot().tasks.items if by.id in ids)
+
+
 def test_feed_task_holds_its_orders_tyres_in_waiting_for_material():
     f = Factory(seed=7, scenario=ScenarioName.SHIFT_START)
     from warroom.schedule.demo import demo_inputs

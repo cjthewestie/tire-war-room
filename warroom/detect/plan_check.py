@@ -17,7 +17,9 @@ checked, each from data the plant really reports:
 
 Each slip is one Anomaly of kind SCHEDULE_SLIP, raised once per (job, task), and wakes the
 commander like a sensor anomaly. A machine that already has an open event is skipped: that
-event owns the slip. Pure and deterministic: time always comes from the caller.
+event owns the slip. A mold-in planned or done before the active schedule took effect is history
+of the plan in force then, not a slip of this one (page 11: v3 was solved at 02:31 but approved
+after the 04:00 mold-in v2 had on press 1). Pure and deterministic: time always comes from the caller.
 """
 from __future__ import annotations
 
@@ -63,6 +65,8 @@ class PlanWatcher:
         self._last: datetime | None = None
         self._seen: set[tuple] = set()
         self._empty_since: dict[str, datetime] = {}
+        self._sched_key: tuple | None = None
+        self._active_since: datetime | None = None   # first check that saw the schedule now in force
 
     def due(self, now: datetime) -> bool:
         return self._last is None or (now - self._last).total_seconds() >= self.period_s
@@ -71,11 +75,17 @@ class PlanWatcher:
         self._last = None
         self._seen.clear()
         self._empty_since.clear()
+        self._sched_key = self._active_since = None
 
     def check(self, now: datetime, schedule: Schedule | None, machines: Iterable[MachineState],
               semi: SemiFinishedProgress | None = None) -> list[Anomaly]:
         self._last = now
         by_id = {m.machine_id: m for m in machines}
+        if schedule is not None:
+            # two solves can share id and created_at (sim time held during concurrent solves): key on the jobs too
+            key = (schedule.id, schedule.created_at, tuple((j.id, j.press_id, j.mold_in) for j in schedule.jobs))
+            if key != self._sched_key:
+                self._sched_key, self._active_since = key, now
         for pid in CURE_PRESS_IDS:
             m = by_id.get(pid)
             if m is not None and m.cure_job is None:
@@ -115,6 +125,8 @@ class PlanWatcher:
         for j in schedule.jobs:
             if j.frozen or not (now - timedelta(hours=LOOKBACK_H) <= j.mold_in <= now - self.grace):
                 continue
+            if self._active_since is not None and j.mold_in < self._active_since:
+                continue                     # T passed before this schedule was in force
             m = by_id.get(j.press_id)
             if m is None or m.active_event_id or m.status is MachineStatus.OUT_OF_SERVICE:
                 continue
@@ -140,6 +152,8 @@ class PlanWatcher:
             if m is None or m.cure_job is None or m.active_event_id:
                 continue
             cj = m.cure_job
+            if self._active_since is not None and cj.mold_in_at < self._active_since:
+                continue                     # loaded under the plan in force then (a later version cannot unload it)
             on_press = [j for j in schedule.jobs if j.press_id == pid]
             if any(j.id == cj.job_id for j in on_press):
                 continue
