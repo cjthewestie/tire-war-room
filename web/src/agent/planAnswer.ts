@@ -150,31 +150,77 @@ export function whoRows(req: ApprovalRequest, ev: Event | null, tasks: WorkTask[
   return rows
 }
 
+/** 交期 and 硫化時間 are the last two lines of _card_changes, and a delivery text may hold its own 「；」: cut them off
+ *  first, then the rest splits at 「；」 (the rebased card joins every change into one line). */
+function splitChange(s: string): { parts: string[]; delivery: string | null; cure: string | null } {
+  let rest = s, delivery: string | null = null, cure: string | null = null
+  const ci = rest.search(/(?:^|；)硫化時間：/)
+  if (ci >= 0) { cure = rest.slice(rest.indexOf('硫化時間：', ci) + 5); rest = rest.slice(0, ci) }
+  const di = rest.search(/(?:^|；)交期：/)
+  if (di >= 0) { delivery = rest.slice(rest.indexOf('交期：', di) + 3); rest = rest.slice(0, di) }
+  return { parts: rest.split('；').map((x) => x.trim()).filter(Boolean), delivery, cure }
+}
+
+/** 「交期：不受影響 → 延誤：#A-311（晚 129 小時）」 → 「交期有變（#A-311 晚 129 小時）」 (the new verdict only). */
+function deliveryNow(change: string): string {
+  const now = plain(change.slice(change.indexOf(' → ') + 3)).split('；')[0].trim()
+  if (/^不受影響/.test(now)) return '交期改成全部準時'
+  const late = /^延誤：(.+)$/.exec(now)
+  if (!late) return `交期有變（${now}）`
+  if (late[1] === '有') return '交期有變（有訂單會晚交）'
+  return `交期有變（${late[1].split('、').map((x) => { const m = /^(.+?)（晚 ([\d.]+) 小時）$/.exec(x); return m ? `${m[1]} 晚 ${m[2]} 小時` : `${x} 會晚交` }).join('、')}）`
+}
+
+/** 「硫化時間：10 號機 41.1 h」 → 「硫化時間改成 10 號硫化機 41.1 小時」. */
+function cureNow(cure: string): string {
+  const c = cure.trim()
+  return c === '不設定' ? '這次不改硫化時間' : `硫化時間改成 ${c.replace(/(\d+) 號機 ([\d.]+) h/g, '$1 號硫化機 $2 小時')}`
+}
+
 /** A re-issued card (已重算) in one sentence (veteran 10-22): 「10 號硫化機的排程先生效了，3 號硫化機這張已依新排程重算：
- *  4 張訂單換機台，人力照你上次選的方案 B。請再核准一次。」 The per-order moves stay as the folded detail. Built from the
- *  card's code-built change lines (warroom/agent/state_machine.py card changes); a line it does not know is detail. */
+ *  4 張訂單換機台，人力照你上次選的方案 B。請再核准一次。」 Each kind of change is said apart — 換機台, 交期, 硫化時間, 人力 —
+ *  and 「…都跟上一張相同」 only when none of them changed. Built from the card's code-built change lines
+ *  (warroom/agent/state_machine.py _request_approval and _card_changes); the per-order moves and any line it does not know
+ *  stay as the folded detail. */
 export function changesLine(req: ApprovalRequest): { line: string; moves: string[] } {
   let head = '已照你說的重算'
   const moves: string[] = []
+  const what: string[] = []
+  const staffing: string[] = []
   const tail: string[] = []
   const orders = new Set<string>()
+  const optName = (label: string) => { const id = req.options.find((o) => o.label === label.trim())?.id; return id ? `方案 ${id}` : `「${plain(label.trim())}」` }
+  const name = (s: string) => {
+    const t = s.trim()
+    const n = /^(\d+) 號機?$/.exec(t)
+    return n ? `${n[1]} 號硫化機` : t === '另一事件的' ? '另一件異常' : plain(t)
+  }
   for (const c of req.changes ?? []) {
     let rest = c
-    const re = /^(.+?)排程先生效；(.+?)依現行排程重算：(.*)$/.exec(c)
+    // concurrent events: another event's schedule took effect first — 「3 號機排程先生效；10 號依現行排程重算：<changes>」,
+    // or 「…依現行排程重算（機台異動同上一版）」 when this re-solve changed nothing against the approved card
+    const re = /^(.+?)排程先生效；(.+?)依現行排程重算(?:：(.*)|（機台異動同上一版）)?$/.exec(c)
     if (re) {
-      const name = (s: string) => { const n = /^(\d+) 號機?$/.exec(s.trim()); return n ? `${n[1]} 號硫化機` : plain(s) }
       head = `${name(re[1])}的排程先生效了，${name(re[2])}這張已依新排程重算`
-      rest = re[3]
+      rest = re[3] ?? ''
     }
     const staff = /^人力沿用主管上次的選擇：\s*([A-Z])/.exec(rest)
     if (staff) { tail.push(`人力照你上次選的方案 ${staff[1]}`); continue }
-    const rec = /^建議方案：.*→\s*([A-Z])/.exec(rest)
-    if (rec) { tail.push(`系統建議改成方案 ${rec[1]}`); continue }
-    for (const part of rest.split('；').map((s) => s.trim()).filter(Boolean)) {
+    const { parts, delivery, cure } = splitChange(rest)
+    for (const part of parts) {
       const mv = /^(#?\p{Lu}+-\d+)：/u.exec(part)
-      if (mv) { orders.add(mv[1]); moves.push(plain(part)) } else if (!/共 \d+ 模改機台$/.test(part)) moves.push(plain(part))
+      const rec = /^建議方案：.*? → (.+)$/.exec(part)
+      const opt = /^人力方案(移除|新增)：(.+)$/.exec(part)
+      if (mv) { orders.add(mv[1]); moves.push(plain(part)) }
+      else if (rec) staffing.push(`系統建議改成${optName(rec[1])}`)
+      else if (opt) staffing.push(`${opt[1] === '新增' ? '多了' : '拿掉'}${opt[2].split('、').map(optName).join('、')}`)
+      else if (!/共 \d+ 模改機台$/.test(part)) moves.push(plain(part))
     }
+    if (delivery) what.push(deliveryNow(delivery))
+    if (cure) what.push(cureNow(cure))
   }
-  const what = [orders.size ? `${orders.size} 張訂單換機台` : '排程內容相同', ...tail].join('，')
-  return { line: `${head}：${what}。請再核准一次。`, moves }
+  if (orders.size) what.unshift(`${orders.size} 張訂單換機台`)
+  if (staffing.length) what.push(`人力方案有變（${staffing.join('、')}）`)
+  if (!what.length) what.push(`${tail.length ? '機台、交期、硫化時間' : '機台、交期、硫化時間、人力'}都跟上一張相同`)
+  return { line: `${head}：${[...what, ...tail].join('，')}。請再核准一次。`, moves }
 }
