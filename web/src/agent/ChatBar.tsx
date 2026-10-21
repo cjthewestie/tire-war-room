@@ -9,7 +9,7 @@ import type { Event, MainReply } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
 import type { ChatItem, LocalItem } from './transcript'
 
-/** `mode` is kept for callers (討論 / 問 AI buttons) and ignored: the 主 agent decides. */
+/** `mode` is kept for callers (討論 / 問 Agent Nemo buttons) and ignored: the 主 agent decides. */
 export interface BarFocus { mode?: BarMode; text?: string; n: number }
 export type BarMode = 'discuss' | 'command' | 'ask'
 
@@ -68,10 +68,10 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
         <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || busy} aria-label="跟 Agent Nemo 說"
           data-testid="chat-input"
           data-plan={waiting ? 'waiting' : undefined}
-          placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : waiting ? '這個計劃要怎麼改，直接說' : '跟 Agent Nemo 說…') : '模擬資料模式不支援，需連線後端'}
+          placeholder={can ? (lanDown ? '廠內網路斷線時，請到現場觸控螢幕操作' : waiting ? '這個計畫要怎麼改，直接說' : '跟 Agent Nemo 說…') : '模擬資料模式不支援，需連線後端'}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(q) } }} />
-        <button type="submit" className="btn-send" disabled={!can || busy || !q.trim()} data-testid="chat-send">{busy ? '判讀中…' : '送出'}</button>
+        <button type="submit" className="btn-send" disabled={!can || busy || !q.trim()} data-testid="chat-send">{busy ? '回覆中…' : '送出'}</button>
       </div>
     </form>
   )
