@@ -114,11 +114,19 @@ def materials(r: Any) -> dict[str, Any]:
     w = _world(r)
     if w is None:
         return {"error": "這個模擬沒有原料資料"}
-    return {"materials": [{"name": m.name, "stock": round(m.stock, 1), "unit": m.unit, "days_left": m.days_left,
-                           "reorder_point": m.reorder_point, "on_order": m.on_order, "status": m.status} for m in w.materials],
+    mats = list(w.materials)
+    pos = [p for p in w.purchase_orders if p.status in ("在途", "延遲", "卸貨中")]
+    # in transit from both sides: a purchase order on its way, or stock the World counts as on order without one
+    # (「缺料怎麼辦」 → 「在途採購：沒有進行中」 while 尼龍布 was on order, and 「12 種原料」 for 6: rag-fix, PR #122)
+    transit = [{"name": p.name, "qty": p.qty, "unit": p.unit, "eta": _hm(p.eta), "status": p.status} for p in pos]
+    named = {p.name for p in pos}
+    transit += [{"name": m.name, "qty": m.on_order, "unit": m.unit, "eta": None, "status": "已下單"}
+                for m in mats if m.on_order > 0 and m.name not in named]
+    return {"material_count": len(mats),
+            "materials": [{"name": m.name, "stock": round(m.stock, 1), "unit": m.unit, "days_left": m.days_left,
+                           "reorder_point": m.reorder_point, "on_order": m.on_order, "status": m.status} for m in mats],
             "status_meaning": {"ok": "足夠", "reorder": "該補貨", "low": "偏低", "out": "缺料"},
-            "purchase_orders": [{"name": p.name, "qty": p.qty, "unit": p.unit, "eta": _hm(p.eta), "status": p.status}
-                                for p in w.purchase_orders if p.status != "已收貨"]}
+            "in_transit": transit or "目前沒有在途的採購"}
 
 
 def open_events(r: Any) -> dict[str, Any]:
