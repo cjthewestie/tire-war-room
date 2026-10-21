@@ -846,6 +846,12 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
   .apv-fold { padding: 8px 14px; }
 }
 
+/* 訂單: the answer first — will any order be late, how many are not scheduled yet */
+.order-answer { padding: 14px 18px; }
+.oa-1 { margin: 0; font-size: 19px; font-weight: 700; }
+.oa-1.ok { color: var(--accent); }
+.oa-1.late { color: var(--alarm); }
+.oa-2 { margin: 4px 0 0; font-size: 14px; color: var(--ink-dim); }
 .order-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .order-tools .order-search { flex: 1 1 320px; }
 .order-tools select, .admin select { background: var(--panel); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }

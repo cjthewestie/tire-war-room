@@ -1,5 +1,6 @@
-// 訂單 (UX brief moment 「查一張單」; CJ, 2026-10-20: 「看訂單狀況這個我很需要」): every order with its status,
-// per-stage progress, ETA against the due date, at-risk orders first, rush orders marked, and a search box.
+// 訂單 (UX brief moment 「查一張單」; CJ, 2026-10-20: 「看訂單狀況這個我很需要」): the answer first (veteran 10-22 for
+// HY: will any order be late, how many are not scheduled yet), then every order with its status, per-stage progress,
+// ETA against the due date, late orders first, rush orders marked, and a search box. 今日訂單 lives on the phone only.
 // Picking a row opens its card (where its tyres are now, what blocks it). Data: GET /api/world orders + the
 // active schedule's jobs per order (A 線投料, 貼合, 入模, 出模); see orderModel.ts.
 import { useMemo, useState } from 'react'
@@ -7,7 +8,6 @@ import { SIZE_LABEL } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { OrderCard } from './OrderCard'
-import { TodayOrders } from './TodayOrders'
 import { successOf, type Success } from '../agent/tickerItems'
 import { RISK_TEXT, byRisk, orderView, warningsFor, type OrderSuccess, type OrderView } from './orderModel'
 
@@ -48,9 +48,16 @@ export function OrdersTab() {
   const count = (s: Show) => views.filter((v) => inShowOf(v, s)).length
   const sel = views.find((v) => v.o.id === picked) ?? (query ? list[0] : null) ?? null
   if (!w) return <div className="loading">讀取訂單中…（訂單資料來自後端；瀏覽器模擬模式沒有這部分）</div>
+  const late = views.filter((v) => v.risk === 'late')
+  const unsched = views.filter((v) => v.risk === 'unsched').sort((a, b) => a.due - b.due)
   return (
     <div className="orders-tab" data-testid="orders-tab">
-      <TodayOrders />
+      <section className="panel order-answer" data-testid="orders-answer" aria-label="訂單現況">
+        <p className={`oa-1 ${late.length ? 'late' : 'ok'}`}>{late.length
+          ? `${late.length} 張訂單會晚交：${late.slice(0, 3).map((v) => v.o.id).join('、')}${late.length > 3 ? '…' : ''}`
+          : '沒有訂單會晚交'}</p>
+        {unsched.length > 0 && <p className="oa-2">{unsched.length} 張還沒排進硫化排程，最近交期 {fmtMD(unsched[0].o.due)}（{unsched[0].o.id}）</p>}
+      </section>
       <div className="order-tools">
         <form className="order-search" role="search" onSubmit={(e) => { e.preventDefault(); if (list[0]) setPicked(list[0].o.id) }}>
           <input value={q} onChange={(e) => { setQ(e.target.value); setPicked(null) }} placeholder="訂單號、客戶或胎型，例如 A-311、中胎" aria-label="查訂單" data-testid="order-search" />
