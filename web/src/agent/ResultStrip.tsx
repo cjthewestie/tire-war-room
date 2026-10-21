@@ -49,13 +49,17 @@ export function ResultStrip({ ev, subject, onFull }: { ev: Event; subject?: stri
   const check = expectationText(missed ?? ev.plan?.hypothesis ?? null) ?? '讀值回到正常'
   // the repair runs while the event executes or verifies: until it is done, that is the stage
   const repairing = repairDone < repair.length && !ev.repaired_at
-  const stages: Stage[] = rejected || closed || stop || replanning ? []
+  // closed, but people are still repairing it or still on a supervisor task's work: not finished yet (ended, homeItems.ts)
+  const fin = closed ? ended(ev, tasks) : null
+  const working = fin?.tone === 'run'
+  const stages: Stage[] = working ? [{ label: fin!.pill, st: 'on' }]
+    : rejected || closed || stop || replanning ? []
     : ev.repaired_at ? [{ label: `${fmtHM(ev.repaired_at)} 維修完成`, st: 'done' }, { label: ev.recovered_at ? '已恢復正常' : '回溫中', st: ev.recovered_at ? 'done' : 'on' }]
     : repairing || executing ? [{ label: repairing ? `維修中（${repairDone}/${repair.length}）` : tasks.length ? `現場工作 ${tdone}/${tasks.length}` : '執行中', st: 'on' }, { label: `確認恢復（${check}）`, st: 'todo' }]
     : [{ label: tasks.length ? `現場工作 ${tdone}/${tasks.length}` : '已執行', st: 'done' }, { label: `讀值確認中（${check}）`, st: 'on' }]
-  const end = closed ? `✓ ${ended(ev).pill}：${endText(ev)}` : stop ? `■ 安全停止：${outcomeText(ev) || '安全核心已停機'}`
+  const end = working ? null : closed ? `✓ ${fin!.pill}：${endText(ev)}` : stop ? `■ 安全停止：${outcomeText(ev) || '安全核心已停機'}`
     : missed ? `✗ 讀值沒有達到（${check}）→ Agent Nemo 重新判斷中` : replanning || rejected ? 'Agent Nemo 重新規劃中' : null
-  const tone = closed ? 'ok' : stop || missed ? 'bad' : 'run'
+  const tone = closed && !working ? 'ok' : stop || missed ? 'bad' : 'run'
   const full = (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(ev.id) } }
   return (
     <div className={`rs rs-${tone}`} role="status" aria-live="polite" data-testid="result-strip" data-state={ev.state}>

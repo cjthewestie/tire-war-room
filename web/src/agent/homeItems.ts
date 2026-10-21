@@ -5,7 +5,7 @@
 //   插單與人力 — supervisor tasks (下新任務) waiting for approval
 //   處理中     — approved work being repaired, recovering or still done by people on the floor
 //   已處理完   — closed events, Safety Core actions, rejected readings (collapsed)
-import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
+import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorkTask, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
 import { REPAIR_KINDS } from '../aiStatus'
@@ -42,14 +42,28 @@ function named(head: string, title: string, machine?: string): string {
   if (own) t = t.slice(own.length).trim()
   return t ? `${head}${machine ? '・' : '：'}${t}` : head
 }
-/** How a closed event ended, in the supervisor's words: 已恢復正常 only when a reading confirmed it; a supervisor task or
- *  plant event has no reading to recover, so it is 已完成. */
-export function ended(ev: Event): { pill: string; tone: HomeItem['tone'] } {
-  if (ev.source === 'supervisor' || ev.source === 'plant') return { pill: '已完成', tone: 'ok' }
-  const out = ev.outcome ?? ''
+/** How a closed event ended, in the supervisor's words, from its outcome alone (a 今天處理過的事 row of a previous run
+ *  keeps no event): 已恢復正常 only when a reading confirmed it; a supervisor task or plant event has no reading to
+ *  recover, so it is 已完成. */
+export function endedBy(task: boolean, outcome: string | null): { pill: string; tone: HomeItem['tone'] } {
+  if (task) return { pill: '已完成', tone: 'ok' }
+  const out = outcome ?? ''
   if (/停用/.test(out)) return { pill: '已停用該機', tone: 'done' }
   if (/未驗證|未以讀值/.test(out)) return { pill: '已處置，未用讀值確認', tone: 'done' }
   return { pill: '已恢復正常', tone: 'ok' }
+}
+/** The same, counting its field work: while people still repair the machine (停用檢修 runs after the event closed), or
+ *  still do a supervisor task's or plant event's work, it is not finished — 處理中 (tone run), never a green 已完成. A
+ *  machine a reading confirmed stays 已恢復正常 while only other work is left (宣達, staffing; veteran 10-22). */
+export function ended(ev: Event, tasks: WorkTask[] = []): { pill: string; tone: HomeItem['tone'] } {
+  const mine = tasks.filter((t) => t.event_id === ev.id)
+  const open = mine.filter((t) => t.status !== '完成').length
+  const repair = mine.filter((t) => REPAIR_KINDS.has(t.kind))
+  const repairOpen = repair.filter((t) => t.status !== '完成').length
+  if (repairOpen) return { pill: `維修中（${repair.length - repairOpen}/${repair.length}）`, tone: 'run' }
+  const task = ev.source === 'supervisor' || ev.source === 'plant'
+  if (task && open) return { pill: `現場工作 ${mine.length - open}/${mine.length}`, tone: 'run' }
+  return endedBy(task, ev.outcome)
 }
 /** The outcome without the backend's 「已修復：」 head (the pill already says how it ended). */
 export const outcomeText = (ev: Event) => plain(ev.outcome ?? '').replace(/^(已修復：)+/, '')
@@ -79,14 +93,14 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
     } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
       // approved work stays on the list until people finish it (field work, warroom/sim/work.py); once a reading
-      // confirmed the machine is back, it turns green and only counts the field work left
+      // confirmed the machine is back and its repair is done, it turns green and only counts the field work left (ended)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
       const done = tasks.length - tasksOpen
       const repair = tasks.filter((t) => REPAIR_KINDS.has(t.kind))
       const repairOpen = repair.filter((t) => t.status !== '完成').length
       const progress = tasks.length ? done / tasks.length : ok / Math.max(1, total)
       if (closed) {
-        const e = ended(ev)
+        const e = ended(ev, tasks)
         out.push({ ...base, rank: 4, tone: e.tone, progress, pill: e.pill, title, sub: `還有 ${tasksOpen} 件現場工作` })
       } else {
         out.push({ ...base, rank: 4, tone: 'run', progress,
@@ -98,7 +112,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     } else if (!closed) {
       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: 'Agent Nemo 規劃中', title, sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
     } else {
-      const e = ended(ev)
+      const e = ended(ev, tasks)
       out.push({ ...base, rank: 5, tone: e.tone, pill: e.pill, title, sub: `${outcomeText(ev)}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
     }
   }

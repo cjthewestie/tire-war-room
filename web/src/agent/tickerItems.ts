@@ -90,9 +90,10 @@ export function tickerItems(snap: DashboardSnapshot | null, schedule: ScheduleVe
   // the latest finished event in the supervisor's words (結案 is a state-machine word): 「✓ 7 號硫化機已恢復正常」
   if (closed) {
     const own = MACHINE_META[closed.machine_id] ? closed.machine_id : undefined
-    const how = ended(closed).pill
-    out.push({ key: `ev-${closed.id}`, tone: !own || how === '已恢復正常' ? 'good' : 'info', machine: own,
-      text: own ? (how === '已恢復正常' ? `✓ ${machineLabel(own)}已恢復正常` : `${machineLabel(own)}：${how}`) : `✓ 已完成：${plain(closed.alert_card?.title ?? closed.command ?? closed.anomaly.message)}` })
+    const how = ended(closed, world?.tasks?.items ?? []).pill
+    const what = plain(closed.alert_card?.title ?? closed.command ?? closed.anomaly.message)
+    out.push({ key: `ev-${closed.id}`, tone: (own ? how === '已恢復正常' : how === '已完成') ? 'good' : 'info', machine: own,
+      text: own ? (how === '已恢復正常' ? `✓ ${machineLabel(own)}已恢復正常` : `${machineLabel(own)}：${how}`) : how === '已完成' ? `✓ 已完成：${what}` : `${how}：${what}` })
   }
   return out
 }

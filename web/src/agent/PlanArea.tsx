@@ -91,7 +91,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     const tasks = (state.world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
     const repairing = tasks.some((t) => REPAIR_KINDS.has(t.kind) && t.status !== '完成')
     // the stage in the supervisor's words (結案 / 驗證 are state-machine words): the same as the list and the result strip
-    const stage = ev.state === 'closed' ? ended(ev).pill : ev.state === 'safe_stop' ? '安全停止'
+    const stage = ev.state === 'closed' ? ended(ev, tasks).pill : ev.state === 'safe_stop' ? '安全停止'
       : ev.repaired_at ? '維修完成・回溫中' : repairing ? '維修中' : ev.state === 'verify' ? '讀值確認中' : ev.state === 'execute' ? '執行中' : 'Agent Nemo 規劃中'
     // the result strip already says how it ended once the supervisor decided: no second 結果 line
     const decided = !!latestDecision(hist, ev.id)
@@ -129,7 +129,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 Agent Nemo</button>
-          <span className="apv-hint">{ev.state === 'safe_stop' ? '已安全停止，請到現場處理' : closed ? `${ended(ev).pill}${ev.source === 'supervisor' || ev.source === 'plant' ? '' : '；Agent Nemo 異常報告在對話區'}` : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{ev.state === 'safe_stop' ? '已安全停止，請到現場處理' : closed ? `${ended(ev, tasks).pill}${ev.source === 'supervisor' || ev.source === 'plant' ? '' : '；Agent Nemo 異常報告在對話區'}` : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )
