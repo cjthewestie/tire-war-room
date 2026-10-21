@@ -1,5 +1,5 @@
 // Minimotive's tilt-shift: render to a multisampled target, blur everything outside a horizontal focus band with
-// four separable Gaussian passes, then tone-map in the output pass. Turned off, it renders straight to the screen.
+// two separable Gaussian passes, then tone-map in the output pass. Turned off, it renders straight to the screen.
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo } from 'react'
 import * as THREE from 'three'
@@ -29,13 +29,14 @@ const TiltShiftShader = {
 export function TiltShift({ enabled }: { enabled: boolean }) {
   const { gl, scene, camera, size, viewport } = useThree()
   const { composer, blurs } = useMemo(() => {
-    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 4 })
+    const rt = new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType, samples: 2 })
     const composer = new EffectComposer(gl, rt)
     composer.addPass(new RenderPass(scene, camera))
-    const blurs = [0, 1, 2, 3].map((i) => {
+    // one horizontal + one vertical pass; 1.8 ≈ the old 1.6 then 0.8 pair (√(1.6² + 0.8²)), so the blur reads the same
+    const blurs = [0, 1].map((i) => {
       const p = new ShaderPass(TiltShiftShader)
       p.uniforms.dir.value = i % 2 ? new THREE.Vector2(0, 1) : new THREE.Vector2(1, 0)
-      p.uniforms.amount.value = i < 2 ? 1.6 : 0.8
+      p.uniforms.amount.value = 1.8
       composer.addPass(p)
       return p
     })

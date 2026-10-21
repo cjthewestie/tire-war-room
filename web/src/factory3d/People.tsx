@@ -133,9 +133,10 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
 const STANDBY: P = [10.45, 0.1]          // 員工待命區: where a task worker comes from and goes back to
 const ON_TASK = new Set(['前往中', '執行中'])
 
-function ringGeo(p: number) {
-  return new THREE.RingGeometry(0.07, 0.1, 24, 1, Math.PI / 2, -Math.max(0.02, Math.min(1, p)) * Math.PI * 2)
-}
+const RING_SEG = 24
+/** A full ring clockwise from 12 o'clock, made once per walker; the progress is how many of its segments are drawn. */
+const ringGeo = () => new THREE.RingGeometry(0.07, 0.1, RING_SEG, 1, Math.PI / 2, -Math.PI * 2)
+const ringTo = (g: THREE.BufferGeometry, p: number) => g.setDrawRange(0, Math.max(1, Math.round(Math.min(1, p) * RING_SEG)) * 6)
 
 /** Workers on a real task (issue #17). Everyone else stands by in the staff corner (StaffCorner) and two patrol the
  *  aisles (Walkers): CJ, 2026-10-20 「恢復人力待命 有一兩個人巡邏」. A worker with a task (world state 前往中 / 執行中 and
@@ -161,7 +162,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
         const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: '#f5b83d' }))
         task.position.set(0, 1.05, 0)
         f.root.add(task)
-        const ring = new THREE.Mesh(ringGeo(0), new THREE.MeshBasicMaterial({ color: '#76b900', side: THREE.DoubleSide }))
+        const ring = new THREE.Mesh(ringGeo(), new THREE.MeshBasicMaterial({ color: '#76b900', side: THREE.DoubleSide }))
         ring.position.set(0, 1.3, 0)
         f.root.add(ring)
         group.add(f.root)
@@ -180,8 +181,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
-        wk.ring.geometry.dispose()
-        wk.ring.geometry = ringGeo(t.progress)
+        ringTo(wk.ring.geometry, t.progress)
       }
     })
     // task done (or reassigned away): walk back to standby, then join the staff corner

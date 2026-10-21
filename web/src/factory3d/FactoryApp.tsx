@@ -301,7 +301,7 @@ export function FactoryApp() {
       <Canvas
         className="f3-canvas"
         camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
-        dpr={[1, 1.5]}
+        dpr={[1, 1.25]}
         shadows="percentage"
         gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
         onCreated={({ gl, camera }) => {

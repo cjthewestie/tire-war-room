@@ -8,6 +8,10 @@ html, body, #root { height: 100%; overflow: hidden; }
 }
 .f3-canvas { position: absolute !important; inset: 0; z-index: 0; outline: none; }  /* own stacking context: 3D labels stay under the HUD */
 .f3-canvas canvas { outline: none; touch-action: none; }
+/* the canvas stays above the big screen's page (drei <Html occlude="blending"> puts the page at z-index 0 behind a hole
+   in the canvas): drei sets that z-index inline, but every other <Html> label mounted later clears it, and the page
+   then showed through the walls (a dark box once its iframe is hidden from afar) */
+.f3-canvas canvas { position: absolute; z-index: 1; }
 .f3-root kbd { display: inline-block; min-width: 1.6em; padding: 0 6px; border: 1px solid #d8c9b0; border-bottom-width: 3px; border-radius: 7px; background: #fffdf7; color: var(--c-ink); font: 700 12px/1.6 ui-monospace, monospace; text-align: center; }
 
 .f3-hud { position: absolute; z-index: 10; top: 14px; left: 14px; display: grid; gap: 6px; max-width: min(560px, calc(100vw - 28px)); pointer-events: none; justify-items: start; }

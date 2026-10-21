@@ -242,7 +242,7 @@ export function trusses(b: { x0: number; x1: number; z0: number; z1: number }, y
   return g
 }
 const BULB = new THREE.MeshStandardMaterial({ color: '#fff3c4', emissive: '#ffe08a', emissiveIntensity: 1.2 })
-/** The warm bulbs under the trusses' lamp shades (separate: emissive, not merged with the beams). */
+/** The warm bulbs under the trusses' lamp shades (separate: emissive, not merged with the beams; Roof merges them into one). */
 export function bulbs(b: { x0: number; x1: number }, y: number, lampsAlongZ: number[]) {
   const g = new THREE.Group()
   const w = b.x1 - b.x0, n = Math.max(1, Math.round(w / 2.2))

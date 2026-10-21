@@ -483,25 +483,39 @@ function Building() {
 
 const LOCKERS = [-1.9, -1.5, -1.1, -0.7]
 
-/** CSS size the dashboard is laid out at on the big screen (16:9, the dashboard's desktop layout). */
-const BIG_W = 1600, BIG_H = 900
+/** CSS size the dashboard is laid out at on the big screen (16:9, the dashboard's desktop layout; 1200 wide is a
+ *  little over half the pixels of 1600 and still the desktop layout). */
+const BIG_W = 1200, BIG_H = 675
+/** Camera distance to the screen past which the page is not laid out (display:none, still mounted: one /ws), and the
+ *  nearer distance at which it shows again (the gap keeps it from flickering on the edge). */
+const BIG_HIDE = 9, BIG_SHOW = 8
+const SCREEN_AT = new THREE.Vector3(SCREEN.x, SCREEN.y, SCREEN.z)
 
 /** The big screen on the war-room wall shows the REAL dashboard page (/) live: an iframe in a drei <Html transform>
  *  scaled to the screen. "blending" occlusion puts the page behind the canvas and cuts a hole where the screen is
  *  visible, so the desk, the people and the hand phone still draw in front of it. Mounted once, for the whole visit
  *  (hidden, not unmounted, in the other spaces), so it keeps a single /ws connection. Look only: no pointer events;
- *  the desk's computer (F) opens the same page full-size to use it. */
+ *  the desk's computer (F) opens the same page full-size to use it. From afar (the overview, the far rows) the iframe
+ *  is display:none, so the browser skips laying out a page nobody can read; the screen stays dark. */
 function BigScreen({ active }: { active: boolean }) {
   // mounted a frame late, like the signs (the very first drei <Html> mounted with the canvas can lose its root)
   const [ready, setReady] = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  const frame = useRef<HTMLIFrameElement>(null)
+  const near = useRef(true)
+  useFrame(({ camera }) => {
+    const d = camera.position.distanceTo(SCREEN_AT)
+    near.current = near.current ? d < BIG_HIDE : d < BIG_SHOW
+    const want = near.current ? '' : 'none'
+    if (frame.current && frame.current.style.display !== want) frame.current.style.display = want
+  })
   if (!ready) return null
   return (
     <group position={[SCREEN.x - 0.045, SCREEN.y, SCREEN.z]} rotation={[0, -Math.PI / 2, 0]}>
       <Html transform occlude="blending" distanceFactor={(SCREEN.w / BIG_W) * 400} zIndexRange={[2, 0]} pointerEvents="none"
         geometry={<planeGeometry args={[SCREEN.w, SCREEN.h]} />}>
         <div className="f3-bigscreen" data-testid="f3-bigscreen" style={{ width: BIG_W, height: BIG_H, display: active ? 'block' : 'none' }}>
-          <iframe title="戰情室大螢幕（儀表板）" src={`/${embedSearch()}#monitor`} tabIndex={-1} aria-hidden />
+          <iframe ref={frame} title="戰情室大螢幕（儀表板）" src={`/${embedSearch()}#monitor`} tabIndex={-1} aria-hidden />
         </div>
       </Html>
     </group>
@@ -666,7 +680,7 @@ export function Lights() {
     s.position.set(1.8 + 7, 16, 0.6 + 8)
     s.target.position.set(1.8, 0, 0.6)
     s.castShadow = true
-    s.shadow.mapSize.set(2048, 2048)
+    s.shadow.mapSize.set(1024, 1024)   // the radius-3 blur hides the coarser texels (2048 was 4× the shadow pass)
     Object.assign(s.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 1, far: 45 })
     s.shadow.bias = -0.0005
     s.shadow.normalBias = 0.03
@@ -694,7 +708,7 @@ function signSpot(line: Line): [number, number] {
 export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: number; lamps: number[] }) {
   const g = useMemo(() => {
     const grp = new THREE.Group()
-    grp.add(mergeStatic(trusses(b, y, wallTop, lamps), { castShadow: false, receiveShadow: false }), bulbs(b, y, lamps))
+    grp.add(mergeStatic(trusses(b, y, wallTop, lamps), { castShadow: false, receiveShadow: false }), mergeStatic(bulbs(b, y, lamps), { castShadow: false, receiveShadow: false }))
     return grp
   }, [b, y, wallTop, lamps])
   useFrame(({ camera }) => { g.visible = camera.position.y < y - 0.2 })
