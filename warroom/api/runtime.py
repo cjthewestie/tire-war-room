@@ -1009,9 +1009,13 @@ class Runtime:
         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
         auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
         AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
-        檢修 walked to 7 號 13 s before the card)."""
+        檢修 walked to 7 號 13 s before the card). Not while code re-solves an approved round whose schedule another
+        event's version made stale (StateMachine.approved_rebase): the approved repair goes on meanwhile."""
         ev = self._event_obj(event_id)
         if ev is None:
+            return False
+        rebase = getattr(self.state_machine, "approved_rebase", None)
+        if callable(rebase) and rebase(ev.id):
             return False
         if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
                         EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):

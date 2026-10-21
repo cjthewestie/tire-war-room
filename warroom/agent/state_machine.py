@@ -257,6 +257,7 @@ class _Run:
     current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
     approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
     stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
+    rebasing: bool = False                                   # code re-solves that stale schedule, until the next decision
     # issue #10: plan discussion
     waiting_req: ApprovalRequest | None = None               # the card the event is waiting on now
     supersede: dict[str, Any] | None = None                  # {"old": card, "text", "by"} set by a discussion
@@ -963,6 +964,7 @@ class StateMachine:
                     self._settle_discussion(run, req)
                     res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
                     run.waiting_req = None
+                run.rebasing = False                 # decided (or carried over): the hold follows this decision
                 if res.status is ApprovalStatus.SUPERSEDED:
                     # issue #10: the supervisor discussed this plan; its card is retired (audited by the
                     # broker) and the plan is redone with the new conditions. A discussion is a decision,
@@ -1059,10 +1061,13 @@ class StateMachine:
                                f"{machine_label(ev.machine_id, short=True)}依現行排程重算（不算失敗）", "dynamic")
                 elif self._fail(run, "動作未完成"):
                     return
-                ctx = {"write_failed": {"steps": run.round_problems, "active_version": self._active_version(),
-                                        "at": self._now().isoformat()}}
-                why = "排程已被另一事件更新 → 依現行排程重算" if stale_only else "動作未完成 → 重新規劃"
-                if not await self._replan(run, ctx, why):
+                if stale_only:
+                    ok = self._resolve_stale(run, "排程已被另一事件更新 → 依現行排程重算")
+                else:
+                    ctx = {"write_failed": {"steps": run.round_problems, "active_version": self._active_version(),
+                                            "at": self._now().isoformat()}}
+                    ok = await self._replan(run, ctx, "動作未完成 → 重新規劃")
+                if not ok:
                     return
                 continue
             verdict, observed = await self._verify(run)
@@ -1141,7 +1146,11 @@ class StateMachine:
                                "duration_ms": res.duration_ms, "attempt": attempt, "data": _brief(res.data)},
                               event_id=ev.id)
             if res.ok:
-                await self._pace(started, max(model_s * attempt, res.duration_ms / 1000.0))
+                if tool not in WRITE_TOOLS:
+                    # a write has no modelled latency: pacing its sub-ms run waited for the next plant tick, which
+                    # another event's model call holds (Runtime.compute_busy) — an approved round stalled 11 s
+                    # between two writes, its fix (VERIFY) and its 綠燈 with it (concurrent_3, real model)
+                    await self._pace(started, max(model_s * attempt, res.duration_ms / 1000.0))
                 return res
             if attempt <= MAX_TOOL_RETRIES:
                 self._note(ev, "工具", f"[工具] {tool_label(tool)}失敗（{tool_error_text(tool, res.error)}）→ 重試一次",
@@ -1479,12 +1488,45 @@ class StateMachine:
         exp = expectation_text(plan.hypothesis.expectation)
         self._note(ev, "指揮官", f"拆步驟：{decompose_text(plan.steps)}" + (f"；預期：{exp}" if exp else ""), "info")
 
+    def _resolve_stale(self, run: _Run, why: str) -> bool:
+        """REPLAN by code: the supervisor approved this round, but its schedule went stale before the confirm (another
+        event's version took effect first, concurrent anomalies, page 10) and nothing else of the round failed. The
+        hypothesis and the plan still stand; only the schedule they were solved against moved, so the same steps run
+        again (SIMULATE re-solves against the schedule in force, GATE carries the approval over when the content is
+        the same, else the v2 card). No second commander call: with the real model it held the plant 10–18 s
+        (concurrent_3, CURE-10) while the approved repair waited. Counts as a replan (max_replans bounds a loop of
+        events invalidating each other). False when the event was safe-stopped."""
+        ev, plan = run.ev, run.plan
+        if ev.replans >= self.max_replans:
+            self._safe_stop(run, f"已重新規劃 {ev.replans} 次仍未解決")
+            return False
+        self._to(ev, EventState.REPLAN, why)
+        ev.replans += 1
+        run.replan_why, run.rebasing = why, True
+        h = ev.hypotheses[-1]
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"stale_resolve": "code", "commander_called": False, "hypothesis": h.id,
+                           "steps": [s.id for s in plan.steps]}, event_id=ev.id)
+        run.plan_at, run.results = self._now(), {}
+        ev.prior_rounds.append(StepRound(round=len(ev.prior_rounds) + 1, hypothesis_id=h.id, goal=ev.goal,
+                                         steps=ev.steps))
+        ev.steps = [StepRun(step=s, state="pending") for s in plan.steps]
+        self._note(ev, "系統", f"{why}（{h.id}：{h.statement}）；沿用原步驟，由程式重新求解", "dynamic")
+        return True
+
+    def approved_rebase(self, event_id: str) -> bool:
+        """The event's round was approved and code is re-solving its stale schedule (_resolve_stale) until the next
+        decision: the repair the supervisor approved goes on meanwhile (Runtime fast repair hold)."""
+        run = self._runs.get(event_id)
+        return run is not None and run.rebasing
+
     async def _replan(self, run: _Run, extra: dict[str, Any], why: str, discussion: bool = False) -> bool:
         """REPLAN: gather fresh context (neighbours on the same header/line, SOP), ask the commander
         for a new hypothesis. False when the event was safe-stopped. A discussion replan (issue #10)
         is bounded by MAX_DISCUSS_REPLANS instead of max_replans and keeps the plan's shape: when the
         model drops the schedule solve, the previous steps run again so the constraint is enforced."""
         ev = run.ev
+        run.rebasing = False
         if not discussion and ev.replans >= self.max_replans:
             self._safe_stop(run, f"已重新規劃 {ev.replans} 次仍未解決")
             return False
