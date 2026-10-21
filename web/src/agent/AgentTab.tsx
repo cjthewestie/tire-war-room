@@ -52,9 +52,11 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   return (
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
-    <div className="home">
+    <div className={`home ${sel ? '' : 'calm'}`}>
       {!sel && <HomeOverview onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
-      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
+      {/* nothing open: the list would only repeat 「全廠正常」, so the plan column takes its place (veteran 10-22 for HY);
+          finished events stay in 今天處理過的事 */}
+      {sel && <ApprovalList items={list} selected={sel.key} onPick={setPicked} />}
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
     </div>

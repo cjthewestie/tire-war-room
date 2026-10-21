@@ -342,6 +342,7 @@
 .home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
 .home > .plan-area { grid-area: plan; height: var(--home-h); }
 .home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
+.home.calm { grid-template-columns: minmax(0, 1fr) 360px; grid-template-areas: "plan chat"; }
 .con-view button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-ev { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
 .feed-ev-h { align-self: flex-start; margin: 10px 0 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-size: 12.5px; color: var(--ink-dim); }
@@ -474,10 +475,12 @@ a.ov-row:hover { background: var(--panel-2); }
 
 @media (max-width: 1099px) {
   .home { grid-template-columns: 240px minmax(0, 1fr); grid-template-areas: "list plan" "chat chat"; }
+  .home.calm { grid-template-columns: minmax(0, 1fr); grid-template-areas: "plan" "chat"; }
   .home > .console { position: static; height: 480px; }
 }
 @media (max-width: 759px) {
   .home { grid-template-columns: minmax(0, 1fr); grid-template-areas: "list" "plan" "chat"; }
+  .home.calm { grid-template-columns: minmax(0, 1fr); grid-template-areas: "plan" "chat"; }
   .home > .home-list { position: static; max-height: none; }
   .home > .plan-area { height: auto; overflow: visible; }
   .plan-area .apv-act { position: static; margin: 14px 0 0; padding: 12px 0 0; box-shadow: none; }
