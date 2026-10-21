@@ -1202,7 +1202,7 @@ class MainAgent:
             tools += control_specs()
             if _BARE_CMD_RX.match(t):                 # a command, not a lookup: no read tools this turn
                 tools = [x for x in tools if x["function"]["name"] in (*CONTROL, PROPOSE)]
-        if self._memory is not None:
+        if self._memory is not None and not (self._control is not None and _BARE_CMD_RX.match(t)):
             tools += memory_specs()
         if recall:
             tools = []                                  # the answer is in the conversation's own record
