@@ -5,7 +5,7 @@
 // and drives off when it leaves. Light on purpose: no pathfinding, a small fixed aisle graph.
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import * as THREE from 'three'
 import { REPAIR_KINDS } from '../aiStatus'
 import { DEMO_MODE } from '../components/DemoStrip'
@@ -240,6 +240,9 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
 function RepairChip({ id, where, walkers }: { id: string; where: string; walkers: RefObject<Map<string, Walker>> }) {
   const at = useRef<THREE.Group>(null)
   const chip = useRef<HTMLDivElement>(null)
+  // mounted a frame late, like the signs (a page opened mid-repair mounts it with the canvas, and that <Html> can lose its root)
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
   useFrame(() => {
     const wk = walkers.current.get(id)
     const el = chip.current
@@ -253,9 +256,9 @@ function RepairChip({ id, where, walkers }: { id: string; where: string; walkers
   })
   return (
     <group ref={at}>
-      <Html position={[0, 1.62, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
+      {ready && <Html position={[0, 1.62, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
         <div ref={chip} className="f3-repair" data-testid="f3-repair-chip" style={{ display: 'none' }} />
-      </Html>
+      </Html>}
     </group>
   )
 }

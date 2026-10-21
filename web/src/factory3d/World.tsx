@@ -5,7 +5,7 @@
 // Static meshes are merged per material (kit.mergeStatic); only lamps, gears, rollers, belts and people animate.
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ComponentProps } from 'react'
 import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
@@ -154,6 +154,14 @@ function glowTexture() {
 }
 const GLOW = typeof document !== 'undefined' ? glowTexture() : null
 
+/** A drei <Html> mounted a frame late, like the signs: the very first <Html> mounted with the canvas can lose its root,
+ *  and a tag pinned from the start (demo: the story event's machine, page opened during an anomaly) never showed. */
+function LateHtml(props: ComponentProps<typeof Html>) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  return ready ? <Html {...props} /> : null
+}
+
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
 function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null }) {
@@ -210,14 +218,14 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
         </mesh>
       )}
       {focus && (
-        <Html position={[0, lampY + 0.2, lz]} zIndexRange={[11, 10]} style={{ pointerEvents: 'none' }}>
+        <LateHtml position={[0, lampY + 0.2, lz]} zIndexRange={[11, 10]} style={{ pointerEvents: 'none' }}>
           <div className={`f3-tag ${light}`} data-testid={`tag-${p.id}`}>
             <b>{tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
             <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>
             {work && <em data-testid={`work-${p.id}`}>{work}</em>}
           </div>
-        </Html>
+        </LateHtml>
       )}
     </group>
   )
