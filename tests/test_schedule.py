@@ -554,7 +554,11 @@ def test_large_tires_run_every_week_on_their_presses():
     n_l = sum(1 for j in new if j.size is TireSize.L and j.order_id != "#A-311")
     n_m = sum(1 for j in new if j.size is TireSize.M)
     assert n_l >= 6 and n_m >= 6, (n_l, n_m)
-    for p in ("CURE-08", "CURE-10"):     # curing #L-301 now
+    # the presses curing L now, read from the sim (dataset layout, #64: CURE-11 cures SO-003 and CURE-08 a
+    # medium tire; the demo book had #L-301 on CURE-08 / CURE-10)
+    curing_l = [m.machine_id for m in sim.machines() if m.cure_job is not None and m.cure_job.size is TireSize.L]
+    assert curing_l
+    for p in curing_l:
         assert any(j.size is TireSize.L for j in new if j.press_id == p and j.mold_in < now + timedelta(days=7)), p
 
 
