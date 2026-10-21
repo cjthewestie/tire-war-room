@@ -156,7 +156,10 @@ async def test_weather_goes_to_the_model_and_a_made_up_answer_is_replaced_after_
     admit it has no weather data (「今天天氣是晴天」, or a plant dump) is replaced after it."""
     m = Model(("say", "我沒有天氣資料。"))
     out, f = await _turn(m, "今天天氣怎樣")
-    assert out["reply"] == "我沒有天氣資料。" and len(m.calls) == 1 and not f.tools and out["by"] == "model"
+    assert out["reply"].startswith("我沒有天氣資料。") and len(m.calls) == 1 and not f.tools and out["by"] == "model"
+    m = Model(("say", "今天是 10/21，天氣我沒有資料，但工廠方面：目前運轉 5 台；在崗 10 人。"))
+    out, _ = await _turn(m, "今天天氣怎樣")
+    assert out["reply"].startswith("今天是 10/21，天氣我沒有資料。") and "運轉 5 台" not in out["reply"]
     for said in ("今天天氣是晴天。", "主管早上好。今天值班 10 人。", "天氣預報是陰轉雨。還有沒有什麼需要我幫忙的？"):
         m = Model(("say", said))
         out, _ = await _turn(m, "今天天氣怎樣")

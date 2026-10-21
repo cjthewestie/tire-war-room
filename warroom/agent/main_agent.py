@@ -824,9 +824,16 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
-            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not _ADMITS_NO_DATA_RX.search(words):
+            if code is None and casual and _NO_DATA_TOPIC_RX.search(t):
                 out["intent"] = "no_data"
-                words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
+                said = _ADMITS_NO_DATA_RX.search(words)
+                if said is None:
+                    words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
+                else:
+                    # the model's own admission, cut where it ends: it went on into a plant status dump (real run
+                    # 10-21: 「天氣我沒有資料，但工廠方面：目前運轉 5 台…」); then one plant fact and an offer, as small talk
+                    end = min([k for k in (words.find(c, said.end()) for c in "。，,；;！!？?") if k >= 0] or [len(words)])
+                    words = self._with_fact(words[:end].rstrip("，,；; ") + "。", context)
             if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
                 # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
                 words = INJECT_REPLY
