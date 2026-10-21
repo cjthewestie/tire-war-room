@@ -40,6 +40,7 @@ from warroom.contracts import ASK_TOOLS, ToolName, ToolResult
 
 MAX_STEPS = 6
 MAX_CALLS_PER_STEP = 4
+MAX_SOP_SEARCHES = 2   # real run 10-21: 「硫化機溫度掉下來要怎麼處理？」 → 6 sop_search with reworded queries, then no words
 BUDGET_S = 60.0
 MEMORY_TURNS = 8
 READ_TOOLS = sorted(t.value for t in ASK_TOOLS)
@@ -351,6 +352,9 @@ class MainAgent:
                                                        ensure_ascii=False))
                     if key in called:                 # the same call again: the result is already above
                         result = "剛查過了，結果在上面。"
+                    elif c.function.name == "sop_search" and sum(k[0] == "sop_search" for k in called) >= MAX_SOP_SEARCHES:
+                        # reworded searches return the same SOP: stop the loop, answer from what is above
+                        result = "SOP 這一輪已經查過，結果在上面。請直接依上面的 SOP 回覆主管（2–3 句），不要再查。"
                     else:
                         called.add(key)
                         result = await self._tool(c.function.name, args if isinstance(args, dict) else {}, text, out, tid,
@@ -433,6 +437,7 @@ class MainAgent:
                 continue
             sops = re.findall(r"(SOP-[A-Z]+-\d+)〈([^〉]+)〉", s["summary"]) if s["tool"] == "sop_search" else []
             ok.append("請照 " + "、".join(f"{a}〈{b}〉" for a, b in sops[:2]) + " 處理" if sops else s["summary"][:90].rstrip("；，、 "))
+        ok = list(dict.fromkeys(ok))                # the same SOP found by several searches is named once
         return ("查到：" + "；".join(ok)[:220] + "。") if ok else ""
 
     # ---------------------------------------------------------------- rules (rule mode, or the model failed)
