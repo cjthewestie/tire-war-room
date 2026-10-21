@@ -3,19 +3,22 @@
 // to use the real dashboard, watch it live on the big wall screen, go through the doors to the 休息區 and 廁所
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
 // F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
-// Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo
-// never has to leave the 3D view; ?demo=1 also lists them in the key strip. #71: the ⚡ 觸發異常 button (or T) does
-// the same with a click, for presenters and touch devices.
+// Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 2 / 3 run at 10× / 60×, 0 pauses
+// or plays, so the demo never has to leave the 3D view; ?demo=1 also lists them in the key strip and turns key 4
+// (隨機事件) off, matching the demo strip's presenter mode. #71: the ⚡ 觸發異常 button (or T) does the same with a
+// click, for presenters and touch devices.
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { STATE_LABEL } from '../components/common'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
+import { useLinkStatus } from '../linkStatus'
 import { alertText, diffPending, type PushState } from '../phone/alert'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
@@ -38,14 +41,15 @@ import { DRAWN_LIGHT, Lights, World } from './World'
 type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
 const PRESS7 = (SCENARIOS.find((s) => s.name === 'press7_temp_drop')?.label ?? '7 號硫化機溫降').replace(/（.*?）/, '')
+const CONC3 = SCENARIOS.find((s) => s.name === 'concurrent_3') ?? { label: '3 件同時異常', speed: 5 }
 /** Presenter keys → the same /api/sim/control calls as the dashboard's demo strip. Digit0 toggles, so it is built per press. */
 const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: string }> = {
   Digit1: () => ({ c: { action: 'scenario', scenario: 'press7_temp_drop', speed: 10, preroll: true }, label: `載入情境：${PRESS7}` }),
+  Digit5: () => ({ c: { action: 'scenario', scenario: 'concurrent_3', speed: CONC3.speed, preroll: true }, label: `載入情境：${CONC3.label}` }),
   Digit2: () => ({ c: { action: 'speed', speed: 10 }, label: '10 倍速' }),
   Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
 }
-const SHOW_DEMO_KEYS = new URLSearchParams(location.search).get('demo') === '1'
 
 let audio: AudioContext | null = null
 function unlockAudio() {
@@ -93,6 +97,7 @@ function promptText(n: Near) {
 
 export function FactoryApp() {
   const { state, transport, connected } = useWarRoom()
+  const link = useLinkStatus()
   const [started, setStarted] = useState(false)
   const [near, setNear] = useState<Near>(null)
   const [panel, setPanel] = useState<Panel>(null)
@@ -214,7 +219,7 @@ export function FactoryApp() {
         transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
-      if (e.code === 'Digit4') {          // issue #36: 隨機事件 on / off (the same switch as the demo strip)
+      if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
         if (!transport?.setSimEvents || e.repeat) return
         const on = !state.clock?.random_events?.enabled
         transport.setSimEvents({ enabled: on }).then(
@@ -308,8 +313,14 @@ export function FactoryApp() {
           <b>戰情室負責人</b>
           <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}</span>
-          {state.clock?.day_loop && <span className="f3-loop" data-testid="f3-loop">一日循環・第 {state.clock.day_loop.loop} 輪</span>}
-          <span className={`f3-conn ${connected ? 'ok' : 'bad'}`}>{connected ? (transport?.mode === 'mock' ? '模擬資料' : '即時連線') : '連線中'}</span>
+          {/* the same as the dashboard header: 一日循環 small and muted beside the time, full wording in the tooltip */}
+          {state.clock?.day_loop && (
+            <span className="f3-loop" data-testid="f3-loop" title={`一日循環・第 ${state.clock.day_loop.loop} 輪：團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>
+              <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
+            </span>
+          )}
+          {/* the header's link chip wording (linkStatus.ts); .live = connected to the backend (e2e waits on it) */}
+          <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
           {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
@@ -321,7 +332,7 @@ export function FactoryApp() {
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
-        {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>4</kbd> 隨機事件 <kbd>0</kbd> 暫停／播放</span>}
+        {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>

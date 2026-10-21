@@ -62,7 +62,9 @@ try {
   watch(page)
   await page.goto(`${BASE}/?live=1#world`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid=plant-panels]', { timeout: 15000 })
-  const pipe = await page.locator('[data-testid=order-pipeline] li').allInnerTexts()
+  // UX declutter: the pipeline sits in ①'s folded 訂單明細 and energy / dock / goods in 更多全廠資訊 — read text, then open them
+  const pipe = await page.locator('[data-testid=order-pipeline] li').allTextContents()
+  await page.evaluate(() => document.querySelectorAll('[data-testid=orders-more], [data-testid=plant-more]').forEach((d) => { d.open = true }))
   check('order pipeline shows the five stages', pipe.length === 5 && ['待排程', '生產中', '完成', '待出貨', '已出貨'].every((s, i) => pipe[i].includes(s)), pipe.map((t) => t.replace(/\n/g, '')).join(' | '))
   check('material bars with reorder lines', (await page.locator('[data-testid=materials] .mat-bar em').count()) === 6)
   check('people by zone', (await page.locator('[data-testid=people-zones] li').count()) >= 4, (await page.locator('[data-testid=people-zones]').innerText()).replace(/\n/g, ' '))

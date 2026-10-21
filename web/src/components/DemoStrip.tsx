@@ -5,6 +5,10 @@ import { useWarRoom } from '../useWarRoom'
 import { SimEventControls } from './SimEvents'
 
 const SPEEDS = [1, 5, 10, 60]
+/** ?demo=1 (presenter mode, the same flag as the 3D key strip; the 3D desk, wall screen and phone iframes inherit it):
+ *  the strip offers only the two demo scenarios, without the day-loop jumps or the 隨機事件 controls. */
+export const DEMO_MODE = new URLSearchParams(location.search).get('demo') === '1'
+const DEMO_SCENARIOS: ScenarioName[] = ['press7_temp_drop', 'concurrent_3']
 const JUMPS: Partial<Record<ScenarioName, { label: string; iso: string }[]>> = {
   press7_temp_drop: [
     { label: '02:14 偵測', iso: '2026-10-03T02:13:55+08:00' },
@@ -35,7 +39,7 @@ export function DemoStrip() {
     <div className="demo" aria-label="展示控制">
       <span className="demo-k">展示</span>
       <div className="seg" role="group" aria-label="情境（注入故障）">
-        {SCENARIOS.map((s) => (
+        {SCENARIOS.filter((s) => !DEMO_MODE || DEMO_SCENARIOS.includes(s.name)).map((s) => (
           <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''}
             onClick={() => { setScenario(s.name); setLoading(s.label); run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null)) }}>{s.label}</button>
         ))}
@@ -48,7 +52,7 @@ export function DemoStrip() {
         ))}
         <button disabled={busy} onClick={() => run(() => transport.control({ action: 'reset' }))}>↺ 重來</button>
       </div>
-      {!mock && state.clock?.day_loop && (
+      {!mock && !DEMO_MODE && state.clock?.day_loop && (
         <div className="seg" role="group" aria-label="跳到時間（一日循環）" data-testid="day-jumps">
           {DAY_JUMPS.map((j) => (
             <button key={j.at} disabled={busy} title={`快轉到 ${j.at}（照常跑過中間的時間）`}
@@ -61,7 +65,7 @@ export function DemoStrip() {
           {JUMPS[current]!.map((j) => <button key={j.iso} onClick={() => run(() => transport.jump!(Date.parse(j.iso)))}>{j.label}</button>)}
         </div>
       )}
-      <SimEventControls busy={busy} run={run} />
+      {!DEMO_MODE && <SimEventControls busy={busy} run={run} />}
       <div className="seg net" role="group" aria-label="拔網路測試" title="模擬離線分層（p.9）：弱網→Agent 不受影響，只延後同步與推播；WAN 斷→手機走廠內 LAN；LAN 斷→現場觸控螢幕＋警示燈">
         {(['online', 'weak', 'wan_down', 'lan_down'] as const).map((n) => (
           <button key={n} disabled={busy} className={net === n ? `on ${n}` : ''} onClick={() => setNet(n)}

@@ -13,13 +13,18 @@ import { ScheduleTab } from './components/ScheduleTab'
 import { OrdersTab } from './components/OrdersTab'
 import { EarlyWarnings } from './components/EarlyWarnings'
 import { TodayPlan } from './components/TodayPlan'
+import { openFolds } from './media'
 import { useWarRoom, WarRoomProvider } from './useWarRoom'
 import { readConsoleEvent } from './agent/consoleHash'
+import { embedSearch } from './transport'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
 const StateMachinePage = lazy(() => import('./statemachine/StateMachinePage').then((m) => ({ default: m.StateMachinePage })))
 const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default: m.AdminPage })))
+
+/** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
+const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
 
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
@@ -50,6 +55,7 @@ function Dashboard() {
     if (m) setMachine(m)
     setTimeout(() => {
       const el = document.querySelector(m ? `[data-machine="${m}"]` : line ? `[data-line="${line}"]` : '.machines')
+      openFolds(el)   // on a phone ④ is folded into its header
       el?.scrollIntoView({ block: 'center' })
       el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
     }, 120)
@@ -75,7 +81,9 @@ function Dashboard() {
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
-      <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測</footer>
+      {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}
+      <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測
+        {!EMBEDDED && <a className="foot-link" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" data-testid="factory-link">3D 工廠 ↗</a>}</footer>
       <nav className="bottomnav" aria-label="分頁">
         <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} aria-label="主控台" onClick={() => go('agent')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v11H9l-5 4zM8 9h8M8 12h5" /></svg>主控台{pendingN > 0 && <i className="nav-badge">{pendingN}</i>}
@@ -92,7 +100,7 @@ function Dashboard() {
         <button className={tab === 'console' ? 'on' : ''} aria-current={tab === 'console' ? 'page' : undefined} aria-label="Agent 完整過程" onClick={() => go('console')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v14H4zM7 9l3 3-3 3M12 15h5" /></svg>Agent
         </button>
-        <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label="更多：狀態機、後台" onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
+        <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={EMBEDDED ? '更多：狀態機、後台' : '更多：狀態機、後台、3D 工廠'} onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
           <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>{tab === 'sm' ? '狀態機' : tab === 'admin' ? '後台' : '更多'}
         </button>
         <button className={demoOpen ? 'on' : ''} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
@@ -111,6 +119,12 @@ function Dashboard() {
               <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>
               <span><b>後台</b><small>RAG 知識庫、工廠指示、記憶、狀態（主管 PIN）</small></span>
             </button>
+            {!EMBEDDED && (
+              <a role="menuitem" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" onClick={() => setMoreOpen(false)} data-testid="factory-link-more">
+                <svg viewBox="0 0 24 24" aria-hidden><path d="M3 20V9l6 4V9l6 4V5h6v15zM3 20h18" /></svg>
+                <span><b>3D 工廠 ↗</b><small>整座工廠的 3D 走查（另開分頁）</small></span>
+              </a>
+            )}
           </div>
         </>
       )}

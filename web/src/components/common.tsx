@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { Event, EventState, MachineStatus, RiskLevel, TimelineItem } from '../contracts'
 import { fmtHMS } from '../format'
+import { PHONE_QUERY, useMediaQuery } from '../media'
 
 /** page 10: why the validation layer rejected a reading */
 export const QUALITY_LABEL: Record<string, string> = { out_of_range: '超出範圍', jump: '突跳', stale: '數值凍結', neighbor_mismatch: '與鄰機不符', missing: '缺值' }
@@ -52,17 +53,35 @@ function actorClass(a: TimelineItem['actor']): string {
   return a === '安全核心' ? 'safety' : a === '指揮官' ? 'cmd' : a === '主管' ? 'human' : a.startsWith('驗證') ? 'verify' : 'plain'
 }
 
-export function Panel({ title, num, children, className = '', right }: { title: string; num?: string; children: ReactNode; className?: string; right?: ReactNode }) {
+/** `fold` (UX declutter): 'phone' = a secondary block that folds into its header under 600 px and stays a plain
+ *  panel on desktop; 'always' = folded by default at every width. A folded header shows `summary` after the title
+ *  (e.g. the event and its state); `right` then moves to the top of the body, since controls do not belong in a summary. */
+export function Panel({ title, num, children, className = '', right, fold, summary, testId }: {
+  title: string; num?: string; children: ReactNode; className?: string; right?: ReactNode
+  fold?: 'phone' | 'always'; summary?: ReactNode; testId?: string
+}) {
+  const phone = useMediaQuery(PHONE_QUERY)
+  const h2 = <h2>{num && <span className="num">{num}</span>}{title}</h2>
+  if (fold === 'always' || (fold === 'phone' && phone)) {
+    return (
+      <details className={`panel fold ${className}`} data-testid={testId}>
+        <summary className="panel-h">{h2}{summary && <span className="fold-sum">{summary}</span>}</summary>
+        {right && <div className="fold-right">{right}</div>}
+        {children}
+      </details>
+    )
+  }
   return (
-    <section className={`panel ${className}`}>
+    <section className={`panel ${className}`} data-testid={testId}>
       <header className="panel-h">
-        <h2>{num && <span className="num">{num}</span>}{title}</h2>
+        {h2}
         {right}
       </header>
       {children}
     </section>
   )
 }
+
 
 export function useWidth<T extends HTMLElement>(): [React.RefObject<T | null>, number] {
   const ref = useRef<T | null>(null)

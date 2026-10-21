@@ -38,10 +38,18 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
             <i className="dot data" />驗證層攔下 {h?.bad_data_total} 筆壞資料（{(h?.bad_data ?? []).map((b) => machineLabel(b.machine_id)).join('、')}・未喚醒 AI）
           </span>
         )}
-        <span className="chip ok" data-testid="chip-normal"><i className="dot ok" />正常 {h?.normal_count ?? '–'} 台</span>
-        <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'muted'}`} data-testid="chip-abnormal"><i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'idle'}`} />異常 {h?.abnormal_count ?? '–'} 台</span>
-        {state.clock?.day_loop && <span className="chip loop" data-testid="chip-loop" title={`團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>一日循環・第 {state.clock.day_loop.loop} 輪</span>}
+        {/* one chip for both counts (UX declutter); it turns red while any machine is abnormal */}
+        <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'ok'}`} data-testid="chip-counts">
+          <i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'ok'}`} />
+          <span data-testid="chip-normal">正常 {h?.normal_count ?? '–'} 台</span>・<span data-testid="chip-abnormal">異常 {h?.abnormal_count ?? '–'} 台</span>
+        </span>
         <span className="clock">{ft ? <><span>{fmtMD(ft)}</span><span>{fmtHM(ft)}</span></> : '—'}</span>
+        {/* README: 「畫面時間旁顯示一日循環・第 n 輪」 — kept beside the time, small and muted; full wording in the tooltip */}
+        {state.clock?.day_loop && (
+          <span className="clock-loop" data-testid="chip-loop" title={`一日循環・第 ${state.clock.day_loop.loop} 輪：團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>
+            <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
+          </span>
+        )}
         {/* .live = connected to the backend (e2e waits on it); tone: ok | warn | mock | down */}
         <span className={`mode t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''} ${transport?.mode === 'mock' ? 'mock' : ''}`} title={link.title} data-testid="link-chip" role="status">
           {link.text}

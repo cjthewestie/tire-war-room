@@ -194,12 +194,28 @@ export class LiveTransport implements Transport {
 // ---------------- mock ----------------
 type BC =
   | { kind: 'hello'; from: string }
-  | { kind: 'leader'; from: string }
+  | { kind: 'leader'; from: string; owner?: boolean }
   | { kind: 'ws'; msg: WsMessage }
   | { kind: 'cmd'; id: string; op: string; args: unknown[] }
   | { kind: 'res'; id: string; value: unknown }
 
-export interface MockOptions { scenario?: ScenarioName; at?: number; speed?: number; standalone?: boolean }
+/** standalone = lead at once (a ?scenario / ?at page runs its own simulation); channel = BroadcastChannel id suffix:
+ *  pages on one channel run one MockEngine (leader election), so the 3D page and its embedded dashboard / phone agree. */
+export interface MockOptions { scenario?: ScenarioName; at?: number; speed?: number; standalone?: boolean; channel?: string }
+
+/** This page's private mock channel: ?mockch=<id> joins one (embedded in / linked from a ?scenario page); a ?scenario /
+ *  ?at page owns a new one per load, so separate tabs opened with ?scenario stay apart. Otherwise the shared channel. */
+const PAGE_Q = new URLSearchParams(location.search)
+const MOCK_CHANNEL = PAGE_Q.get('mockch') ?? (PAGE_Q.has('scenario') || PAGE_Q.has('at') ? Math.random().toString(36).slice(2, 10) : undefined)
+
+/** Query string for a page this one embeds or links (the 3D iframes, 「3D 工廠 ↗」): the same params, plus mockch so
+ *  that page follows this page's simulation. Live mode ignores mockch (the server keeps every page in sync). */
+export function embedSearch(): string {
+  if (!MOCK_CHANNEL || PAGE_Q.has('mockch') || PAGE_Q.has('live')) return location.search
+  const q = new URLSearchParams(location.search)
+  q.set('mockch', MOCK_CHANNEL)
+  return `?${q}`
+}
 
 export class MockTransport implements Transport {
   mode: Mode = 'mock'
@@ -220,21 +236,30 @@ export class MockTransport implements Transport {
       onConn(true)
     }
     const hasBC = typeof BroadcastChannel !== 'undefined'
-    if (!hasBC || this.opts.standalone) { becomeLeader(); return () => { unsub?.(); this.engine?.stop() } }
-    this.ch = new BroadcastChannel('warroom-mock')
+    if (!hasBC) { becomeLeader(); return () => { unsub?.(); this.engine?.stop() } }
+    this.ch = new BroadcastChannel(this.opts.channel ? `warroom-mock:${this.opts.channel}` : 'warroom-mock')
     let following = false
+    // joined another page's channel (?mockch): if its owner answers late (busy rendering 3D), drop our copy and follow it
+    const yields = !!this.opts.channel && !this.opts.standalone
     this.ch.onmessage = async (e: MessageEvent<BC>) => {
       const m = e.data
-      if (m.kind === 'hello' && this.engine) this.ch!.postMessage({ kind: 'leader', from: this.me } satisfies BC)
-      else if (m.kind === 'leader' && !this.engine && !following) { following = true; clearTimeout(leaderTimer); onConn(true) }
+      if (m.kind === 'hello' && this.engine) this.ch!.postMessage({ kind: 'leader', from: this.me, owner: this.opts.standalone } satisfies BC)
+      else if (m.kind === 'leader' && !following && (!this.engine || (yields && m.owner))) {
+        if (this.engine) { unsub?.(); this.engine.stop(); this.engine = null }
+        following = true; clearTimeout(leaderTimer); onConn(true)
+      }
       else if (m.kind === 'ws' && following) onMsg(m.msg)
       else if (m.kind === 'cmd' && this.engine) {
         const value = await this.local(m.op, m.args)
         this.ch!.postMessage({ kind: 'res', id: m.id, value } satisfies BC)
       } else if (m.kind === 'res') { this.waiters.get(m.id)?.(m.value); this.waiters.delete(m.id) }
     }
-    this.ch.postMessage({ kind: 'hello', from: this.me } satisfies BC)
-    leaderTimer = setTimeout(() => { if (!following) becomeLeader() }, 350)
+    // standalone: this page owns its private channel, so it leads at once and answers its embeds' hellos
+    if (this.opts.standalone) becomeLeader()
+    else {
+      this.ch.postMessage({ kind: 'hello', from: this.me } satisfies BC)
+      leaderTimer = setTimeout(() => { if (!following) becomeLeader() }, 350)
+    }
     return () => { clearTimeout(leaderTimer); unsub?.(); this.engine?.stop(); this.ch?.close() }
   }
 
@@ -295,7 +320,8 @@ export async function pickTransport(): Promise<Transport> {
       const hhmmss = atq.length === 5 ? `${atq}:00` : atq
       at = Date.parse(`${date}T${hhmmss}+08:00`)
     }
-    return { scenario, speed, at, standalone: !!(scenario || atq) }
+    // ?mockch: follow that page's simulation (and lead it with our own params only if nobody answers)
+    return { scenario, speed, at, standalone: !!(scenario || atq) && !q.has('mockch'), channel: MOCK_CHANNEL }
   }
   if (q.has('mock')) return new MockTransport(mockOpts())
   if (q.has('live')) return new LiveTransport()

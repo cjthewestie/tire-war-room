@@ -109,6 +109,10 @@ try {
   await d.locator('.tabs button', { hasText: '產線監控' }).click()
   await d.waitForSelector('.monitor-wrap [data-testid=approval-visual]', { timeout: 5000 }).catch(() => {})
   check('monitor tab shows the visual card', (await d.locator('.monitor-wrap [data-testid=approval-visual]').count()) >= 1)
+  // UX declutter: the card is compact on 產線監控; 核准 and the recommended option show, the evidence opens with 展開
+  check('monitor card: compact, 核准 visible before 展開', await d.locator('.monitor-wrap [data-testid=visual-approve]').first().isVisible() &&
+    !(await d.locator('.monitor-wrap [data-testid=schedule-compare]').first().isVisible().catch(() => false)))
+  await d.locator('.monitor-wrap [data-testid=apv-expand]').first().click()
   const mon = d.locator('.monitor-wrap [data-testid=approval-visual]').first()
   const gantt = await mon.locator('[data-testid=schedule-compare]').innerText().catch(() => '')
   check('monitor card: before/after Gantt names #A-311', gantt.includes('#A-311'), gantt.replace(/\n/g, ' | ').slice(0, 160))
@@ -147,6 +151,8 @@ try {
 
   // approve from the visual card (option B), confirm via GET /api/approvals
   const reqId = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => a[0]?.id))
+  const fold = d.locator('.monitor-wrap [data-testid=apv-expand]').first()
+  if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click()   // the options sit behind 展開
   await d.locator('.monitor-wrap [data-testid=option-B]').first().click()
   await d.locator('.monitor-wrap [data-testid=visual-approve]').first().click()
   let status = ''

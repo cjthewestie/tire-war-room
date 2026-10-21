@@ -109,6 +109,9 @@ try {
     const r = await run(name, speed, isRush ? async () => {
       // tasks are running: dashboard 工廠全貌 + agent console, 1440 and 390
       await page.goto(`${BASE}/?live=1#world`, { waitUntil: 'domcontentloaded' })
+      // UX declutter: goods and tasks sit in 「更多全廠資訊」 (closed by default); on a phone the plant section folds too
+      await page.waitForSelector('[data-testid=plant-more]', { timeout: 15000 })
+      await page.evaluate(() => document.querySelectorAll('[data-testid=plant-panels] details').forEach((d) => { d.open = true }))
       await page.waitForSelector('[data-testid=world-goods] [data-testid=goods-item]', { timeout: 15000 })
       await sleep(800)
       const rows = await page.locator('[data-testid=world-tasks] [data-testid=task-row]').evaluateAll((els) => els.map((e) => e.dataset.status))
@@ -125,6 +128,8 @@ try {
       check('1440 agent console: event TaskList', !!et, `${et} rows`)
       await page.screenshot({ path: `${OUT}/scenarios-1440-console.png` })
       await p3.goto(`${BASE}/?live=1#world`, { waitUntil: 'domcontentloaded' })
+      await p3.waitForSelector('[data-testid=plant-more]', { state: 'attached', timeout: 15000 })
+      await p3.evaluate(() => document.querySelectorAll('[data-testid=plant-panels] details').forEach((d) => { d.open = true }))
       await p3.waitForSelector('[data-testid=world-tasks]', { timeout: 15000 })
       await sleep(600)
       const sw = await p3.evaluate(() => document.documentElement.scrollWidth)

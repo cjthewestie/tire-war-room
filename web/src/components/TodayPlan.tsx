@@ -2,8 +2,8 @@
 // overnight, today's risks and the shift-load bars — all from the active schedule, GET /api/shifts and GET /api/world.
 // There is no API to approve a whole day's plan yet, so this card has no 核准 button (listed as a gap in the PR).
 import { useEffect, useMemo, useState } from 'react'
-import type { Shift } from '../contracts'
-import { machineLabel } from '../factory'
+import type { ScheduleJob, Shift } from '../contracts'
+import { SIZE_LABEL, machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { plain } from '../plain'
 import { useWarRoom } from '../useWarRoom'
@@ -20,11 +20,11 @@ export function TodayPlan() {
   useEffect(() => { transport?.shifts().then(setShifts).catch(() => {}) }, [transport, d0])
   const w = state.world
   const starts = useMemo(() => {
-    const by = new Map<string, { n: number; presses: Set<string> }>()
+    const by = new Map<string, { n: number; presses: Set<string>; size: ScheduleJob['size'] }>()
     for (const j of state.schedule?.schedule.jobs ?? []) {
       const t = ms(j.mold_in)
       if (!(t >= d0 && t < d0 + 24 * H)) continue
-      const g = by.get(j.order_id) ?? { n: 0, presses: new Set<string>() }
+      const g = by.get(j.order_id) ?? { n: 0, presses: new Set<string>(), size: j.size }
       g.n++; g.presses.add(j.press_id); by.set(j.order_id, g)
     }
     return [...by.entries()]
@@ -36,6 +36,10 @@ export function TodayPlan() {
   const risks = [...(state.schedule?.schedule.warnings ?? []).map(plain), ...maint.map((m) => `${fmtHM(m.start)} ${machineLabel(m.machine_id)}${m.title}`),
     ...low.map((m) => `${m.name}約 ${m.days_left ?? '—'} 天`)]
   const due = (id: string) => w?.orders.items.find((o) => o.id === id)?.due
+  const customer = (id: string) => w?.orders.items.find((o) => o.id === id)?.customer
+  const evRow = (e: (typeof overnight)[number]) => (
+    <li key={e.id}>{fmtHM(e.opened_at)} {e.source === 'supervisor' ? '主管指令' : machineLabel(e.machine_id)}：{plain(e.alert_card?.title ?? e.command ?? e.anomaly.message)}（{STATE_LABEL[e.state]}）</li>
+  )
   return (
     <section className="panel today" aria-label="今日計劃" data-testid="today-plan">
       <header className="panel-h"><h2>今日計劃・{isNaN(d0) ? '' : `${fmtMD(d0)}（${fmtWeekday(d0)}）`}</h2><span className="muted small">排程第 {state.schedule?.version ?? '—'} 版</span></header>
@@ -44,7 +48,8 @@ export function TodayPlan() {
           <h3 className="sub">今天入模的單</h3>
           {starts.length ? (
             <table className="impact-t"><thead><tr><th>訂單</th><th>條數</th><th>硫化機</th><th>交期</th></tr></thead>
-              <tbody>{starts.map(([id, g]) => <tr key={id}><td><b>{id}</b></td><td>{g.n}</td><td>{[...g.presses].map((p) => `${Number(p.slice(5))} 號`).join('、')}</td><td>{due(id) ? fmtMD(due(id)!) : '—'}</td></tr>)}</tbody></table>
+              {/* order numbers, not machines (CJ, ScheduleTab SchedHelp): each carries its tyre size and customer */}
+              <tbody>{starts.map(([id, g]) => <tr key={id}><td><b>{id}</b> {SIZE_LABEL[g.size]}{customer(id) && <small className="muted">・{customer(id)}</small>}</td><td>{g.n}</td><td>{[...g.presses].map((p) => `${Number(p.slice(5))} 號`).join('、')}</td><td>{due(id) ? fmtMD(due(id)!) : '—'}</td></tr>)}</tbody></table>
           ) : <p className="muted">今天沒有排入模。</p>}
         </div>
         <div>
@@ -57,7 +62,11 @@ export function TodayPlan() {
       <div className="today-grid">
         <div>
           <h3 className="sub">過去 12 小時發生的事</h3>
-          {overnight.length ? <ul className="w-list">{overnight.map((e) => <li key={e.id}>{fmtHM(e.opened_at)} {e.source === 'supervisor' ? '主管指令' : machineLabel(e.machine_id)}：{plain(e.alert_card?.title ?? e.command ?? e.anomaly.message)}（{STATE_LABEL[e.state]}）</li>)}</ul> : <p className="muted">沒有事件。</p>}
+          {/* UX declutter: at most 3 here, the rest behind 「還有 N 件」 (same pattern as 預警) */}
+          {overnight.length ? <ul className="w-list">{overnight.slice(0, 3).map(evRow)}</ul> : <p className="muted">沒有事件。</p>}
+          {overnight.length > 3 && (
+            <details className="tp-more"><summary>還有 {overnight.length - 3} 件</summary><ul className="w-list">{overnight.slice(3).map(evRow)}</ul></details>
+          )}
         </div>
         <div>
           <h3 className="sub">今天的風險</h3>

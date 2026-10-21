@@ -56,7 +56,7 @@ try {
   check('canvas renders full screen', !!box && box.width >= 1400 && box.height >= 850, JSON.stringify(box))
   const gl = await page.evaluate(() => { const c = document.querySelector('canvas'); return !!(c && (c.getContext('webgl2') || c.getContext('webgl'))) })
   check('WebGL context', gl)
-  const live = await until(() => page.locator('.f3-conn.ok').count(), 10000)
+  const live = await until(() => page.locator('.f3-conn.live').count(), 10000)
   check('HUD connected to live backend', !!live, await page.locator('.f3-hud-top').innerText())
 
   // before start: the camera circles the whole building; all four corners and the dock are on screen
