@@ -1,6 +1,8 @@
 // The patrol robot's routes (PatrolRobot.tsx): the aisles it drives, its loop and inspection stops, and the path along
 // the aisles to a machine. Pure data and geometry, plus the robot's live pose (read by the demo camera and the e2e hook).
-import type { Placed } from './layout'
+import { PLACED, type Placed } from './layout'
+
+export const PLACED_IDS = PLACED.map((p) => p.id)
 
 /** Aisle centre lines (z) between the rows, and the two cross corridors (x) at the ends of the rows. */
 export const AISLE: Record<string, number> = { A: -3.5, B: -1.25, C: 0.9, D: 0.9, BOND: 0.9, CURE: 3.2 }
@@ -15,7 +17,20 @@ export const STOPS: { x: number; z: number; id: string }[] = [
 ]
 
 /** Live pose, for the demo camera and the e2e hook. */
-export const robot = { x: WEST_X, z: 0.9, yaw: 0, mode: 'patrol' as 'patrol' | 'divert' | 'parked' | 'return', target: null as string | null }
+export const robot = {
+  x: WEST_X, z: 0.9, yaw: 0, mode: 'patrol' as 'patrol' | 'divert' | 'parked' | 'return', target: null as string | null,
+  /** the demo's robot beat (useGuidedDemo): set true to make it stop and play its little show (ROBOT_SHOW) */
+  playReq: false,
+  /** the show's current step (null = not playing) and the steps played so far, in order (the e2e checks the order) */
+  playing: null as RobotStep | null,
+  played: [] as RobotStep[],
+}
+
+/** The robot beat (CJ, 2026-10-22: 「也要去跟巡檢機器人玩一下」): stop, turn to the camera, wave, scan the nearest
+ *  machine with the light, a little bow, then back to patrol. [step, seconds it ends at]. */
+export type RobotStep = 'turn' | 'wave' | 'scan' | 'bow'
+export const ROBOT_SHOW: [RobotStep, number][] = [['turn', 1.0], ['wave', 3.0], ['scan', 5.2], ['bow', 6.6]]
+export const showStep = (s: number): RobotStep | null => ROBOT_SHOW.find(([, end]) => s < end)?.[0] ?? null
 
 /** The stand point in the aisle in front of a machine. */
 export function standPoint(p: Placed): [number, number] {

@@ -22,6 +22,8 @@ import { useRingRecoveries } from './recovery'
 import { DockCelebration } from './DockCelebration'
 import { PatrolRobot } from './PatrolRobot'
 import { Whiteboard } from './Whiteboard'
+import { Alarms } from './Alarms'
+import type { Alarm } from './alarm'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
   PLACED_BY_ID, ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
@@ -708,10 +710,13 @@ const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
 /** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp, celebrate = null, board }: {
+export function World({ state, focusId, active, fp, celebrate = null, board, alarms, arrows }: {
   state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null
   /** the pitch whiteboard's deck and current slide; clicking the board opens the full-screen view */
   board: { slides: string[]; index: number; onOpen: () => void }
+  /** abnormal machines (alarm.ts) for the stack lights, beacons and labels; arrows = the off-screen indicators */
+  alarms: Record<string, Alarm>
+  arrows: boolean
 }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
@@ -761,6 +766,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board }: {
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />
       <PatrolRobot incident={incident} />
+      {active && <Alarms alarms={alarms} labels={!fp} arrows={arrows} />}
       {active && <Whiteboard slides={board.slides} index={board.index} onOpen={board.onOpen} />}
       <Ambient />
     </group>

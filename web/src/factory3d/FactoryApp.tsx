@@ -8,8 +8,12 @@
 // lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
 // click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
 // is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
-// ▶ Demo（6 分鐘） (G): the guided 6-minute run for the finals (GuidedDemo.tsx, demoCues.ts): cue cards, the camera
-// flies to each beat, and at 3:00 the pitch on the whiteboard (Whiteboard.tsx; CJ's slides in web/public/pitch/).
+// ▶ Demo（6 分鐘） (G, or Menu on the pad): the guided run for the finals (useGuidedDemo.ts, demo/cues.ts): presenter
+// checkpoints (Space / N / A continue, the sim waits meanwhile), one continuous camera take (demoCamera.ts), the robot's
+// beat, and the pitch on the whiteboard (Whiteboard.tsx; CJ's slides in web/public/pitch/). The camera is locked while
+// it runs: only continue, pause (B / Menu), exit (Esc / hold B), slides (← → / LB RB) and the phone (P / X) work.
+// Xbox controller (gamepad.ts): sticks walk and look, D-pad steps through the machines, A opens, B backs out, X phone,
+// Y flies to an abnormal machine (else the whiteboard), View held shows the mapping.
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -19,6 +23,7 @@ import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
 import type { SimControl } from '../contracts'
+import { STATUS_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useLinkStatus } from '../linkStatus'
@@ -30,16 +35,19 @@ import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
-import { DemoOverlay, SlideView } from './GuidedDemo'
+import { DemoOverlay, PadHelp, SlideView } from './GuidedDemo'
+import { alarms, arrowEls } from './alarm'
+import { BTN, approach, usePad, type Btn, type PadFrame } from './gamepad'
+import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
-import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
+import { PLACED, PLACED_BY_ID, ROOMS, WHITEBOARD, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
-import { TOUCH_DEVICE, cam, player, teleport, view } from './pose'
+import { CAM_LIMITS, TOUCH_DEVICE, cam, player, stick, teleport, view } from './pose'
 import { BreakRoom, Restroom } from './Rooms'
 import { SPACES, arrival } from './spaces'
 import { TiltShift } from './TiltShift'
@@ -132,6 +140,7 @@ export function FactoryApp() {
   const nearRef = useRef<Near>(null)
   useEffect(() => { nearRef.current = near }, [near])
   const fadingRef = useRef(false)
+  const phoneUpRef = useRef(false)
   const push = useRef<PushState>({ seen: new Set(), held: [] })
 
   const ev = primaryEvent(state.snapshot?.events)
@@ -196,25 +205,34 @@ export function FactoryApp() {
     setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
   }, [])
   const onDemoEnd = useCallback(() => { window.focus(); canvasRef.current?.focus() }, [])
-  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd })
-  const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const nSlides = deck.slides.length
-  const { running: demoOn, setSlide, setSlideView, slideView } = demo
+  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, nSlides })
+  const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
+  const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
+  // demo keys (demoInput.ts): while the demo runs these are the only keys that work
+  const runAction = useCallback((act: Action) => {
+    if (act === 'start') void demo.begin()
+    else if (act === 'continue') void demo.cont()
+    else if (act === 'pause') demo.togglePause()
+    else if (act === 'exit-ask') demo.setConfirmExit(true)
+    else if (act === 'exit-yes') void demo.exit()
+    else if (act === 'exit-no') demo.setConfirmExit(false)
+    else if (act === 'slide+') changeSlide(1)
+    else if (act === 'slide-') changeSlide(-1)
+    else if (act === 'slides-close') setSlideView(false)
+  }, [demo, changeSlide, setSlideView])
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       const tg = e.target as HTMLElement | null
-      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA')) return
-      if (e.code === 'KeyG' && !e.repeat) { void demo.begin(); return }
-      if (!demoOn) return
-      if (e.code === 'KeyN' && !e.repeat) demo.skip()
-      else if (e.code === 'KeyB' && !e.repeat) demo.togglePause()
-      else if ((pitchView || slideView) && (e.code === 'ArrowRight' || e.code === 'PageDown')) setSlide((i) => Math.min(nSlides - 1, i + 1))
-      else if ((pitchView || slideView) && (e.code === 'ArrowLeft' || e.code === 'PageUp')) setSlide((i) => Math.max(0, i - 1))
-      else if (e.code === 'Escape' && slideView) setSlideView(false)
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA') || e.repeat) return
+      const act = demoKey(e.code, { demoOn, confirmExit: demo.confirmExit, slides: pitchView || slideView, slideView, phoneUp: phoneUpRef.current })
+      if (!act || act === 'phone') return   // the phone (P) stays with the main handler
+      if (act === 'continue') e.preventDefault()
+      runAction(act)
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [demo, demoOn, pitchView, slideView, nSlides, setSlide, setSlideView])
+  }, [demo.confirmExit, demoOn, pitchView, slideView, runAction])
 
   const stateRef = useRef(state)          // 情境疊加: the key handler decides overlay / load on the latest state
   useEffect(() => { stateRef.current = state }, [state])
@@ -260,6 +278,8 @@ export function FactoryApp() {
       if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return
       if (!started && (e.code === 'Enter' || e.code === 'Space')) { start(); return }
       unlockAudio()
+      // the demo runs the flow: no free keys, only the phone (approving is part of the story)
+      if (demoOn) { if (e.code === 'KeyP') raisePhone(!phoneUp); else if (e.code === 'Escape' && phoneUp) raisePhone(false); return }
       const demo = DEMO_KEYS[e.code]
       if (demo) {
         if (!transport || e.repeat) return
@@ -287,7 +307,6 @@ export function FactoryApp() {
       }
       if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
-      if (e.code === 'Escape' && demoOn) return   // the demo's slide view takes Esc
       if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
@@ -327,6 +346,71 @@ export function FactoryApp() {
     return () => { delete w.__factory3d }
   }, [raisePhone, goTo])
 
+  // ---------------------------------------------------------------- warning lights (Alarms.tsx, alarm.ts)
+  const alarmMap = useMemo(() => alarms(state.snapshot?.machines, state.snapshot?.events, pending), [state.snapshot?.machines, state.snapshot?.events, pending])
+  const alarmIds = Object.keys(alarmMap).filter((id) => PLACED_BY_ID[id])
+
+  // ---------------------------------------------------------------- Xbox controller (gamepad.ts)
+  const [padFocus, setPadFocus] = useState<string | null>(null)
+  const padIdx = useRef(-1)
+  const padLook = useRef({ x: 0, y: 0, fw: 0, st: 0 })
+  const bHeldFired = useRef(false)
+  const live = useRef({ demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction })
+  useEffect(() => { live.current = { demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction } })
+  useEffect(() => { phoneUpRef.current = phoneUp }, [phoneUp])
+  useEffect(() => { if (!padFocus) return; const id = setTimeout(() => setPadFocus(null), 4000); return () => clearTimeout(id) }, [padFocus])
+  const pad = usePad(useCallback((f: PadFrame, edges: Btn[], held: Record<number, number>, dt: number) => {
+    const L = live.current
+    unlockAudio()
+    const nearBoard = Math.hypot(player.x - WHITEBOARD.x, player.z - WHITEBOARD.z) < 4.5
+    const out = padActions(f, edges, held, {
+      demoOn: L.demoOn, confirmExit: L.demo.confirmExit, slides: L.pitchView || L.slideView || nearBoard, slideView: L.slideView, phoneUp: L.phoneUp,
+    }, bHeldFired.current)
+    if (!(held[BTN.B] > 0)) bHeldFired.current = false
+    if (out.actions.includes('exit-ask')) bHeldFired.current = true
+    if (!L.started && !L.demoOn) { if (edges.length) { if (out.actions.includes('start')) void L.demo.begin(); else start() } return }
+    // walk / look: eased toward the stick, capped (no sudden lurches); zero while the demo holds the camera
+    const pl = padLook.current
+    pl.fw = approach(pl.fw, out.move[0], dt, 8); pl.st = approach(pl.st, out.move[1], dt, 8)
+    pl.x = approach(pl.x, out.look[0], dt, 7); pl.y = approach(pl.y, out.look[1], dt, 7)
+    stick.fw = Math.abs(pl.fw) < 0.02 ? 0 : pl.fw
+    stick.st = Math.abs(pl.st) < 0.02 ? 0 : pl.st
+    if (!L.demoOn && !L.panel && !L.phoneUp) {
+      if (view.mode === 'first') {
+        player.yaw -= pl.x * 2.2 * dt
+        player.pitch = Math.max(-1.1, Math.min(1.1, player.pitch - pl.y * 1.5 * dt))
+      } else {
+        cam.yaw -= pl.x * 1.8 * dt
+        cam.pitch = Math.max(CAM_LIMITS.pitchMin, Math.min(CAM_LIMITS.pitchMax, cam.pitch + pl.y * 0.9 * dt))
+        if (out.zoom) cam.dist = Math.max(CAM_LIMITS.distMin, Math.min(CAM_LIMITS.distMax, cam.dist * Math.exp(out.zoom * 1.3 * dt)))
+      }
+    }
+    for (const act of out.actions) {
+      if (act === 'phone') raisePhone(!L.phoneUp)
+      else if (act === 'focus+' || act === 'focus-' || act === 'row+' || act === 'row-') {
+        // D-pad: step through the machines (← → along the row, ↑ ↓ about a row), standing in front of each
+        const n = PLACED.length, d = act === 'focus+' ? 1 : act === 'focus-' ? -1 : act === 'row+' ? 7 : -7
+        padIdx.current = padIdx.current < 0 ? 0 : (padIdx.current + d + n) % n
+        const p = PLACED[padIdx.current]
+        standAt(p.id)
+        const tile = L.tiles?.find((m) => m.machine_id === p.id)
+        setPadFocus(`${machineLabel(p.id)}・${tile ? STATUS_LABEL[tile.status] ?? tile.status : '—'}${tile?.temp_c != null ? `・${tile.temp_c.toFixed(1)}°C` : ''}`)
+      } else if (act === 'open') {
+        const nr = nearRef.current
+        if (L.panel) closePanel()
+        else if (nr?.kind === 'door') goTo(nr.to)
+        else if (nr) { releaseLook(); setPanel(nr.kind === 'desk' ? { kind: 'monitor' } : { kind: 'machine', id: nr.id }) }
+        else if (padIdx.current >= 0) setPanel({ kind: 'machine', id: PLACED[padIdx.current].id })
+      } else if (act === 'back') {
+        if (L.anomOpen) setAnomOpen(false); else if (L.phoneUp) raisePhone(false); else if (L.panel) closePanel()
+      } else if (act === 'fly') {
+        // an abnormal machine first (the off-screen arrows point at the same ones), else the whiteboard
+        const hot = Object.entries(L.alarms).filter(([id]) => PLACED_BY_ID[id]).map(([id]) => id)
+        if (hot.length) { setMode('third'); standAt(hot[0]) } else teleport(WHITEBOARD.x - 2.4, WHITEBOARD.z, -Math.PI / 2, -Math.PI / 2)
+      } else L.run(act)
+    }
+  }, [raisePhone, closePanel, goTo, start]))
+
   const prompt = started && !overlay && !fading ? promptText(near) : null
 
   return (
@@ -349,7 +433,7 @@ export function FactoryApp() {
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
         <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
-          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} />
+          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} alarms={alarmMap} arrows={!demoOn && scene === 'factory'} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
@@ -398,10 +482,20 @@ export function FactoryApp() {
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>}
-      <DemoOverlay demo={demo} slides={nSlides} onPhone={() => raisePhone(true)} />
+      <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />
+      {!demoOn && scene === 'factory' && alarmIds.map((id) => (
+        <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
+          ref={(el) => { if (el) arrowEls.set(id, el); else arrowEls.delete(id) }}
+          onClick={() => { setMode('third'); standAt(id) }}>
+          <i aria-hidden>➤</i>{alarmMap[id].text}
+        </button>
+      ))}
+      {pad.connected && <div className="f3-pad-chip" data-testid="f3-pad">🎮 已連接{pad.help ? '' : '・按住 View 看按鍵'}</div>}
+      {pad.help && <PadHelp demo={demoOn} />}
+      {padFocus && !demoOn && <div className="f3-pad-focus" data-testid="f3-pad-focus">{padFocus}</div>}
       {slideView && <SlideView slides={deck.slides} index={Math.min(demo.slide, nSlides - 1)} onIndex={setSlide} onClose={() => setSlideView(false)} />}
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>

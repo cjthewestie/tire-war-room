@@ -1,33 +1,16 @@
 // The war room side of the guided demo: follow the shared cue (WS "demo"), send continue / pause / exit, and, when the
-// demo was started here (no 3D tab driving), run the same cue timeline as the 3D factory (cues.ts step()) and post each
+// demo was started here (no 3D tab driving), run the same cue timeline as the 3D factory (demo/driver.ts) and post each
 // cue it reaches. The 3D factory drives with factory3d/useGuidedDemo.ts; whichever screen pressed start is the driver.
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { ScenarioName } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
-import {
-  CUES, DEMO_TOTAL, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, clockPause, latch, clockRead, clockResume, clockSet, clockStart,
-  skip, step, type DemoClock, type DemoLoad, type Signals, type Timeline,
-} from './cues'
-import { beatFor, waitingFor } from './beats'
+import { CUES } from './cues'
+import { beatFor } from './beats'
+import { DemoRun } from './driver'
 import { PAD_A, PAD_MENU, padEdges } from './gamepad'
-import { freshSeen, signals } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
 /** This tab's driver id: the war room drives only the demo it started, in the tab that started it. */
 const ME = `warroom:${Math.random().toString(36).slice(2, 8)}`
-
-/** What cue i waits for: its own checkpoint (cues.ts, 按 A 繼續 or the real approval), else the beat map's rule. */
-const waitOf = (i: number) => {
-  const c = CUES[i] as (typeof CUES)[number] & { checkpoint?: 'continue' | 'approval' }
-  return c ? c.checkpoint ?? waitingFor(c.id, CUES[i + 1]?.on) : null
-}
-
-/** Move the timeline to cue `i` (a continue pressed on another screen). */
-function jumpTo(tl: Timeline, i: number, t: number): Timeline {
-  let out = tl
-  while (out.index < i && CUES[out.index + 1]) out = skip(out, t)
-  return out
-}
 
 export function useDemo() {
   const { state, transport } = useWarRoom()
@@ -43,9 +26,15 @@ export function useDemo() {
     }
   }, [transport])
 
+  // ---------------------------------------------------------------- driver (this tab started the demo): demo/driver.ts
+  const run = useRef<DemoRun | null>(null)
   const start = useCallback(async () => {
-    await send({ action: 'start', cues: CUES.map((c) => c.id), cue_id: CUES[0].id, driver: ME, story_target_s: PITCH_AT, waiting_for: waitOf(0) })
-  }, [send])
+    if (!transport?.demo) { setErr('Demo 模式需要連到伺服器（live）'); return }
+    const r = new DemoRun(transport, ME)
+    run.current = r
+    const note = await r.start(performance.now())
+    if (note) setErr(note)
+  }, [transport])
   const cont = useCallback(() => send({ action: 'continue' }), [send])
   // the paused flag the server last sent (a quick P-P must not send pause twice before the push arrives)
   const pausedRef = useRef(false)
@@ -54,78 +43,20 @@ export function useDemo() {
     const out = await send({ action: pausedRef.current ? 'resume' : 'pause' })
     if (out) pausedRef.current = out.paused
   }, [send])
-  const exit = useCallback(() => send({ action: 'exit' }), [send])
+  const exit = useCallback(async () => { if (run.current) await run.current.exit(); else await send({ action: 'exit' }) }, [send])
 
-  // ---------------------------------------------------------------- driver (this tab started the demo)
   const driving = running && demo?.driver === ME
-  const tl = useRef<Timeline | null>(null)
-  const clock = useRef<DemoClock>({ base: 0, since: null })
-  const seen = useRef(freshSeen())
-  const latched = useRef<Signals>({})
-  const loaded = useRef(new Set<number>())
-  const loads = useRef<DemoLoad[]>(MAIN_LOADS)
-  const armedAt = useRef(Infinity)
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
-  const demoRef = useRef(demo)
-  useEffect(() => { demoRef.current = demo }, [demo])
-
-  const load = useCallback(async (l: DemoLoad) => {
-    if (!transport) return
-    armedAt.current = Infinity
-    seen.current = freshSeen()
-    latched.current = {}
-    await transport.control({ action: 'scenario', scenario: l.scenario as ScenarioName, speed: l.speed, preroll: true })
-    await transport.control({ action: 'play' })
-    armedAt.current = performance.now() + 1500     // the new plant's snapshot replaces the old one's events
-  }, [transport])
-
-  useEffect(() => {
-    if (!driving || !transport) { tl.current = null; return }
-    if (tl.current) return
-    tl.current = { index: 0, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] }
-    clock.current = clockStart(performance.now())
-    loaded.current = new Set([0])
-    void (async () => {
-      let known = false
-      try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { /* offline */ }
-      loads.current = known ? MAIN_LOADS : FALLBACK_LOADS
-      try { await load(loads.current[0]) } catch (e) { console.warn('[demo] scenario load', e); setErr('情境載入沒有成功') }
-    })()
-  }, [driving, transport, load])
-
   useEffect(() => {
     if (!driving) return
     const id = setInterval(() => {
-      const cur = tl.current, d = demoRef.current
-      if (!cur || !d) return
-      const now = performance.now()
-      // the shared pause freezes the timeline too
-      if (d.paused && clock.current.since != null) clock.current = clockPause(clock.current, now)
-      if (!d.paused && clock.current.since == null) clock.current = clockResume(clock.current, now)
-      let t = Math.min(clockRead(clock.current, now), DEMO_TOTAL + 0.5)
-      // continue pressed elsewhere: follow the server's cue (into the pitch, the clock jumps there as in the 3D)
-      if (d.cue_index > cur.index) {
-        tl.current = jumpTo(cur, d.cue_index, t)
-        const at = CUES[d.cue_index]?.at ?? t
-        if (at >= PITCH_AT && t < at) { clock.current = clockSet(clock.current, at, now); t = at }
-        return
-      }
-      loads.current.forEach((l, i) => {
-        if (i > 0 && t >= l.at && !loaded.current.has(i)) { loaded.current.add(i); void load(l).catch((e) => console.warn(e)) }
-      })
-      // latched: the approval card is gone once approved, the cue still follows it (cues.ts latch)
-      const sig = now >= armedAt.current ? (latched.current = latch(latched.current, signals(stateRef.current, seen.current))) : {}
-      let n = step(cur, t, sig)
-      // the approval beat never moves on by the clock: only the real approval (worker on the way) ends it
-      if (n !== cur && waitOf(cur.index) === 'approval' && n.fired[n.fired.length - 1].reason === 'time' && !sig.worker) n = cur
-      if (n === cur) return
-      tl.current = n
-      const c = CUES[n.index]
-      void send({ action: 'cue', cue_id: c.id, cue_index: n.index, waiting_for: waitOf(n.index) })
+      const r = run.current
+      if (!r) return
+      if (r.tick(performance.now(), stateRef.current) === 'stopped') run.current = null
     }, 250)
     return () => clearInterval(id)
-  }, [driving, load, send])
+  }, [driving])
 
   // ---------------------------------------------------------------- Xbox pad: A continue, Menu pause (Gamepad API)
   useEffect(() => {
