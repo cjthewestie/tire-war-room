@@ -1,0 +1,205 @@
+// Agent page (#console, issue #37): the full transcript of one event — every state change, the plan and
+// hypotheses the commander returned, each tool call with its args, result and duration, the data it read
+// (sensor readings, orders, SOP hits with their source), gate verdicts, approvals and replans — with filters
+// and an event picker. CJ, 2026-10-20: 「在那個大的單獨的 agent 的 page 那邊才要去有這些步驟讓我們看到她思考的過程
+// 跟調用工具調用資料的過程」. Rows come from the same audit-log transcript as the home panel (useTranscript).
+import { useMemo, useState } from 'react'
+import type { Event, EventState, ToolName } from '../contracts'
+import { machineLabel } from '../factory'
+import { fmtHMS, fmtMD, fmtMs } from '../format'
+import { plain } from '../plain'
+import { TOOL_LABEL } from '../stepText'
+import { STATE_LABEL } from '../components/common'
+import { StateDiagram } from './StateDiagram'
+import { pathOf, stateAt } from './stateGraph'
+import { useWarRoom } from '../useWarRoom'
+import { ToolIcon } from './ToolIcon'
+import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
+import { Row } from './TranscriptRows'
+import { ChatBar } from './ChatBar'
+import { useTranscript } from './useTranscript'
+import './agent.css'
+
+type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
+const KINDS: { id: Kind; label: string; hint: string }[] = [
+  { id: 'all', label: '全部', hint: '每一步' },
+  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心' },
+  { id: 'think', label: '計畫與判斷', hint: '指揮官回傳的計畫、假設、程式驗證' },
+  { id: 'tool', label: '工具', hint: '每次工具呼叫：參數、結果、耗時' },
+  { id: 'data', label: '讀資料', hint: '只讀的工具：感測器、預測、SOP、訂單班表、排程求解' },
+  { id: 'gate', label: '把關', hint: '動作把關的判定與攔截' },
+  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件' },
+  { id: 'talk', label: '對話', hint: '主管訊息與 Agent 回覆' },
+]
+const READ_TOOLS: ToolName[] = ['read_sensors', 'predict_anomaly', 'cure_formula', 'sop_search', 'query_orders_shifts', 'solve_schedule']
+
+function inKind(i: Item, k: Kind): boolean {
+  switch (k) {
+    case 'all': return true
+    case 'state': return i.k === 'state' || i.k === 'anomaly' || i.k === 'safety'
+    case 'think': return i.k === 'think' || i.k === 'note'
+    case 'tool': return i.k === 'tool'
+    case 'data': return i.k === 'tool' && READ_TOOLS.includes(i.tool)
+    case 'gate': return i.k === 'gate' || i.k === 'blocked'
+    case 'approval': return i.k === 'approval' || i.k === 'version' || i.k === 'chips'
+    case 'talk': return i.k === 'chat' || i.k === 'ask'
+  }
+}
+
+const ASKS = '__asks'
+
+export function AgentConsolePage({ asks, setAsks, initial }: {
+  asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; initial: string | null
+}) {
+  const { state } = useWarRoom()
+  const events = useMemo(() => [...(state.snapshot?.events ?? [])].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)), [state.snapshot?.events])
+  const [picked, setPicked] = useState<string | null>(initial)
+  const [seen, setSeen] = useState(initial)
+  if (initial !== seen) { setSeen(initial); if (initial) setPicked(initial) }
+  const [scope, setScope] = useState<'all' | 'open' | 'closed'>('all')
+  const askOnly = picked === ASKS
+  const ev = askOnly ? null : events.find((e) => e.id === picked) ?? events[0] ?? null
+  const pick = (id: string) => {
+    setPicked(id)
+    history.replaceState(null, '', `${location.pathname}${location.search}#console?event=${encodeURIComponent(id)}`)
+  }
+  const listed = events.filter((e) => scope === 'all' || (scope === 'open') === (e.state !== 'closed' && e.state !== 'safe_stop'))
+  if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
+  return (
+    <div className="trace" data-testid="agent-page">
+      <aside className="trace-side panel" aria-label="選擇事件">
+        <header className="panel-h"><h2>事件</h2><span className="muted small">{events.length} 件</span></header>
+        <div className="seg sm" role="group" aria-label="事件範圍">
+          {(['all', 'open', 'closed'] as const).map((s) => (
+            <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'all' ? '全部' : s === 'open' ? '處理中' : '已結案'}</button>
+          ))}
+        </div>
+        <select className="trace-pick" value={askOnly ? ASKS : ev?.id ?? ''} onChange={(e) => pick(e.target.value)} aria-label="選擇事件">
+          {listed.map((e) => <option key={e.id} value={e.id}>{evName(e)}・{fmtHMS(e.opened_at).slice(0, 5)}・{STATE_LABEL[e.state]}</option>)}
+          {asks.length > 0 && <option value={ASKS}>問戰情室（這次開啟）</option>}
+        </select>
+        <ul className="trace-list" role="listbox" aria-label="事件清單">
+          {listed.map((e) => (
+            <li key={e.id} role="option" aria-selected={e.id === ev?.id}>
+              <button className={e.id === ev?.id ? 'on' : ''} onClick={() => pick(e.id)} data-testid="trace-event">
+                <b>{evName(e)}</b><span className={`state-pill st-${e.state}`}>{STATE_LABEL[e.state]}</span>
+                <small className="muted">{fmtMD(e.opened_at)} {fmtHMS(e.opened_at).slice(0, 5)}{e.replans ? `・重新規劃 ${e.replans} 次` : ''}</small>
+                <small className="muted trace-what">{plain(e.command ?? e.alert_card?.title ?? e.anomaly.message)}</small>
+              </button>
+            </li>
+          ))}
+          {asks.length > 0 && (
+            <li role="option" aria-selected={askOnly}>
+              <button className={askOnly ? 'on' : ''} onClick={() => pick(ASKS)}><b>問戰情室</b><small className="muted">這次開啟問了 {asks.filter((a) => a.k === 'ask').length} 題（只查不改）</small></button>
+            </li>
+          )}
+          {!listed.length && <li className="muted small">沒有事件。</li>}
+        </ul>
+      </aside>
+      {askOnly ? <Trace ev={null} asks={asks} setAsks={setAsks} onPick={pick} /> : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
+        <section className="panel trace-main"><p className="muted">目前沒有事件。AI 指揮官只在事件偵測喚醒、或主管下任務時才動；喚醒後每一步都會出現在這裡。</p></section>
+      )}
+    </div>
+  )
+}
+
+function evName(e: Event): string {
+  return e.source === 'supervisor' ? '主管指令' : e.source === 'plant' ? '工廠事件' : machineLabel(e.machine_id)
+}
+
+function Trace({ ev, asks, setAsks, onPick }: {
+  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+}) {
+  const { state } = useWarRoom()
+  const { items: evItems, source } = useTranscript(ev)
+  // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
+  const items = useMemo(() => withAsks(ev ? evItems : [], asks), [ev, evItems, asks])
+  const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
+  const [kind, setKind] = useState<Kind>('all')
+  const [open, setOpen] = useState(false)
+  const [pick, setPick] = useState<EventState | null>(null)
+  const at = useMemo(() => stateAt(items), [items])
+  const path = useMemo(() => pathOf(items), [items])
+  const shown = items.filter((i, n) => inKind(i, kind) && (!pick || at[n] === pick))
+  const tools = items.filter((i): i is ToolItem => i.k === 'tool')
+  const toolMs = tools.reduce((a, t) => a + (t.durationMs ?? 0), 0)
+  const thinkIdx = new Map<string, number>()
+  let n = 0
+  for (const i of items) if (i.k === 'think' && i.stepIds.length) thinkIdx.set(i.key, n++)
+  return (
+    <section className="panel trace-main" aria-label="Agent 完整過程">
+      <header className="trace-h">
+        <div>
+          <h2>{ev ? <>{evName(ev)}・{fmtMD(ev.opened_at)} {fmtHMS(ev.opened_at)}</> : '問戰情室（只查不改）'}</h2>
+          {ev && <p className="muted small trace-id">{ev.id}{ev.goal ? `・目標：${plain(ev.goal)}` : ''}</p>}
+        </div>
+        {ev && <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>}
+      </header>
+      {ev && <StateDiagram ev={ev} path={path} pick={pick} onPick={setPick} />}
+      <dl className="trace-stats">
+        <div><dt>步驟</dt><dd>{items.length}</dd></div>
+        <div><dt>工具呼叫</dt><dd>{tools.length}<small>{tools.length ? `・共 ${fmtMs(toolMs)}` : ''}</small></dd></div>
+        <div><dt>計畫</dt><dd>{items.filter((i) => i.k === 'think').length}<small>{ev?.replans ? `・重新規劃 ${ev.replans}` : ''}</small></dd></div>
+        <div><dt>把關</dt><dd>{items.filter((i) => i.k === 'gate' || i.k === 'blocked').length}</dd></div>
+        <div><dt>核准</dt><dd>{items.filter((i) => i.k === 'approval').length}</dd></div>
+      </dl>
+      {tools.length > 0 && <DataSummary tools={tools} />}
+      <div className="trace-filters" role="group" aria-label="篩選">
+        {KINDS.map((k) => {
+          const c = items.filter((i) => inKind(i, k.id)).length
+          return (
+            <button key={k.id} className={kind === k.id ? 'on' : ''} aria-pressed={kind === k.id} title={k.hint} onClick={() => setKind(k.id)} disabled={!c && k.id !== 'all'} data-testid={`trace-filter-${k.id}`}>
+              {k.label}<small>{c}</small>
+            </button>
+          )
+        })}
+        <label className="trace-open"><input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} />展開工具細節</label>
+      </div>
+      <p className="muted small trace-note">指揮官以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
+      <div className="con-body trace-body" data-testid="trace-body">
+        {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
+        {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}
+        {shown.map((it) => <Row key={it.key} it={it} ev={ev} nth={it.k === 'think' ? thinkIdx.get(it.key) ?? 0 : 0} open={open} />)}
+      </div>
+      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} onPick={onPick} focus={null} /></div>
+    </section>
+  )
+}
+
+/** 讀了哪些資料: one line per read tool, SOP hits with their source. */
+function DataSummary({ tools }: { tools: ToolItem[] }) {
+  const reads = tools.filter((t) => READ_TOOLS.includes(t.tool))
+  const by = new Map<ToolName, number>()
+  for (const t of reads) by.set(t.tool, (by.get(t.tool) ?? 0) + 1)
+  const sop = new Map<string, { title: string; source: string; score: number | null }>()
+  for (const t of reads.filter((x) => x.tool === 'sop_search' && x.data)) {
+    for (const h of [...arr(t.data!.hits), ...arr(t.data!.team_hits)]) {
+      const id = String(h.sop_id ?? '')
+      if (id && !sop.has(id)) sop.set(id, { title: String(h.title ?? ''), source: String(h.source ?? ''), score: typeof h.score === 'number' ? h.score : null })
+    }
+  }
+  const presses = new Set<string>()
+  for (const t of reads.filter((x) => x.tool === 'read_sensors' && x.data)) for (const id of Object.keys((t.data!.summary ?? {}) as object)) presses.add(id)
+  return (
+    <section className="trace-data" aria-label="讀了哪些資料">
+      <h3 className="sub">讀了哪些資料</h3>
+      <ul>
+        {[...by.entries()].map(([tool, c]) => (
+          <li key={tool}><ToolIcon name={tool} /><b>{TOOL_LABEL[tool]}</b> ×{c}
+            {tool === 'read_sensors' && presses.size > 0 && <span className="muted">：{[...presses].map(machineLabel).join('、')}</span>}
+          </li>
+        ))}
+      </ul>
+      {sop.size > 0 && (
+        <ul className="trace-sop">
+          {[...sop.entries()].map(([id, h]) => (
+            <li key={id}><b>{id}</b> {h.title}<small>{h.source === 'team_dataset' ? '團隊資料集' : h.source}{h.score != null ? `・${h.score.toFixed(3)}` : ''}</small></li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+type D = Record<string, unknown>
+const arr = (v: unknown): D[] => (Array.isArray(v) ? (v as D[]) : [])

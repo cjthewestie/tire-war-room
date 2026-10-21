@@ -116,7 +116,7 @@ def _tool_catalogue() -> str:
         "- sop_search {query, k=3} SOP 知識庫（讀，自動）",
         "- confirm_schedule {schedule_version: int, reason} 確認新排程（寫，需主管核准）",
         "- set_cure_time {press_id, total_cure_h, reason} 設定硫化時間建議值（寫，需主管核准）",
-        "- notify_teams {teams: [curing|body|side|bead_nylon|bigopen|bond|maintenance|qc|supervisor], "
+        "- notify_teams {teams: [curing|body|side|bead_nylon|bigopen|bond|maintenance|qc|trim|supervisor], "
         "kind: maintenance|info|slow_feed|pause_feed|staff_move|overtime|machine_out|dispatch, message, machine_id?} "
         "通知各組（寫；maintenance/info 自動，其餘需核准；dispatch=派工，核准後由程式轉成人員任務）",
     ])
@@ -164,8 +164,12 @@ def build_user_message(req: CommanderRequest) -> str:
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
-def build_messages(req: CommanderRequest) -> list[dict[str, str]]:
-    return [{"role": "system", "content": SYSTEM_PROMPT}, {"role": "user", "content": build_user_message(req)}]
+def build_messages(req: CommanderRequest, plant_text: str | None = None) -> list[dict[str, str]]:
+    """System = the fixed core prompt, then the plant section (PLANT.md, warroom/agent/plant.py) after it, so the
+    core prefix stays cacheable. plant_text overrides the active version (the 後台 test run of a draft)."""
+    from warroom.agent import plant
+    extra = plant.section_of(plant_text) if plant_text is not None else plant.section()
+    return [{"role": "system", "content": SYSTEM_PROMPT + extra}, {"role": "user", "content": build_user_message(req)}]
 
 
 # =====================================================================================
@@ -307,10 +311,14 @@ class OpenAICommander:
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw: str = ""
         self.last_error: str | None = None     # why the latest call fell back (None = it did not)
+        self.plant_override: str | None = None  # 後台 test run: a draft PLANT.md instead of the active one
+        self.last_plant_sha: str | None = None  # sha256 of the PLANT.md text in the latest request
         self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | invalid_output | error
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
-        kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req), temperature=0.0,
+        from warroom.agent import plant
+        self.last_plant_sha = plant.sha256(self.plant_override) if self.plant_override is not None else plant.active_sha()
+        kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req, self.plant_override), temperature=0.0,
                                   max_tokens=self.max_tokens, stream=True,
                                   stream_options={"include_usage": True})
         # response_format json_schema works on vLLM (xgrammar; guided_json was removed in vLLM 0.12),

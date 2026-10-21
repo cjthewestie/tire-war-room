@@ -67,6 +67,8 @@ async function getJSON<T>(path: string): Promise<T> {
   if (!r.ok) throw new Error(`${r.status} ${path}${await errDetail(r)}`)
   return (await r.json()) as T
 }
+/** Live read-only GET for pages outside the Transport interface (狀態機, 每日事件紀錄). */
+export const apiGet = getJSON
 
 // Writes from a LAN client (the phone) need the supervisor PIN (server: WARROOM_SUPERVISOR_PIN).
 // It is entered when asked and sent only in the X-Supervisor-Pin header: never read from or put in a
@@ -98,6 +100,26 @@ async function postJSON<T>(path: string, body: unknown, retried = false): Promis
     if (p) {
       try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
       return postJSON<T>(path, body, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+  return (await r.json()) as T
+}
+
+/** 後台 (issue #37): every admin call, reads included, carries the supervisor PIN when this tab has one and
+ *  asks for it on a 401 — same PIN rule as approvals, plus the server's factory-network check. */
+export async function adminFetch<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
+  const pin = supervisorPin()
+  const headers: Record<string, string> = {}
+  if (init.body !== undefined) headers['Content-Type'] = 'application/json'
+  if (pin) headers['X-Supervisor-Pin'] = pin
+  const r = await fetch(path, { method: init.method ?? 'GET', headers, body: init.body === undefined ? undefined : JSON.stringify(init.body) })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('後台需要主管 PIN')
+    if (p) {
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return adminFetch<T>(path, init, true)
     }
   }
   if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)

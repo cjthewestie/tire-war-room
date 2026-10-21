@@ -75,7 +75,7 @@ pnpm dev          # 改了存檔，瀏覽器自動更新
 
 **改哪裡：**
 
-- 戰情室：`web/src/App.tsx`、`web/src/components/`（`MonitorTab.tsx` 產線監控、`ScheduleTab.tsx` 排程與人力、`Header.tsx`、`DemoStrip.tsx` 展示列、`MachineDrawer.tsx` 機台抽屜）
+- 戰情室：`web/src/App.tsx`、`web/src/components/`（`MonitorTab.tsx` 產線監控（下半部全廠人、料、貨、車在 `PlantPanels.tsx`）、`OrdersTab.tsx` 訂單、`ScheduleTab.tsx` 排程與人力、`web/src/agent/AgentConsolePage.tsx` Agent 完整過程、`web/src/admin/AdminPage.tsx` 後台、`Header.tsx`、`DemoStrip.tsx` 展示列、`MachineDrawer.tsx` 機台抽屜）
 - 手機頁：`web/src/phone/Phone.tsx`（核准卡、問戰情室）
 - 樣式：`web/src/index.css`
 - 模擬資料：`web/src/mock/`（只影響 `?mock=1`，數字要和企劃書一致，`tests/test_web.py` 會檢查）

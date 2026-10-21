@@ -1,6 +1,6 @@
 // Issue #10: 討論這個計劃 + 下新任務, end to end against a running backend. Headless only.
 //   PORT=8060 ./start.sh   then   node web/e2e/plan-talk.mjs http://localhost:8060
-// (a) press-7 scenario: while the approval card waits, type 「9 號機今晚要保養」 in the Agent 對話台 →
+// (a) press-7 scenario: while the approval card waits, type 「9 號機今晚要保養」 in the 主控台's Agent panel →
 //     the agent re-plans, card v2 replaces v1 and says what changed (#A-311 no longer on press 9), v1 can
 //     no longer be approved, v2 is approved from the card. The phone shows the newest version.
 // (b) 下新任務 「通知維修組明早檢查 3 號機」 → a supervisor event goes PLAN → gate → approval → closed,
@@ -36,8 +36,8 @@ try {
   await d.waitForSelector('.mode.live', { timeout: 15000 }).catch(() => {})
   // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
   const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
-  check('/ opens the 對話台 and it is the first tab', firstTab.includes('對話台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
-  check('status strip on the console (counts, events, approvals, time, network)', /正常 \d+ 台/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
+  check('/ opens the 主控台 and it is the first tab', firstTab.includes('主控台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
+  check('ticker on the console: fixed 正常 / 異常 / 待核准 counts', /正常\s*\d+[\s\S]*異常\s*\d+[\s\S]*待核准\s*\d+/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))
@@ -58,14 +58,22 @@ try {
   await d.waitForTimeout(1500)
   const me = await tr.locator('[data-testid=chat-me]').last().innerText().catch(() => '')
   check('transcript shows the supervisor message', me.includes('9 號機今晚要保養'), me.slice(0, 60))
-  const chips = await tr.locator('[data-testid=constraint-chips]').last().innerText().catch(() => '')
-  check('transcript shows the constraint chip 「9 號機 今晚不可用」', chips.includes('9 號機 今晚不可用'), chips.replace(/\n/g, ' ').slice(0, 80))
-  check('transcript shows a replan row', (await tr.locator('[data-kind=state][data-to=replan]').count()) >= 1)
-  const ver = await tr.locator('[data-testid=card-version]').last().innerText().catch(() => '')
-  check('transcript shows card v1 → v2 with what changed', ver.includes('v1 → v2') && /#A-311：9 號 →/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
   const reply = await tr.locator('[data-testid=chat-reply]').last().innerText().catch(() => '')
   check('agent reply names v2 and the code check', /v2|第 2 版/.test(reply) && reply.includes('程式已檢查'), reply.replace(/\n/g, ' ').slice(0, 160))
   check('agent posted a plain summary for v2', (await tr.locator('[data-testid=chat-summary]', { hasText: '我建議' }).count()) >= 2)
+  // issue #37: chips, the replan row and the card version are steps, shown on the Agent page (看完整過程)
+  await d.locator('[data-testid=see-full]').click()
+  await d.waitForSelector('[data-testid=trace-body] [data-kind=state]', { timeout: 10000 }).catch(() => {})
+  {
+    const tr = d.locator('[data-testid=trace-body]')
+    const chips = await tr.locator('[data-testid=constraint-chips]').last().innerText().catch(() => '')
+    check('transcript shows the constraint chip 「9 號機 今晚不可用」', chips.includes('9 號機 今晚不可用'), chips.replace(/\n/g, ' ').slice(0, 80))
+    check('transcript shows a replan row', (await tr.locator('[data-kind=state][data-to=replan]').count()) >= 1)
+    const ver = await tr.locator('[data-testid=card-version]').last().innerText().catch(() => '')
+    check('transcript shows card v1 → v2 with what changed', ver.includes('v1 → v2') && /#A-311：9 號 →/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
+  }
+  await d.locator('[data-testid=tab-agent]').click()
+  await d.waitForSelector('[data-testid=transcript]')
   const changes = await side.locator('[data-testid=card-changes]').innerText().catch(() => '')
   check('card v2 shows 「與 v1 相比」 and #A-311 off press 9', changes.includes('與 v1 相比') && /#A-311：9 號 →/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
   const pend = (await api(d, '/api/approvals?status=pending')).json ?? []

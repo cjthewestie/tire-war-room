@@ -680,6 +680,14 @@ class StateMachine:
         run.discuss_future = None
 
     # ------------------------------------------------------------------ helpers: time, bus, audit
+    def _plant_sha(self) -> str | None:
+        """sha256 of the PLANT.md version the commander's prompt carried (issue #37, refs #34)."""
+        sha = getattr(self.commander, "last_plant_sha", None)
+        if sha:
+            return sha
+        from warroom.agent import plant
+        return plant.active_sha()
+
     def _now(self) -> datetime:
         return self.clock.now() if self.clock else datetime.now(TZ)
 
@@ -1169,12 +1177,12 @@ class StateMachine:
             self.audit.append(AuditKind.LLM_CALL, "commander",
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
                                "fell_back_to_mock": False, "plan_source": None, "strict": strict,
-                               "reason": run.commander_error}, event_id=ev.id)
+                               "reason": run.commander_error, "plant_sha256": self._plant_sha()}, event_id=ev.id)
             self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
             self.compute_inflight -= 1
-        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json")}
+        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha()}
         if info.fell_back_to_mock:
             # the model's output was rejected: what runs is the deterministic fallback's plan, and the
             # record says so (never credit the mock's steps to the model), with why and what it sent

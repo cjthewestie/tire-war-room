@@ -285,7 +285,9 @@ async def test_mock_commander_page2():
 def test_prompt_prefix_is_stable():
     a = build_messages(_req_plan(page11_anomaly()))
     b = build_messages(_req_plan(mill_anomaly(), "replan"))
-    assert a[0] == b[0] and a[0]["content"] == SYSTEM_PROMPT
+    from warroom.agent import plant
+    # fixed core first (cacheable prefix), then the active PLANT.md section (issue #37), same for every call
+    assert a[0] == b[0] and a[0]["content"] == SYSTEM_PROMPT + plant.section()
     assert a[1] != b[1]
     assert list(plan_schema()["properties"])[0] == "alert_card"
 
@@ -339,7 +341,7 @@ async def test_openai_commander_streams_and_constrains(base_url, expect_guided):
 
     body = seen["body"]
     assert seen["path"].endswith("/chat/completions") and body["stream"] is True and body["temperature"] == 0
-    assert body["model"] == "nemotron-test" and body["messages"][0]["content"] == SYSTEM_PROMPT
+    assert body["model"] == "nemotron-test" and body["messages"][0]["content"].startswith(SYSTEM_PROMPT)
     assert body["response_format"]["type"] == "json_schema" and "guided_json" not in body
     if expect_guided:      # vLLM: reasoning off through the chat template
         assert body["chat_template_kwargs"] == {"enable_thinking": False}

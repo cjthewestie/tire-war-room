@@ -65,7 +65,7 @@ States: `EventState` with `ALLOWED_TRANSITIONS`. `DETECTED → CLASSIFY → PLAN
 - World-only orders (`#W-…`) do not occupy presses and the seed order book is never edited by the world; planned maintenance does not stop machines. These are views of the plant, not inputs to the scheduler yet.
 - API: `GET /api/world` (`WorldSnapshot`); WS `world` messages carry only the sections that changed (`full: true` on the first publish and after a scenario load; nothing extra on connect, clients read `GET /api/world` at start and on reconnect), at most once a wall second (`Runtime._publish_world`).
 - Extension point for the agent: `World.add_listener(fn)` receives every `WorldEvent` (`stockout`, `delivery_late`, `delivery_short`, `order_rush`, `defect`, `repair_open` …). Nothing wakes the state machine from it yet; the agent's 9 tools and the Action Gate do not see the world.
-- UI: dashboard tab 工廠全貌 (`web/src/components/WorldTab.tsx`); 3D workers and the dock truck (`web/src/factory3d/People.tsx`). Headless check: `node web/e2e/world.mjs http://127.0.0.1:<port>`.
+- UI: the lower half of the 產線監控 tab (`web/src/components/PlantPanels.tsx`; issue #37 merged the old 工廠全貌 tab in); 3D workers and the dock truck (`web/src/factory3d/People.tsx`). Headless check: `node web/e2e/world.mjs http://127.0.0.1:<port>`. Issue #37 added the Agent page (`web/src/agent/AgentConsolePage.tsx`, the full transcript) and 後台 (`web/src/admin/AdminPage.tsx` + `warroom/api/admin.py`: RAG maintenance, memory notes, status, runs; supervisor PIN and factory network only); check: `node web/e2e/tabs37.mjs http://127.0.0.1:<port>`.
 
 ## Plant events, worker tasks and goods status (issue #17)
 

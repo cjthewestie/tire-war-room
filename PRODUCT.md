@@ -22,7 +22,7 @@ Edge, offline and controllable: the model only proposes, code decides, the super
 ## Operating Context
 
 - Big screen in a glass war room, plus a phone carried around the plant, in the break room and the toilet.
-- The Agent 對話台 is the main page and the dashboard is secondary (CJ, 2026-10-20: 「我覺得對話台應該是主要頁面 儀表板次要」).
+- The 主控台 (was Agent 對話台; renamed by CJ, 2026-10-20: 「這個 page 改成主控台名字」) is the main page and the dashboard is secondary (CJ, 2026-10-20: 「我覺得對話台應該是主要頁面 儀表板次要」).
 - Network tiers: normal, weak, WAN down (no change), LAN down (approve on the on-site touch screen).
 - Traditional Chinese UI; factory vocabulary (硫化機, 開煉機, 模, 班表).
 

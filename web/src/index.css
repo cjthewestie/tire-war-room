@@ -103,9 +103,11 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .clock { display: inline-flex; gap: 8px; color: var(--ink); font-size: 18px; font-weight: 600; letter-spacing: .02em; }
 .clock span:first-child { color: var(--ink-dim); font-weight: 400; }
 .mode { font-size: 12px; padding: 3px 8px; border-radius: 6px; border: 1px dashed var(--panel-3); color: var(--ink-dim); white-space: nowrap; }
-.mode.mock { border-color: var(--warn); color: var(--warn); }
-.mode.live { border-color: var(--accent); color: var(--accent); }
-.mode.down { border-color: var(--alarm); color: var(--alarm); }
+/* the link chip (linkStatus.ts): 連線中 green, 模型未連線 / 離線・示範資料 amber, 重新連線… red */
+.mode { border-style: solid; font-weight: 600; }
+.mode.t-ok { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.mode.t-warn, .mode.t-mock { border-color: var(--warn); color: var(--warn); background: var(--warn-soft); }
+.mode.t-down { border-color: var(--alarm); color: var(--alarm); background: var(--alarm-soft); }
 
 /* demo strip (presenter controls) — inline on desktop, a bottom sheet below 1024 px */
 .demo-sheet { margin: 14px 0 0; background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); }
@@ -542,10 +544,10 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .tabs { display: none; }
   .stages { flex-wrap: wrap; overflow: visible; }
 
-  .bottomnav { display: grid; grid-template-columns: repeat(6, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
+  .bottomnav { display: grid; grid-template-columns: repeat(7, 1fr); position: fixed; left: 0; right: 0; bottom: 0; z-index: 35;
     height: calc(var(--nav-h) + env(safe-area-inset-bottom)); padding: 0 max(env(safe-area-inset-left), 8px) env(safe-area-inset-bottom) max(env(safe-area-inset-right), 8px);
     background: var(--panel); border-top: 1px solid var(--border); }   /* solid: page text must not show through the tabs (#24) */
-  .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 12px; white-space: nowrap; min-width: 0; }
+  .bottomnav button { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; background: none; border: 0; color: var(--ink-faint); font-size: 11px; white-space: nowrap; min-width: 0; }
   .bottomnav button svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .bottomnav button:last-child svg { fill: currentColor; stroke: none; }
   .bottomnav button.on { color: var(--accent); }
@@ -783,3 +785,80 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .early-more > summary { cursor: pointer; font-size: 13.5px; color: var(--ink-dim); padding: 6px 0 0; }
 .ph-problem { margin: -4px 0 12px; font-size: 15px; color: var(--ink-dim); }
 .early > .early-list .early-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* ---------- issue #37: 產線監控 now holds the whole plant; 訂單 list; 人力排程 explainer ---------- */
+.monitor-wrap > .kpis { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1279px) { .monitor-wrap > .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 899px) { .monitor-wrap > .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.section-h { font-size: 16px; margin: calc(var(--gap) * 1.5) 2px 10px; color: var(--ink); font-weight: 700; }
+.plant-wait { margin: var(--gap) 2px; }
+.panel-link { font-size: 13px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.panel-link:hover { text-decoration: underline; }
+.monitor .orders .pipe { margin-top: 14px; }
+.monitor .orders .pipe li { font-size: 11.5px; padding: 6px 1px; }
+.monitor .orders .pipe li b { font-size: 17px; }
+.monitor .orders .w-list li { padding: 6px 0; }
+.monitor .orders .w-list .w-row { font-size: 13.5px; margin-bottom: 2px; }
+
+.order-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.order-tools .order-search { flex: 1 1 320px; }
+.order-tools select, .admin select { background: var(--panel); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }
+.order-tools .seg button { padding: 6px 11px; }
+.order-tools .seg small { color: var(--ink-faint); }
+.order-table { padding-bottom: 10px; }
+.ot-head, .ot-row { display: grid; grid-template-columns: minmax(170px, 1.3fr) minmax(110px, .8fr) minmax(170px, 1.4fr) 108px 64px; gap: 4px 14px; align-items: center; }
+.ot-head { font-size: 12px; color: var(--ink-faint); padding: 0 8px 6px; border-bottom: 1px solid var(--border); }
+.ot-list { list-style: none; margin: 0 0 10px; padding: 0; }
+.ot-row { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 10px 8px; color: var(--ink); font-size: 14px; border-left: 3px solid transparent; }
+.ot-row:hover, .ot-row.on { background: var(--panel-2); }
+.ot-row.r-late { border-left-color: var(--alarm); }
+.ot-row.r-risk { border-left-color: var(--warn); }
+.ot-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
+.ot-id small { flex-basis: 100%; font-size: 12.5px; }
+.ot-st { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-weight: 600; }
+.ot-st small { font-weight: 400; font-size: 12px; }
+.ot-st small.muted { flex-basis: 100%; }
+.r-late .ot-st { color: var(--alarm); } .r-risk .ot-st { color: var(--warn); } .r-ok .ot-st { color: var(--accent); } .r-done .ot-st { color: var(--ink-dim); }
+.risk-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
+.ot-stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
+.ot-stages i { height: 8px; border-radius: 3px; background: var(--panel-3); overflow: hidden; display: block; }
+.ot-stages i b { display: block; height: 100%; background: var(--info); }
+.ot-stages i.done b { background: var(--accent); }
+.ot-eta, .ot-due { font-size: 13.5px; white-space: nowrap; }
+.ot-due.late { color: var(--alarm); font-weight: 700; }
+.ot-why { grid-column: 1 / -1; font-size: 12.5px; color: var(--warn); }
+.r-late .ot-why { color: var(--alarm); }
+@media (max-width: 899px) {
+  .ot-head { display: none; }
+  .ot-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .ot-stages { grid-column: 1 / -1; }
+  .ot-eta::before { content: "預估 "; color: var(--ink-faint); }
+  .ot-due::before { content: "交期 "; color: var(--ink-faint); font-weight: 400; }
+  .ot-due { text-align: right; }
+}
+
+.sched-help { background: var(--panel-2); border-radius: 10px; padding: 8px 14px; margin: 0 0 12px; font-size: 14px; }
+.sched-help summary { cursor: pointer; font-weight: 700; color: var(--ink); }
+.sched-help ul { margin: 6px 0 2px; padding-left: 18px; color: var(--ink-dim); }
+.sched-help li { margin: 3px 0; }
+.sched-help b { color: var(--ink); }
+.sched-next { margin-top: 10px; overflow-x: auto; }
+.sched-next .sub { margin-top: 8px; }
+.sched-next td small { margin-left: 4px; }
+.lg.now { background: var(--info); width: 2px; height: 12px; }
+.ot-row.r-complete .ot-st, .ot-row.r-done .ot-st { color: var(--accent); }
+.ot-row.r-complete { border-left-color: var(--accent); }
+.ok-mark { font-weight: 700; }
+.ot-why.ok { color: var(--accent); }
+
+/* phones: 「更多」 sheet above the bottom nav (狀態機, 後台) — issue #52 */
+.more-sheet { position: fixed; right: 8px; bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 8px); z-index: 36; min-width: 260px; max-width: calc(100vw - 16px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 6px; display: flex; flex-direction: column; gap: 4px;
+  box-shadow: 0 -10px 30px rgb(var(--shade-rgb, 0 0 0) / .35); }
+.more-sheet button { display: flex; gap: 12px; align-items: center; text-align: left; background: none; border: 0; border-radius: 10px; padding: 10px 12px; color: var(--ink); min-height: 52px; }
+.more-sheet button:hover, .more-sheet button.on { background: var(--panel-2); }
+.more-sheet button.on b { color: var(--accent); }
+.more-sheet svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.more-sheet span { display: flex; flex-direction: column; }
+.more-sheet small { color: var(--ink-dim); font-size: 12px; }
+@media (min-width: 1024px) { .more-sheet { display: none; } }

@@ -1,6 +1,6 @@
 """FastAPI app: REST per contracts.REST_ENDPOINTS (+ a few demo-control extras), one WebSocket
 /ws relaying the InProcessBus, and the built web/ dist (dashboard at /, phone at /phone, 3D factory at /factory,
-shift handover at /handover).
+floor worker's tasks at /worker, shift handover at /handover).
 
 Everything is local: no CDN, no outbound calls except the optional LLM health probe.
 
@@ -444,6 +444,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     async def lifespan(app: FastAPI):
         r = rt()
         app.state.runtime = r
+        from warroom.agent import plant           # PLANT.md versions live next to the audit log (issue #37)
+        plant.configure(Path(r.settings.audit_path).parent)
         await r.start()
         try:
             yield
@@ -733,6 +735,52 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if kb is None:
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
+
+    # ------------------------------------------------------------------ 每日事件紀錄 (issue #37): read-only, from the audit log
+    def _daylog():
+        from warroom.api import daylog
+        r = rt()
+        sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
+                   for ev in _safe(r.events, [])}
+        return daylog, daylog.build(r.audit.tail(0, 1_000_000), sources)
+
+    @app.get("/api/daylog")
+    async def daylog_days() -> dict[str, Any]:
+        """Days (or demo loops) with their run counts, newest first."""
+        def run() -> dict[str, Any]:
+            dl, days = _daylog()
+            out = [{"key": d["key"], "label": d["label"], "first": d["first"].isoformat(), "last": d["last"].isoformat(),
+                    "last_seq": d["last_seq"], **dl.summary(d)} for d in days.values()]
+            return {"days": sorted(out, key=lambda d: d["last_seq"], reverse=True)}   # newest activity first
+        return await asyncio.to_thread(run)
+
+    @app.get("/api/daylog/{key}")
+    async def daylog_day(key: str) -> dict[str, Any]:
+        def run() -> dict[str, Any]:
+            dl, days = _daylog()
+            if key == "current" and days:
+                d = max(days.values(), key=lambda x: x["last_seq"])   # the day of the newest entry (clocks jump)
+            elif key in days:
+                d = days[key]
+            else:
+                raise _404(key)
+            return {**dl.jsonable(d), "summary": dl.summary(d)}
+        return await asyncio.to_thread(run)
+
+    @app.get("/api/daylog/{key}/csv")
+    async def daylog_csv(key: str) -> Response:
+        def run() -> str:
+            dl, days = _daylog()
+            if key not in days:
+                raise _404(key)
+            return dl.to_csv(days[key])
+        text = await asyncio.to_thread(run)
+        return Response(text, media_type="text/csv; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="daylog-{key}.csv"'})
+
+    # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
+    from warroom.api.admin import install_admin
+    install_admin(app, rt, supervisor)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
@@ -1028,6 +1076,11 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     @app.get("/factory.html", include_in_schema=False)
     async def factory():
         return page("factory.html")
+
+    @app.get("/worker", include_in_schema=False)
+    @app.get("/worker.html", include_in_schema=False)
+    async def worker():                     # issue #46: floor worker's tasks (read-only; reads /api/world + /ws)
+        return page("worker.html")
 
     @app.get("/handover", include_in_schema=False)
     @app.get("/handover.html", include_in_schema=False)

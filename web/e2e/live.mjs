@@ -21,7 +21,7 @@ const d = await ctx.newPage()
 d.on('pageerror', (e) => errors.push(e.message))
 await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode.live', { timeout: 10000 }).catch(() => {})
-check('auto mode picked live backend', (await d.locator('.mode').innerText()).includes('即時'), await d.locator('.mode').innerText())
+check('auto mode picked live backend', /連線中|模型未連線/.test(await d.locator('.mode').innerText()) && (await d.locator('.mode').getAttribute('class')).includes('live'), await d.locator('.mode').innerText())
 check('snapshot rendered', (await d.locator('body').innerText()).includes('訂單進度'))
 const r = await d.evaluate(async (sc) => {
   const post = (body) => fetch('/api/sim/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.status)

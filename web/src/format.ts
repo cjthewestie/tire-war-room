@@ -60,3 +60,6 @@ export function fmtNum(n: number | null | undefined, digits = 1): string {
   if (n == null || isNaN(n)) return '—'
   return n.toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: 0 })
 }
+
+/** A tool call's duration: 840 ms, 2.3 s. */
+export function fmtMs(n: number): string { return n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms` }
