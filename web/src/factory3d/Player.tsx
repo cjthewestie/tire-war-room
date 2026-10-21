@@ -9,6 +9,7 @@ import { Html } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
 import { LIGHT_HEX, OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
@@ -61,9 +62,10 @@ function buildLead() {
   return { f, phone, screenMat }
 }
 
-export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzzUntil, phoneUp, mode, scene }: {
+/** `focus` (demo): where the overview centres instead of the lead, the machine of the anomaly being told (FactoryApp). */
+export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzzUntil, phoneUp, mode, scene, focus = null }: {
   enabled: boolean; started: boolean; onNear: (n: Near) => void; onDoor: (to: SceneId) => void; prompt: string | null
-  pending: number; buzzUntil: number; phoneUp: boolean; mode: 'first' | 'third'; scene: SceneId
+  pending: number; buzzUntil: number; phoneUp: boolean; mode: 'first' | 'third'; scene: SceneId; focus?: [number, number] | null
 }) {
   const { camera, gl } = useThree()
   const keys = useRef(new Set<string>())
@@ -209,7 +211,8 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
         if (!first) player.yaw += wrap(Math.atan2(-dx, -dz) - player.yaw) * Math.min(1, dt * 12)
         moved = true
       }
-    } else if (!started) {
+    } else if (!started && !DEMO_MODE) {
+      // demo: a still opening shot (circling, the camera crossed the building's sides and whole walls popped to stubs)
       cam.yaw += dt * 0.12
     }
     player.moving = moved
@@ -249,7 +252,10 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     const vw = orbit.current
     const targetDist = !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist
     const yawT = cam.yaw + (phoneUp ? 0.85 : 0)
-    const tx = started ? player.x : OVERVIEW_CENTER.x, tz = started ? player.z : OVERVIEW_CENTER.z
+    // demo: the overview glides over to the anomaly's machine (slowly, so the presenter keeps their bearings); the
+    // raised phone still zooms in on the lead
+    const onEv = started && !first && !phoneUp && !!focus && scene === 'factory'
+    const tx = onEv ? focus[0] : started ? player.x : OVERVIEW_CENTER.x, tz = onEv ? focus[1] : started ? player.z : OVERVIEW_CENTER.z
     if (cam.snap) {
       vw.yaw = yawT; vw.pitch = cam.pitch; vw.dist = targetDist; vw.tx = tx; vw.tz = tz
     } else {
@@ -257,8 +263,9 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
       vw.yaw += wrap(yawT - vw.yaw) * e
       vw.pitch += (cam.pitch - vw.pitch) * (1 - Math.exp(-dt * 3))
       vw.dist += (targetDist - vw.dist) * (1 - Math.exp(-dt * (started ? 4 : 1)))
-      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
-      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
+      const rate = onEv ? 2 : started ? 10 : 1.5
+      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * rate))
+      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * rate))
     }
     const ty = 0.55
     const hr = Math.cos(vw.pitch) * vw.dist

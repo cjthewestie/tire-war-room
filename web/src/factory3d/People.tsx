@@ -3,10 +3,14 @@
 // says they are: at their machine, in the war room, the staff corner, the dock; going to the 休息區 or 廁所 they
 // walk to that door and step through it. The truck at the dock drives in when a delivery or a shipment arrives
 // and drives off when it leaves. Light on purpose: no pathfinding, a small fixed aisle graph.
+import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, type RefObject } from 'react'
 import * as THREE from 'three'
+import { REPAIR_KINDS } from '../aiStatus'
+import { DEMO_MODE } from '../components/DemoStrip'
 import type { WorldSnapshot, WorldTruck, WorldWorker } from '../contracts'
+import { machineLabel } from '../factory'
 import { box, cyl, makeFigure, rbox, restPose, walkCycle, type Figure } from './kit'
 import { DESK, DOCK, LIGHT_HEX, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS, WORK_HEX } from './layout'
 
@@ -100,6 +104,11 @@ interface Walker {
   ring: THREE.Mesh; progress: number; target: P; taskId: string
 }
 
+/** Demo (?demo=1): the worker Agent Nemo sent to repair a machine carries a big marker in NVIDIA green (0.22 instead of
+ *  0.09, readable on a projector) and a chip 「維修人員前往 7 號硫化機」 / 「維修中」 (RepairChip). */
+const NV_GREEN = '#76b900'
+const FIX_MARK = 0.22 / 0.09
+
 /** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
  *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
 function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Quaternion): boolean {
@@ -178,7 +187,12 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       }
       wk.yaw = s.yaw
       wk.key = `${w.state}|${t.id}`
-      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? LIGHT_HEX.green : WORK_HEX)
+      const fix = DEMO_MODE && REPAIR_KINDS.has(t.kind)
+      wk.task.visible = wk.ring.visible = true   // hidden while walking back: shown again on the next task
+      wk.task.scale.setScalar(fix ? FIX_MARK : 1)
+      wk.task.position.y = fix ? 1.2 : 1.05
+      wk.ring.position.y = fix ? 1.55 : 1.3
+      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(fix ? NV_GREEN : w.state === '執行中' ? LIGHT_HEX.green : WORK_HEX)
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
         ringTo(wk.ring.geometry, t.progress)
@@ -214,7 +228,36 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); walkers.current.delete(id) }
     }
   })
-  return <primitive object={group} />
+  const fixing = DEMO_MODE ? (world.tasks?.items ?? []).filter((t) => t.worker_id && ON_TASK.has(t.status) && REPAIR_KINDS.has(t.kind)) : []
+  return <>
+    <primitive object={group} />
+    {fixing.map((t) => <RepairChip key={t.worker_id} id={t.worker_id!} where={machineLabel(t.machine_id ?? '')} walkers={walkers} />)}
+  </>
+}
+
+/** The chip over a repair worker's head: follows the figure (its walker lives in a ref, so the frame loop moves it) and
+ *  reads 「維修人員前往 …」 while they walk, 「維修中」 once there; hidden until the figure exists and once it walks back. */
+function RepairChip({ id, where, walkers }: { id: string; where: string; walkers: RefObject<Map<string, Walker>> }) {
+  const at = useRef<THREE.Group>(null)
+  const chip = useRef<HTMLDivElement>(null)
+  useFrame(() => {
+    const wk = walkers.current.get(id)
+    const el = chip.current
+    if (!at.current || !el) return
+    const on = !!wk && wk.phase !== 'back'
+    if (el.style.display !== (on ? '' : 'none')) el.style.display = on ? '' : 'none'
+    if (!wk || !on) return
+    at.current.position.copy(wk.f.root.position)
+    const text = wk.phase === 'at' ? '維修中' : `維修人員前往 ${where}`
+    if (el.textContent !== text) el.textContent = text
+  })
+  return (
+    <group ref={at}>
+      <Html position={[0, 1.62, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
+        <div ref={chip} className="f3-repair" data-testid="f3-repair-chip" style={{ display: 'none' }} />
+      </Html>
+    </group>
+  )
 }
 
 /** The dock truck. Live: drives in when a truck is at the dock (crates in, tyres out), off when it leaves.

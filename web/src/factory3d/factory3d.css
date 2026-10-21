@@ -49,8 +49,14 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-tag.red { border-top-color: #c0352a; background: #ffe9e4; } .f3-tag.red span { color: var(--c-red); }
 .f3-tag.grey { border-top-color: #8a8f96; }
 
+/* demo: the chip over the worker Agent Nemo sent to repair (People.tsx RepairChip), anchored above the head */
+.f3-repair { transform: translate(-50%, calc(-100% - 4px)); padding: 4px 12px; border-radius: 999px; background: var(--c-paper-solid); border: 3px solid #76b900; color: var(--c-ink); white-space: nowrap; font-size: 14px; font-weight: 800; box-shadow: var(--c-shadow); }
+
 /* line signpost board (DOM, so the tilt-shift blur leaves it sharp; in first person it scales with distance) */
 .f3-sign { padding: 2px 10px; border: 3px solid; border-radius: 12px; background: var(--c-paper-solid); color: var(--c-ink); font-weight: 800; font-size: 13px; white-space: nowrap; box-shadow: 0 3px 10px rgba(90, 70, 40, .14); }
+/* demo: press number plates on the floor (1 and 11 as a ruler, plus the press with an event, in the one red) */
+.f3-press-no { padding: 1px 8px; border-color: #b9ab93; font-size: 13px; }
+.f3-press-no.hot { border-color: var(--c-red); color: var(--c-red); }
 /* room name plates: same chip, a warm frame */
 .f3-room { border-color: #c9b89a; background: #fff6e4; font-size: 12.5px; }
 

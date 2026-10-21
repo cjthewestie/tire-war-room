@@ -29,6 +29,7 @@ import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
 import { AiStatusLine } from '../AiStatusLine'
+import { recoveryPhase } from './machineRing'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
@@ -119,7 +120,7 @@ export function FactoryApp() {
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
   const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
-  const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
+  const success = useSuccessMoments(state.world, DEMO_MODE ? state.snapshot?.events : undefined)   // issue #36: 訂單完成 / 出貨已出廠 (+ demo: 已恢復正常)
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const cameraRef = useRef<THREE.Camera | null>(null)
@@ -138,6 +139,11 @@ export function FactoryApp() {
   const repairing = stages.filter((x) => x === 'repairing' || x === 'recovering').length
   const unread = stages.filter((x) => x === 'report').length
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+  // demo: the event the story is about, while open and for the green hold after it recovered (machineRing's 已恢復 ring):
+  // its reading tag stays up and the overview (V) centres on its machine
+  const back = ev && !evOpen && recoveryPhase(ev) === 'recovered' ? Date.parse(ev.recovered_at ?? ev.closed_at ?? '') : NaN
+  const story = DEMO_MODE && ev && (evOpen || (Date.parse(ft ?? '') - back <= Math.max(60_000, 6_000 * (state.clock?.speed ?? 1)))) ? ev : null
+  const storyAt = story ? PLACED_BY_ID[story.machine_id] : undefined
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
@@ -316,13 +322,13 @@ export function FactoryApp() {
         <color attach="background" args={['#ddd2bf']} />
         <fog attach="fog" args={['#ddd2bf', 46, 110]} />
         <Lights />
-        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} pinId={story?.machine_id ?? null} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
           enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
           pending={pending.length + notices.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
-          prompt={prompt}
+          prompt={prompt} focus={storyAt ? [storyAt.x, storyAt.z] : null}
         />
         <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
       </Canvas>

@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { LINES } from '../factory'
 import type { WarRoomState } from '../store'
 import { embedSearch } from '../transport'
@@ -716,11 +717,28 @@ export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: num
 }
 const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 
+/** Demo (?demo=1): number plates on the floor in front of the curing presses, so the audience can find 「7 號」 from the
+ *  overview: the two ends (1 and 11) as a ruler, plus every press with an open event. A DOM chip like the line signs,
+ *  mounted a frame late like them. */
+function PressNo({ p, hot }: { p: Placed; hot: boolean }) {
+  const [ready, setReady] = useState(false)
+  useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
+  return ready ? (
+    <Html position={[p.x, 0.05, p.z + p.d / 2 + 0.32]} center zIndexRange={[9, 5]} style={{ pointerEvents: 'none' }}>
+      <div className={`f3-sign f3-press-no${hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號</div>
+    </Html>
+  ) : null
+}
+const PRESSES = PLACED.filter((p) => p.line === 'CURE')
+const RULER = new Set([PRESSES[0].id, PRESSES[PRESSES.length - 1].id])
+
 /** Live light per machine as last drawn (read by the e2e test hook). */
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
-/** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
+/** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen.
+ *  `pinId` (demo): the story event's machine keeps its reading tag up without the lead standing at it; one machine only,
+ *  so the three events of concurrent_3 do not stack three tags. */
+export function World({ state, focusId, pinId = null, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; pinId?: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
   // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
@@ -739,10 +757,14 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       <OuterWalls />
       <Roof b={BUILDING} y={2.5} wallTop={1.85} lamps={HALL_LAMPS} />
       <Machines />
-      {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
-        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />)}
+      {PLACED.map((p) => {
+        const tag = active && (focusId === p.id || pinId === p.id)
+        return <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={tag}
+          work={tag ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />
+      })}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
+        {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => <PressNo key={p.id} p={p} hot={hot.has(p.id)} />)}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
         <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
         {WALL_DOORS.map((d) => (
