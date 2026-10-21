@@ -60,6 +60,8 @@ from warroom.factory import (
     CURE_TEMP_MIN_C,
     CURE_TEMP_NOMINAL_C,
     MACHINE_BY_ID,
+    ML_PRESSES,
+    SMALL_ONLY_PRESSES,
 )
 
 AlertCallback = Callable[[AlertCard], Any]
@@ -132,7 +134,7 @@ def _r1_templates_text() -> str:
 
 SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系統中唯一的 LLM。你只輸出一個 JSON 物件（CommanderPlan），不輸出其他文字。
 
-工廠事實：4 條產線、28 台機台、11 台硫化機（每台一顆胎；CURE-08..11 可做中／大胎，CURE-01..07 只做小胎）。硫化 S 24 h / M 28 h / L 34 h，{CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C，標稱 {CURE_TEMP_NOMINAL_C:.0f}°C。蒸汽管線：H1=CURE-01..05、H2=CURE-06..08、H3=CURE-09..11。活化能 {ACTIVATION_ENERGY_KJ_MOL:.0f} kJ/mol（假設值）。
+工廠事實：4 條產線、28 台機台、11 台硫化機（每台一顆胎；{ML_PRESSES[0]}..{ML_PRESSES[-1][5:]} 可做中／大胎，{SMALL_ONLY_PRESSES[0]}..{SMALL_ONLY_PRESSES[-1][5:]} 只做小胎）。硫化 S 24 h / M 28 h / L 34 h，{CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C，標稱 {CURE_TEMP_NOMINAL_C:.0f}°C。蒸汽管線：H1=CURE-01..05、H2=CURE-06..08、H3=CURE-09..11。活化能 {ACTIVATION_ENERGY_KJ_MOL:.0f} kJ/mol（假設值）。
 安全核心（確定性 PLC 規則，你不能呼叫也不能覆寫）：煉膠 ≥{COMPOUND_STOP_C:.0f}°C 停機；已加硫 ≥{CURATIVE_STOP_C:.0f}°C 停機；硫化機 <{CURE_TEMP_MIN_C:.0f}°C 扣模。
 
 工具（只能用使用者訊息 allowed_tools 列出的；沒有任何機台致動或 PLC 寫入工具）：
@@ -155,6 +157,69 @@ SYSTEM_PROMPT = f"""你是實心胎工廠戰情室的「事件指揮官」，系
 14. context.source=plant 時，這不是機台異常，是工廠事件（context.plant_event.kind：shift_start 早班開工、rush_order 急單插單、absence 有人請假）：hypothesis.cause_code 填 shift_start／order_rush／staffing_short，expectation 為 null（程式等人員任務完成來驗證）。步驟用 query_orders_shifts 查、solve_schedule 重排、confirm_schedule 確認；早班開工與插單最後加 notify_teams kind=dispatch（派工，需核准）；人力缺口不必寫加班或調人步驟，A/B 方案由求解器的 staffing_options 產生。confirm_schedule 的 schedule_version 一律寫 "$S2.schedule_version"（引用求解步驟），不寫數字；不要用 cure_formula、set_cure_time、read_sensors（沒有機台故障）；machine_id 不填。人員任務一律由程式產生，你不寫任務。"""
 
 
+# Cause codes a replan may still try, by machine kind (page 11: H1 steam pressure -> H2 leak / sensor drift). Listed
+# in the replan feedback minus what was rejected; a code is a hint, the test is what counts. steam_pressure_low is
+# not offered on a press: after its recovery test failed, proposing it again is the repeat itself.
+CAUSE_CANDIDATES_CURE = ("steam_leak", "sensor_drift", "steam_leak_or_sensor_drift", "steam_valve_fault")
+CAUSE_CANDIDATES_COMPOUND = ("cooling_insufficient", "sensor_drift", "overheat_unknown")
+CAUSE_CANDIDATES_OTHER = ("sensor_drift", "unknown")
+
+
+def _cause_candidates(machine_id: str) -> tuple[str, ...]:
+    mdef = MACHINE_BY_ID.get(machine_id)
+    if mdef is not None and mdef.line is Line.CURE:
+        return CAUSE_CANDIDATES_CURE
+    if mdef is not None and mdef.handles_compound:
+        return CAUSE_CANDIDATES_COMPOUND
+    return CAUSE_CANDIDATES_OTHER
+
+
+def _test_text(exp: Any) -> str:
+    """「CURE-07 temp_c ≥121」 for an expectation (the words the feedback forbids reusing)."""
+    op = {">=": "≥", "<=": "≤"}.get(exp.op, exp.op)
+    unit = "°C" if exp.channel is Channel.TEMP else ""
+    return f"{exp.machine_id} {exp.channel.value} {op}{_fmt(exp.value)}{unit}"
+
+
+def replan_feedback(req: CommanderRequest) -> dict[str, Any] | None:
+    """Structured feedback for a replan after VERIFY rejected a hypothesis (Spark 10-21, p.11 4/4 SAFE_STOP: the
+    model proposed 「蒸汽壓不足」 again with the same 「CURE-07 ≥121°C」 test). Lives in the user message, so the system
+    prompt stays byte-identical. None on a plan, or a replan with nothing rejected (the message is then unchanged)."""
+    if req.phase != "replan" or not req.rejected:
+        return None
+    ctx = req.context or {}
+    failed = ctx.get("failed_expectation") or {}
+    tests = [h.expectation for h in req.rejected if h.expectation is not None]
+    rejected = []
+    for h in req.rejected:
+        item: dict[str, Any] = {"id": h.id, "cause_code": h.cause_code, "statement": h.statement,
+                                "test": _test_text(h.expectation) if h.expectation is not None else None}
+        if failed.get("hypothesis_id") == h.id and failed.get("observed") is not None:
+            item["observed"] = failed["observed"]
+            if h.expectation is not None:
+                item["evidence"] = (f"{h.expectation.machine_id} {h.expectation.channel.value} 實測 "
+                                    f"{_fmt(failed['observed'])}，未達預期 {_test_text(h.expectation)}")
+        rejected.append(item)
+    banned = "、".join(dict.fromkeys(_test_text(e) for e in tests))
+    instruction = "以上假設已被讀值推翻，不可重提（換名稱或換說法也算重提）。"
+    if banned:
+        instruction += (f"新假設的預期不可再用 {banned} 的回溫；請改用其他可驗證的預期（例如停用機台狀態、蒸汽／壓力通道、"
+                        "或 SOP 交接）。")
+    a = req.anomaly
+    mdef = MACHINE_BY_ID.get(a.machine_id)
+    if mdef is not None and mdef.line is Line.CURE:
+        instruction += (f"若同管線其他機台正常，問題侷限 {a.machine_id}：可提出持續洩壓或感測器漂移，"
+                        f"讓 {a.machine_id} 停用（notify_teams kind=machine_out，solve_schedule 的 unavailable_presses "
+                        f"含 {a.machine_id}）並重排，expectation 為 null。")
+    tried = {h.cause_code for h in req.rejected}
+    out: dict[str, Any] = {"rejected": rejected, "instruction": instruction,
+                           "untried_cause_codes": [c for c in _cause_candidates(a.machine_id) if c not in tried]}
+    rep = ctx.get("repeated_rejected")
+    if rep:        # the second ask of the same replan: the first answer repeated a rejected hypothesis
+        out["your_last_answer_repeated"] = rep
+    return out
+
+
 def build_user_message(req: CommanderRequest) -> str:
     payload = {
         "phase": req.phase,
@@ -164,6 +229,9 @@ def build_user_message(req: CommanderRequest) -> str:
         "rejected": [h.model_dump(mode="json") for h in req.rejected],
         "context": req.context,
     }
+    fb = replan_feedback(req)
+    if fb is not None:
+        payload["replan_feedback"] = fb
     return json.dumps(payload, ensure_ascii=False, separators=(",", ":"), default=str)
 
 

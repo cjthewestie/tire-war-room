@@ -446,12 +446,32 @@ class StateMachine:
                 self._safe_stop(run, f"內部錯誤：{type(e).__name__}")
         finally:
             self._settle_discussion(run, None)
+            self._retire_cards(run)
             self._runs.pop(ev.id, None)
             if self._open.get(ev.machine_id) == ev.id:
                 del self._open[ev.machine_id]
             self._hook(self.on_end, ev)
             self._trim()
         return ev
+
+    def _retire_cards(self, run: _Run) -> None:
+        """Audit N9 (Spark 10-21): an event that ends while a card of it is still PENDING (cancelled or crashed in
+        AWAIT_APPROVAL) supersedes that card, so no one can approve a plan whose event is gone."""
+        ev = run.ev
+        pending = getattr(self.approvals, "pending", None)
+        supersede = getattr(self.approvals, "supersede", None)
+        if not callable(pending) or not callable(supersede):
+            return
+        for req in [r for r in pending() if r.event_id == ev.id]:
+            try:
+                supersede(req.id, by="state_machine", reason=f"事件已結束（{ev.state.value}），此卡作廢")
+            except Exception as e:  # noqa: BLE001 - decided meanwhile; never break the run's cleanup
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"retire_card_error": f"{type(e).__name__}: {e}"[:300], "request_id": req.id},
+                                  event_id=ev.id)
+                continue
+            self._note(ev, "系統", f"事件已結束，待核准卡 v{req.version} 作廢", "info")
+        run.waiting_req = None
 
     def _hook(self, fn: Callable[[Event], None] | None, ev: Event) -> None:
         if fn is not None:
@@ -1288,19 +1308,14 @@ class StateMachine:
         return [m.id for m in MACHINES if m.line is mdef.line]
 
     # ------------------------------------------------------------------ PLAN / REPLAN
-    async def _ask(self, run: _Run, phase: str, extra: dict[str, Any]) -> CommanderPlan | None:
+    async def _commander_call(self, run: _Run, phase: str, req: CommanderRequest
+                              ) -> tuple[CommanderPlan, Any] | None:
+        """One commander call, audited (LLM_CALL, plus INTERCEPTED for dropped steps). None when it raised: the
+        reason is in run.commander_error."""
         ev = run.ev
-        allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
-        rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
-        ctx = {**run.base_context, **extra}
-        if ev.previous is not None:              # 「請 AI 重新規劃」: why the last run of this ended in SAFE_STOP
-            ctx["previous_run"] = {"event_id": ev.previous.event_id, "stop_reason": ev.previous.reason_text}
-        req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
-                               context=ctx, rejected=rejected)
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
-        llm_started = self._now()
         self.compute_inflight += 1                   # LLM thinking time: Runtime may hold sim time
         try:
             if self._commander_streams:
@@ -1345,10 +1360,32 @@ class StateMachine:
                               {"step": s, "reason": "tool not on the allow-list (dropped from plan)"
                                + ("; the rest of the model's plan was invalid, fallback plan used"
                                   if info.fell_back_to_mock else "")}, event_id=ev.id)
+        return plan, info
+
+    async def _ask(self, run: _Run, phase: str, extra: dict[str, Any]) -> CommanderPlan | None:
+        ev = run.ev
+        allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
+        rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
+        ctx = {**run.base_context, **extra}
+        if ev.previous is not None:              # 「請 AI 重新規劃」: why the last run of this ended in SAFE_STOP
+            ctx["previous_run"] = {"event_id": ev.previous.event_id, "stop_reason": ev.previous.reason_text}
+        req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
+                               context=ctx, rejected=rejected)
+
+        llm_started = self._now()
+        got = await self._commander_call(run, phase, req)
+        if got is None:
+            return None
+        plan, info = got
+        total_ms = info.total_ms
         # the repeat check runs on what the commander proposed, before code bounds the expectation
         # (bounding maps every cure-press temperature test onto the same line, so a genuinely new
         # hypothesis would otherwise look like the rejected one)
         again = self._repeats_rejected(plan.hypothesis, rejected)
+        rules_note = False
+        if again and not plan.safe_stop:
+            plan, again, more_ms, rules_note = await self._retry_repeat(run, phase, req, plan, again, rejected)
+            total_ms += more_ms
         run.sop_handoff = phase == "replan" and bool(extra.get("sop_path"))
         exp, fixes = self._code_expectation(ev, plan, handoff=run.sop_handoff)
         if fixes:
@@ -1389,11 +1426,56 @@ class StateMachine:
                                              goal=ev.goal, steps=ev.steps))
         ev.plan, ev.goal = plan, plan.goal
         ev.steps = [StepRun(step=s, state="pending") for s in plan.steps]
+        if rules_note and not plan.safe_stop:
+            self._note(ev, "指揮官", f"AI 兩次重提已否決的假設，改用規則假設 {hyp.id}", "dynamic")
         self._narrate_hypothesis(run, phase, rejected)
         if not plan.safe_stop:
-            await self._pace(llm_started, max(MODEL_LLM_PLAN_S, info.total_ms / 1000.0))
+            await self._pace(llm_started, max(MODEL_LLM_PLAN_S, total_ms / 1000.0))
             self._narrate_steps(run)
         return plan
+
+    REPEAT_RETRIES = 1      # extra asks of the same replan after a repeated rejected hypothesis (not a replan)
+
+    async def _retry_repeat(self, run: _Run, phase: str, req: CommanderRequest, plan: CommanderPlan, again: str,
+                            rejected: list[Hypothesis]) -> tuple[CommanderPlan, str | None, float, bool]:
+        """The commander re-proposed a rejected hypothesis (Spark 10-21, p.11 4/4: 「蒸汽壓不足」 again with the same
+        「CURE-07 ≥121°C」 test). Ask once more within the same replan, the repeat flagged in the user message
+        (context.repeated_rejected -> replan_feedback); a second repeat takes the rule commander's hypothesis for this
+        phase (page 11: H2 leak / sensor drift, press out of service). Neither ask counts as a replan (max_replans
+        counts _replan calls only). Returns (plan, repeat match or None, extra model ms, rules used). With --strict
+        (no rule plan) or a rule plan that repeats too, the match stays set and the caller safe-stops."""
+        ev = run.ev
+        extra_ms = 0.0
+        for _ in range(self.REPEAT_RETRIES):
+            h = plan.hypothesis
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"error": "commander re-proposed a rejected hypothesis", "match": again,
+                               "cause_code": h.cause_code, "action": "retry_with_feedback"}, event_id=ev.id)
+            self._note(ev, "指揮官", f"新假設重提已否決的假設（{h.statement}）→ 附上否決證據再問一次", "dynamic")
+            rep = {"cause_code": h.cause_code, "statement": h.statement, "match": again,
+                   "expectation": h.expectation.model_dump(mode="json") if h.expectation else None}
+            req = req.model_copy(update={"context": {**req.context, "repeated_rejected": rep}})
+            got = await self._commander_call(run, phase, req)
+            if got is None:
+                break                                   # the model failed on the retry: rules below
+            plan, info = got
+            extra_ms += info.total_ms
+            again = self._repeats_rejected(plan.hypothesis, rejected)
+            if plan.safe_stop or not again:
+                return plan, again, extra_ms, False
+        if getattr(getattr(self.commander, "settings", None), "llm_fallback_to_mock", True) is False:
+            return plan, again or "repeat (strict: no rule plan)", extra_ms, False
+        from warroom.agent.commander import MockCommander
+        rules, _ = await MockCommander().plan(req)
+        again_rules = self._repeats_rejected(rules.hypothesis, rejected)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"fell_back_to_rules": "repeated_rejected_hypothesis", "phase": phase, "match": again,
+                           "model_cause_code": plan.hypothesis.cause_code, "plan_source": "rules",
+                           "hypothesis": rules.hypothesis.id, "cause_code": rules.hypothesis.cause_code,
+                           "steps": [st.id for st in rules.steps], "safe_stop": rules.safe_stop,
+                           "rules_repeat": again_rules}, event_id=ev.id)
+        run.commander_error = None
+        return rules, again_rules, extra_ms, True
 
     # ---- VERIFY must test the event, not whatever the LLM picked ----
     EXPECT_MARGIN_C = 1.0

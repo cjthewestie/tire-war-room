@@ -77,6 +77,9 @@ MACHINE_BY_ID: dict[str, MachineDef] = {m.id: m for m in MACHINES}
 CURE_PRESS_IDS: tuple[str, ...] = tuple(m.id for m in MACHINES if m.line is Line.CURE)
 SMALL_ONLY_PRESSES: tuple[str, ...] = tuple(m.id for m in MACHINES if m.line is Line.CURE and m.small_only)
 ML_PRESSES: tuple[str, ...] = tuple(m.id for m in MACHINES if m.line is Line.CURE and not m.small_only)
+# 「8–11」: the 號 range of the medium / large presses, so every prompt, PLANT.md and SOP text follows ML_PRESSES
+# (web/src/factory.ts ML_RANGE is the same rule for the UI)
+ML_RANGE = f"{int(ML_PRESSES[0][5:])}–{int(ML_PRESSES[-1][5:])}"
 COMPOUND_MACHINES: tuple[str, ...] = tuple(m.id for m in MACHINES if m.handles_compound)
 LINE_LABELS: dict[Line, str] = {
     Line.A: "A 胎體／胎面膠", Line.B: "B 胎側膠", Line.C: "C 鋼絲圈", Line.D: "D 尼龍布",

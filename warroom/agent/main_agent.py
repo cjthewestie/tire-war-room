@@ -300,8 +300,9 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
             ["machine_ids"]),
         _fn("predict_anomaly", "預測機台某通道未來幾分鐘的值", {"machine_id": {"type": "string"},
             "channel": {"type": "string", "description": "例如 temp_c"}, "horizon_min": {"type": "integer"}}, ["machine_id"]),
-        _fn("cure_formula", "依胎型與實際溫度算硫化時間", {"size": {"type": "string", "enum": ["S", "M", "L"]},
-            "actual_temp_c": {"type": "number"}, "elapsed_h": {"type": "number"}}, ["size", "actual_temp_c"]),
+        # inputs are the press's live cure job and reading (ask.bind_cure_formula), never the model's numbers
+        _fn("cure_formula", "算某台硫化機的硫化時間（尺寸、溫度、時數由程式從現場讀取）",
+            {"press_id": {"type": "string", "description": "硫化機代號，例如 CURE-07"}}, ["press_id"]),
         _fn("query_orders_shifts", "訂單交期、班表、人力缺口、每台硫化機的下一模", {"order_ids": ids, "press_ids": ids}, []),
         _fn("sop_search", "查知識庫（SOP）。問「怎麼處理」一定先查", {"query": {"type": "string"}, "k": {"type": "integer"}}, ["query"]),
         _fn(QUERY, "查工廠其他資料（只讀）。topic：" + "；".join(f"{k}＝{v}" for k, v in PLANT_TOPICS.items()),
