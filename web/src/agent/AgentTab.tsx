@@ -11,6 +11,7 @@ import { RISK_PLAIN } from '../plain'
 import { useWarRoom } from '../useWarRoom'
 import { STATE_LABEL } from '../components/common'
 import { ApprovalList } from './ApprovalList'
+import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
 import { nextUp } from './homeItems'
 import { useHomeSelection } from './homeSelection'
@@ -56,6 +57,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
+      {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
       <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} />
