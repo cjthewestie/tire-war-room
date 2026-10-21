@@ -30,8 +30,9 @@ Model, shared by both solvers (built in `_prepare`):
   jobs of the untouched press pool keep their previous slot if still valid; moving work onto a
   press that shares the affected press's steam header (page 11: 6 and 8 share 7's pipe) costs
   extra, so #A-311 goes to CURE-09 rather than CURE-08. A press whose cure the request LENGTHENS
-  (page 11 H1: runs at 122 °C) takes no tire planned on another press (hard; only #A-311 moves,
-  off it), and pulling an op into a short-staffed shift the previous plan did not already have
+  (page 11 H1: runs at 122 °C) takes no tire planned on another press (hard), and the tire its
+  longer cure pushes out of its slot (page 11: #A-311) costs PEN_SLOW_KEEP to stay there: it moves
+  off the press whose steam is low (only #A-311 moves), and pulling an op into a short-staffed shift the previous plan did not already have
   there costs PEN_SHORT_NEW, so a repair does not take over a shortage that is not its own.
 - Identical tires of one order are interchangeable: ids are re-matched to the previous plan
   after solving so `moves` lists real moves, not id swaps.
@@ -99,6 +100,7 @@ PEN_SHORT_NEW = 72 * 60 * W_DEMOLD     # repair: an op a short shift did not alr
 PEN_SIZE_HOME = 48 * 60 * W_DEMOLD  # principle 4 中大胎固定機台: M on an L press or L on an M press (rush orders exempt)
 PEN_DISTURB = 4 * 60 * W_DEMOLD      # repair: changing a tire on a press the event did not touch at all
 PEN_SAME_HEADER = 12 * 60 * W_DEMOLD  # moving work onto the affected press's steam pipe (page 11: 6, 8 share 7's pipe)
+PEN_SLOW_KEEP = 24 * 60 * W_DEMOLD    # repair: the tire a lengthened cure pushes out of its slot stays on that press
 EXTRA_DAYS = 4          # jobs may finish this many days past the horizon
 REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
 # Deterministic budget (CP-SAT deterministic-time units). The old stop (no improvement for 1.5 s of WALL time)
@@ -151,6 +153,7 @@ class _Ctx:
     affected: set[str] = field(default_factory=set)  # presses the request re-cured or took out
     blackouts: dict[str, list[tuple[int, int]]] = field(default_factory=dict)  # press -> [a, b) minutes, no tire
     slow: set[str] = field(default_factory=set)      # presses assumed to run below recipe temp (cure extended)
+    displaced: set[str] = field(default_factory=set)  # free jobs on a slow press whose slot the longer cure overruns
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
     now_m: int = 0                  # req.now in minutes from the grid origin t0
@@ -349,6 +352,14 @@ def _guard_slow_presses(ctx: _Ctx, unavailable: set[str]) -> None:
     for j in ctx.free:
         if j.orig_press is not None:
             j.eligible = [q for q in j.eligible if q not in ctx.slow or q == j.orig_press]
+    # the tire whose slot the longer cure overruns (page 11: #A-311 at 00:00, 7 de-molds 16:22 + 8 h mold change)
+    # would go in while the steam is still low: it moves off rather than wait on that press (PEN_SLOW_KEEP)
+    for p in ctx.slow:
+        fz = max((j for j in ctx.frozen if j.press == p), key=lambda j: j.mold_in)
+        for j in ctx.free:
+            if j.orig_press == p and j.orig_mold_in is not None and j.orig_mold_in < fz.mold_in + fz.cure_min + (
+                    MOLD_GAP_MIN if _mold_key(j) != _mold_key(fz) else 0):
+                ctx.displaced.add(j.id)
     for p in sorted(ctx.slow):
         if any(j.orig_press == p for j in ctx.free):
             ctx.warnings.append(f"{p} 硫化延長中：不移入其他機台的模次；已排在 {p} 的後續模次以標準硫化時間排"
@@ -808,6 +819,8 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
             cost = W_DEMOLD * (1 + max(0, j.priority)) * (t + j.cure_min)
             if j.orig_press is not None and p != j.orig_press:
                 cost += PEN_MOVE + (PEN_SAME_HEADER if p in ctx.suspect else 0)
+            if p in ctx.slow and j.id in ctx.displaced:
+                cost += PEN_SLOW_KEEP
             if mold.get(p) is not None and mold[p] != _mold_key(j):
                 cost += PEN_MOLD_CHANGE
             cost += _size_home_pen(ctx, j, p)
@@ -982,6 +995,8 @@ class CpSatScheduler:
                     press_iv[p].append(m.NewOptionalFixedSizeIntervalVar(mi, j.cure_min, x, f"iv_{j.id}_{p}"))
                     if j.orig_press is not None and p != j.orig_press:
                         obj.append((PEN_MOVE + (PEN_SAME_HEADER if p in ctx.suspect else 0)) * x)
+                    if p in ctx.slow and j.id in ctx.displaced:
+                        obj.append(PEN_SLOW_KEEP * x)
                     pm = ctx.press_mold.get(p)
                     if pm is not None and pm != _mold_key(j):
                         obj.append(PEN_MOLD_CHANGE * x)

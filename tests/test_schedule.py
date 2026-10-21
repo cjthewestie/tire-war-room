@@ -369,6 +369,9 @@ def test_cpsat_same_request_gives_the_same_plan():
         res = CpSatScheduler().solve(req)
         assert res.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE), res.gaps
         plans.append(sorted((j.id, j.press_id, j.mold_in) for j in res.schedule.jobs))
+        # page 11 S3: the tire the 28.5 h cure pushes out of its slot leaves press 7 (it does not wait on the press
+        # whose steam is low); nothing else changes press
+        assert [(m.order_id, m.from_press) for m in res.moves if m.from_press != m.to_press] == [("#A-311", "CURE-07")]
     assert plans[0] == plans[1] == plans[2]
 
 
