@@ -46,7 +46,7 @@ A: 不會。R1 是看內容判定，不是看指揮官貼的標籤：只有固�
 關鍵詞: R1, 自動執行, 通知模板, R1_TEMPLATES, 自由文字, 升級, escalation, 濫用
 
 ## Q: 硫化時間這些物理數字是 LLM 算的嗎？
-A: 不是。cure_formula 的輸入取自硫化機目前的工單和偵測器預測，排程用 OR-Tools 求解；Gate 會檢查 set_cure_time 和排程覆寫值必須等於這台機公式算出來的值。物理數字從不來自 LLM。
+A: 硫化時間這類物理數字不是 LLM 算的，模型給錯也不會生效。cure_formula 的輸入取自硫化機目前的工單和偵測器預測，排程用 OR-Tools 求解；Gate 會檢查 set_cure_time 和排程覆寫值必須等於這台機公式算出來的值。物理數字從不來自 LLM。
 證據: `warroom/agent/state_machine.py:29`, `warroom/agent/gate.py:24`, `README.md:19`
 關鍵詞: 物理數字, Arrhenius, 硫化公式, cure_formula, OR-Tools, 幻覺, hallucination, 數字從哪來
 
@@ -73,7 +73,7 @@ A: 失敗的工具重試 MAX_TOOL_RETRIES = 1 次，再走 SOP 路徑；連續�
 ## Q: 稽核日誌怎麼防竄改？
 A: 稽核日誌是 append-only，每行一筆 JSON，用 HMAC-SHA256 串成雜湊鏈：每筆的 hash = HMAC(key, 前一筆 hash + 這筆內容)。每次寫入都 fsync，最後一筆另外錨定在 `.head` 檔。開檔時會驗證，被改、被刪、被重排的紀錄會讓整份檔被封存成 `.broken-N` 並開新鏈記錄原因。
 證據: `warroom/agent/audit.py:3`, `warroom/agent/audit.py:4`, `warroom/agent/audit.py:21`
-關鍵詞: 稽核, audit, HMAC, hash chain, 雜湊鏈, 防竄改, tamper, append-only, 可追溯, 竄改, 改紀錄, 能被改嗎, 稽核紀錄, 刪紀錄, log, 日誌, 被改看得出來, 偵測竄改
+關鍵詞: 稽核, audit, HMAC, hash chain, 雜湊鏈, 防竄改, tamper, append-only, 可追溯, 竄改, 改紀錄, 能被改嗎, 稽核紀錄, 刪紀錄, log, 日誌, 被改看得出來, 偵測竄改, log 被改掉看得出來嗎, 紀錄被人改
 
 ## Q: 稽核記了什麼？
 A: 每次狀態轉移、LLM 呼叫、工具呼叫與結果、Gate 判定和攔截都寫進稽核，並在 bus 上廣播。安全核心的每個動作也以 SAFETY_ACTION 寫入並掛到該機台的事件。
@@ -141,7 +141,7 @@ A: （未驗證：repo 裡找不到「限縮才能完全掌控」這句話。）
 關鍵詞: 模組化, modular, 白名單, 限縮, 掌控, control, 可預期, 工具設計, query_plant
 
 ## Q: 你們跟 OpenClaw、Hermes、Claude Code 這類 agent 有什麼不同？
-A: （未驗證：repo 沒有正式的比較文件，只有沙箱政策提到 NemoClaw 只支援 OpenClaw、Hermes 等列出的 agent。）就程式本身而言：那類是對話驅動、由模型決定下一步並能用通用工具（含命令列）；我們是事件驅動，偵測器喚醒、程式的轉移表決定下一步，模型只在 PLAN/REPLAN 產出 JSON 計畫，工具是 9 個固定白名單，沒有命令列工具。
+A: 最大差別是：那類是對話驅動，由模型決定下一步，並能用通用工具（含命令列）；我們是事件驅動，偵測器喚醒、程式的轉移表決定下一步，模型只在 PLAN/REPLAN 產出 JSON 計畫，工具是 9 個固定白名單，沒有命令列工具。（未驗證：repo 沒有正式的比較文件，只有沙箱政策提到 NemoClaw 只支援 OpenClaw、Hermes 等列出的 agent。）
 證據: `deploy/openshell/warroom-policy.yaml:4`, `warroom/contracts.py:150`, `warroom/agent/state_machine.py:10`, `warroom/contracts.py:181`
 關鍵詞: OpenClaw, Hermes, Claude Code, 比較, 差異, event-driven, chat-driven, 通用 agent, 競品
 

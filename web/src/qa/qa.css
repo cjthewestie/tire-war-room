@@ -1,0 +1,52 @@
+/* QA 模式 (#qa). Colours come from the :root tokens (light + dark). 大字模式 scales the whole page for a projector. */
+.qa-page { max-width: 1100px; margin: 0 auto; padding: 8px 0 32px; display: flex; flex-direction: column; gap: 14px; font-size: 16px; }
+.qa-page.qa-big { font-size: 24px; max-width: 1320px; }
+.qa-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.qa-head h2 { margin: 0 0 4px; font-size: 1.4em; }
+.qa-dim { color: var(--ink-dim); margin: 0; font-size: .9em; }
+.qa-big-btn { flex: none; border: 1px solid var(--border); background: var(--panel); color: var(--ink); border-radius: 999px; padding: 6px 14px; font: inherit; font-size: .85em; cursor: pointer; min-height: 40px; }
+.qa-big-btn.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.qa-ask { display: flex; gap: 10px; align-items: stretch; }
+.qa-ask textarea { flex: 1; min-width: 0; resize: vertical; font: inherit; font-size: 1.15em; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--panel); color: var(--ink); }
+.qa-ask textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.qa-go { flex: none; min-width: 88px; font: inherit; font-size: 1.1em; font-weight: 700; border: 0; border-radius: var(--radius); background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+.qa-go:disabled { opacity: .55; cursor: default; }
+.qa-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.qa-chip { font: inherit; font-size: .9em; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink); border-radius: 999px; padding: 6px 12px; cursor: pointer; min-height: 36px; }
+.qa-chip:hover:not(:disabled) { border-color: var(--accent); }
+.qa-chip:disabled { opacity: .6; cursor: default; }
+.qa-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--accent); border-radius: var(--radius); padding: 16px 18px; }
+.qa-card.none { border-left-color: var(--warn); }
+.qa-q { margin: 0 0 8px; color: var(--ink-dim); font-size: .95em; }
+.qa-a { margin: 0; font-size: 1.3em; line-height: 1.6; }
+.qa-meta { margin: 10px 0 0; color: var(--ink-faint); font-size: .8em; }
+.qa-ev { margin-top: 14px; border-top: 1px solid var(--border); padding-top: 10px; }
+.qa-ev h3 { margin: 0 0 6px; font-size: .9em; color: var(--ink-dim); }
+.qa-ev ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.qa-ev li { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.qa-ref { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: .85em; background: none; border: 0; padding: 2px 0; color: var(--info); text-decoration: underline; cursor: pointer; overflow-wrap: anywhere; text-align: left; }
+.qa-ev-t { color: var(--ink-dim); font-size: .85em; }
+.qa-live { color: var(--accent); font-size: .85em; white-space: nowrap; }
+.qa-err { color: var(--alarm); margin: 0; }
+.qa-past summary { cursor: pointer; color: var(--ink-dim); }
+.qa-past ul { margin: 6px 0 0; padding-left: 18px; }
+.qa-past button { font: inherit; background: none; border: 0; color: var(--ink); text-align: left; cursor: pointer; padding: 2px 0; }
+.qa-viewer-scrim { position: fixed; inset: 0; background: rgb(0 0 0 / .5); z-index: 60; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.qa-viewer { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); width: min(980px, 100%); max-height: 86vh; display: flex; flex-direction: column; overflow: hidden; font-size: 15px; }
+.qa-viewer-h { display: flex; gap: 12px; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.qa-viewer-h b { overflow-wrap: anywhere; }
+.qa-viewer-h span { color: var(--ink-dim); }
+.qa-viewer-h .x { margin-left: auto; background: none; border: 0; color: var(--ink); font-size: 18px; cursor: pointer; min-width: 36px; min-height: 36px; }
+.qa-code { overflow: auto; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 13px; line-height: 1.5; padding: 8px 0; }
+.qa-code div { display: flex; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qa-code div.on { background: var(--accent-soft); }
+.qa-code i { flex: none; width: 48px; text-align: right; padding-right: 10px; color: var(--ink-faint); font-style: normal; user-select: none; }
+.qa-code span { flex: 1; min-width: 0; padding-right: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+@media (max-width: 640px) {
+  .qa-page { padding: 4px 0 24px; }
+  .qa-head { flex-direction: column; }
+  .qa-ask { flex-direction: column; }
+  .qa-go { min-height: 48px; }
+  .qa-page.qa-big { font-size: 20px; }
+}

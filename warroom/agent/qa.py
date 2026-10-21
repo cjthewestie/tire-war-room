@@ -11,14 +11,16 @@ One question:
 3. LLM mode: one model call (JSON {answer, evidence}) in a ModelQueue slot at the plant-question priority ("task"),
    so an incident plan still goes first. Mock mode: the best curated answer, verbatim.
 4. Post-model check by code: every cited evidence id and every file path in the answer must be one of the hits, and
-   every number must appear in the hit text or the question. A miss → the curated answer of the best hit, verbatim
+   every number must appear in the hit text or the question; when a curated pair matches closely, the answer must
+   keep at least FACT_SHARE of its names and numbers. A miss → the curated answer of the best hit, verbatim
    (by = "extract"), or FALLBACK when there is none. At most MAX_SENTENCES sentences.
-5. The safety filter on the output.
+5. The safety filter on the output. A blocked model answer falls back to the curated answer when that one passes.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import time
 from collections import OrderedDict
@@ -31,18 +33,21 @@ from warroom.kb.framework import FrameworkHit, FrameworkKB, default_framework_kb
 FALLBACK = "這部分我們文件裡沒有，現場由 CJ 補充。"
 MAX_SENTENCES = 5
 SEARCH_K = 5
+CURATED_SURE = 0.42         # a curated pair this close to the question overrides the model's 「文件裡沒有」
+FACT_SHARE = 0.6            # share of a close curated answer's names and numbers the model's answer must keep
 HISTORY_TURNS = 2           # earlier Q/A pairs of the same conversation the model sees (follow-ups: 「那它呢？」)
 MAX_CONVERSATIONS = 64
 
 QA_SYSTEM = """你是「實心胎智慧製造戰情室」團隊的工程師，正在決賽現場回答評審對 agent 框架的技術問題。
 規則：
 1. 只根據使用者訊息裡的「文件片段」回答；片段沒寫的不要補充、不要猜。
-2. 繁體中文，口語，像當面回答評審；第一句講結論，再用 2 到 4 句講片段裡具體的機制、名稱和數字，總共最多 5 句。
-3. 數字、狀態名、規則編號照片段原文寫，不要自己換算或補數字。
-4. evidence 只填片段的 ref（例如 docs/qa/framework-qa.md:23），挑真的用到的 1 到 3 個。
-5. 片段標「未驗證」的內容要直說「這點還沒驗證」。
-6. 不要寫英文單字 bash、shell、PIN；說「命令列」「主管驗證碼」。
-7. 片段答不了這題：answer 寫「這部分我們文件裡沒有，現場由 CJ 補充。」，evidence 留空。"""
+2. 片段裡有「A:」開頭的標準答案時，以最相關的那一則為主：保留它的每個重點（名稱、數字、機制），改寫成口語，不要只講一句。
+3. 繁體中文，像當面回答評審；第一句講結論，再用 2 到 4 句講具體的機制、名稱和數字，總共最多 5 句。
+4. 數字、狀態名、規則編號照片段原文寫，不要自己換算或補數字。
+5. evidence 只填片段的 ref（例如 docs/qa/framework-qa.md:23），挑真的用到的 1 到 3 個。
+6. 片段標「未驗證」的部分照樣回答，但要直說「這點還沒驗證」。
+7. 不要寫英文單字 bash、shell、PIN；說「命令列」「主管驗證碼」。
+8. 只有片段跟問題完全無關時，answer 才寫「這部分我們文件裡沒有，現場由 CJ 補充。」，evidence 留空。"""
 
 _NUM_RX = re.compile(r"\d+(?:\.\d+)?")
 _PATH_RX = re.compile(r"[\w./-]+\.(?:py|md|ya?ml|ts|tsx|json|toml)\b")
@@ -61,7 +66,7 @@ def curated_answer(hit: FrameworkHit) -> str | None:
     if hit.kind != "qa":
         return None
     m = re.search(r"^A:\s*(.+)$", hit.text, re.MULTILINE)
-    return m.group(1).strip() if m else None
+    return m.group(1).replace("`", "").strip() if m else None      # spoken / projected: no markdown code ticks
 
 
 def cap_sentences(text: str, n: int = MAX_SENTENCES) -> str:
@@ -69,14 +74,26 @@ def cap_sentences(text: str, n: int = MAX_SENTENCES) -> str:
     return "".join(parts[:n]).strip() if len(parts) > n else text.strip()
 
 
+_FACT_RX = re.compile(r"[A-Za-z][A-Za-z0-9_.\-]*[A-Za-z0-9]|\d+(?:[.,]\d+)?")
+
+
+def fact_coverage(answer: str, curated: str) -> tuple[int, int]:
+    """(kept, needed): the curated answer's key tokens (names such as EXECUTE / confirm_schedule / HMAC, and numbers)
+    the model's answer kept, and how many it must keep (FACT_SHARE of them). The model may rephrase, not drop facts."""
+    facts = {f.lower() for f in _FACT_RX.findall(curated)}
+    kept = sum(1 for f in facts if f in answer.lower())
+    return kept, math.ceil(len(facts) * FACT_SHARE)
+
+
 def check_answer(answer: str, evidence: list[str], question: str, hits: list[FrameworkHit]) -> list[str]:
-    """Code checks the model. Returns the problems ([] = the answer stands)."""
+    """Code checks the model. Returns the problems ([] = the answer stands). A file path counts when it is a hit's
+    file, a file a hit cites, or written in a hit's text."""
     refs = {h.ref for h in hits}
     files = {h.source for h in hits} | {e.rsplit(":", 1)[0] for h in hits for e in h.evidence}
     problems = [f"evidence {e} is not a search hit" for e in evidence if e not in refs]
-    problems += [f"path {p} is not in the hits" for p in _PATH_RX.findall(answer)
-                 if p not in files and not any(f.endswith(p) for f in files)]
     source = question + " " + " ".join(f"{h.title} {h.text} {' '.join(h.evidence)}" for h in hits)
+    problems += [f"path {p} is not in the hits" for p in _PATH_RX.findall(answer)
+                 if p not in files and not any(f.endswith(p) for f in files) and p not in source]
     known = set(_NUM_RX.findall(source))
     known |= {n.split(".")[0] for n in known}
     problems += [f"number {n} is not in the hits" for n in _NUM_RX.findall(answer) if n not in known]
@@ -223,10 +240,16 @@ class QaAgent:
                 else:
                     m_answer, m_cited = await call()
                 if not m_answer or "文件裡沒有" in m_answer:
-                    answer, cited, by = FALLBACK, [], "model_no_answer"
+                    # a curated pair that matched well is still the answer; otherwise trust the model's "no"
+                    if not (extract and best.kind == "qa" and best.score >= CURATED_SURE):
+                        answer, cited, by = FALLBACK, [], "model_no_answer"
                 else:
                     m_answer = cap_sentences(m_answer)
                     problems = check_answer(m_answer, m_cited, q, passed)
+                    if not problems and extract and best.kind == "qa" and best.score >= CURATED_SURE:
+                        kept, need = fact_coverage(m_answer, extract)
+                        if kept < need:
+                            problems = [f"model answer kept {kept}/{need} key facts of the curated answer"]
                     if problems:
                         out["problems"] = problems
                     else:
@@ -235,6 +258,9 @@ class QaAgent:
                 out["error"] = f"{type(e).__name__}: {e}"[:300]
         answer = cap_sentences(answer)
         o = self.sf.check_output(answer, secrets)
+        if o is not None and by == "model" and extract and self.sf.check_output(extract, secrets) is None:
+            out["problems"].append(f"model answer blocked: {o.category}; curated answer shown")
+            answer, cited, by, o = cap_sentences(extract), [best.ref], "extract", None
         if o is not None:
             out["problems"].append(f"output blocked: {o.category}")
             answer, cited, by = o.reply, [], "safety_filter"
