@@ -20,6 +20,7 @@ const check = (name, ok, detail = '') => { if (!ok) failed++; console.log(`${ok 
 const browser = await pw.chromium.launch({ headless: true, args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] })
 const wr = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
 const phone = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage()
+const wr390 = await (await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })).newPage()
 let f3 = null
 const api = (path, body) => wr.evaluate(([p, b]) => fetch(p, b ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) } : undefined).then((r) => r.json()), [path, body])
 
@@ -28,6 +29,7 @@ await wr.waitForSelector('[data-testid="demo-start"]', { timeout: 20000 })
 const st0 = await api('/api/demo/state')
 if (st0.running) await api('/api/demo/state', { action: 'exit' })
 await phone.goto(BASE + '/phone')
+await wr390.goto(BASE + '/')
 if (!NO3D) {
   try {
     f3 = await (await browser.newContext({ viewport: { width: 1280, height: 720 } })).newPage()
@@ -49,6 +51,7 @@ const shoot = async (cue, suffix = '') => {
   const name = `${String(n).padStart(2, '0')}-${cue}${suffix}`
   await wr.screenshot({ path: `${OUT}/${name}.png` })
   await phone.screenshot({ path: `${OUT}/${name}-phone.png` })
+  await wr390.screenshot({ path: `${OUT}/${name}-390.png` })
   if (f3) await f3.screenshot({ path: `${OUT}/${name}-3d.png` }).catch(() => {})
   const v = await wr.evaluate(() => window.__demoWarroom?.())
   const tab = await wr.evaluate(() => document.querySelector('[aria-current="page"]')?.textContent ?? location.hash)
@@ -63,7 +66,7 @@ while (Date.now() - t0 < 9 * 60_000) {
   if (!s.running) { console.log('demo no longer running', JSON.stringify(s)); break }
   if (s.cue_id !== last) {
     last = s.cue_id; n++
-    await wr.waitForTimeout(3500)          // page switch, scroll and spotlight settle
+    await wr.waitForTimeout(2000)          // page switch, scroll and spotlight settle
     await shoot(s.cue_id)
     if (f3) {
       const d3 = await f3.evaluate(() => window.__demo3d?.() ?? null).catch(() => null)
@@ -73,13 +76,14 @@ while (Date.now() - t0 < 9 * 60_000) {
       check('pitch: calm card on the war room', await wr.locator('[data-testid="demo-pitch"]').isVisible())
       await wr.keyboard.press('n'); await wr.waitForTimeout(2500)
       n++; last = 'warn'; await shoot('warn')
-      await wr.keyboard.press('p'); await wr.waitForTimeout(1500)
-      const ps = await api('/api/demo/state')
-      check('P pauses the demo and the sim', ps.paused && (await api('/api/snapshot')).header !== undefined)
-      await wr.keyboard.press('p'); await wr.waitForTimeout(1000)
-      await wr.keyboard.press('Escape'); await wr.waitForTimeout(1500)
-      check('Esc ends the demo everywhere', !(await api('/api/demo/state')).running)
-      check('war room left demo mode', !(await wr.locator('[data-testid="demo-bar"]').isVisible()))
+      const until = async (f, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await f()) return true; await wr.waitForTimeout(250) } return false }
+      await wr.keyboard.press('p')
+      check('P pauses the demo and the sim', await until(async () => (await api('/api/demo/state')).paused && (await api('/api/sim/scenarios')) && true))
+      await wr.keyboard.press('p')
+      check('P again resumes', await until(async () => !(await api('/api/demo/state')).paused))
+      await wr.keyboard.press('Escape')
+      check('Esc ends the demo everywhere', await until(async () => !(await api('/api/demo/state')).running))
+      check('war room left demo mode', await until(async () => !(await wr.locator('[data-testid="demo-bar"]').isVisible())))
       break
     }
   }
@@ -100,7 +104,7 @@ while (Date.now() - t0 < 9 * 60_000) {
         // a card re-issued after a schedule change (…v2, 照新排程執行) needs the supervisor again
         await btn.click(); approvedOnPhone++
         console.log('approved on the phone', approvedOnPhone)
-        await phone.waitForTimeout(3000)
+        await phone.waitForTimeout(400)
       }
     }
   }

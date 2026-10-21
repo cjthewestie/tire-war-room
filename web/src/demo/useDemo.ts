@@ -42,7 +42,13 @@ export function useDemo() {
     await send({ action: 'start', cues: CUES.map((c) => c.id), cue_id: CUES[0].id, driver: ME, story_target_s: PITCH_AT, waiting_for: waitOf(0) })
   }, [send])
   const cont = useCallback(() => send({ action: 'continue' }), [send])
-  const togglePause = useCallback(() => send({ action: demo?.paused ? 'resume' : 'pause' }), [send, demo?.paused])
+  // the paused flag the server last sent (a quick P-P must not send pause twice before the push arrives)
+  const pausedRef = useRef(false)
+  useEffect(() => { pausedRef.current = !!demo?.paused }, [demo?.paused])
+  const togglePause = useCallback(async () => {
+    const out = await send({ action: pausedRef.current ? 'resume' : 'pause' })
+    if (out) pausedRef.current = out.paused
+  }, [send])
   const exit = useCallback(() => send({ action: 'exit' }), [send])
 
   // ---------------------------------------------------------------- driver (this tab started the demo)
