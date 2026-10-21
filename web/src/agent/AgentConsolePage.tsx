@@ -19,7 +19,7 @@ import { ToolIcon } from './ToolIcon'
 import { withAsks, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
 import { ChatBar, type BarFocus } from './ChatBar'
-import { SUB_STATUS, SUB_TONE, isOpen, plainStatus, whatOf } from './subagents'
+import { SUB_STATUS, SUB_TONE, eventOpen, plainStatus, whatOf } from './subagents'
 import { BubbleRow, Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
@@ -76,7 +76,10 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
     history.replaceState(null, '', `${location.pathname}${location.search}#console${id === MAIN ? '' : `?event=${encodeURIComponent(id)}`}`)
   }
   const subs = new Map((state.subagents?.items ?? []).map((x) => [x.id, x]))
-  const openOf = (e: Event) => { const sa = subs.get(e.id); return sa ? isOpen(sa) : e.state !== 'closed' && e.state !== 'safe_stop' }
+  // open / ended by the event's state and the World's worker tasks, as 主控台 lists it (not the subagent status: a fast
+  // repair's closed event stayed under 處理中 as 「等現場完成（1/5）」 while 主控台 said 已結案, #92 review)
+  const tasksOf = (e: Event) => (state.world?.tasks?.items ?? []).filter((t) => t.event_id === e.id)
+  const openOf = (e: Event) => eventOpen(e, tasksOf(e))
   const listed = events.filter((e) => scope === 'all' || (scope === 'open') === openOf(e))
   // 總覽: Agent Nemo over every task — its own conversation (mode overview), no task selected (CJ 2026-10-22)
   const thread = useMainThread(asks, 'overview')
@@ -98,7 +101,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
         </div>
         <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
           <option value={MAIN}>Agent Nemo 對話</option>
-          {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa)}` : evName(e)}</option> })}
+          {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa, e, tasksOf(e))}` : evName(e)}</option> })}
         </select>
         <ul className="trace-list tree" role="listbox" aria-label="處理中的事件">
           {listed.map((e) => {
@@ -106,7 +109,7 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
             return (
               <li key={e.id} role="option" aria-selected={e.id === ev?.id}>
                 <button className={e.id === ev?.id ? 'on' : ''} onClick={() => pick(e.id)} data-testid="trace-event" data-event={e.id} data-sub={sa?.status}>
-                  <span className="tree-row" data-testid="sub-status">{sa ? <><b>{whatOf(sa, e)}</b>：{plainStatus(sa)}</> : <b>{evName(e)}</b>}</span>
+                  <span className="tree-row" data-testid="sub-status">{sa ? <><b>{whatOf(sa, e)}</b>：{plainStatus(sa, e, tasksOf(e))}</> : <b>{evName(e)}</b>}</span>
                   {sa && sa.tasks_total > 0 && <span className="sub-bar" aria-hidden><i style={{ width: `${(100 * sa.tasks_done) / sa.tasks_total}%` }} /></span>}
                 </button>
               </li>

@@ -347,17 +347,21 @@ def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
 
 
 def tasks(r: Any) -> dict[str, Any]:
-    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long."""
+    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long. A closed
+    event whose people are still at work is listed too (主控台 ④ 執行中，等確認完成; #92 review)."""
     now = r.clock.now()
     subs = {x["id"]: x for x in r.orch.subagents()}
     pending = {a.event_id: a for a in r.approvals.pending()} if r.approvals is not None else {}
     pre = getattr(r.orch, "preplan_ids", set())
     items = []
-    for e in sorted(_open_events(r), key=lambda e: e.opened_at):
+    working = [e for e in r.events() if e.state.value == "closed" and subs.get(e.id, {}).get("status") == "waiting_tasks"]
+    for e in sorted([*_open_events(r), *working], key=lambda e: e.opened_at):
         sa = subs.get(e.id, {})
         card = pending.get(e.id)
         st = e.state.value
-        if card is not None:
+        if st == "closed":
+            label, waits = f"已結案，現場 {sa['tasks_done']}/{sa['tasks_total']}", "等現場完成"
+        elif card is not None:
             label, waits = f"待核准 v{card.version}", "等主管核准"
         elif st in ("execute", "verify") and sa.get("tasks_total"):
             label = f"執行中 {sa['tasks_done']}/{sa['tasks_total']}" if st == "execute" else "驗證中"

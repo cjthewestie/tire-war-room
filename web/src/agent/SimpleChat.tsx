@@ -146,7 +146,7 @@ export function SubProgress({ ev, talk = [] }: { ev: Event; talk?: Bubble[] }) {
   }
   return (
     <div className="con-body sp" data-testid="sub-progress">
-      <p className="sp-status"><b>{sa ? plainStatus(sa) : STATE_LABEL[ev.state]}</b>
+      <p className="sp-status"><b>{sa ? plainStatus(sa, ev, tasks) : STATE_LABEL[ev.state]}</b>
         <span className="muted small">{STATE_LABEL[ev.state]}・第 {(ev.prior_rounds?.length ?? 0) + 1} 輪・工具 {tools.length}{tasks.length ? `・現場 ${tasks.filter((t) => t.status === '完成').length}/${tasks.length}` : ''}</span>
         {open && transport?.interrupt && <button className="btn-ghost danger sp-stop" disabled={busy} onClick={() => void stop()} data-testid="sp-interrupt">中斷</button>}
       </p>
