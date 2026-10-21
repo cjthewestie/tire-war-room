@@ -37,6 +37,7 @@ export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
   | "day_loop"  // issue #36 一日循環
+  | "morning_rush"  // issue #104 一早訂單湧入
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
