@@ -1,7 +1,7 @@
 // Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 專人維修 →
 // 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 專人維修中 / 維修完成・溫度回降中 / 已恢復正常・報告已產生 /
 // 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
-// page's task, 已恢復正常 and 報告 rows, and the report's 維修完成 / 恢復正常 / 主管已讀 lines. Built on
+// page's task, 已恢復正常 and 報告 rows, and the report's one-line head (發生 → 維修完成 → 恢復正常｜result). Built on
 // fixtures/status-cases.json (concurrent_3, B 線開煉機 overheat: ≤118°C) with the Event.repaired_at / recovered_at / review
 // fields of the shared contract patched in.
 // Run: cd web && node e2e/fastfix-unit.mjs
@@ -183,14 +183,25 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
 
 // ---------------------------------------------------------------- report
 {
-  const ev = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'done', requested_at: iso(now + 4000), done_at: iso(now + 60_000), by: 'supervisor' } }
-  const r = buildReport({ ev, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  const head = Object.fromEntries(r.head.map((h) => [h.k, h.text]))
-  check('report head: 維修完成 / 恢復正常 / 主管已讀 with seconds', /^10\/03 10:32:40$/.test(head['維修完成'] ?? '') && /^10\/03 10:32:44$/.test(head['恢復正常'] ?? '') && /^10\/03 10:33:40/.test(head['主管已讀'] ?? ''), JSON.stringify([head['維修完成'], head['恢復正常'], head['主管已讀']]))
-  const p = buildReport({ ev: { ...ev, review: { ...ev.review, status: 'pending', done_at: null, by: null } }, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  check('… unread → 尚未讀取', /^尚未讀取/.test(p.head.find((h) => h.k === '主管已讀')?.text ?? ''), p.head.find((h) => h.k === '主管已讀')?.text)
+  const ev = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), outcome: '已修復：B 線開煉機 膠溫回到 101°C（維修完成 10:32、恢復 10:32）',
+    review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null },
+    timeline: [{ ts: base.opened_at, actor: '事件偵測', tag: 'tool', text: '[工具] B 線開煉機 膠溫 96°C → 喚醒指揮官' },
+      { ts: base.opened_at, actor: '指揮官', tag: 'decision', text: 'EV-20261003-100133-B-OPEN｜請核准：放慢生料投入（胎側膠組）。' }] }
+  const r = buildReport({ ev, approvals: [], tasks: s.tasks, chainOk: true, auditCount: 65 })
+  const head = r.head.map((h) => h.text).join(' / ')
+  check('report title: the alert card\'s title without 異常：', r.title === 'B 線開煉機 溫度過高', r.title)
+  check('report head: one line 發生 → 維修完成 → 恢復正常・共 N 分鐘｜已恢復正常 with the reading',
+    r.head.length === 1 && /^10\/03 10:01 發生 → 10:32 維修完成 → 10:32 恢復正常・共 \d+ 分鐘｜已恢復正常，膠溫回到 101°C$/.test(head), head)
+  check('… no 主管已讀 / 尚未讀取 on the report (the phone\'s 知道了 marks it read)', !/主管已讀|尚未讀取/.test(head))
+  const tl = r.parts.find((p) => p.id === 'timeline').rows
+  check('事件經過: 指揮官 shown as Agent Nemo, no [工具], no event id in front', tl[1].k === 'Agent Nemo' && tl[0].text === 'B 線開煉機 膠溫 96°C → 交給 Agent Nemo' && tl[1].text.startsWith('請核准'), tl.map((x) => `${x.k}：${x.text}`).join(' / '))
+  const audit = r.parts.find((p) => p.id === 'audit').rows.map((x) => x.text)
+  check('八、稽核: the record count and the event id', audit[1] === `這件事共 65 筆紀錄・事件編號 ${base.id}`, audit[1])
+  check('… without an Agent Nemo report it does not claim one', audit[2] === '一～六節由系統紀錄整理，不經 AI；七由主管填寫。', audit[2])
+  const ai = buildReport({ ev: { ...ev, ai_report: { text: '【異常報告】x\n摘要：y', summary: 'y', by: 'rules', drafted_ms: 1, at: iso(now), late_ms: null } }, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
+  check('… with one: written by Agent Nemo, 規則備援 by the rules', ai.parts.find((p) => p.id === 'audit').rows[2].text.startsWith('最上面的異常報告由 Agent Nemo 撰寫（標「規則備援」時由規則整理）') && ai.ai?.tag === '規則備援')
   const none = buildReport({ ev: base, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
-  check('… an event without the fields keeps the old head', !none.head.some((h) => h.k === '主管已讀' || h.k === '維修完成' || h.k === '恢復正常'))
+  check('… an event without the fields: no 維修完成 / 恢復正常 in the head', none.head.length === 1 && !/維修完成|恢復正常/.test(none.head[0].text), none.head[0].text)
 }
 
 await vite.close()

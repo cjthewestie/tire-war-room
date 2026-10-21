@@ -9,12 +9,10 @@
 .rp-pick select { flex: 1; min-width: 0; min-height: 42px; font-size: 15px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); }
 .rp-note, .rp-empty { margin: 0; color: var(--ink-dim); font-size: 14px; }
 .rp-doc { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
-.rp-title { margin: 0; font-size: 22px; line-height: 1.35; text-wrap: balance; }
-.rp-head { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; padding: 12px 14px; background: var(--panel-2); border-radius: 10px; }
-.rp-head div { display: flex; flex-direction: column; min-width: 0; }
-.rp-head dt { font-size: 12.5px; color: var(--ink-faint); }
-.rp-head dd { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
-.rp-head .t-ok dd { color: var(--accent); } .rp-head .t-warn dd { color: var(--warn); } .rp-head .t-bad dd { color: var(--alarm); }
+.rp-title { margin: 0; font-size: 22px; line-height: 1.35; text-wrap: balance; word-break: keep-all; overflow-wrap: anywhere; }
+/* one line under the title: 發生 → 維修完成 → 恢復正常・共 N 分鐘｜result; the tone is the left edge */
+.rp-head { margin: 0; padding: 10px 14px; background: var(--panel-2); border-radius: 10px; border-left: 4px solid var(--border); font-size: 15.5px; font-weight: 600; line-height: 1.55; overflow-wrap: anywhere; }
+.rp-head.t-ok { border-left-color: var(--accent); } .rp-head.t-warn { border-left-color: var(--warn); } .rp-head.t-bad { border-left-color: var(--alarm); }
 .rp-part { display: flex; flex-direction: column; gap: 8px; }
 .rp-part h3 { margin: 0; font-size: 17px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .rp-part ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
