@@ -18,6 +18,7 @@ export interface Bubble {
 type D = Record<string, unknown>
 
 const isLoad = (e: AuditEntry) => e.kind === 'system' && (e.payload as D | null)?.msg === 'scenario loaded'
+const mine = (e: AuditEntry) => (e.actor === 'main_agent' && e.kind === 'system') || isLoad(e)
 
 /** Audit rows of the 主 agent → bubbles. */
 function fromAudit(e: AuditEntry): Bubble[] {
@@ -49,13 +50,19 @@ export function useMainThread(asks: LocalItem[]): Bubble[] {
   useEffect(() => {
     if (transport?.mode !== 'live' || !connected) return
     let off = false
-    apiGet<AuditEntry[]>('/api/audit?kind=system&limit=5000').then((es) => { if (!off) setBackfill(es.filter((e) => e.actor === 'main_agent' || isLoad(e))) }).catch(() => {})
+    apiGet<AuditEntry[]>('/api/audit?kind=system&limit=5000').then((es) => { if (!off) setBackfill(es.filter(mine)) }).catch(() => {})
     return () => { off = true }
   }, [transport, connected])
+  // the store keeps only the last 300 audit rows: the 主 agent's live rows (and the load marker) are kept here, or once
+  // the 「scenario loaded」 row scrolled out the cut went back to an older load and the last rehearsal came back mid-demo
+  const [kept, setKept] = useState<AuditEntry[]>([])
+  const top = kept.length ? kept[kept.length - 1].seq : 0     // kept is sorted by seq
+  const add = state.audit.filter((e) => mine(e) && e.seq > top)
+  if (add.length) setKept([...kept, ...add].sort((a, b) => a.seq - b.seq))   // adjusted while rendering (no effect)
   return useMemo(() => {
     const bySeq = new Map<number, AuditEntry>()
     let loaded = 0
-    for (const e of [...backfill, ...state.audit]) {
+    for (const e of [...backfill, ...kept, ...state.audit]) {
       if (isLoad(e)) loaded = Math.max(loaded, e.seq)
       else if (e.actor === 'main_agent' && e.kind === 'system') bySeq.set(e.seq, e)
     }
@@ -70,6 +77,6 @@ export function useMainThread(asks: LocalItem[]): Bubble[] {
         fellBack: it.fellBack, error: it.error, about: it.about ?? null })
     }
     return out
-  }, [backfill, state.audit, asks])
+  }, [backfill, kept, state.audit, asks])
 }
 

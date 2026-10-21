@@ -104,14 +104,18 @@ _PLAN_EDIT_RX = re.compile(r"\d|降|升|調|改成|改到|改用|換|延後|提�
 _VAGUE_EDIT_RX = re.compile(r"^(?:這個|這份)?(?:計[劃畫])?(?:要)?(?:怎麼?|如何)?(?:改|修改|調整)(?:一下|看看)?(?:計[劃畫])?[?？]?$")
 _LAST_Q_RX = re.compile(r"[^。！!?？\n]*[?？]\s*$")
 _GREETING = r"(?:早安|早上好|午安|下午好|晚安|晚上好|你好|您好|哈囉|嗨)"
-# a short acknowledgement before a greeting or a self-introduction (「收到，主管。我是戰情室的 agent…」) goes with it
-_INTRO_RX = re.compile(r"^\s*(?:(?:[^。！!？?\n]{1,8}?[，,。！!]\s*){1,2}?(?=" + _GREETING + r"|我是))?"
+# a short acknowledgement before a greeting or a self-introduction (「收到，主管。我是戰情室的 agent…」) goes with it;
+# only before a real one: 「7 號機正常，我是根據讀值判斷的。」 keeps 「7 號機正常」
+_INTRO_RX = re.compile(r"^\s*(?:(?:[^。！!？?\n]{1,8}?[，,。！!]\s*){1,2}?(?=" + _GREETING + r"|我是[^。！!\n]{0,30}?agent))?"
                        r"(?:" + _GREETING + r"[！!，,。～~\s]*)?(?:我是[^。！!\n]{0,30}?agent[^。！!\n]*[。！!]\s*)?",
                        re.IGNORECASE)
 _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛剛|剛才|上面|前面|這台|那台|它|他們|同一")
 # a reply that says something was changed or sent (「這份待核准計畫現在已更新」「已擬計劃送你核准」) is only true after a
 # propose_plan or a discussion that replanned; otherwise code writes the reply (real run 2026-10-21, event_id=null)
-_CLAIM_RX = re.compile(r"已(?:經)?(?:幫你|替你|為你)?(?:改|更新|修改|調整|重排|擬|送)")
+_CLAIM_RX = re.compile(r"已(?:經)?(?:幫你|替你|為你)?(?:改(?!善)|更新|修改|調整|重排|擬|送)")
+# a question that asks for no change (「現在狀況怎樣？」): 「AI 指揮官已擬好停用 7 號機的計劃」 describes the plant, it claims
+# nothing for this turn (review 10-21: it was replaced by 「計劃沒有改。這份計劃能改的是…」)
+_CHANGE_WORD_RX = re.compile(r"改|換|調|不要|不可|不能|加班|重排|安排|擬|送|降|升|延後|提前|保養|停")
 # advice that breaks process sense for a temperature-drop plan (「調低到 118°C」「加快降溫」「縮短硫化時間」)
 _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{0,6}(?:硫化|時間)|(?:硫化|時間).{0,4}縮短")
 # 「（discuss_waiting_plan 回覆：…）」: a tool name in the reply
@@ -585,11 +589,17 @@ class MainAgent:
         bad = ungrounded(words, source)
         if bad:                                       # a number the tools did not give: the results speak instead
             out["error"] = f"ungrounded numbers {bad}"
-            return self._results_reply(steps) or (PLAN_EDIT_Q if waiting_plan and about_edit else NO_FACTS)
+            fixed = self._results_reply(steps) or (PLAN_EDIT_Q if waiting_plan and about_edit else "")
+            if fixed:
+                return fixed
+            # nothing read and not a plan change: the words stay, as before (「現在狀況怎樣？」 → 「7 號機 122.3°C…」 from
+            # the context: 「7」 is CURE-07, 「1 台」 a count; 「這個我沒有查到資料」 there was not true, review 10-21)
         if waiting_plan and about_edit and _UNSAFE_RX.search(words):
             out["error"] = "advice outside what the plan can change"
             return PLAN_EDIT_Q
-        if _CLAIM_RX.search(words):                   # 「已改／已更新／已擬計劃／已送」 with nothing proposed or replanned
+        t = text.strip()
+        asks_only = bool(_QUESTION_RX.search(t)) and not _CHANGE_WORD_RX.search(t) and not is_gibberish(t)
+        if _CLAIM_RX.search(words) and not asks_only:  # 「已改／已更新／已擬計劃／已送」 with nothing proposed or replanned
             out["error"] = "claimed a change that was not made"
             return GIBBERISH_REPLY if is_gibberish(text) else NOT_CHANGED if waiting_plan else NOT_DONE
         return None

@@ -134,6 +134,20 @@ async def test_a_claimed_plan_without_propose_is_replaced():
     assert out["reply"] == NOT_CHANGED
 
 
+async def test_a_status_question_keeps_the_models_words():
+    """Review 10-21: a question that asks for no change describes the plant (「已擬好…計劃」 is the commander's), and a
+    number from the context (「7 號機」 = CURE-07) is no reason to answer 「這個我沒有查到資料」."""
+    say = "7 號機溫度續降，AI 指揮官已擬好停用 7 號機的計劃，等你核准。"
+    out = await Floor().turn(MainAgent(_settings(), client=Model(("say", say))), "現在狀況怎樣？", PLAN)
+    assert out["reply"] == say
+    say = "有 1 台異常：7 號機 122.3°C，AI 指揮官處理中。"
+    out = await Floor().turn(MainAgent(_settings(), client=Model(("say", say))), "工廠現在還好嗎")
+    assert out["reply"] == say
+    m = Model(("say", "好，已改成不加班。"), ("say", "好，已改成不加班。"))   # a question that asks for a change
+    out = await Floor().turn(MainAgent(_settings(), client=m), "可以改成不加班嗎？", PLAN)
+    assert out["reply"] == NOT_CHANGED
+
+
 # ---------------------------------------------------------------- A2: a new task while a card is selected
 def test_new_task_while_a_plan_is_selected():
     assert new_task("#M-201 可能晚交，請重排保交期", PLAN)
@@ -243,6 +257,7 @@ def test_tidy_reply():
     assert r == "7 號機現在 122.3°C。第二段。第三段。"
     assert tidy("好，已擬計劃送你核准。", keep_intro=False) == "好，已擬計劃送你核准。"
     assert tidy("- 先確認蒸汽壓\n- 再看水流", keep_intro=False) == "先確認蒸汽壓；再看水流"
+    assert tidy("7 號機正常，我是根據讀值判斷的。", keep_intro=False) == "7 號機正常，我是根據讀值判斷的。"
 
 
 async def test_model_reply_is_tidied():
