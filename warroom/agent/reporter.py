@@ -98,7 +98,7 @@ def _write_line(sr: Any) -> str | None:
         return f"確認排程{' v' + str(v) if v else ''}（{how}）"
     if tool is ToolName.SET_CURE_TIME:
         h = data.get("total_cure_h") or args.get("total_cure_h")
-        return f"設定{machine_label(str(args.get('press_id', '')))}硫化時間 {fmt_num(h)} h（{how}）"
+        return f"設定 {machine_label(str(args.get('press_id', '')))}硫化時間 {fmt_num(h)} h（{how}）"
     return None
 
 
@@ -232,7 +232,7 @@ def ground(raw: dict[str, Any], facts: dict[str, Any]) -> tuple[dict[str, Any] |
 
     def keep(text: Any, cap: int) -> str:
         out = []
-        for c in _CLAUSE_RX.findall(str(text or "").strip()):
+        for c in _CLAUSE_RX.findall(" ".join(str(text or "").split())):   # one line per part (the report is 5 lines)
             bad = [n for n in _NUM_RX.findall(c) if n not in known]
             if bad:
                 dropped.extend(bad)
@@ -412,7 +412,6 @@ class ReportDesk:
             self.jobs.pop(ev.id, None)
             return
         job.finishing = True
-        closed = time.perf_counter()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -422,7 +421,7 @@ class ReportDesk:
             # ready: delivered right away, just after the main agent's 「完成」 line of this same close
             loop.call_soon(lambda: self._publish(ev, job, self._result(job), 0.0))
             return
-        loop.create_task(self._finish(ev, job, closed), name=f"ai-report-close-{ev.id}")
+        loop.create_task(self._finish(ev, job), name=f"ai-report-close-{ev.id}")
 
     @staticmethod
     def _wait_recovery(ev: Event) -> bool:
@@ -438,11 +437,13 @@ class ReportDesk:
                 "model_error": "draft cancelled" if t is not None and t.cancelled() else "draft failed",
                 "drafted_ms": None}
 
-    async def _finish(self, ev: Event, job: _Job, closed: float) -> None:
+    async def _finish(self, ev: Event, job: _Job) -> None:
         t0 = time.perf_counter()
         while self._wait_recovery(ev) and time.perf_counter() - t0 < RECOVER_WAIT_S:
             await asyncio.sleep(0.2)
-        if job.task is not None and not job.task.done():
+        back = time.perf_counter()                   # back to normal: only a wait for the draft from here is 「晚」
+        late = job.task is not None and not job.task.done()
+        if late:
             with contextlib.suppress(Exception):
                 await asyncio.wait({job.task}, timeout=CLOSE_WAIT_S)
             if not job.task.done():
@@ -451,7 +452,7 @@ class ReportDesk:
                     await job.task
         if not job.facts:                            # cancelled before the facts were read
             job.facts = report_facts(ev, None, self._tasks(ev), sop_refs(ev, self.o.audit))
-        self._publish(ev, job, self._result(job), round((time.perf_counter() - closed) * 1000, 1))
+        self._publish(ev, job, self._result(job), round((time.perf_counter() - back) * 1000, 1) if late else 0.0)
 
     def _publish(self, ev: Event, job: _Job, draft: dict[str, Any], late_ms: float) -> None:
         if job.published:
