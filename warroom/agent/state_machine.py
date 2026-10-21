@@ -377,7 +377,8 @@ class StateMachine:
             return
         st = self._machine_state(machine_id)
         if st is not None and st.status is MachineStatus.WARNING:
-            self._set_status(machine_id, MachineStatus.RUNNING, None)
+            # the drawer's banner drops 「回溫中」: back to the event's message (_live_note turns it into the live line)
+            self._set_status(machine_id, MachineStatus.RUNNING, ev.anomaly.message)
         if ev.state is EventState.CLOSED:
             self._report_ready(ev)
 
@@ -3383,7 +3384,9 @@ class StateMachine:
         st = self._machine_state(ev.machine_id)
         if (verified if clear_alarm is None else clear_alarm) and st is not None and \
                 st.status in (MachineStatus.ALARM, MachineStatus.WARNING):
-            self._set_status(ev.machine_id, MachineStatus.RUNNING, None)
+            # from 回溫中 the drawer's banner goes back to the event's message (as from the red alarm)
+            self._set_status(ev.machine_id, MachineStatus.RUNNING,
+                             ev.anomaly.message if st.status is MachineStatus.WARNING else None)
         self._note(ev, "系統", f"事件結案：{outcome}" + ("" if verified else f"（{why}）"), "info")
         if ev.repaired_at is not None:
             self._report_ready(ev)

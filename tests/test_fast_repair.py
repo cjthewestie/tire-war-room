@@ -112,6 +112,8 @@ async def _fast_flow(tmp_path, scenario: str, speed: float, machine: str, check=
         assert ev.repaired_at is not None and ev.recovered_at is not None and ev.repaired_at <= ev.recovered_at
         assert ev.review is not None and ev.review.status == "pending" and ev.review.done_at is None and ev.review.by is None
         assert rt.sim.machine(machine).status is MachineStatus.RUNNING                  # green
+        drawer = rt.machine_detail(machine).state                                      # the machine drawer's banner
+        assert drawer.status is MachineStatus.RUNNING and "回溫中" not in (drawer.note or ""), drawer.note
         tasks = [t for t in rt.sim.world.tasks.for_event(ev.id) if t.kind in REPAIR_KINDS]
         assert tasks and all(t.status == "完成" and t.progress == 1.0 and t.worker_id for t in tasks), tasks
         if check is not None:
