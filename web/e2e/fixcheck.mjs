@@ -23,14 +23,14 @@ await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode.live', { timeout: 10000 })
 check('header has no English mock badge', !(await d.locator('.mode').innerText()).includes('mock'), await d.locator('.mode').innerText())
 
-// network tiers: enabled and effective in live mode
-const lan = d.locator('.seg.net button', { hasText: 'LAN 斷' })
-check('LAN 斷 button enabled live', await lan.isEnabled())
-await lan.click()
+// network tiers, effective in live mode (#100 took the 拔網路 buttons off the screen: the tier is set over the API)
+const net = (network) => d.evaluate((n) => fetch('/api/sim/network', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ network: n }) }).then((r) => r.status), network)
+check('no 拔網路 buttons on the screen (#100)', (await d.locator('.seg.net button').count()) === 0)
+check('LAN tier accepted live', (await net('lan_down')) === 200)
 await d.waitForTimeout(5000)
 check('header shows LAN tier', (await d.locator('.topbar').innerText()).includes('廠內網路斷線'))
 await d.screenshot({ path: `${OUT}/fix-lan-down-1440.png` })
-await d.locator('.seg.net button', { hasText: '在線' }).click()
+await net('online')
 await d.waitForTimeout(5000)
 check('back online', !(await d.locator('.topbar').innerText()).includes('廠內網路斷線'))
 
@@ -103,14 +103,8 @@ await d.keyboard.press('Escape')
 
 await d.click('text=人力排程')
 await d.waitForTimeout(2500)
-await d.evaluate(() => { const p = document.querySelector('details.plan-panel'); if (p) p.open = true })   // ⑥ is folded by default (UX declutter)
-await d.waitForTimeout(200)
-const plan = await d.locator('.plan-panel').innerText()
-check('step plan has no JSON / key=value dumps', !/[{}]|=\S/.test(plan), plan.match(/.*[{}=].*/)?.[0] ?? '')
-check('step plan shows Chinese tool labels, no snake_case names', !/[a-z]+_[a-z_]+/.test(plan), plan.match(/.*[a-z]+_[a-z_]+.*/)?.[0] ?? '')
-const ids = await d.$$eval('.step-id', (els) => els.map((e) => [e.textContent, e.scrollWidth, e.clientWidth, e.getBoundingClientRect().height]))
-// one line at 16 px × 1.5 = 24 px
-check('step ids fit one line', ids.every(([, , , h]) => h <= 24), JSON.stringify(ids.slice(-3)))
+// #102 took ⑥ 指揮官步驟計畫 off 人力排程 (the steps are on the Agent Nemo page): no step-plan panel to read here
+check('人力排程 has no step-plan panel since #102', (await d.locator('.plan-panel').count()) === 0)
 // 人力排程 keeps the page-6 lead time as one line (Kyle 10-22); the weekly table left the page
 const cap = await d.locator('[data-testid=sched-benefit]').innerText()
 check('⑨ shows the page-6 lead time', cap.includes('13.3 → 9.3'), cap.replace(/\n/g, ' | ').slice(0, 200))
