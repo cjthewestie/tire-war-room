@@ -96,12 +96,12 @@ await p.fill('[data-testid="order-search"]', 'A-311')
 check('search filters', await p.locator('[data-testid="order-list"] .ot-row').count() === 1 && await p.locator('[data-testid="order-card"]').count() === 1)
 await p.fill('[data-testid="order-search"]', '')
 
-// 3. 人力排程
+// 3. 人力排程 (Kyle 10-22 draft: the answer on top, today's shifts, the next de-molds / mold-ins in words; 硫化機排程 is on 產線監控)
 await p.click('.tabs button:has-text("人力排程")')
-await p.waitForSelector('.sched-help')
-const help = await p.locator('.sched-help').innerText()
-check('schedule explains order ids and the bottleneck', help.includes('訂單編號') && help.includes('瓶頸') && help.includes('11 台硫化機'))
-check('schedule lists next mold-ins in words', await p.locator('.sched-next tbody tr').count() >= 1)
+await p.waitForSelector('[data-testid=sched-answer]')
+check('schedule answers in one sentence on top', (await p.locator('[data-testid=sched-answer] h1').count()) === 1)
+check('schedule draws today\'s shifts', (await p.locator('[data-testid=sched-people] svg').count()) === 1)
+check('schedule lists the next de-molds / mold-ins in words', await p.locator('[data-testid=sched-next] li').count() >= 1)
 
 // 4. home: dialogue only + link
 await p.click('[data-testid="tab-agent"]')

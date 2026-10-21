@@ -1,76 +1,99 @@
-/* 人力排程 only (.sp), after HY's simpler 主控台 (2026-10-21): bigger titles, one quiet help line, numbers first,
-   calm shift rows where only a short shift is coloured. Kept out of index.css so it never collides with the 主控台 work. */
+/* 人力排程 only (.sp): the draft Kyle approved on 10-22 (.design/drafts/schedule/v2-simple.html). The answer on top,
+   plain sections under it, few colours (green = enough people, red = short or a de-mold, amber = night), generous
+   spacing. Theme tokens only, so the dark theme follows. Kept out of index.css so it never collides with other pages. */
 .sp { gap: 16px; }
 .sp .panel { padding: 20px 22px; }
-.sp .panel-h { margin-bottom: 14px; }
-.sp .panel-h h2 { font-size: 18px; font-weight: 700; color: var(--ink); letter-spacing: 0; }
-.sp .panel.fold:not([open]) > summary { margin-bottom: 0; }
-.sp .sched-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
-.sp .today { margin-bottom: 0; }
-.sp .muted.small, .sp .small { font-size: 13px; }
+.sp .panel-h { margin-bottom: 4px; }
+.sp .panel-h h2 { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: 0; }
+.sp .sched-row { grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.sp-sub { margin: 0 0 14px; color: var(--ink-dim); font-size: 14.5px; line-height: 1.6; }
+.sp-k { font-size: 14px; font-weight: 700; color: var(--ink-dim); }
 
-/* 硫化機排程: version chips and the rollback button at a readable size; the help is one line until opened */
-.sp .ver { font-size: 14px; padding: 4px 10px; border-radius: 999px; }
-.sp .ver small { font-size: 12.5px; }
-.sp .versions .btn-ghost { font-size: 14px; padding: 5px 12px; border-radius: 999px; }
-.sp .sched-help { background: none; padding: 0; margin: -6px 0 12px; }
-.sp .sched-help summary { font-weight: 500; color: var(--ink-dim); font-size: 14px; }
-.sp .sched-help[open] { background: var(--panel-2); border-radius: 10px; padding: 10px 14px; margin-top: 0; }
-.sp .sched-help ul { line-height: 1.75; }
-.sp .g-tick-t, .sp .g-now-t { font-size: 12px; }
-.sp .g-press { font-size: 13.5px; }
-.sp .legend { font-size: 13.5px; gap: 6px 18px; margin-top: 10px; }
+/* 1. the answer: one sentence, the numbers behind it, the system's fix and where to approve it */
+.sp-answer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 28px; align-items: center; border-left: 6px solid var(--alarm); }
+.sp-answer.ok { border-left-color: var(--accent); grid-template-columns: minmax(0, 1fr); }
+.sp-answer:not(.ok) > div:first-child > .sp-k { color: var(--alarm); }
+.sp-answer h1 { margin: 2px 0 6px; font-size: 30px; line-height: 1.3; font-weight: 700; color: var(--ink); }
+.sp-answer p { margin: 0; font-size: 16px; line-height: 1.65; color: var(--ink-dim); }
+.sp-answer p b { color: var(--ink); }
+.sp-fix { background: var(--panel-2); border-radius: 10px; padding: 12px 16px 14px; min-width: 300px; }
+.sp-fix .sp-k { font-weight: 500; }
+.sp-fix b { display: block; font-size: 20px; line-height: 1.4; margin: 2px 0 10px; color: var(--ink); }
+.sp-go { display: inline-block; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 15px; padding: 8px 16px; border-radius: 8px; text-decoration: none; }
+.sp-go:hover { filter: brightness(1.08); }
+.sp-go:focus-visible, .sp-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* 今天的人力: three numbers, then the shift rows */
-.sp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-.sp-stats > div { background: var(--panel-2); border-radius: 10px; padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; min-width: 0; }
-.sp-k { flex-basis: 100%; font-size: 13.5px; color: var(--ink-dim); }
-.sp-stats b { font-size: 30px; line-height: 1.15; font-variant-numeric: tabular-nums; }
-.sp-stats small { font-size: 14px; color: var(--ink-dim); }
-.sp-stats em { flex-basis: 100%; font-style: normal; font-size: 13.5px; color: var(--ink-dim); margin-top: 2px; }
-.sp-stats .is-short { background: var(--alarm-soft); }
-.sp-stats .is-short b, .sp-stats .is-short em { color: var(--alarm); }
-.sp-stats .is-short em { font-weight: 700; }
-.sp-risks { border-left: 3px solid var(--warn); padding: 2px 0 2px 12px; margin: 0 0 16px; }
-.sp-risks ul { margin: 2px 0 0; padding-left: 1.1em; font-size: 14.5px; line-height: 1.7; }
-.sp .shift-load { font-size: 14.5px; }
-.sp .sl-row { grid-template-columns: 116px 52px 104px minmax(0, 1fr); column-gap: 12px; min-height: 36px; }
-.sp .sl-head { font-size: 13px; min-height: 28px; }
-.sp .sl-time { font-size: 13.5px; }
-.sp .sl-time small { display: none; }
-.sp .sl-bar { height: 6px; border-radius: 3px; }
-.sp .sl-fill { background: rgb(var(--accent-rgb, 118 185 0) / .45); }
-.sp .sl-short { background: var(--alarm); }
-.sp .sl-row.is-short { background: var(--alarm-soft); border-radius: 6px; }
-.sp .sl-row.is-short .sl-team, .sp .sl-row.is-short .sl-n { color: var(--alarm); }
-.sp .sl-n em { font-style: normal; margin-left: 6px; }
+/* 2. 今天誰上班: the time chart (PeopleChart) */
+.sp-chart { min-width: 0; }
+.sp-chart svg { display: block; overflow: visible; }
+.pc-tk { stroke: var(--border); }
+.pc-tkt { fill: var(--ink-dim); font-size: 12.5px; }
+.pc-team { fill: var(--ink); font-size: 14px; font-weight: 700; }
+.narrow .pc-team { font-size: 12.5px; }
+.pc-team.alert { fill: var(--alarm); }
+.pc-off { fill: var(--panel-2); }
+.pc-on { fill: rgb(var(--accent-rgb, 118 185 0) / .38); stroke: var(--panel); stroke-width: 2; }
+.pc-short { fill: var(--alarm); stroke: var(--panel); stroke-width: 2; }
+.pc-bt { fill: var(--ink); font-size: 13px; font-weight: 700; pointer-events: none; }
+.narrow .pc-bt { font-size: 12.5px; }
+.pc-bt.on-short { fill: var(--panel); }
+.pc-dm { stroke: var(--alarm); stroke-width: 3; }
+.pc-mi { stroke: var(--ink); stroke-width: 2; }
+.pc-now { stroke: var(--accent); stroke-width: 2; }
+.pc-nowt { fill: var(--accent); font-size: 12.5px; font-weight: 700; }
+.sp-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; color: var(--ink-dim); font-size: 14px; }
+.sp-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.sp-legend i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }
+.sp-legend .lg-on { background: rgb(var(--accent-rgb, 118 185 0) / .38); }
+.sp-legend .lg-short { background: var(--alarm); }
+.sp-legend .lg-dm { width: 3px; height: 14px; background: var(--alarm); }
+.sp-legend .lg-mi { width: 2px; height: 14px; background: var(--ink); }
 
-/* 接下來入模 (its own panel now, so no gap above it) */
-.sp .sched-next { margin-top: 0; }
-.sp .sched-next table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-.sp .sched-next th { font-size: 13px; color: var(--ink-dim); font-weight: 500; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
-.sp .sched-next td { padding: 9px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.sp .sched-next tr:last-child td { border-bottom: 0; }
+/* 3. 接下來要有人在場 */
+.sp-next { list-style: none; margin: 0; padding: 0; }
+.sp-next li { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 15.5px; font-variant-numeric: tabular-nums; }
+.sp-next li:last-child { border-bottom: 0; }
+.sp-next .t { flex: none; min-width: 3.2em; font-size: 17px; }
+.sp-next .t small { font-size: 13px; font-weight: 500; color: var(--ink-dim); margin-right: 4px; }
+.sp-next .what { min-width: 0; }
+.sp-kind { flex: none; font-size: 13px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+.sp-kind.dm { background: var(--alarm-soft); color: var(--alarm); }
+.sp-kind.mi { background: var(--panel-2); color: var(--ink); }
+.sp-next em { flex: none; margin-left: auto; font-style: normal; font-size: 13px; color: var(--warn); background: var(--warn-soft); padding: 1px 8px; border-radius: 999px; }
 
-/* 交期縮短: the two lead-time numbers lead, the weekly table follows, the conditions fold away */
-.sp .cap { gap: 16px 40px; align-items: flex-start; }
-.sp .cap-big { gap: 32px; }
-.sp .cap-big b { font-size: 30px; font-variant-numeric: tabular-nums; }
-.sp .cap caption { text-align: left; padding-bottom: 4px; }
-.sp .cap-why { margin-top: 12px; }
-.sp .cap-why summary { cursor: pointer; color: var(--ink-dim); font-size: 14px; }
-.sp .cap-why p { margin: 6px 0 0; line-height: 1.7; }
+/* 4. the schedule in force, one sentence; 5. the benefit, one line */
+.sp .sp-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; padding: 14px 22px; }
+.sp-line > p { margin: 0; font-size: 16px; }
+.sp-line > p b { font-weight: 700; }
+.sp-line[data-testid="sched-version"] > p b { color: var(--accent); margin: 0 2px; }
+.sp-line[data-testid="sched-benefit"] > p b { font-size: 22px; margin-left: 4px; white-space: nowrap; }
+.sp-line .btn-ghost { font-size: 14px; padding: 5px 12px; border-radius: 999px; }
+.sp-dim { color: var(--ink-dim); font-size: 14px; margin-right: 14px; }
+.sp-link { color: var(--warn); font-weight: 700; text-decoration: none; margin-left: 6px; white-space: nowrap; }
+.sp-link:hover { text-decoration: underline; }
+.sp-link.quiet { margin-left: auto; color: var(--ink-dim); font-weight: 500; font-size: 14px; }
+.sp-msg { flex-basis: 100%; margin: 0; }
+.sp-why { margin-left: auto; }
+.sp-why summary { cursor: pointer; color: var(--ink-dim); font-size: 14px; }
+.sp-why[open] { flex-basis: 100%; margin-left: 0; }
+.sp-why p { margin: 6px 0 0; color: var(--ink-dim); font-size: 14px; line-height: 1.7; }
 
-@media (max-width: 900px) {
-  .sp .sched-row { grid-template-columns: 1fr; }
-  .sp .sched-next { overflow-x: auto; }
+@media (max-width: 899px) {
+  .sp .sched-row { grid-template-columns: minmax(0, 1fr); }
 }
-@media (max-width: 560px) {
+@media (max-width: 760px) {
+  .sp-answer { grid-template-columns: minmax(0, 1fr); }
+  .sp-fix { min-width: 0; }
+}
+@media (max-width: 599px) {
   .sp .panel { padding: 16px; }
-  .sp-stats { gap: 8px; }
-  .sp-stats > div { padding: 10px; }
-  .sp-stats b { font-size: 24px; }
-  .sp .sl-row { grid-template-columns: 92px 40px minmax(0, 1fr); }
-  .sp .sl-row > .sl-time { display: none; }
-  .sp .sl-head > span:nth-child(3) { display: none; }
+  .sp .sp-line { padding: 14px 16px; }
+  .sp-answer { border-left-width: 5px; }
+  .sp-answer h1 { font-size: 24px; }
+  .sp-answer p { font-size: 15px; }
+  /* time, kind and the night tag on one line, the press and order under them */
+  .sp-next li { display: grid; grid-template-columns: auto auto minmax(0, 1fr); align-items: center; gap: 2px 10px; font-size: 15px; }
+  .sp-next .what { grid-row: 2; grid-column: 1 / -1; }
+  .sp-next em { grid-column: 3; justify-self: end; }
+  .sp-link.quiet, .sp-why { margin-left: 0; }
 }
