@@ -10,7 +10,7 @@ Compare any file: `git fetch --tags && git diff keep/pr105-ours origin/main -- w
 
 | PR | winner | what was lost |
 |---|---|---|
-| #112 (Lufi) | Lufi | main's 討論 scroll-input-into-view fix (ChatBar); the 「核准後才執行；要改，按「討論」」 hint (Lufi's deadline + 「核准後 Agent Nemo 派人執行並回報」 text instead); simplified subagent tag in the approval list. Chat-agent labels renamed to Agent Nemo. |
+| #112 (Lufi) | Lufi | main's 討論 scroll-input-into-view fix (ChatBar; restored later by #153); the 「核准後才執行；要改，按「討論」」 hint (Lufi's deadline + 「核准後 Agent Nemo 派人執行並回報」 text instead); simplified subagent tag in the approval list. Chat-agent labels renamed to Agent Nemo. |
 | #105 (ours) | main | `Runtime._awaits_decision` early return for ended (SAFE_STOP) events, so 交給現場處理 tasks may wait; #105's PlanFlow 計劃板 block in PlanArea; old 覆核 ReviewCard on the phone. Safety endpoints, phone safety/stop cards and alerts kept. |
 | #111 (ours) | main | 「系統健康」 tab label (main's 「狀態」); 稽核紀錄 / 系統參數 tabs kept. |
 | #107 (ours) | main | demo speed buttons incl. 40× (main removed the speed row in #100); our approval-list row layout. return-to-service endpoint and 預檢 hint kept. |
