@@ -51,6 +51,9 @@ const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: str
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
 }
 
+/** The HUD's 已暫停 chip, in the amber tone of the link chip (.f3-conn.t-warn). */
+const PAUSED_CHIP = { padding: '0 9px', borderRadius: 999, background: '#fbecd0', color: 'var(--c-amber)', fontSize: 13, fontWeight: 700 } as const
+
 let audio: AudioContext | null = null
 function unlockAudio() {
   try {
@@ -216,7 +219,9 @@ export function FactoryApp() {
       if (demo) {
         if (!transport || e.repeat) return
         const { c, label } = demo(paused)
-        transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
+        // 1 / 5 while paused used to load the scenario and stay paused (the plant looked frozen): loading also plays
+        const sent = c.action === 'scenario' ? transport.control(c).then(() => transport.control({ action: 'play' })) : transport.control(c)
+        sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
       if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
@@ -319,6 +324,8 @@ export function FactoryApp() {
               <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
             </span>
           )}
+          {/* paused (0, or the dashboard's ❚❚ 暫停): without this the plant just looks frozen */}
+          {paused && <span style={PAUSED_CHIP} role="status" data-testid="f3-paused">❚❚ 已暫停{TOUCH_DEVICE ? '' : '・按 0'}</span>}
           {/* the header's link chip wording (linkStatus.ts); .live = connected to the backend (e2e waits on it) */}
           <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>

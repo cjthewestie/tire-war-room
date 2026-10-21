@@ -35,13 +35,18 @@ export function DemoStrip() {
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
   const current = scenario ?? (mock ? guessScenario(state.snapshot?.events.map((e) => e.machine_id) ?? []) : (state.clock?.scenario as ScenarioName | undefined) ?? null)
   const setNet = (n: HeaderStatus['network']) => run(() => transport.setNetwork(n))
+  // a scenario picked while paused used to load and stay paused (the plant looked frozen): loading it also plays
+  const loadAndPlay = async (name: ScenarioName, speed: number) => {
+    await transport.control({ action: 'scenario', scenario: name, speed, preroll: true })
+    await transport.control({ action: 'play' })
+  }
   return (
     <div className="demo" aria-label="展示控制">
       <span className="demo-k">展示</span>
       <div className="seg" role="group" aria-label="情境（注入故障）">
         {SCENARIOS.filter((s) => !DEMO_MODE || DEMO_SCENARIOS.includes(s.name)).map((s) => (
           <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''}
-            onClick={() => { setScenario(s.name); setLoading(s.label); run(() => transport.control({ action: 'scenario', scenario: s.name, speed: s.speed, preroll: true })).finally(() => setLoading(null)) }}>{s.label}</button>
+            onClick={() => { setScenario(s.name); setLoading(s.label); run(() => loadAndPlay(s.name, s.speed)).finally(() => setLoading(null)) }}>{s.label}</button>
         ))}
       </div>
       {loading && <span className="demo-loading" role="status" data-testid="demo-loading">載入情境…（{loading}）</span>}
