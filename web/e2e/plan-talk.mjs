@@ -69,7 +69,7 @@ try {
     const chips = await tr.locator('[data-testid=constraint-chips]').last().innerText().catch(() => '')
     check('transcript shows the constraint chip 「9 號機 今晚不可用」', chips.includes('9 號機 今晚不可用'), chips.replace(/\n/g, ' ').slice(0, 80))
     check('transcript shows a replan row', (await tr.locator('[data-kind=state][data-to=replan]').count()) >= 1)
-    check('the subagent posted a plain summary for v2 (Agent page)', (await tr.locator('[data-testid=chat-summary]', { hasText: '我建議' }).count()) >= 2)
+    check('the subagent posted a plain summary for v2 (Agent page)', (await tr.locator('[data-testid=chat-summary]', { hasText: '請核准：' }).count()) >= 2)
     const ver = await tr.locator('[data-testid=card-version]').last().innerText().catch(() => '')
     check('transcript shows card v1 → v2 with what changed', ver.includes('v1 → v2') && /#A-311：9 號 →/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
   }

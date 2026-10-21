@@ -2289,30 +2289,27 @@ class StateMachine:
         return out
 
     def _post_summary(self, run: _Run, req: ApprovalRequest) -> None:
-        """「我建議…因為…你可以說…」: built by code from the card (every number is a tool result)."""
+        """One line for the supervisor, built by code from the card (every number is a tool result):
+        「<事件編碼>｜請核准：<要做的事>；人力：<建議方案>。」 Kyle 10-21: 寫給主管的就是最簡單、最白話，告訴他怎麼做，
+        不要贅詞（最多附上事件編碼）—— the old 「我建議…因為…你可以說…」 read the same on every card."""
         ev = run.ev
-        acts = [re.sub(r"^S\d+[a-z]? ", "", a) for a in req.actions if not a.startswith("人力：依所選")]
+        acts: list[str] = []
+        for a in req.actions:
+            a = re.sub(r"^S\d+[a-z]? ", "", a)
+            if a.startswith("人力："):
+                continue                                  # the staffing choice is said once, below
+            a = re.sub(r"（公式[^）]*）", "", a)            # 「41.1 h（公式 41.1 h）」: the same number twice
+            a = re.sub(r"^排程 v(\d+) 生效", r"排程第 \1 版", a)
+            m = re.match(r"^(.+?) → (.+?)［.+?］：", a)    # 「通知維修 → 維修組［3 號機］：<message>」
+            acts.append(f"{m.group(1)}（{m.group(2)}）" if m else a)
+        # 「10 號機硫化總時數 41.1 h」 when the schedule line already says 「10 號硫化 41.1 h」
+        acts = [a for a in acts if not ((m := re.match(r"^(\d+) 號機硫化總時數 ([\d.]+ h)$", a))
+                                        and any(f"{m.group(1)} 號硫化 {m.group(2)}" in x for x in acts if x is not a))]
         rec = next((o for o in req.options if o.recommended), None)
         if rec is not None and len(req.options) > 1:
-            acts.append(f"人力選 {rec.id} {rec.label}")
-        say: list[str] = []
-        presses: list[str] = []
-        for _, d in self._solve_steps(run):
-            for m in d.get("moves") or []:
-                p = str(m.get("to_press") or "")
-                if p and p != m.get("from_press") and p not in presses and p != ev.machine_id:
-                    presses.append(p)
-        if presses:
-            say.append(f"「{machine_label(presses[0], short=True)}機今晚要保養」")
-        kinds = {o.args.get("kind") for o in req.options}
-        if NotifyKind.OVERTIME.value in kinds:
-            say.append("「不要加班」")
-        if NotifyKind.STAFF_MOVE.value in kinds:
-            say.append("「不要跨組調人」")
-        why = req.reason + (f"；交期{req.delivery_impact}" if req.delivery_impact and self._solve_steps(run) else "")
-        text = (f"{'（v' + str(req.version) + '）' if req.version > 1 else ''}我建議：{'；'.join(acts) or req.title}。"
-                f"因為：{why}。" + (f"你可以說：{'、'.join(say)}，或直接核准／駁回。" if say
-                                   else "有問題可以直接問我，或核准／駁回。"))
+            acts.append(f"人力：{rec.id} {rec.label}")
+        text = (f"{ev.id}{'（v' + str(req.version) + '）' if req.version > 1 else ''}｜"
+                f"請核准：{'；'.join(dict.fromkeys(acts)) or req.title}。")
         self.audit.append(AuditKind.SYSTEM, "agent", {"plan_summary": text, "approval_id": req.id,
                                                       "version": req.version}, event_id=ev.id)
         self._note(ev, "指揮官", text, "decision")
