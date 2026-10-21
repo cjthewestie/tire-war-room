@@ -183,11 +183,11 @@ def final_facts(ev: Event, sim: Any = None) -> dict[str, Any]:
 
 
 def result_line(ff: dict[str, Any]) -> str:
-    """「結果：A 線大開煉機 膠溫回到 100°C（維修完成 14:32、恢復正常 14:33）」"""
-    when = "、".join(x for x in (f"維修完成 {ff['維修完成']}" if ff.get("維修完成") else "",
-                                 f"恢復正常 {ff['恢復正常']}" if ff.get("恢復正常") else "") if x)
+    """「結果：A 線大開煉機膠溫回到 100°C（14:32 維修完成、14:33 恢復正常）」 (the time first, like every 維修完成 line)"""
+    when = "、".join(x for x in (f"{ff['維修完成']} 維修完成" if ff.get("維修完成") else "",
+                                 f"{ff['恢復正常']} 恢復正常" if ff.get("恢復正常") else "") if x)
     if ff.get("值"):
-        return f"結果：{ff['機台']} {ff['讀值']}回到 {ff['值']}" + (f"（{when}）" if when else "")
+        return f"結果：{ff['機台']}{ff['讀值']}回到 {ff['值']}" + (f"（{when}）" if when else "")
     out = re.sub(r"^(已修復|安全中止)[：:]\s*", "", str(ff.get("結果") or "事件結案"))
     return f"結果：{out}" + (f"（{when}）" if when and ff.get("維修完成") else "")
 

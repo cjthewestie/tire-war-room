@@ -129,7 +129,7 @@ async def test_model_json_is_the_draft_and_the_request_matches_the_commander():
     lines = text.split("\n")
     assert lines[0] == "【異常報告】A 線大開煉機膠溫過高" and lines[1].startswith("摘要：膠溫 102°C") and lines[2].startswith("原因：")
     assert lines[3] == "處置：自動通知維修組檢修冷卻水路；主管核准方案 A：放慢生料投入；派工：陳志明檢修、S05 放慢投料"
-    assert lines[4] == "結果：A 線大開煉機 膠溫回到 100°C（維修完成 14:32、恢復正常 14:33）" and len(lines) <= 6
+    assert lines[4] == "結果：A 線大開煉機膠溫回到 100°C（14:32 維修完成、14:33 恢復正常）" and len(lines) <= 6
 
 
 async def test_invalid_json_falls_back_to_the_rules_draft():
@@ -203,14 +203,14 @@ def test_result_line_is_written_by_code():
     ev.repaired_at = T0 + timedelta(minutes=11, seconds=5)
     ev.closed_at = T0 + timedelta(minutes=12)
     ev.outcome = "已修復：A 線大開煉機 膠溫回到 100°C（維修完成 14:31）"
-    assert result_line(final_facts(ev)) == "結果：A 線大開煉機 膠溫回到 100°C（維修完成 14:31、恢復正常 14:32）"
+    assert result_line(final_facts(ev)) == "結果：A 線大開煉機膠溫回到 100°C（14:31 維修完成、14:32 恢復正常）"
 
     class WithRecovery(Event):                                # the recovery ramp's Event.recovered_at (other branch)
         recovered_at: datetime | None = None
     ev2 = _event(EventState.CLOSED, WithRecovery)
     ev2.repaired_at, ev2.closed_at = ev.repaired_at, T0 + timedelta(minutes=14)
     ev2.recovered_at, ev2.outcome = T0 + timedelta(minutes=13, seconds=10), ev.outcome
-    assert result_line(final_facts(ev2)).endswith("（維修完成 14:31、恢復正常 14:34）")
+    assert result_line(final_facts(ev2)).endswith("（14:31 維修完成、14:34 恢復正常）")
     ev3 = _event(EventState.CLOSED)
     ev3.closed_at, ev3.outcome = T0 + timedelta(minutes=20), "H1 冷卻能力不足（水流偏低）：通知維修"
     assert result_line(final_facts(ev3)) == "結果：H1 冷卻能力不足（水流偏低）：通知維修"
@@ -284,7 +284,7 @@ async def test_approval_starts_the_draft_and_close_delivers_the_report():
     await asyncio.sleep(0)
     rep = ev.ai_report
     assert rep is not None and rep.by == "rules" and rep.late_ms is None and rep.drafted_ms is not None
-    assert rep.text.splitlines()[-1] == "結果：A 線大開煉機 膠溫回到 100°C（維修完成 14:21、恢復正常 14:21）"
+    assert rep.text.splitlines()[-1] == "結果：A 線大開煉機膠溫回到 100°C（14:21 維修完成、14:21 恢復正常）"
     assert rep.summary and rep.summary in rep.text
     ma = [r for r in audit.rows if r.actor == "main_agent" and r.event_id == ev.id]
     kinds = [r.payload.get("orch") for r in ma]
@@ -348,7 +348,7 @@ async def test_the_recovery_ramp_holds_the_report_until_recovered_at():
         if ev.ai_report is not None:
             break
         await asyncio.sleep(0.05)
-    assert ev.ai_report is not None and ev.ai_report.text.endswith("（維修完成 14:21、恢復正常 14:21）")
+    assert ev.ai_report is not None and ev.ai_report.text.endswith("（14:21 維修完成、14:21 恢復正常）")
     assert ev.ai_report.late_ms is None                      # the draft was ready: waiting for the ramp is not 「晚」
 
 
@@ -398,7 +398,7 @@ async def test_open_mill_overheat_report_lands_with_the_close(tmp_path):
             assert rep is not None and rep.by == "rules" and lag < 0.5, lag     # with the close, no extra wait
             lines = rep.text.splitlines()
             assert lines[0] == "【異常報告】A 線大開煉機 溫度過高" and len(lines) == 5
-            assert lines[-1].startswith("結果：A 線大開煉機 膠溫回到 100°C（維修完成 ") and "、恢復正常 " in lines[-1]
+            assert lines[-1].startswith("結果：A 線大開煉機膠溫回到 100°C（") and lines[-1].endswith(" 恢復正常）")
             assert "派工：檢修 " in rep.text
             facts = rt.orch.reports.jobs[ev.id].facts                         # what the model would have been given
             assert facts["主管核准"]["方案"].startswith("A ") and facts["派工"] and facts["已執行"]

@@ -201,9 +201,9 @@ def status_is_error(data: dict[str, Any]) -> bool:
     return str(data.get("status") or "") not in ("feasible", "optimal")
 
 
-def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
-    """Press moves grouped by order and target press, one phrase per order (page 11: '#A-311 改 9 號';
-    many molds of one order: '#M-201 ×2 → 8 號、×3 → 9 號'). Same-press time shifts are left out."""
+def _group_moves(moves: list[dict[str, Any]] | None) -> tuple[dict[str, dict[str, int]], dict[str, dict[str, int]]]:
+    """(inserted, moved): per order, tyres per target press. Inserted = an order's first slots (issue #17: no previous
+    slot), moved = a tyre that changes press. Same-press time shifts are left out."""
     per_order: dict[str, dict[str, int]] = {}
     new_order: dict[str, dict[str, int]] = {}
     for mv in moves or []:
@@ -216,19 +216,48 @@ def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
             continue
         tgt = per_order.setdefault(str(mv.get("order_id")), {})
         tgt[str(to)] = tgt.get(str(to), 0) + 1
-    out: list[str] = []
+    return new_order, per_order
 
-    def where(p: str) -> str:
-        n = press_no(p)
-        return f"{n} 號" if n else machine_label(p)
+
+def _where(p: str) -> str:
+    n = press_no(p)
+    return f"{n} 號" if n else machine_label(p)
+
+
+def moves_text(moves: list[dict[str, Any]] | None) -> list[str]:
+    """Press moves grouped by order and target press, one phrase per order (page 11: '#A-311 改 9 號';
+    many molds of one order: '#M-201 ×2 → 8 號、×3 → 9 號'). Same-press time shifts are left out."""
+    new_order, per_order = _group_moves(moves)
+    out: list[str] = []
     for oid, targets in new_order.items():
-        out.append(f"{oid} 排入 " + "、".join(f"{where(p)}" + (f" ×{n}" if n > 1 else "") for p, n in targets.items()))
+        out.append(f"{oid} 排入 " + "、".join(f"{_where(p)}" + (f" ×{n}" if n > 1 else "") for p, n in targets.items()))
     for oid, targets in per_order.items():
         if len(targets) == 1 and next(iter(targets.values())) == 1:
-            out.append(f"{oid} 改 {where(next(iter(targets)))}")
+            out.append(f"{oid} 改 {_where(next(iter(targets)))}")
         else:
-            out.append(f"{oid} " + "、".join(f"×{n} → {where(p)}" for p, n in targets.items()))
+            out.append(f"{oid} " + "、".join(f"×{n} → {_where(p)}" for p, n in targets.items()))
     return out
+
+
+def press_change_text(moves: list[dict[str, Any]] | None) -> str:
+    """The press changes of a schedule in one short phrase for an approval option (StateMachine._option_label), from
+    the moves themselves: '不換機台'; '#A-311 改 9 號' (one order changes press); '3 張訂單換機台'. An inserted order's
+    first slots change no press: '#R-009 新排 2 模（8 號），其他訂單不換機台' / '2 張新訂單排入，…'."""
+    new_order, per_order = _group_moves(moves)
+    bits: list[str] = []
+    if len(new_order) == 1:
+        oid, targets = next(iter(new_order.items()))
+        bits.append(f"{oid} 新排 {sum(targets.values())} 模（{'、'.join(_where(p) for p in targets)}）")
+    elif new_order:
+        bits.append(f"{len(new_order)} 張新訂單排入")
+    if len(per_order) == 1:
+        oid, targets = next(iter(per_order.items()))
+        bits.append(f"{oid} 改 {'、'.join(_where(p) for p in targets)}")
+    elif per_order:
+        bits.append(f"{len(per_order)} 張訂單換機台")
+    else:
+        bits.append("其他訂單不換機台" if new_order else "不換機台")
+    return "，".join(bits)
 
 
 def order_shifts(moves: list[dict[str, Any]] | None, jobs: list[dict[str, Any]] | None = None) -> list[str]:

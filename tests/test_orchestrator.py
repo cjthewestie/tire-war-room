@@ -150,6 +150,32 @@ async def test_page11_unchanged_under_the_main_agent(tmp_path):
     assert sub["status"] == "done" and sub["round"] == 2 and sub["tools_called"] >= 4
 
 
+def test_dispatch_and_report_lines_name_the_machine_once_and_never_cut_a_number():
+    """Agent Nemo 頁的處理歷程 (10-22 稽核): 「10 號機・10 號 128 → 122°C，預測穩定在 1：開始處理」 cut the forecast inside a
+    number, 「B 線開煉機・B 線開煉機 膠溫 96°C 持續上升（+4.5：」 named the mill twice, and the fast-repair report read
+    「3 號機已修復：已修復：3 號機 溫度回到 128°C…」."""
+    from datetime import timedelta
+
+    from warroom.agent.orchestrator import SubAgent, _clip
+    from warroom.contracts import Event
+    a = page11_anomaly()
+    ev = Event(id="EV-1", opened_at=a.ts, machine_id="CURE-10", state=EventState.DETECTED, source="detector",
+               anomaly=a.model_copy(update={"machine_id": "CURE-10", "message": "10 號 128 → 122°C，預測穩定在 122±1°C"}))
+    assert Orchestrator._what(ev) == "10 號機・128 → 122°C"
+    mill = ev.model_copy(update={"machine_id": "B-OPEN", "anomaly": a.model_copy(update={
+        "machine_id": "B-OPEN", "message": "B 線開煉機 膠溫 96°C 持續上升（+4.5°C/分），冷卻水流 40 → 22 L/min"})})
+    assert Orchestrator._what(mill) == "B 線開煉機・膠溫 96°C 持續上升"
+    assert _clip("溫度降到 122.4°C 持續下降中", 8) == "溫度降到…"                # never 「溫度降到 122.」
+    assert _clip("溫度降到 122°C", 30) == "溫度降到 122°C"
+    o = Orchestrator(SimpleNamespace(), None)
+    done = ev.model_copy(update={"machine_id": "CURE-03", "state": EventState.CLOSED,
+                                 "closed_at": a.ts + timedelta(minutes=10),
+                                 "outcome": "已修復：3 號機 溫度回到 128°C（維修完成 02:23、恢復 02:24）"})
+    text, facts = o.summary(done, SubAgent(done.id, "machine", 1, "code", "", a.ts.isoformat()))
+    assert text.startswith("3 號機已修復：溫度回到 128°C（維修完成 02:23、恢復 02:24）（02:24 結案）"), text
+    assert facts["outcome"] == done.outcome                                        # the event's own outcome is kept
+
+
 # ---------------------------------------------------------------- interrupt
 class _Board:
     def __init__(self):

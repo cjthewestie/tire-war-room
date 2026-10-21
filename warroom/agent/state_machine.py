@@ -64,6 +64,7 @@ from warroom.agent.narrate import (
     fmt_num,
     machine_label,
     moves_text,
+    press_change_text,
     result_text,
     staffing_label,
     gate_reason_text,
@@ -539,7 +540,7 @@ class StateMachine:
         self.audit.append(AuditKind.STATE_TRANSITION, "state_machine",
                           {"from": None, "to": EventState.DETECTED.value, "reason": "plant event"}, event_id=eid)
         self.audit.append(AuditKind.SYSTEM, "plant", {"plant_input": pin.model_dump(mode="json")}, event_id=eid)
-        self._note(ev, "事件偵測", f"[工具] {pin.text} → 喚醒指揮官", "tool", ts=now)
+        self._note(ev, "事件偵測", f"[工具] {pin.text} → 交給 Agent Nemo", "tool", ts=now)
         title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
         self._set_alert(ev, AlertCard(title=title, summary=pin.text[:60]), source="detector")
         return ev
@@ -677,7 +678,7 @@ class StateMachine:
                        (f"；今日排 {today['mold_ins']} 模入模" if today.get("mold_ins") is not None else ""))
         leave = d.get("leave")
         if leave is not None:
-            names = "、".join(f"{x.get('name')}（{x.get('group') or x.get('team_label')}：{x.get('note') or '請假'}）"
+            names = "、".join(f"{x.get('name')}（{x.get('team_label') or x.get('group')}：{x.get('note') or '請假'}）"
                              for x in leave)
             out.append(f"出勤：在廠 {today.get('on_duty', '?')} 人；請假 {len(leave)} 人" + (f"：{names}" if names else ""))
         mats = [m for m in d.get("materials") or [] if m.get("status") != "ok"]
@@ -897,7 +898,7 @@ class StateMachine:
         self.audit.append(AuditKind.ANOMALY, "detector", a.model_dump(mode="json"), event_id=eid)
         self.audit.append(AuditKind.STATE_TRANSITION, "state_machine",
                           {"from": None, "to": EventState.DETECTED.value, "reason": "detector wake-up"}, event_id=eid)
-        self._note(ev, "事件偵測", f"[工具] {a.message} → 喚醒指揮官", "tool", ts=a.ts)
+        self._note(ev, "事件偵測", f"[工具] {a.message} → 交給 Agent Nemo", "tool", ts=a.ts)
         # Instant card from detector data (no LLM) so the screen shows something at once; the
         # commander's card replaces it as soon as it streams in.
         self._set_alert(ev, AlertCard(title=f"{machine_label(a.machine_id)}異常", summary=a.message),
@@ -2197,9 +2198,8 @@ class StateMachine:
         if not opts:
             # built in code from the validated args, never the commander's own wording (purpose)
             first = needs[0].step
-            label = self._action_text(run, first, True) if len(needs) == 1 else \
-                "核准全部：" + "；".join(self._action_text(run, sr.step, True) for sr in needs)
-            opts.append(ApprovalOption(id="A", label=label, tool=first.tool, args=first.args, recommended=True))
+            opts.append(ApprovalOption(id="A", label=self._option_label(run, needs), tool=first.tool, args=first.args,
+                                       recommended=True))
         if opts and not any(o.recommended for o in opts):
             opts[0] = opts[0].model_copy(update={"recommended": True})
         pref = [c for c in run.ev.constraints if c.kind == "prefer_option"]
@@ -2210,6 +2210,31 @@ class StateMachine:
             if hit is not None:      # the supervisor's preference becomes the recommended option (code, not model)
                 opts = [o.model_copy(update={"recommended": o.id == hit.id}) for o in opts]
         return opts
+
+    def _option_label(self, run: _Run, needs: list[StepRun]) -> str:
+        """The lone option of a card without a staffing choice, one short line of what approving changes (Kyle 10-21:
+        寫給主管的就是最簡單、最白話): 「第 3 版排程生效，10 號機這一模硫化 41.1 小時，不換機台」. No formula reference
+        and nothing said twice (the cure time the schedule carries is the one set on the press); every write with its
+        key args stays in the card's actions (核准內容)."""
+        bits: list[str] = []
+        for sr in needs:
+            a = sr.step.args
+            if sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+                v = a.get("schedule_version")
+                bits.append(f"第 {v} 版排程生效")
+                for sstep, data in self._solve_steps(run):
+                    if data.get("schedule_version") != v:
+                        continue
+                    for p, h in (sstep.args.get("cure_overrides_h") or {}).items():
+                        bits.append(f"{machine_label(str(p))}這一模硫化 {fmt_num(h)} 小時")
+                    for p in sstep.args.get("unavailable_presses") or []:
+                        bits.append(f"{machine_label(str(p))}停用")
+                    bits.append(press_change_text(data.get("moves")))
+            elif sr.step.tool is ToolName.SET_CURE_TIME:
+                bits.append(f"{machine_label(str(a.get('press_id')))}這一模硫化 {fmt_num(a.get('total_cure_h'))} 小時")
+            else:
+                bits.append(self._action_text(run, sr.step, True))
+        return "，".join(dict.fromkeys(bits))
 
     # ---- approval-card content: only what THIS event's own results say ----
     def _solve_steps(self, run: _Run) -> list[tuple[PlanStep, dict[str, Any]]]:
@@ -2551,7 +2576,7 @@ class StateMachine:
             if a.startswith("人力："):
                 continue                                  # the staffing choice is said once, below
             a = re.sub(r"（公式[^）]*）", "", a)            # 「41.1 h（公式 41.1 h）」: the same number twice
-            a = re.sub(r"^排程 v(\d+) 生效", r"排程第 \1 版", a)
+            a = re.sub(r"^排程 v(\d+) 生效", r"第 \1 版排程", a)
             m = re.match(r"^(.+?) → (.+?)［.+?］：", a)    # 「通知維修 → 維修組［3 號機］：<message>」
             acts.append(f"{m.group(1)}（{m.group(2)}）" if m else a)
         # 「10 號機硫化總時數 41.1 h」 when the schedule line already says 「10 號硫化 41.1 h」

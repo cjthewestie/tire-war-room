@@ -203,7 +203,7 @@ async def test_stale_reapproval_with_one_option_says_run_the_new_schedule(tmp_pa
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
     v1, v2 = approvals.all()
-    assert v1.options[0].label.startswith("核准全部：")
+    assert v1.options[0].label.startswith("第 2 版排程生效，"), v1.options
     assert [o.label for o in v2.options] == ["照新排程執行"] and v2.version == 2
     assert not any("人力方案" in c for c in v2.changes), v2.changes       # a lone approve-all is no 人力方案
     assert ev.state is EventState.CLOSED

@@ -102,6 +102,22 @@ def test_page11_night_shift_from_team_dataset():
     assert len(sup) == 1 and sup[0].zone == "war_room" and sup[0].source == "generated"
 
 
+def test_dataset_worker_names_use_the_team_names_on_screen():
+    """A dataset worker has only a staff id; the task list, the report's 派工 and the 3D bubble read 「S14（硫化機組）」, not
+    the dataset's 「S14（加硫組）」 (10-22 稽核: one name per team on every screen)."""
+    f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    w = f.world
+    assert w.worker_name("S14") == "S14（硫化機組）" and w.worker_name("S18") == "S18（胎側膠組）"
+    assert w.worker_name("S03") == "S03（胎體／胎面膠組）" and w.worker_name("NOPE") is None
+    named = next(x for x in w._workers if not x.group)                         # a generated worker keeps their name
+    assert w.worker_name(named.id) == named.name
+    people = {x.id: x for x in w.snapshot().people.workers}                    # the staff list and the leave list too
+    assert people["S14"].team_label == "硫化機組" and people["S18"].team_label == "胎側膠組"
+    assert people["S03"].team_label == "胎體／胎面膠組"
+    assert {x["id"]: x["team_label"] for x in w.leave_now()}.get("S11") == "貼合組"
+    assert not [x for x in w.snapshot().people.workers if x.team_label in ("加硫組", "胎邊組", "打膠組", "成形組")]
+
+
 def test_team_dataset_sources_and_dates():
     ds = team_dataset.load()
     assert ds is not None and len(ds.staff) == 20

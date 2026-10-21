@@ -193,6 +193,12 @@ class _Chan:
     recent_raw: deque = field(default_factory=lambda: deque(maxlen=3))
     stale_val: float | None = None
     stale_n: int = 0
+    ramp: tuple[float, float, float] | None = None     # 回溫中 (follow_recovery): (lo, hi, last) since the last reading
+
+
+def _on_ramp(c: _Chan, v: float, tol: float) -> bool:
+    """回溫中: v is on the runtime's recovery ramp (within tol of a value it passed since the last reading)."""
+    return c.ramp is not None and c.ramp[0] - tol <= v <= c.ramp[1] + tol
 
 
 @dataclass
@@ -212,6 +218,7 @@ class _Track:
     normal_since: float | None = None
     recovering: bool = False                 # repaired: on its way back to normal, nothing to report
     recover_since: float | None = None
+    ramp_done: bool = False                  # the recovery ramp ended: the next reading is the last checked on it
 
 
 class StreamDetector:
@@ -280,6 +287,10 @@ class StreamDetector:
             c = tr.chans[ch]
             prev = c.last_valid
             q = check_channel(ch, v, prev[1] if prev else None, (t - prev[0]) if prev else 1.0)
+            if q is DataQuality.JUMP and _on_ramp(c, v, JUMP_PER_S[ch]):
+                # 回溫中: the step follows the repair's ramp (wall seconds; the sim clock may stand still meanwhile),
+                # not a glitch; a step off the ramp still is one
+                q = DataQuality.OK
             if q is DataQuality.JUMP and len(c.recent_raw) == 2:
                 # three consistent samples at the new level = a real change, accept it
                 vals = [x for _, x in c.recent_raw] + [v]
@@ -295,7 +306,14 @@ class StreamDetector:
         d = MACHINE_BY_ID.get(r.machine_id)
         if d is not None and d.kind is MachineKind.CURING_PRESS and per.get(Channel.STEAM) is DataQuality.OK:
             dt = (t - tr.last_t) if tr.last_t is not None else 0.0
-            if tr.expected_temp is not None and 0 < dt <= 5.0:
+            temp = tr.chans[Channel.TEMP]
+            if temp.ramp is not None:
+                # 回溫中: the platen is on the repair's ramp (a few wall seconds), faster than it follows its steam, so the
+                # ramp is the redundant model until it ends; a reading off it (a drifting thermometer) is not trusted
+                if per.get(Channel.TEMP) is DataQuality.OK and not _on_ramp(temp, r.temp_c, REDUNDANT_TOL_C):
+                    per[Channel.TEMP] = DataQuality.NEIGHBOR_MISMATCH
+                expected = r.temp_c if per.get(Channel.TEMP) is DataQuality.OK else temp.ramp[2]
+            elif tr.expected_temp is not None and 0 < dt <= 5.0:
                 expected = approach(tr.expected_temp, implied_press_temp(r.steam_kgf_cm2), dt, THERMAL_TAU_S)
                 if per.get(Channel.TEMP) is DataQuality.OK and abs(r.temp_c - expected) > REDUNDANT_TOL_C:
                     per[Channel.TEMP] = DataQuality.NEIGHBOR_MISMATCH
@@ -345,6 +363,11 @@ class StreamDetector:
                 tr.expected_temp = r.temp_c          # (re)initialise after start or a gap
             elif per.get(Channel.STEAM) is not DataQuality.OK:
                 tr.expected_temp = None
+        # 回溫中: the next reading is checked against the ramp from where it is now on (after its end: as before)
+        for c in tr.chans.values():
+            if c.ramp is not None:
+                c.ramp = None if tr.ramp_done else (c.ramp[2],) * 3
+        tr.ramp_done = False
         tr.last_t = t
         tr.last_reading = r
         self.last_quality[tr.mid] = per.get(Channel.TEMP, DataQuality.MISSING) if any(
@@ -679,7 +702,27 @@ class StreamDetector:
                 t_now = c.buf[-1][0]
                 recent = [v for t, v in c.buf if t >= t_now - 30.0]
                 c.baseline = float(np.median(recent)) if recent else c.baseline
+            c.ramp = None
         tr.onset_t, tr.onset_sign, tr.alarm_since, tr.calm_since = None, 0, None, None
         tr.flow_low_since = tr.pressure_low_since = None
         tr.emitted, tr.normal_since = False, None
-        tr.recovering, tr.recover_since = repaired, None
+        tr.recovering, tr.recover_since, tr.ramp_done = repaired, None, False
+
+    def follow_recovery(self, machine_id: str, ramp: SensorReading | None, *, done: bool = False) -> None:
+        """回溫中 (Runtime._advance_recoveries, after reset(repaired=True)): where the runtime's ramp has put the repaired
+        machine's process values on their way back to normal (noiseless). The ramp runs on the WALL clock and the sim
+        clock may stand still meanwhile, so a whole ramp can land between two readings: the next reading is checked
+        against every value the ramp passed since the last one. On it (a press's temperature within REDUNDANT_TOL_C,
+        any channel within a second's physics) the step is no jump and the ramp stands in for the steam model; off it
+        (a drifting thermometer, a spike) the reading is bad data as before. done: the ramp ended (the reading after
+        it is the last one checked this way)."""
+        tr = self._tracks.get(machine_id)
+        if tr is None:
+            return
+        for ch in Channel:
+            v = None if ramp is None else getattr(ramp, ch.value)
+            if v is None:
+                continue
+            c = tr.chans[ch]
+            c.ramp = (v, v, v) if c.ramp is None else (min(c.ramp[0], v), max(c.ramp[1], v), v)
+        tr.ramp_done = tr.ramp_done or done
