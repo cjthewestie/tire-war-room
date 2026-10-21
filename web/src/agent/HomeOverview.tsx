@@ -6,10 +6,11 @@
 // something new arrives), 接下來, 今天處理過的事 (history.ts, kept across scenario switches) and, live
 // only, 人力・出貨・品質.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { Shift } from '../contracts'
+import type { Event, Shift, WorkTask } from '../contracts'
 import { factoryMidnight, fmtHM, fmtNum, ms } from '../format'
 import { useHistory, type HistRow } from '../history'
 import { useWarRoom } from '../useWarRoom'
+import { ended, endedBy } from './homeItems'
 import { upcoming, when } from './overviewModel'
 import { ResultStrip } from './ResultStrip'
 
@@ -54,7 +55,7 @@ export function HomeOverview({ onFull }: { onFull?: (eventId?: string) => void }
         <Sec title="今天處理過的事" testId="ov-done">
           {today.length || before.length ? (
             <ul className="ov-list ov-hist">
-              {today.map((r) => <HistLine key={r.key} r={r} now={now} href={events.some((e) => e.id === r.eventId) ? r.eventId : null} onClick={full} />)}
+              {today.map((r) => { const ev = events.find((e) => e.id === r.eventId); return <HistLine key={r.key} r={r} now={now} href={ev ? r.eventId : null} ev={ev} tasks={w?.tasks?.items ?? []} onClick={full} /> })}
               {!today.length && <li className="muted ov-empty">今天還沒有處理過的事</li>}
               {before.length > 0 && <li className="ov-sub" aria-hidden="true">上一輪（切換情境前）</li>}
               {before.map((r) => <HistLine key={r.key} r={r} now={now} href={null} old onClick={full} />)}
@@ -85,12 +86,22 @@ function Sec({ title, testId, children }: { title: string; testId: string; child
   )
 }
 
+/** 結案 is a state-machine word: an event row says how it ended, as the 處理清單 does (homeItems.ts) — from the event and
+ *  its field work while it is on screen, else from the outcome the row kept (a previous run's events are gone). */
+function endTag(r: HistRow, ev: Event | undefined, tasks: WorkTask[]): { tag: string; cls: string } {
+  if (r.kind !== 'event' || r.tag !== '結案') return { tag: r.tag, cls: `t-${r.tone}` }
+  const e = ev ? ended(ev, tasks) : endedBy(r.subject === '主管指令' || r.subject === '工廠事件', r.detail)
+  return { tag: e.pill, cls: e.tone === 'ok' ? 't-ok' : e.tone === 'run' ? 't-decide' : 't-done' }
+}
+
 /** One row: time, what (subject・text：outcome), its tag; a row of this run opens the event on the Agent page. */
-function HistLine({ r, now, href, old = false, onClick }: { r: HistRow; now: number; href: string | null; old?: boolean; onClick: (id: string) => (e: React.MouseEvent) => void }) {
+function HistLine({ r, now, href, ev, tasks = [], old = false, onClick }: { r: HistRow; now: number; href: string | null; ev?: Event; tasks?: WorkTask[]; old?: boolean; onClick: (id: string) => (e: React.MouseEvent) => void }) {
+  const end = endTag(r, ev, tasks)
+  const detail = r.detail?.replace(/^(已修復：)+/, '')           // the tag already says how it ended
   const body = <>
     <span className="ov-time">{old ? when(ms(r.at), now) : fmtHM(r.at)}</span>
-    <span className="ov-what">{r.subject && <b>{r.subject}・</b>}{r.text}{r.detail && <span className="muted">：{r.detail}</span>}</span>
-    <span className="ov-tags"><span className={`ov-tag t-${r.tone}`}>{r.tag}</span>{old && <span className="ov-tag t-old">上一輪</span>}</span>
+    <span className="ov-what">{r.subject && <b>{r.subject}・</b>}{r.text}{detail && <span className="muted">：{detail}</span>}</span>
+    <span className="ov-tags"><span className={`ov-tag ${end.cls}`}>{end.tag}</span>{old && <span className="ov-tag t-old">上一輪</span>}</span>
   </>
   return (
     <li className={old ? 'old' : ''} data-testid="ov-done-row" data-run={old ? 'prev' : 'cur'}>
