@@ -13,7 +13,7 @@ import { useWarRoom } from '../useWarRoom'
 import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
-import { BriefingView } from '../components/BriefingView'
+import { BriefingView, BriefSections, BriefTop, Txt } from '../components/BriefingView'
 import { actionLines, buildBriefing, fullActionLines, optionBriefs } from '../briefing'
 import { useBriefCtx } from '../useBriefing'
 
@@ -44,7 +44,6 @@ export function Phone() {
           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
           <ThemeToggle className="ph-tog" />
         </div>
-        {top && <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
@@ -59,9 +58,9 @@ export function Phone() {
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
         {pending.length === 0 ? (
           <div className="ph-card idle">
-            <h2>目前沒有待核准事項</h2>
+            {idleBrief ? null : <h2>目前沒有待核准事項</h2>}
             {idleBrief ? (
-              <BriefingView b={idleBrief} />
+              <><BriefingView b={idleBrief} /><p className="ph-none muted">目前沒有待核准事項</p></>
             ) : ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
@@ -176,12 +175,11 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
   return (
     <div className="ph-card ph-approval">
       <div className="ph-col-a">
-      <div className="ph-top">
-        <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>
-        <span className="ph-round">{ROUND[a.round] ?? `第${a.round}輪`}核准</span>
-        {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
-      </div>
-      {brief && <BriefingView b={brief} testId="phone-briefing" />}
+      <p className="ph-meta" data-testid="phone-meta">
+        <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>・{ROUND[a.round] ?? `第${a.round}輪`}核准
+        {(a.version ?? 1) > 1 && <b data-testid="phone-version">・v{a.version}（最新）</b>}
+      </p>
+      {brief && <div className={`br br-${brief.state}`}><BriefTop b={brief} />{!staffing.length && <BriefSections b={brief} only={['advice']} />}</div>}
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">
           <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
@@ -203,17 +201,20 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
           ))}
         </div>
       </>}
+      {brief && <div className={`br br-${brief.state}`}><BriefSections b={brief} only={['impact']} hide={staffing.length ? /^人力：/ : undefined} /></div>}
       {talk && (
         <textarea className="ph-reason" rows={2} maxLength={300} autoFocus value={text} onChange={(e) => setText(e.target.value)}
           placeholder="例如：不要加班／9 號機今晚要保養／這個不行，改用 B" aria-label="跟 AI 討論這個計劃" data-testid="phone-discuss-input" />
       )}
       {err && <p className="err">{err}</p>}
-      {scope.length > 0 && <p className="ph-scope" data-testid="phone-scope">核准範圍：{scope.join('；')}</p>}
+      <div className="ph-bar">
+      {scope.length > 0 && <p className="ph-scope" data-testid="phone-scope"><b>核准範圍</b>：<Txt>{scope.join('；')}</Txt></p>}
       <div className="ph-acts">
         <button className="ph-approve" disabled={locked || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>
           {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label.replace(/（[^）]*）$/, '')}` : ''}`}
         </button>
         <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
+      </div>
       </div>
       <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
       <details className="ph-why">

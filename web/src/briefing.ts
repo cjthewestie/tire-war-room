@@ -18,8 +18,8 @@ import { NOTIFY_LABEL, resultText, staffingChoice } from './stepText'
 import { cureChange, deliveryFacts, optionViews, type OptionView } from './agent/approvalView'
 import { expectationText, repairWindow } from './phone/RepairEta'
 
-export type BriefState = 'pending' | 'running' | 'done' | 'stopped'
-export type SectionKey = 'advice' | 'impact' | 'deadline' | 'progress' | 'eta' | 'result' | 'equipment' | 'todo'
+export type BriefState = 'pending' | 'running' | 'followup' | 'done' | 'stopped'
+export type SectionKey = 'advice' | 'impact' | 'deadline' | 'progress' | 'blocker' | 'eta' | 'result' | 'equipment' | 'todo'
 
 export interface BriefSection {
   key: SectionKey
@@ -35,6 +35,8 @@ export interface Briefing {
   sections: BriefSection[]
   /** 待核准 only: the 請核准 chip and its deadline (null time = no reliable deadline, the chip shows alone) */
   deadline: { time: string | null } | null
+  /** collapsed under the summary (查看執行明細 / 查看處理結論): what the supervisor does not need to decide or watch */
+  details?: { title: string; lines: string[] }
   eventId: string
 }
 
@@ -89,7 +91,7 @@ export function optionBriefs(req: ApprovalRequest, ev: Event | null): OptionBrie
     const kind = staffingKind(v)
     const effect: string[] = []
     if (kind === 'transfer') {
-      const from = v.who ? v.who.split(' → ')[0] : '來源組'
+      const from = v.who ? v.who.split(' → ')[0] : '調出組（組別待確認）'
       effect.push(`${from}少 ${v.people ?? 1} 人${v.shift ? `（${v.shift}）` : ''}，可能影響該組產能`)
     } else if (kind === 'overtime') {
       effect.push(`${v.who ?? '原班人員加班'}${v.shift ? `・${v.shift}` : ''}，不從其他組調人`)
@@ -114,7 +116,7 @@ export function fullActionLines(req: ApprovalRequest): string[] {
 
 export function actionLines(req: ApprovalRequest): string[] {
   // 「排程生效」 and 「硫化總時數」 usually describe the same change: say it once (only when the hours match)
-  const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：依所選')).map((a) => plain(a).replace(/）\s+生效/, '）生效'))
+  const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：')).map((a) => plain(a).replace(/）\s+生效/, '）生效'))
   const sched = acts.find((a) => /排程.*生效/.test(a))
   return acts.filter((a) => {
     if (!sched || a === sched || !/硫化總時數/.test(a)) return true
@@ -151,8 +153,16 @@ function causeText(ev: Event): string | null {
   return `${h.status === 'confirmed' ? '' : '疑似'}${plain(h.statement)}`
 }
 
+/** The header already names the machine, so the sentence under it does not repeat 「7 號機」/「7 號硫化機」. */
+function withoutMachine(ev: Event, text: string): string {
+  if (!isMachineEvent(ev)) return text
+  const n = String(machineLabel(ev.machine_id)).match(/\d+/)?.[0]
+  if (!n) return text
+  return text.replace(new RegExp(`^${n}\\s*號(?:硫化)?機\\s*`), '本機')
+}
+
 function headline(ev: Event, req: ApprovalRequest | null): string {
-  const what = plain(req?.title ?? ev.alert_card?.title ?? ev.anomaly.message)
+  const what = withoutMachine(ev, plain(req?.title ?? ev.alert_card?.title ?? ev.anomaly.message))
   const cause = causeText(ev)
   if (isMachineEvent(ev)) return cause ? `${what}，${cause}。` : `${what}。`
   const why = plain(req?.reason ?? ev.anomaly.message)
@@ -227,16 +237,20 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
       advice.push(pick.id === rec?.id ? `${prefix}${pick.label}` : `${prefix}${pick.label}（你改選；系統建議方案 ${rec?.id}）`)
     }
     advice.push(...actionLines(req))
+    // 交期與風險: delivery verdict, the picked staffing option's cost, then what is still unresolved
     const impact: string[] = []
-    const cure = cureChange(ev)
-    if (cure) impact.push(`${machineLabel(cure.press)}硫化總時數 ${round1(cure.from)} h → ${round1(cure.to)} h`)
-    if (pick?.effect.length) impact.push(...pick.effect.map((e) => `人力：${e}`))
     const d = deliveryLine(req.delivery_impact)
     if (d) impact.push(d)
-    impact.push(...gapLines(req).map((g) => `缺口：${g}`))
+    if (pick?.effect.length) impact.push(...pick.effect.map((e) => `人力：${e}`))
+    // a staffing action from an earlier round ("第 1 輪已核准並執行…本輪改選會撤回") is a risk, not part of this card's scope
+    impact.push(...(req.actions ?? []).filter((x) => x.startsWith('人力：') && !x.startsWith('人力：依所選')).map((x) => `注意：${plain(x).slice(3)}`))
+    const gaps = gapLines(req)
+    impact.push(...gaps.map((g) => `未解決缺口：${g}`))
+    const cure = cureChange(ev)
+    if (cure) impact.push(`${machineLabel(cure.press)}硫化時間由 ${round1(cure.from)} h 延長為 ${round1(cure.to)} h`)
     const sections: BriefSection[] = []
     if (advice.length) sections.push({ key: 'advice', title: '建議處置', lines: advice })
-    if (impact.length) sections.push({ key: 'impact', title: '預期影響', lines: impact })
+    if (impact.length) sections.push({ key: 'impact', title: '交期與風險', lines: impact })
     return {
       ...base, state: 'pending', stateLabel: '待核准', lead: headline(ev, req), sections,
       deadline: { time: req.expires_at ? fmtHM(req.expires_at) : null },
@@ -257,57 +271,83 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
 
   const approved = approvedOf(ev, c.resolved)
 
-  // ------------------------------------------------------------ 處置完成
+  const evTasks = c.tasks.filter((t) => t.event_id === ev.id)
+  const openTasks = evTasks.filter((t) => t.status !== '完成')
+  const fixing = isMachineEvent(ev) && !!c.maintenance?.some((m) => m.machine_id === ev.machine_id && m.status === 'in_progress')
+  const dl = approved ? deliveryLine(approved.delivery_impact) : deliveryFromEvent(ev)
+  const staffed = !!approved && approved.options.length > 1 && !!approved.decision?.option_id
+  /** 交期與風險: the delivery verdict (預估), the cost of the approved staffing option, and whatever is still open */
+  const riskLines = (): string[] => {
+    const out: string[] = []
+    if (dl) out.push(dl)
+    if (approved && staffed) {
+      const ob = optionBriefs(approved, ev).find((o) => o.id === approved.decision?.option_id)
+      if (ob?.effect.length) out.push(...ob.effect.map((e) => `人力：${e}`))
+    } else if (approved) out.push(...gapLines(approved).map((g) => `未解決缺口：${g}`))
+    return out
+  }
+  const writes = writeSteps(ev)
+  const execLines = [...new Set(writes.filter((s) => s.state === 'ok').map(stepName))]
+
+  // ------------------------------------------------------------ 處置完成 / 排程已更新・現場處理中
   if (ev.state === 'closed') {
-    const exec = writeSteps(ev).filter((s) => s.state === 'ok').map(stepName)
-    const result = [...new Set(exec)]
-    if (approved && approved.options.length > 1 && approved.decision?.option_id) {
+    const followup = openTasks.length > 0 || fixing
+    const result = execLines.map(shortAction)
+    // 已核准 ≠ 已執行: while the staffing move is still a field task it is listed under 現場待辦, not 已完成
+    if (approved && staffed && !followup) {
       const t = `人力：${approvedLabel(approved, ev)}`
       if (!result.some((r) => r.includes(approved.decision!.option_id ?? '~'))) result.push(t)
     }
-    const dl = approved ? deliveryLine(approved.delivery_impact) : deliveryFromEvent(ev)
-    if (dl) result.push(dl)
     const eq = equipmentLine(ev, c)
-    const openTasks = c.tasks.filter((t) => t.event_id === ev.id && t.status !== '完成')
-    const todo = [...openTasks.map((t) => taskLine(t))]
-    if (approved && !(approved.options.length > 1 && approved.decision?.option_id)) todo.push(...gapLines(approved).map((g) => `缺口：${g}`))
-    const concl = plain(ev.outcome).replace(/\u2060/g, '')
-    if (concl && result.length) result.push(`結論：${concl}`)
-    const sections: BriefSection[] = [{ key: 'result', title: '處理結果', lines: result.length ? result : [concl || '待確認'] }]
+    const concl = plain(ev.outcome).replace(/\u2060/g, '').replace(/\s+(?=生效)/g, '')
+    const scheduled = execLines.some((l) => /排程.*生效/.test(l))
+    const sections: BriefSection[] = [{ key: 'result', title: followup ? '已完成' : '處理結果', lines: result.length ? result : [concl || '待確認'] }]
+    if (followup && openTasks.length) sections.push({ key: 'todo', title: '現場待辦', lines: openTasks.map(taskLine) })
     if (eq) sections.push({ key: 'equipment', title: '設備狀態', lines: [eq], plain: true })
-    if (todo.length) sections.push({ key: 'todo', title: '後續待辦', lines: todo })
-    const did = [...new Set(exec.map(shortAction))].slice(0, 3)
-    return { ...base, state: 'done', stateLabel: '處置完成', lead: did.length ? `已完成：${did.join('、')}。` : (concl ? `${concl}。` : '處置流程已結案。'), sections, deadline: null }
+    const risk = riskLines()
+    if (risk.length) sections.push({ key: 'impact', title: '交期與風險', lines: risk })
+    const details = concl ? { title: '查看處理結論', lines: [concl] } : undefined
+    if (followup) {
+      const doneN = evTasks.length - openTasks.length
+      return {
+        ...base, state: 'followup', stateLabel: scheduled ? '排程已更新｜現場處理中' : '現場處理中', deadline: null, details, sections,
+        lead: evTasks.length ? `現場工作尚未全部完成（${doneN}/${evTasks.length}），設備尚未確認修復。` : '現場維修仍在進行，設備尚未確認修復。',
+      }
+    }
+    const did = result.slice(0, 3)
+    return { ...base, state: 'done', stateLabel: '處置完成', lead: did.length ? `已完成：${did.join('、')}。` : (concl ? `${concl}。` : '處置流程已結案。'), sections, details, deadline: null }
   }
 
   // ------------------------------------------------------------ 執行中 (approved, not closed yet)
   // the client only holds the approval record for decisions it saw; after a reload the event itself says it ran
   const ran = !!approved || ev.state === 'execute' || ev.state === 'verify' || (ev.state === 'replan' && ev.approvals.length > 0)
   if (ran) {
-    const steps = writeSteps(ev)
-    const progress: string[] = steps.map((s) => `${stepName(s)}：${STEP_STATE[s.state]}`)
-    const tasks = c.tasks.filter((t) => t.event_id === ev.id)
-    progress.push(...tasks.map((t) => taskLine(t)))
+    const okN = writes.filter((s) => s.state === 'ok').length
+    const progress: string[] = []
+    if (writes.length) progress.push(`系統動作 ${okN}/${writes.length} 完成`)
+    if (evTasks.length) progress.push(`現場任務 ${evTasks.length - openTasks.length}/${evTasks.length} 完成`)
     if (ev.state === 'replan') progress.push('驗證未達預期：正在換假設重新規劃')
     else if (ev.state === 'verify') progress.push('動作完成後，系統正依讀值驗證是否達到預期')
+    // 目前卡點: a step that failed / is stopped, else the field task that is waiting longest
+    const stuck = writes.find((s) => s.state === 'failed' || s.state === 'rejected' || s.state === 'awaiting_approval')
+    const nextTask = [...openTasks].sort((x, y) => String(x.eta ?? '~').localeCompare(String(y.eta ?? '~')))[0]
+    const blocker = stuck ? `${stepName(stuck)}：${STEP_STATE[stuck.state]}`
+      : nextTask ? `${plain(nextTask.title)}：${nextTask.status}${nextTask.eta ? `，預計 ${fmtHM(nextTask.eta)}` : ''}` : null
     const w = repairWindow(ev, c.now, c.tasks, c.resolved)
     const eta = w.doneBy
-      ? `預計 ${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)} 完成${w.lastEta ? '（含現場任務）' : w.x ? `（${expectationText(w.x)}）` : ''}，完成後將通知你。`
-      : '待確認，完成後將通知你。'
-    const impact: string[] = []
-    const dl = approved ? deliveryLine(approved.delivery_impact) : deliveryFromEvent(ev)
-    if (dl) impact.push(dl)
-    const staffed = !!approved && approved.options.length > 1 && !!approved.decision?.option_id
-    if (approved && staffed) {
-      const ob = optionBriefs(approved, ev).find((o) => o.id === approved.decision?.option_id)
-      if (ob?.effect.length) impact.push(...ob.effect.map((e) => `人力：${e}`))
-    } else if (approved) impact.push(...gapLines(approved).map((g) => `缺口：${g}`))
-    const sections: BriefSection[] = [
-      { key: 'progress', title: '處理進度', lines: progress.length ? progress : ['待確認'] },
-      { key: 'eta', title: '預計完成', lines: [eta], plain: true },
-    ]
-    if (impact.length) sections.push({ key: 'impact', title: '預期影響', lines: impact })
-    return { ...base, state: 'running', stateLabel: '執行中', lead: approved ? approvedLead(approved, ev) : (staffingChoice(ev.steps) ? `已核准：${staffingChoice(ev.steps)}。` : '已核准。'), sections, deadline: null }
+      ? `${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)}${w.lastEta ? '（含現場任務）' : w.x ? `（${expectationText(w.x)}）` : ''}`
+      : '待確認'
+    const sections: BriefSection[] = [{ key: 'progress', title: '實際進度', lines: progress.length ? progress : ['待確認'] }]
+    if (blocker) sections.push({ key: 'blocker', title: '目前卡點', lines: [blocker], plain: true })
+    sections.push({ key: 'eta', title: '預計完成', lines: [eta], plain: true })
+    const risk = riskLines()
+    if (risk.length) sections.push({ key: 'impact', title: '交期與風險', lines: risk })
+    const more = [...writes.map((s) => `${stepName(s)}：${STEP_STATE[s.state]}`), ...evTasks.map(taskLine)]
+    return {
+      ...base, state: 'running', stateLabel: '執行中', sections, deadline: null,
+      details: more.length ? { title: '查看執行明細', lines: more } : undefined,
+      lead: approved ? approvedLead(approved, ev) : (staffingChoice(ev.steps) ? `已核准：${staffingChoice(ev.steps)}。` : '已核准。'),
+    }
   }
   return null   // still planning: the existing 「AI 指揮官…中」 line covers it
 }
