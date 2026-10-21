@@ -704,8 +704,8 @@ class MainAgent:
         if small:
             # the model writes the warm line only; code adds one plant fact and the offer (the model's own facts were
             # made up: 「1 號機正在硫化中，3 號機待機」, preview run 10-21)
-            msgs[-1]["content"] = json.dumps({**ctx, "instruction": "這是閒聊：針對主管這句話，只回一句溫暖自然的話（說累就體貼他、問吃什麼就推薦一樣吃的，"
-                                              "要笑話就講一個很短的笑話）；不要編天氣或新聞，不要提工廠、數字或機台，不要問問題。"}, ensure_ascii=False, default=str)
+            msgs[-1]["content"] = json.dumps({**ctx, "instruction": "這是閒聊：只針對主管這一句回一句溫暖自然的話（問吃的就推薦一樣吃的，要笑話就講一個很短的"
+                                              "笑話）；不要提主管沒說過的事或心情，不要編天氣或新聞，不要提工廠、數字或機台，不要問問題。"}, ensure_ascii=False, default=str)
         # numbers the reply may use: the message, what rode along with it, the context, the plan and the tool results
         source = " ".join([text, *earlier, " ".join(prev) if follow and prev is not None else "",
                            json.dumps(context, ensure_ascii=False, default=str), waiting_plan or "", PROCESS_RULE])
