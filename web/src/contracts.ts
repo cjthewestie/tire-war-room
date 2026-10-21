@@ -585,13 +585,38 @@ export interface SimEventsBody { enabled?: boolean; every_min?: number; seed?: n
 export interface RandomEventsClock { enabled: boolean; every_min: number; seed: number; fired: number; last: string | null }
 
 export interface SimControl {
-  action: "play" | "pause" | "speed" | "reset" | "scenario" | "jump"
+  /** overlay (情境疊加): apply an overlayable scenario's steps from now on top of the running one, no reload */
+  action: "play" | "pause" | "speed" | "reset" | "scenario" | "jump" | "overlay"
   speed?: number | null
   scenario?: ScenarioName | null
   /** issue #36: run headless to ~15 factory s before the scenario's first scripted step */
   preroll?: boolean
   /** issue #36 jump (一日循環 only): run the plant forward to this time of day, "HH:MM" (through 24:00 if earlier) */
   at?: string | null
+}
+
+/** 情境疊加: what one scenario step became (POST /api/sim/control {action:"overlay"} → `overlay`). */
+export interface OverlayStep {
+  note: string
+  /** where it went; null for a plant input (rush order, sick call) */
+  machine_id: string | null
+  /** the scripted machine, when it was busy and an idle one of the same kind stood in */
+  substituted_for: string | null
+  /** busy and no idle machine of the same kind: not applied */
+  skipped: boolean
+  /** 「改用 5 號硫化機（7 號機處理中）」, or why it was skipped */
+  detail: string | null
+  /** opens an event (bad data never wakes the AI) */
+  wakes: boolean
+  at: ISODate | null
+}
+export interface OverlayResult {
+  scenario: ScenarioName
+  title: string
+  at: ISODate
+  steps: OverlayStep[]
+  /** applied steps that open an event */
+  new_events: number
 }
 
 export interface HealthStatus {
@@ -704,7 +729,7 @@ export type WsMessage =
   | { type: "approval_resolved"; ts: ISODate; data: ApprovalRequest }
   | { type: "schedule"; ts: ISODate; data: ScheduleVersion }
   | { type: "audit"; ts: ISODate; data: AuditEntry }
-  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null } }
+  | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null; /** 情境疊加: scenarios overlaid since the last load */ overlays?: ScenarioName[] } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
   | { type: "subagents"; ts: ISODate; data: SubagentsView }
 

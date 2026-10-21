@@ -991,6 +991,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     @app.post("/api/sim/control")
     async def sim_control(ctl: SimControl, _: Session = Depends(demo)) -> dict[str, Any]:
         r = rt()
+        overlay: dict[str, Any] | None = None
         if ctl.action == "play":
             r.play()
         elif ctl.action == "pause":
@@ -1009,6 +1010,14 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 await r.jump_to(ctl.at)
             except RuntimeError as e:
                 raise HTTPException(status_code=409, detail=str(e)) from None
+        elif ctl.action == "overlay":
+            # 情境疊加: add an overlayable scenario's faults / plant inputs from now, keeping everything running
+            if ctl.scenario is None:
+                raise HTTPException(status_code=422, detail="scenario required")
+            try:
+                overlay = await r.overlay_scenario(ctl.scenario)
+            except ValueError as e:       # a story scenario: the caller loads it instead
+                raise HTTPException(status_code=409, detail=str(e)) from None
         elif ctl.action in ("reset", "scenario"):
             if ctl.action == "scenario" and ctl.scenario is None:
                 raise HTTPException(status_code=422, detail="scenario required")
@@ -1026,7 +1035,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if ctl.speed is not None and ctl.action != "speed":
             r.set_speed(ctl.speed)
         r.bus.publish(WsType.CLOCK, r.clock_info())
-        return {"ok": True, **r.clock_info()}
+        return {"ok": True, **r.clock_info(), **({"overlay": overlay} if overlay is not None else {})}
 
     @app.get("/api/sim/scenarios")
     async def sim_scenarios() -> list[dict[str, Any]]:

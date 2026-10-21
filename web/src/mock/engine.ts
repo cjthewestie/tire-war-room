@@ -2,16 +2,18 @@
 // so the dashboard and phone render with no server. Deterministic: state = f(factory time, decisions).
 import type {
   ApprovalDecision, ApprovalRequest, CapacityReport, Channel, CompoundStage, DashboardSnapshot, Event, HeaderStatus,
-  MachineDetail, MachineState, MachineTile, MetricTile, Prediction, ScenarioName, ScheduleVersion, SensorReading, Shift,
-  SimControl, WsMessage,
+  MachineDetail, MachineState, MachineTile, MetricTile, OverlayResult, OverlayStep, Prediction, ScenarioName, ScheduleVersion,
+  SensorReading, Shift, SimControl, WsMessage,
 } from '../contracts'
 import {
-  CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURRENT_SHIFTS, DEMO_ORDER_PROGRESS, LEAD_TIME_WEEKS, MACHINES, SIZE_LABEL,
+  CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURRENT_SHIFTS, DEMO_ORDER_PROGRESS, LEAD_TIME_WEEKS, MACHINES, SIZE_LABEL, machineLabel,
 } from '../factory'
 import { isoTaipei } from '../format'
 import { isAbnormal } from '../store'
 import { HOUR, MIN, baseJobs, makeSchedule, pressSize, shiftInstances, version } from './schedule'
-import { type Ctx, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, press7Script, r1 } from './scripts'
+import {
+  type Ctx, type OverlayFault, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, overlayFaultScript, press7Script, r1,
+} from './scripts'
 
 /** Tyres already de-molded at the page-11 start (dataset 10/28 02:12 shifted to 10/03): S 21, M 9, L 7 of 100. */
 const MOCK_ORDER_DONE: Record<'S' | 'M' | 'L', number> = { S: 21, M: 9, L: 7 }
@@ -59,7 +61,8 @@ export const SCENARIOS: { name: ScenarioName; label: string; start: string; spee
   { name: 'staffing', label: '人力調度', start: '2026-10-06T07:20:00+08:00', speed: 10 },
 ]
 
-interface LoadedScenario { name: ScenarioName; scripts: Script[]; press7?: ReturnType<typeof press7Script>; badData?: string }
+/** badData: machines whose readings jump from a time on (validate() flags them, they never wake the AI). */
+interface LoadedScenario { name: ScenarioName; scripts: Script[]; press7?: ReturnType<typeof press7Script>; badData?: { id: string; from: number }[] }
 
 function buildScenario(name: ScenarioName): LoadedScenario {
   const T = (iso: string) => Date.parse(iso)
@@ -70,7 +73,7 @@ function buildScenario(name: ScenarioName): LoadedScenario {
       const p = press7Script(T('2026-10-03T02:14:00+08:00'))
       return { name, scripts: [p, openMillScript(T('2026-10-03T02:14:30+08:00')), bmixScript(T('2026-10-03T02:15:00+08:00'))], press7: p }
     }
-    case 'bad_data': return { name, scripts: [], badData: 'CURE-04' }
+    case 'bad_data': return { name, scripts: [], badData: [{ id: 'CURE-04', from: T('2026-10-22T09:00:30+08:00') }] }
     default: return { name, scripts: [] }
   }
 }
@@ -94,6 +97,9 @@ export class MockEngine {
   private cache: { now: number; rev: number; world: ScriptWorld[] } | null = null
   private rev = 0
   private ctx: Ctx = { userDecision: (id) => this.decisions.get(id) }
+  /** 情境疊加: scenarios overlaid since the last load (the clock message carries them, like the live one) */
+  private overlays: ScenarioName[] = []
+  private overlaySeq = 0
 
   constructor(opts: EngineOptions = {}) { this.load(opts.scenario ?? 'open_mill_overheat', opts.at, opts.speed) }
 
@@ -104,6 +110,7 @@ export class MockEngine {
     this.speed = speed ?? def.speed
     this.decisions.clear()
     this.rollbacks = []
+    this.overlays = []
     this.prevPending.clear(); this.prevResolved.clear(); this.prevVersions = 0; this.prevEventStates.clear()
     this.rev++
   }
@@ -138,7 +145,8 @@ export class MockEngine {
     for (const s of this.scenario.scripts) { const v = s.signal(id, t, this.ctx); if (v) o = { ...o, ...v } }
     const temp = o.temp_c ?? b.temp + baseNoise(id, t, b.temp > 100 ? 0.6 : 0.4)
     let tempOut = temp
-    if (this.scenario.badData === id && t >= Date.parse('2026-10-22T09:00:30+08:00')) {
+    const badFrom = this.badFrom(id)
+    if (badFrom != null && t >= badFrom) {
       const k = Math.floor(t / 10_000) % 3
       tempOut = k === 0 ? 182.0 : k === 1 ? temp : -5   // jumps → validate() flags, never wakes AI
     }
@@ -153,7 +161,7 @@ export class MockEngine {
   private reading(id: string, t: number, seq: number): SensorReading {
     const s = this.signal(id, t)
     let quality: SensorReading['quality'] = 'ok'
-    if (this.scenario.badData === id && (s.temp_c > 160 || s.temp_c < 0)) quality = s.temp_c < 0 ? 'out_of_range' : 'jump'
+    if (this.badFrom(id) != null && (s.temp_c > 160 || s.temp_c < 0)) quality = s.temp_c < 0 ? 'out_of_range' : 'jump'
     return { ts: isoTaipei(t), machine_id: id, ...s, seq, quality }
   }
 
@@ -193,7 +201,7 @@ export class MockEngine {
       let status = p.status ?? 'running'
       let note = p.note ?? null
       if (m.line === 'CURE' && !cure_job && !p.status) status = 'idle'
-      if (this.scenario.badData === m.id && r.quality !== 'ok') { status = 'warning'; note = '資料異常（跳值）→ 驗證層攔下，不喚醒 AI' }
+      if (this.badFrom(m.id) != null && r.quality !== 'ok') { status = 'warning'; note = '資料異常（跳值）→ 驗證層攔下，不喚醒 AI' }
       return {
         machine_id: m.id, line: m.line, name: m.name, short_name: m.short, status, last_reading: r,
         step_elapsed_min: Math.floor((this.now / MIN + hashId(m.id)) % 45), compound_stage: BASE[m.id].stage,
@@ -245,7 +253,7 @@ export class MockEngine {
 
   private publish(full: boolean) {
     const snap = this.snapshot()
-    this.emit(this.msg('clock', { factory_time: isoTaipei(this.now), speed: this.speed, paused: this.paused }))
+    this.emit(this.msg('clock', { factory_time: isoTaipei(this.now), speed: this.speed, paused: this.paused, scenario: this.scenario.name, overlays: [...this.overlays] }))
     this.emit(this.msg('snapshot', snap))
     const all = this.approvals()
     for (const a of all) {
@@ -283,10 +291,80 @@ export class MockEngine {
     if (c.action === 'speed' && c.speed) this.speed = c.speed
     if (c.action === 'reset') this.load(this.scenario.name)
     if (c.action === 'scenario' && c.scenario) this.load(c.scenario)
+    if (c.action === 'overlay' && c.scenario) { this.overlay(c.scenario); return }
     this.publish(true)
   }
 
   jump(t: number) { this.now = t; this.rev++; this.publish(true) }
+
+  private badFrom(id: string): number | null {
+    const b = this.scenario.badData?.filter((x) => x.id === id) ?? []
+    return b.length ? Math.min(...b.map((x) => x.from)) : null
+  }
+
+  /** Machines an overlay must not stack on: a script's machine whose event is still coming or open, one taken out
+   *  (stopped / out of service), and one with bad data playing. */
+  private busyMachines(): Set<string> {
+    const busy = new Set<string>()
+    for (const s of this.scenario.scripts) {
+      const w = s.world(this.now, this.ctx)
+      if (!w.event || (w.event.state !== 'closed' && w.event.state !== 'safe_stop')) busy.add(s.machine)
+      for (const [id, p] of Object.entries(w.machine)) if (p.status === 'stopped' || p.status === 'out_of_service') busy.add(id)
+    }
+    for (const b of this.scenario.badData ?? []) busy.add(b.id)
+    return busy
+  }
+
+  /** 情境疊加 (mock): the overlayable scenario's scripts re-anchored at now, beside the running ones; clock, decisions,
+   *  schedule versions and the running scripts are kept. A busy machine's part goes to an idle one of the same kind
+   *  (overlayFaultScript); press 7's part of 3 件同時異常 always does, since press7Script also drives the schedule and
+   *  cannot be stacked. The same shape as the live POST /api/sim/control {action:'overlay'}; the mock's concurrent_3
+   *  stays its own (press 7 + 大開煉機 + B 線密煉機, not the backend's 3 號 / B 線開煉機 / 10 號). */
+  overlay(name: ScenarioName): OverlayResult {
+    const t0 = Math.ceil(this.now / SEC) * SEC
+    const busy = this.busyMachines()
+    const tag = `-OV${++this.overlaySeq}`
+    const steps: OverlayStep[] = []
+    const scripts: Script[] = []
+    const bad: { id: string; from: number }[] = []
+    const place = (mid: string, offS: number, note: string, wakes: boolean, story: ((A: number) => Script) | null, kind: OverlayFault | null) => {
+      const A = t0 + offS * SEC
+      let to: string | null = mid
+      if (busy.has(mid)) to = substitute(mid, busy)
+      if (!to) {
+        steps.push({ note, machine_id: mid, substituted_for: null, skipped: true, detail: `略過：${machineShort(mid)}處理中，沒有空的同類機台`, wakes, at: isoTaipei(A) })
+        return
+      }
+      busy.add(to)
+      const sub = to !== mid
+      if (kind == null) bad.push({ id: to, from: A })
+      else scripts.push(!sub && story ? story(A) : overlayFaultScript(A, to, kind, BASE[to].temp, tag))
+      steps.push({
+        note: sub ? `${note}（改用 ${machineLabel(to)}）` : note, machine_id: to, substituted_for: sub ? mid : null, skipped: false,
+        detail: sub ? `改用 ${machineLabel(to)}（${machineShort(mid)}處理中）` : null, wakes, at: isoTaipei(A),
+      })
+    }
+    if (name === 'concurrent_3') {
+      // press7Script cannot be stacked (it owns the schedule versions): its part is a plain steam drop, on 7 when free
+      place('CURE-07', 30, '7 號硫化機蒸汽壓不足，溫度下降', true, null, 'steam')
+      place('A-BIGOPEN', 60, 'A 線大開煉機冷卻水不足', true, (A) => openMillScript(A, tag), 'water')
+      place('B-MIX', 90, 'B 線密煉機溫度偏高', true, (A) => bmixScript(A), 'heat')
+    } else if (name === 'open_mill_overheat') {
+      place('A-BIGOPEN', 60, '冷卻水量 40 → 22 L/min', true, (A) => openMillScript(A, tag), 'water')
+    } else if (name === 'bad_data') {
+      place('CURE-04', 30, '4 號硫化機讀值跳動（壞資料）', false, null, null)
+    } else {
+      // issue #17 plant events are backend only: the mock plays them as normal running
+      steps.push({ note: SCENARIOS.find((s) => s.name === name)?.label ?? name, machine_id: null, substituted_for: null, skipped: true,
+        detail: '略過：模擬模式不播放工廠事件（接後端才有）', wakes: true, at: isoTaipei(t0) })
+    }
+    this.scenario = { ...this.scenario, scripts: [...this.scenario.scripts, ...scripts], badData: [...(this.scenario.badData ?? []), ...bad] }
+    this.overlays.push(name)
+    this.rev++
+    this.publish(true)
+    const label = SCENARIOS.find((s) => s.name === name)?.label ?? name
+    return { scenario: name, title: label, at: isoTaipei(t0), steps, new_events: steps.filter((s) => s.wakes && !s.skipped).length }
+  }
 
   setNetwork(n: Network) { this.network = n; this.publish(false) }
 
@@ -350,3 +428,27 @@ function tileStatus(id: string, ch: Channel, v: number | null, b: Base): MetricT
   if (ch === 'water_flow_lpm' && b.flow) return v < b.flow * 0.75 ? 'alarm' : 'normal'
   return 'normal'
 }
+
+// 情境疊加: an idle machine of the same kind (warroom/sim/events.py substitute_machine, on the mock's machines)
+const WATER_MILLS = ['A-OPEN', 'A-BIGOPEN', 'B-OPEN']
+const MIXERS = ['A-MIX', 'B-MIX']
+const pressNo = (id: string) => Number(id.slice(5))
+const header = (id: string) => (pressNo(id) <= 5 ? 'H1' : pressNo(id) <= 8 ? 'H2' : 'H3')   // steam headers (factory.py)
+function samePool(id: string): string[] {
+  if (id.startsWith('CURE-')) return MACHINES.filter((m) => m.line === 'CURE' && pressSize(m.id) === pressSize(id)).map((m) => m.id)
+  if (WATER_MILLS.includes(id)) return WATER_MILLS
+  if (MIXERS.includes(id)) return MIXERS
+  return [id]
+}
+/** Nearest first; a press on a steam header a busy press shares comes last (page 11 reads 6 and 8 against 7). */
+function substitute(id: string, busy: Set<string>): string | null {
+  const pool = samePool(id).filter((m) => m !== id && !busy.has(m))
+  if (!pool.length) return null
+  const press = id.startsWith('CURE-')
+  const hot = new Set([...busy].filter((m) => m.startsWith('CURE-')).map(header))
+  const pos = (m: string) => (press ? pressNo(m) : samePool(id).indexOf(m))
+  const key = (m: string) => [press && hot.has(header(m)) ? 1 : 0, Math.abs(pos(m) - pos(id))]
+  return pool.sort((a, b) => { const ka = key(a), kb = key(b); return ka[0] - kb[0] || ka[1] - kb[1] || (a < b ? -1 : 1) })[0]
+}
+/** 「7 號機」 for a press, the full label otherwise (the 「改用 …（7 號機處理中）」 note). */
+const machineShort = (id: string) => (id.startsWith('CURE-') ? `${pressNo(id)} 號機` : machineLabel(id))

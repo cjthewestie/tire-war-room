@@ -1096,11 +1096,31 @@ class WsMessage(_M):
 
 
 class SimControl(_M):
-    action: Literal["play", "pause", "speed", "reset", "scenario", "jump"]
+    # overlay (情境疊加): apply an overlayable scenario's steps from now on top of the running one (no reload)
+    action: Literal["play", "pause", "speed", "reset", "scenario", "jump", "overlay"]
     speed: float | None = None          # sim seconds per wall second
     scenario: ScenarioName | None = None
     preroll: bool = False               # issue #36 scenario: run headless to ~15 s before the first scripted step
     at: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")   # issue #36 jump (一日循環): "HH:MM"
+
+
+class OverlayStep(_M):
+    """情境疊加: what one scenario step became. machine_id is where it went (None for a plant input)."""
+    note: str
+    machine_id: str | None = None
+    substituted_for: str | None = None   # the scripted machine, when it was busy and an idle one stood in
+    skipped: bool = False                # busy and no idle machine of the same kind: not applied
+    detail: str | None = None            # 「改用 5 號硫化機（7 號機處理中）」 / why it was skipped
+    wakes: bool = True                   # opens an event (bad data never wakes the AI)
+    at: datetime | None = None           # factory time it starts
+
+
+class OverlayResult(_M):
+    scenario: ScenarioName
+    title: str
+    at: datetime                         # factory time of the overlay
+    steps: list[OverlayStep]
+    new_events: int                      # applied steps that open an event
 
 
 class HealthStatus(_M):

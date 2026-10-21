@@ -14,6 +14,7 @@ import { TaskList } from '../components/TaskList'
 import { currentRoundTools, planNodes } from './approvalView'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalVisual, PlanFlow } from './ApprovalVisual'
+import { ResultStrip } from './ResultStrip'
 import type { HomeItem } from './homeItems'
 import { expectationText, type Item } from './transcript'
 import { REPLAN_HINT, setReplan, useReplans, type Replan } from './replanStore'
@@ -89,6 +90,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     return (
       <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
         <div className="po-body">
+          <ResultStrip ev={ev} />
           <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
           <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}</h3>
           {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}

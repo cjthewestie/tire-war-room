@@ -48,6 +48,7 @@ from warroom.contracts import (
     DashboardSnapshot,
     Event,
     EventState,
+    FaultKind,
     FaultSpec,
     FocusPanel,
     HeaderStatus,
@@ -535,6 +536,7 @@ class Runtime:
         self._last_plant_persist = -1e9
         from warroom.sim.events import SimEvents
         self.sim_events = SimEvents()            # issue #36 模擬事件: off by default, kept across scenario loads
+        self.overlays: list[ScenarioName] = []   # 情境疊加: scenarios overlaid since the last load (cleared by a load)
         if components is None and want_resume and getattr(self.builder, "reopened_store", False):
             self.resumed = True
             self._restore_plant()                # factory clock continues; the script is not replayed
@@ -1177,6 +1179,7 @@ class Runtime:
                         pass
                     raise
                 self.scenario = new_scenario
+                self.overlays = []
                 self.c = comps
                 _ = self.orch                      # the main agent hooks the new state machine at once
                 self.ingest.reset()
@@ -1308,9 +1311,7 @@ class Runtime:
         from warroom.contracts import FaultSpec
         from warroom.sim.events import fault_text
         now = self.clock.now()
-        busy = {m for m in F.MACHINE_IDS if self._open_event_id(m)} | \
-            {f.machine_id for f in (self.sim.faults() if callable(getattr(self.sim, "faults", None)) else [])}
-        out = self.sim_events.build(kind, self.sim, now, busy)
+        out = self.sim_events.build(kind, self.sim, now, self._busy_machines())
         from warroom.sim.events import WorldInput
         if isinstance(out, FaultSpec):
             self.inject_fault(out)
@@ -1337,6 +1338,114 @@ class Runtime:
         return {"at": fired.at.isoformat(), "kind": fired.kind, "label": fired.label, "text": fired.text,
                 "source": source, "ref": fired.ref}
 
+    def _busy_machines(self) -> set[str]:
+        """Machines with an open event or an active fault (a new fault is never stacked on them)."""
+        return {m for m in F.MACHINE_IDS if self._open_event_id(m)} | \
+            {f.machine_id for f in (self.sim.faults() if callable(getattr(self.sim, "faults", None)) else [])}
+
+    # ------------------------------------------------------------------ 情境疊加 (scenario overlay)
+    async def overlay_scenario(self, name: ScenarioName) -> dict[str, Any]:
+        """Apply an overlayable scenario's steps on top of the running one, relative to now: the first step starts
+        at once and the others keep their spacing (offset - first offset). Clock, events, approvals, schedule
+        versions and audit are kept; nothing is rebuilt. A fault whose machine is busy (open event, active or
+        coming fault, stopped / out of service) goes to an idle machine of the same kind (events.substitute_machine)
+        so the overlay still opens its full set of events; with none free the step is skipped and says so. Faults go
+        through inject_fault and plant inputs through the sim's plant-input queue, the same paths as
+        POST /api/sim/fault and a scripted rush order. Story scenarios (page 11, 一日循環, 早班開工, 正常) raise
+        ValueError: they always reload."""
+        from warroom.contracts import OverlayResult, OverlayStep
+        from warroom.sim.events import machine_label, machine_short, substitute_machine
+        from warroom.sim.scenarios import OVERLAY_SCENARIOS, get_scenario
+        name = ScenarioName(name)
+        if name not in OVERLAY_SCENARIOS:
+            raise ValueError(f"{name.value} 是故事情境，只能重新載入")
+        if self._switch_lock is None:
+            self._switch_lock = asyncio.Lock()
+        async with self._switch_lock:              # never in the middle of a scenario load
+            now = self.clock.now()
+            base = get_scenario(name)
+            first = min((s.at_offset_s for s in base.steps), default=0.0)
+            sc = get_scenario(name, start_at=now - timedelta(seconds=first))    # dates (a rush order's due) from now
+            unusable = {MachineStatus.STOPPED, MachineStatus.OUT_OF_SERVICE, MachineStatus.OFFLINE}
+            states = self.sim.states() if callable(getattr(self.sim, "states", None)) else {}
+            scheduled = getattr(self.sim, "scheduled_fault_machines", None)
+            busy = self._busy_machines() | (scheduled() if callable(scheduled) else set()) | \
+                {m for m, s in states.items() if s.status in unusable}
+            taken = {s.fault.machine_id for s in sc.steps if s.fault is not None}   # this overlay's own targets
+            n_ov = len(self.overlays) + 1
+            out: list[OverlayStep] = []
+            for st in sc.steps:
+                at = now + timedelta(seconds=st.at_offset_s - first)
+                note = st.note or ""
+                if st.fault is not None:
+                    f = st.fault
+                    mid, sub, detail = f.machine_id, None, None
+                    if mid in busy:
+                        sub = substitute_machine(mid, busy | taken, f.kind)
+                        if sub is None:
+                            out.append(OverlayStep(note=note, machine_id=mid, skipped=True, at=at,
+                                                   detail=f"略過：{machine_short(mid)}處理中，沒有空的同類機台"))
+                            continue
+                        detail = f"改用 {machine_label(sub)}（{machine_short(mid)}處理中）"
+                        mid, sub = sub, mid
+                        taken.add(mid)
+                    spec = f.model_copy(update={"id": f"{f.id}-OV{n_ov}-{now:%H%M%S}", "machine_id": mid,
+                                                "start_offset_s": f.start_offset_s + st.at_offset_s - first})
+                    self.inject_fault(spec)
+                    wakes = f.kind not in (FaultKind.SPIKE, FaultKind.SENSOR_DROPOUT, FaultKind.SENSOR_DRIFT)
+                    if sub is not None and note:
+                        note = f"{note}（改用 {machine_label(mid)}）"
+                    out.append(OverlayStep(note=note, machine_id=mid, substituted_for=sub, detail=detail,
+                                           wakes=wakes, at=at))
+                elif st.plant is not None:
+                    pin, detail = self._overlay_plant_input(st.plant, at)
+                    sched = getattr(self.sim, "schedule_plant_input", None)
+                    if not callable(sched) or pin is None:
+                        out.append(OverlayStep(note=note, skipped=True, wakes=False, at=at,
+                                               detail=detail or "略過：這個模擬器不收工廠事件"))
+                        continue
+                    sched(pin, at)
+                    out.append(OverlayStep(note=pin.text if detail else note, detail=detail, at=at))
+            res = OverlayResult(scenario=name, title=sc.title, at=now, steps=out,
+                                new_events=sum(1 for s in out if s.wakes and not s.skipped))
+            self.overlays.append(name)
+            self.audit.append(AuditKind.SYSTEM, "supervisor",
+                              {"msg": "scenario overlaid", "scenario": name.value, "on": self.scenario.value,
+                               "factory_time": now.isoformat(), "new_events": res.new_events,
+                               "steps": [s.model_dump(mode="json", exclude_none=True) for s in out]})
+        self._publish_periodic(force=True)
+        return res.model_dump(mode="json")
+
+    def _overlay_plant_input(self, pin: Any, at: datetime) -> tuple[Any, str | None]:
+        """A plant step for an overlay: a rush order whose id is already on the book gets the next free id, a sick
+        call for someone already off that day goes to another person of the same team and shift. Returns the input
+        (None = skip) and the substitution note."""
+        if pin.kind == "rush_order" and pin.order is not None:
+            ids = {o.id for o in self.sim.orders()} if callable(getattr(self.sim, "orders", None)) else set()
+            oid = pin.order.id
+            if oid not in ids:
+                return pin, None
+            n = 2
+            while f"{oid}-{n}" in ids:
+                n += 1
+            new = f"{oid}-{n}"
+            order = pin.order.model_copy(update={"id": new, "mold_id": f"{pin.order.mold_id}-{n}"})
+            return pin.model_copy(update={"order": order, "text": pin.text.replace(oid, new)}), \
+                f"訂單號改用 {new}（{oid} 已在訂單上）"
+        if pin.kind == "absence" and pin.staff_id:
+            world = getattr(self.sim, "world", None)
+            off = getattr(world, "_extra_absent", {}) if world is not None else {}
+            if (pin.staff_id, at.date()) not in off:
+                return pin, None
+            for w in getattr(world, "_workers", []):
+                if w.staff_id and w.staff_id != pin.staff_id and w.team == pin.team and \
+                        getattr(w.sd, "name", None) == pin.shift_name and (w.staff_id, at.date()) not in off:
+                    return pin.model_copy(update={"staff_id": w.staff_id,
+                                                  "text": pin.text.replace(pin.staff_id, w.staff_id)}), \
+                        f"改由 {w.staff_id} 請病假（{pin.staff_id} 今天已請假）"
+            return None, f"略過：{pin.shift_name}沒有其他可請假的人"
+        return pin, None
+
     def clear_faults(self, machine_id: str | None = None) -> None:
         self.sim.clear_faults(machine_id)
         self.c.detector.reset(machine_id, repaired=machine_id is not None)
@@ -1346,6 +1455,7 @@ class Runtime:
         ev = self.sim_events
         return {"factory_time": self.clock.now().isoformat(), "speed": self.speed, "paused": self.paused,
                 "scenario": self.scenario.value, "day_loop": self.day_loop_info(),
+                "overlays": [o.value for o in self.overlays],
                 "random_events": {"enabled": ev.enabled, "every_min": ev.every_min, "seed": ev.seed,
                                   "fired": len(ev.fired), "last": ev.fired[-1].text if ev.fired else None}}
 

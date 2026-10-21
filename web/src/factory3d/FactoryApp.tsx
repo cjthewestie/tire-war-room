@@ -3,10 +3,11 @@
 // to use the real dashboard, watch it live on the big wall screen, go through the doors to the 休息區 and 廁所
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
 // F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
-// Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 2 / 3 run at 10× / 60×, 0 pauses
-// or plays, so the demo never has to leave the 3D view; ?demo=1 also lists them in the key strip and turns key 4
-// (隨機事件) off, matching the demo strip's presenter mode. #71: the ⚡ 觸發異常 button (or T) does the same with a
-// click, for presenters and touch devices.
+// Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 6 正常運轉 (the demo strip's
+// default three), 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo never has to leave the 3D view; ?demo=1 also
+// lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
+// click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
+// is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -14,6 +15,7 @@ import * as THREE from 'three'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
+import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
@@ -42,10 +44,12 @@ type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
 const PRESS7 = (SCENARIOS.find((s) => s.name === 'press7_temp_drop')?.label ?? '7 號硫化機溫降').replace(/（.*?）/, '')
 const CONC3 = SCENARIOS.find((s) => s.name === 'concurrent_3') ?? { label: '3 件同時異常', speed: 5 }
+const NORMAL = SCENARIOS.find((s) => s.name === 'normal') ?? { label: '正常運轉', speed: 1 }
 /** Presenter keys → the same /api/sim/control calls as the dashboard's demo strip. Digit0 toggles, so it is built per press. */
 const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: string }> = {
   Digit1: () => ({ c: { action: 'scenario', scenario: 'press7_temp_drop', speed: 10, preroll: true }, label: `載入情境：${PRESS7}` }),
   Digit5: () => ({ c: { action: 'scenario', scenario: 'concurrent_3', speed: CONC3.speed, preroll: true }, label: `載入情境：${CONC3.label}` }),
+  Digit6: () => ({ c: { action: 'scenario', scenario: 'normal', speed: NORMAL.speed, preroll: true }, label: `載入情境：${NORMAL.label}` }),
   Digit2: () => ({ c: { action: 'speed', speed: 10 }, label: '10 倍速' }),
   Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
@@ -112,7 +116,7 @@ export function FactoryApp() {
   const [toast, setToast] = useState<{ title: string; body: string; at: number; review?: boolean } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
-  const [demoNote, setDemoNote] = useState<{ text: string; at: number } | null>(null)
+  const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
   const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
   const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
@@ -172,9 +176,11 @@ export function FactoryApp() {
 
   useEffect(() => {
     if (!demoNote) return
-    const t = setTimeout(() => setDemoNote(null), 2500)
+    const t = setTimeout(() => setDemoNote(null), demoNote.ms ?? 2500)
     return () => clearTimeout(t)
   }, [demoNote])
+  const stateRef = useRef(state)          // 情境疊加: the key handler decides overlay / load on the latest state
+  useEffect(() => { stateRef.current = state }, [state])
 
   useEffect(() => {
     const f = () => setLocked(!!document.pointerLockElement)
@@ -221,6 +227,14 @@ export function FactoryApp() {
       if (demo) {
         if (!transport || e.repeat) return
         const { c, label } = demo(paused)
+        // 情境疊加: 1 / 5 while an event or approval is open on another scenario add on top (the demo strip's rule)
+        if (c.action === 'scenario' && c.scenario && scenarioClick(c.scenario, stateRef.current) === 'overlay') {
+          const name = c.scenario
+          const lab = SCENARIOS.find((s) => s.name === name)?.label ?? name
+          transport.overlay(name).then((r) => setDemoNote({ text: overlayNote(lab, r), at: Date.now(), ms: OVERLAY_NOTE_MS }),
+            (err) => { console.warn(err); setDemoNote({ text: `疊加：${lab}：沒有成功`, at: Date.now() }) })
+          return
+        }
         // 1 / 5 while paused used to load the scenario and stay paused (the plant looked frozen): loading also plays
         const sent = c.action === 'scenario' ? transport.control(c).then(() => transport.control({ action: 'play' })) : transport.control(c)
         sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
@@ -335,13 +349,13 @@ export function FactoryApp() {
           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length || reviews.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{reviews.length ? `・待覆核 ${reviews.length} 件` : ''}{pending.length || reviews.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
-        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text) => setDemoNote({ text, at: Date.now() })} />}
+        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
-        {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
+        {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>

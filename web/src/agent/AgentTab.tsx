@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Event, Line } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalList } from './ApprovalList'
+import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
 import { nextUp } from './homeItems'
 import { useHomeSelection } from './homeSelection'
@@ -52,6 +53,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
+      {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />

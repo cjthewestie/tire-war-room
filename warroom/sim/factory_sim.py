@@ -323,6 +323,18 @@ class Factory:
         t = self._t
         return [f.spec for f in self._faults if (f.active(t) or not active_only)]
 
+    def scheduled_fault_machines(self) -> set[str]:
+        """情境疊加: machines a fault is still coming to (a scripted step not yet due, or injected with a later
+        start), so an overlay does not stack a second fault on them."""
+        t = self._t
+        return {st.fault.machine_id for _, st in self._pending if st.fault is not None} | \
+            {f.spec.machine_id for f in self._faults if f.start > t}
+
+    def schedule_plant_input(self, pin: PlantInput, at: datetime) -> None:
+        """情境疊加: a plant input fired at `at` (the first step at or after it), like a scripted one."""
+        self._plant_pending.append((at, pin))
+        self._plant_pending.sort(key=lambda x: x[0])
+
     def fault_started_at(self, machine_id: str) -> datetime | None:
         t = self._t
         starts = [f.start for f in self._faults
