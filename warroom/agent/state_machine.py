@@ -460,8 +460,8 @@ class StateMachine:
         ev = run.ev
         pending = getattr(self.approvals, "pending", None)
         supersede = getattr(self.approvals, "supersede", None)
-        if not callable(pending) or not callable(supersede):
-            return
+        if not callable(pending) or not callable(supersede) or ev.id in self._interrupt:
+            return        # a supervisor interrupt: the orchestrator supersedes the cards itself and reports them
         for req in [r for r in pending() if r.event_id == ev.id]:
             try:
                 supersede(req.id, by="state_machine", reason=f"事件已結束（{ev.state.value}），此卡作廢")
@@ -1403,6 +1403,7 @@ class StateMachine:
             plan = plan.model_copy(update={"safe_stop": True})
         if ev.source == "plant":
             plan = self._plant_plan_guard(run, plan)
+        plan = self._bind_takeout(run, plan)
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
         cur = ev.hypotheses[-1] if ev.hypotheses else None
         if phase == "replan" and cur is not None and cur.status is HypothesisStatus.ACTIVE \
@@ -1477,6 +1478,38 @@ class StateMachine:
         run.commander_error = None
         return rules, again_rules, extra_ms, True
 
+    def _bind_takeout(self, run: _Run, plan: CommanderPlan) -> CommanderPlan:
+        """A plan that takes the event press out (machine_out for it) re-solves without THAT press. Mac 10-22, p.11 H2:
+        Lightning wrote unavailable_presses ["CURE-09"] (the system prompt's example press) next to 「7 號機停用」; the
+        gate then blocked the machine_out (no feasible solve without CURE-07) and the approved H2 safe-stopped 3 of 5
+        runs. A solve that names presses but not the event press gets it, and loses a press that is running normally
+        (not out, not held); a solve naming none is left alone (the gate decides, test_agent_review_r4)."""
+        ev = run.ev
+        mid = ev.machine_id
+        out = any(st.tool is ToolName.NOTIFY_TEAMS and st.args.get("kind") == NotifyKind.MACHINE_OUT.value
+                  and st.args.get("machine_id") in (None, mid) for st in plan.steps)
+        if not out or mid not in MACHINE_BY_ID or MACHINE_BY_ID[mid].line is not Line.CURE:
+            return plan
+
+        def keep(p: str) -> bool:
+            st = self._machine_state(p)
+            return st is None or st.status not in (MachineStatus.RUNNING, MachineStatus.IDLE)
+        steps, changed = [], []
+        for st in plan.steps:
+            was = list(st.args.get("unavailable_presses") or []) if st.tool is ToolName.SOLVE_SCHEDULE else []
+            if was and mid not in was:     # names presses, not this one (a solve with none is left to the gate)
+                now = [mid, *(p for p in was if keep(p))]
+                if now != was:
+                    changed.append({"step_id": st.id, "from": was, "to": now})
+                    st = st.model_copy(update={"args": {**st.args, "unavailable_presses": now}})
+            steps.append(st)
+        if not changed:
+            return plan
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"unavailable_presses_bound": changed, "reason": "machine_out of the event press"},
+                          event_id=ev.id)
+        return plan.model_copy(update={"steps": steps})
+
     # ---- VERIFY must test the event, not whatever the LLM picked ----
     EXPECT_MARGIN_C = 1.0
     EXPECT_WITHIN_MIN = (5.0, 60.0)
@@ -1542,6 +1575,12 @@ class StateMachine:
             return (">=" if a.value < a.baseline else "<="), a.value           # at least no worse than now
         return None, None
 
+    @staticmethod
+    def _exact_bound(ev: Event, channel: Channel) -> bool:
+        """The code's threshold is the test itself, not a floor: temperature on a curing press."""
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        return channel is Channel.TEMP and mdef is not None and mdef.line is Line.CURE
+
     def _default_expectation(self, ev: Event, channel: Channel, within: float) -> Expectation:
         a = ev.anomaly
         op, bound = self._bound_for(ev, channel)
@@ -1578,6 +1617,12 @@ class StateMachine:
                 op = need_op
             if bound is not None and (value < bound if op == ">=" else value > bound):
                 fixes.append(f"value {value:g} -> {bound:g}")
+                value = bound
+            elif bound is not None and value != bound and self._exact_bound(ev, channel):
+                # a press temperature test is the cure band (page 11: H1 holds while 7 號 stays ≥121). A higher bar
+                # (Mac 10-22: Lightning asked ≥123 with the prediction at 122±1) rejected H1 at once at 122 °C, before
+                # the leak, so the demo never read 119.5
+                fixes.append(f"value {value:g} -> {bound:g} (cure band)")
                 value = bound
         if op != exp.op:
             upd["op"] = op

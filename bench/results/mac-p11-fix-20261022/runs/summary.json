@@ -1,0 +1,127 @@
+[
+ {
+  "run": 1,
+  "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 145.0,
+  "end": "closed",
+  "total_s": 145.5,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:12.6s",
+   "replan:commander:steam_leak_or_sensor_drift:10.0s"
+  ]
+ },
+ {
+  "run": 2,
+  "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 153.9,
+  "end": "closed",
+  "total_s": 154.4,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:11.4s",
+   "replan:commander:steam_leak_or_sensor_drift:20.5s"
+  ]
+ },
+ {
+  "run": 3,
+  "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 145.8,
+  "end": "closed",
+  "total_s": 146.4,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:13.8s",
+   "replan:commander:steam_leak_or_sensor_drift:10.0s"
+  ]
+ },
+ {
+  "run": 4,
+  "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 150.4,
+  "end": "closed",
+  "total_s": 150.9,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:16.7s",
+   "replan:commander:steam_leak_or_sensor_drift:9.5s"
+  ]
+ },
+ {
+  "run": 5,
+  "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置",
+  "h2_source": "model",
+  "h2_card": true,
+  "h2_card_s": 142.8,
+  "end": "closed",
+  "total_s": 143.4,
+  "hyps": [
+   [
+    "H1",
+    "single_press_issue",
+    "rejected"
+   ],
+   [
+    "H2",
+    "steam_leak_or_sensor_drift",
+    "active"
+   ]
+  ],
+  "calls": [
+   "plan:commander:single_press_issue:10.3s",
+   "replan:commander:steam_leak_or_sensor_drift:9.1s"
+  ]
+ }
+]

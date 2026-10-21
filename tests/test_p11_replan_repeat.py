@@ -118,3 +118,28 @@ async def test_strict_repeat_twice_still_safe_stops(tmp_path):
     assert not _sys(audit, "fell_back_to_rules")
     assert any(p.get("error") == "commander re-proposed a rejected hypothesis" and "action" not in p
                for p in _sys(audit, "error"))
+
+
+class MacLightning(MockCommander):
+    """Mac 10-22 real runs: H1's test asked ≥123 °C (prediction 122±1), and H2 re-solved without CURE-09 (the system
+    prompt's example press) next to 「7 號機停用」."""
+
+    def build(self, req):
+        p = super().build(req)
+        if req.phase == "plan":
+            exp = p.hypothesis.expectation.model_copy(update={"value": 123.0})
+            return p.model_copy(update={"hypothesis": p.hypothesis.model_copy(update={"expectation": exp})})
+        steps = [s.model_copy(update={"args": {**s.args, "unavailable_presses": ["CURE-09"]}})
+                 if s.tool.value == "solve_schedule" else s for s in p.steps]
+        return p.model_copy(update={"steps": steps})
+
+
+async def test_press_test_is_the_cure_band_and_takeout_binds_the_event_press(tmp_path):
+    ev, audit, sim = await _run(tmp_path, MacLightning())
+    assert ev.state is EventState.CLOSED, ev.outcome
+    h1 = ev.hypotheses[0]
+    assert (h1.expectation.op, h1.expectation.value) == (">=", 121.0)
+    assert any("119.5" in e for e in h1.evidence)            # rejected by the leak, not at 122 °C right away
+    bound = _sys(audit, "unavailable_presses_bound")
+    assert bound and bound[0]["unavailable_presses_bound"][0]["to"] == ["CURE-07"]
+    assert sim.status["CURE-07"] is MachineStatus.OUT_OF_SERVICE
