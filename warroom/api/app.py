@@ -1243,7 +1243,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                         control=Control(), mode=body.mode)
         if overview_mode:
             from warroom.api import overview
-            res["links"] = _safe(lambda: overview.links(r, text, res["reply"], reads), [])
+            acted = [str(s["args"]["event_id"]) for s in res["steps"] if isinstance(s.get("args"), dict) and s["args"].get("event_id")]
+            res["links"] = _safe(lambda: overview.links(r, text, res["reply"], reads, acted), [])
             res["mode"] = "overview"
         key = getattr(r.audit, "_key", None)
         out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])

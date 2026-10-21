@@ -87,7 +87,7 @@ def questionable(r: Any) -> list[dict[str, Any]]:
         if card is not None and card.expires_at is not None:
             total, gone = _min(card.expires_at, card.created_at), _min(now, card.created_at)
             if total > 0 and gone > total / 2:
-                why.append(f"等核准 {gone:.0f} 分鐘，超過時限一半（{total:.0f} 分鐘後會安全停止）")
+                why.append(f"等核准 {gone:.0f} 分鐘，超過時限一半（時限 {total:.0f} 分鐘，到時沒核准會安全停止）")
         if e.replans >= REPLANS:
             why.append(f"重新規劃了 {e.replans} 次")
         for h in e.hypotheses:
@@ -113,7 +113,7 @@ def questionable(r: Any) -> list[dict[str, Any]]:
             late = [t for t in board.for_event(e.id) if t.status != "完成" and t.eta is not None and _min(now, t.eta) > TASK_LATE_MIN]
             if late:
                 t = max(late, key=lambda x: _min(now, x.eta))
-                why.append(f"現場任務逾時：{t.title[:16]} 晚了 {_min(now, t.eta):.0f} 分鐘" + (f"（共 {len(late)} 件）" if len(late) > 1 else ""))
+                why.append(f"現場任務逾時：{t.title[:24]} 晚了 {_min(now, t.eta):.0f} 分鐘" + (f"（共 {len(late)} 件）" if len(late) > 1 else ""))
         if why:
             out.append({"id": e.id, "what": _what(e), "machine": e.machine_id, "state": STATE.get(st, st),
                         "reasons": why, "opened": e.opened_at})
@@ -162,14 +162,15 @@ def _mentioned(e: Any, reply: str) -> bool:
                                                                or machine_label(e.machine_id).replace(" ", "") in reply.replace(" ", "")))
 
 
-def links(r: Any, text: str, reply: str, reads: list[tuple[str, Any]]) -> list[dict[str, Any]]:
+def links(r: Any, text: str, reply: str, reads: list[tuple[str, Any]], acted: list[str] = ()) -> list[dict[str, Any]]:
     """Links to task boards for one overview reply. Only ids of events that exist: an id the model wrote is kept only
     when it is real. The questionable list (asked for, or read) is linked whole with its reasons; tasks the reads
-    returned are linked when the reply names them (id, order or press), or all of them when it names none."""
+    returned are linked when the reply names them (id, order or press), or all of them when it names none. `acted`:
+    the events a control step of this turn ran on (「好」 → 中斷 it)."""
     events = {e.id: e for e in r.events()}
     asked = bool(QUESTIONABLE_RX.search(text)) or any(t == "questionable" for t, _d in reads)
     q = {x["id"]: "；".join(x["reasons"]) for x in questionable(r)} if asked else {}
-    order: list[str] = [*q]
+    order: list[str] = [*q, *acted]
     order += [i for i in _ID_RX.findall(reply) if i in events]
     read = [i for _t, d in reads for i in _ids_in(d) if i in events]
     named = [i for i in read if _mentioned(events[i], reply)]

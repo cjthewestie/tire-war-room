@@ -1012,6 +1012,10 @@ class MainAgent:
         # 「我剛剛說哪台不要動？」「前面我們聊過什麼」: about the conversation itself, answered from its own record; with
         # the last turn alongside it re-answered that turn (「7 號機現在溫度 127.9°C」, real run 10-22)
         recall = prev is not None and bool(_RECALL_RX.search(t))
+        if self.mode == "overview" and prev is not None and topic_for(t) not in (None, topic_for(prev[0])):
+            # 總覽: 「哪些任務有問題」 after 「#A-311 之前怎麼了」 is its own question (with the last turn alongside, the real
+            # model re-read #A-311, preview run 10-22)
+            asked = about_last = False
         follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or about_last or asked or recall)
         # the supervisor's earlier words, repeats folded (20 × 「7號機現在溫度多少」 crowded out the real question)
         earlier = list(dict.fromkeys(q for q, _a in self.memory)) if follow else []

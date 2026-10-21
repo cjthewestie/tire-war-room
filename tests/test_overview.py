@@ -15,10 +15,10 @@ T0 = datetime(2026, 10, 22, 8, 0, tzinfo=timezone(timedelta(hours=8)))
 
 
 def _ev(eid, state="plan", minutes=1.0, **kw):
-    base = dict(id=eid, opened_at=T0, closed_at=None, state=NS(value=state), follow_up=None, stop_reason_text=None,
-                outcome=None, replans=0, hypotheses=[], consecutive_failures=0, steps=[], source="detector",
-                timeline=[NS(ts=T0 + timedelta(minutes=minutes))], command=None, alert_card=None,
-                anomaly=NS(message="溫度偏低"), machine_id="CURE-07")
+    base = {"id": eid, "opened_at": T0, "closed_at": None, "state": NS(value=state), "follow_up": None,
+            "stop_reason_text": None, "outcome": None, "replans": 0, "hypotheses": [], "consecutive_failures": 0, "steps": [],
+            "source": "detector", "timeline": [NS(ts=T0 + timedelta(minutes=minutes))], "command": None, "alert_card": None,
+            "anomaly": NS(message="溫度偏低"), "machine_id": "CURE-07"}
     return NS(**{**base, **kw})
 
 
@@ -111,3 +111,8 @@ async def test_overview_mode_has_no_selected_task(tmp_path, monkeypatch):
         assert over["mode"] == "overview" and isinstance(over["links"], list) and "links" not in task
         rows = [e.payload for e in p.rt.audit.tail(0, 1_000_000) if e.actor == "main_agent" and e.payload.get("orch") == "chat"]
         assert rows[-1]["mode"] == "overview" and rows[-1]["selected"] is None and "mode" not in rows[-2]
+
+
+def test_links_name_the_task_a_control_ran_on():
+    r = _runtime([_ev("EV-1", state="safe_stop", closed_at=T0, follow_up=NS(status="closed"))])
+    assert [x["event_id"] for x in overview.links(r, "好", "主管中斷 10 號機", [], ["EV-1", "EV-NOPE"])] == ["EV-1"]
