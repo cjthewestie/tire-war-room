@@ -122,6 +122,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
       {uses.length ? <ToolChips uses={uses} /> : <p className="muted small">尚無工具紀錄</p>}
     </Block>
   )
+  const gated = (ev?.steps ?? []).filter((x) => x.state === 'awaiting_approval')
   const conclusion = (n: number) => (
     <Block key="concl" n={n} title="結論" className="apv-concl">
       <dl className="concl">
@@ -140,6 +141,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
             {chosenOpt && <li>人力：{chosenOpt.id} {chosenOpt.label}</li>}
             {afterSteps.map((n) => <li key={n.id}>接著自動（R1）：{TOOL_LABEL[n.tool]}・{plain(n.purpose)}</li>)}
           </ul>
+          {gated.length > 0 && (
+            // the exact tool and args approving runs, from the event's steps (code), next to the AI's own words
+            // above: title and rationale are model prose and could differ (CJ 2026-10-21: 「我有方法避免prompt injection嗎」)
+            <details className="concl-sub apv-exec" data-testid="apv-exec">
+              <summary>程式實際會執行（工具與參數）</summary>
+              <ul>{gated.map((g) => <li key={g.step.id}><code>{g.step.id} {g.step.tool} {JSON.stringify(g.step.args)}</code></li>)}</ul>
+            </details>
+          )}
         </dd>
         <dt className="no">不同意時</dt>
         <dd>按「討論」跟 AI 說，AI 重排發新版；未核准前不執行{activeV != null ? `（排程維持第 ${activeV} 版）` : ''}。</dd>
