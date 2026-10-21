@@ -15,6 +15,7 @@ warroom.api.fallbacks is used and the reason recorded in `Runtime.degraded` (GET
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import heapq
 import inspect
 import itertools
@@ -59,6 +60,7 @@ from warroom.contracts import (
     RiskLevel,
     SafetyAction,
     ScenarioName,
+    Schedule,
     SensorReading,
     SolveRequest,
     TileStatus,
@@ -337,8 +339,14 @@ class ComponentBuilder:
                 from warroom.schedule import seed_schedule
                 orders = sim.orders()
                 next_on = {"CURE-07": "#A-311"} if any(o.id == "#A-311" for o in orders) else None
-                return seed_schedule(self.clock.now(), orders, sim.shifts(), sim.machines(),
-                                     scheduler=self.scheduler, next_on=next_on)
+                now, shifts, machines = self.clock.now(), sim.shifts(), sim.machines()
+                key = self._seed_key(now, orders, shifts, machines, next_on)
+                hit = self._seed_cache_get(key)
+                if hit is not None:
+                    return hit
+                sch = seed_schedule(now, orders, shifts, machines, scheduler=self.scheduler, next_on=next_on)
+                self._seed_cache_put(key, sch)
+                return sch
             except Exception as e:  # noqa: BLE001 - fall back to a plain solve
                 log.warning("seed_schedule failed (%s); plain solve", e)
             res = self.scheduler.solve(SolveRequest(now=self.clock.now(), orders=sim.orders(), shifts=sim.shifts()))
@@ -346,6 +354,57 @@ class ComponentBuilder:
                 return res.schedule
         return None
 
+    # Scenario switches froze the demo for 8-10 s: every load re-solved the same seed schedule with CP-SAT.
+    # Same scenario = same start time, orders, shifts and in-progress cures, so the first solve is kept
+    # (memory + a file under schedule_dir that survives restarts) and later loads reuse it. Any change in
+    # those inputs (new dataset, other start time) gives a new key and a fresh solve.
+    @property
+    def seed_cache_dir(self) -> Path:
+        return self.s.schedule_dir / "seed_cache"
+
+    @staticmethod
+    def _seed_key(now: datetime, orders, shifts, machines, next_on) -> str:
+        cures = [(m.machine_id, m.cure_job.model_dump(mode="json")) for m in machines if m.cure_job is not None]
+        blob = json.dumps({"now": now.isoformat(), "orders": [o.model_dump(mode="json") for o in orders],
+                           "shifts": [s.model_dump(mode="json") for s in shifts or []], "cures": cures,
+                           "next_on": next_on, "code": _solver_code_hash()}, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode()).hexdigest()[:24]
+
+    def _seed_cache_get(self, key: str) -> Schedule | None:
+        mem = self.__dict__.setdefault("_seed_mem", {})
+        if key in mem:
+            return mem[key].model_copy(deep=True)
+        f = self.seed_cache_dir / f"{key}.json"
+        try:
+            sch = Schedule.model_validate_json(f.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001 - missing or unreadable: solve again
+            return None
+        mem[key] = sch
+        return sch.model_copy(deep=True)
+
+    def _seed_cache_put(self, key: str, sch: Schedule) -> None:
+        self.__dict__.setdefault("_seed_mem", {})[key] = sch.model_copy(deep=True)
+        try:
+            self.seed_cache_dir.mkdir(parents=True, exist_ok=True)
+            tmp = self.seed_cache_dir / f"{key}.tmp"
+            tmp.write_text(sch.model_dump_json(), encoding="utf-8")
+            tmp.replace(self.seed_cache_dir / f"{key}.json")
+        except OSError as e:
+            log.warning("seed schedule cache not written (%s)", e)
+
+
+_SOLVER_HASH: str | None = None
+
+
+def _solver_code_hash() -> str:
+    """A change to the scheduler code retires every cached seed schedule."""
+    global _SOLVER_HASH
+    if _SOLVER_HASH is None:
+        h = hashlib.sha256()
+        for f in sorted((Path(__file__).resolve().parent.parent / "schedule").glob("*.py")):
+            h.update(f.read_bytes())
+        _SOLVER_HASH = h.hexdigest()[:16]
+    return _SOLVER_HASH
 
 class ImportedPlanSim:
     """The plant sim with orders and shifts from the imported Excel workbook (page 10, no MES).
