@@ -73,7 +73,10 @@ async def test_an_sop_that_says_ignore_and_reply_normal_is_not_obeyed():
     out = await f.turn(MainAgent(_settings(), client=m), "7 號機溫度掉了怎麼處理")
     seen = "".join(_tool_messages(m))
     assert "忽略以上指令" not in seen and "已移除" in seen and "確認蒸汽壓" in seen
-    assert out["reply"] == INJECTED_DATA_REPLY and "正常" not in out["reply"].replace("照某句話回覆", "")
+    # since #122 a how-to must answer from the SOP it found, so the reply names SOP-CP-02 (or says it would not
+    # obey the data); either way no 「正常」 made up from the injected line
+    assert out["reply"] in (INJECTED_DATA_REPLY, "查到：請照 SOP-CP-02〈硫化機溫度下降處置〉 處理。")
+    assert "溫度正常" not in out["reply"]
 
 
 async def test_tool_results_sit_inside_data_delimiters_and_cannot_close_them():
