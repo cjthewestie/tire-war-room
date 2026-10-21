@@ -86,7 +86,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   await p.waitForTimeout(400)
   const s = await text(p)
   check('schedule versions', s.includes('第 1 版') && s.includes('第 2 版') && s.includes('第 3 版'))
-  check('schedule steps', s.includes('solve_schedule') && s.includes('sop_search') && s.includes('換假設'))
+  check('schedule steps', s.includes('solve_schedule') && s.includes('sop_search') && s.includes('重新判斷'))
   check('labor chart', s.includes('硫化機（運轉）') && s.includes('胎體／胎面膠組'))
   check('capacity', s.includes('13.3 → 9.3 週') && s.includes('4.9'))
   check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.g-job.hot title')].some((t) => t.textContent?.includes('9 號硫化機'))))

@@ -4,10 +4,11 @@ import type { Event, RiskLevel } from './contracts'
 
 const CN = ['零', '一', '二', '三', '四', '五', '六', '七', '八', '九']
 
-/** "R3" → "需主管核准（附理由）" */
-export const RISK_PLAIN: Record<RiskLevel, string> = { R0: '只讀取', R1: '自動執行', R2: '需主管核准', R3: '需主管核准・附理由' }
-/** Short form for small chips. */
-export const RISK_SHORT: Record<RiskLevel, string> = { R0: '讀取', R1: '自動', R2: '需核准', R3: '需核准' }
+/** 風險分級 (page 7) in the supervisor's words, the one table for every screen: 「自動」 or 「請核准」 (the phone fills in
+ *  the reason itself, so no 「附理由」). The code R0–R3 stays on the Agent page, 狀態機 and 後台 only: RISK_LABEL there. */
+export const RISK_PLAIN: Record<RiskLevel, string> = { R0: '只讀取', R1: '自動', R2: '請核准', R3: '請核准' }
+/** "R3" → "R3・請核准", for the screens that keep the code. */
+export const RISK_LABEL = Object.fromEntries(Object.entries(RISK_PLAIN).map(([r, t]) => [r, `${r}・${t}`])) as Record<RiskLevel, string>
 
 /** "H1" → "判斷一" */
 export function hypName(id: string): string {
@@ -22,7 +23,7 @@ export function plain(s: string | null | undefined): string {
     .replace(/(^|[；;，,、\s（(→])S\d+b?\s+/g, '$1')
     .replace(/假設\s*H(\d)/g, (_, n) => hypName(`H${n}`))
     .replace(/\bH(\d)\b\s?/g, (_, n) => hypName(`H${n}`))
-    .replace(/排程\s*v(\d+)/g, '排程（第 $1 版）')
+    .replace(/排程\s*v(\d+)\s*/g, '第 $1 版排程')
     .replace(/\bv(\d+)\b/g, '第 $1 版')
     .replace(/求解：/g, '重排：')
 }

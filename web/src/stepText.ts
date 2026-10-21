@@ -87,14 +87,15 @@ export function resultText(tool: ToolName, args: D, data: D, opts: { staffing?: 
       }
       if (data.deliveries_met) bits.push('交期全部滿足')
       else if (arr(data.late_orders).length) bits.push(`延誤 ${arr(data.late_orders).join('、')}`)
-      bits.push(data.feasible === false ? '不可行' : `可行（${data.solver === 'heuristic' ? '備援求解器' : 'CP-SAT'}）`)
-      if (data.fell_back) bits.push('求解逾時 → 備援')
-      return bits.filter(Boolean).join('，')
+      if (data.feasible === false) bits.push('不可行')
+      // the solver's name is for engineers: only the fallback is said (「（備援求解）」)
+      const fallback = data.fell_back ? '（求解逾時，改用備援求解）' : data.solver === 'heuristic' ? '（備援求解）' : ''
+      return bits.filter(Boolean).join('，') + fallback
     }
     case 'confirm_schedule': {
       const v = data.version ?? args.schedule_version
       const prev = data.previous_version
-      return `排程 v${v} 生效${prev != null ? `（保留 v${prev}，可一鍵回復）` : ''}`
+      return `第 ${v} 版排程生效${prev != null ? `（保留第 ${prev} 版，可一鍵回復）` : ''}`
     }
     case 'set_cure_time':
       return `${pressShort(args.press_id)} 建議硫化 ${num(args.total_cure_h)} h`
