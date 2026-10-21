@@ -71,8 +71,10 @@ export function machineRing(id: string, tile: MachineTile | undefined, world: Wo
   const here = items.filter((t: WorkTask) => t.machine_id === id && (t.status === '執行中' || t.status === '前往中'))
   const ringOf = (task: WorkTask): MachineRing => {
     const p = liveProgress(task, now)
+    // a repair on its way reads as the person (the demo's 「派人進廠維修」 step), other tasks keep their kind first
+    const going = REPAIR_KINDS.has(task.kind) ? '維修人員前往中' : `${task.kind}（人員前往中）`
     return { kind: 'task', progress: p, color: TASK_COLOR[task.kind] ?? '#5db2f5',
-      label: `${task.kind}${task.status === '前往中' ? '（人員前往中）' : ` ${Math.round(p * 100)}%`}` }
+      label: task.status === '前往中' ? going : `${task.kind} ${Math.round(p * 100)}%` }
   }
   const repairing = here.find((t) => REPAIR_KINDS.has(t.kind))
   if (repairing) return ringOf(repairing)

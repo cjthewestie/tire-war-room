@@ -1,11 +1,13 @@
 // Issue #48: the raw materials, visible in the 3D factory. A plate above the loading-area pallet says how the six
 // materials stand (GET /api/world materials): 「原料 6 項正常」, or the ones that are low / out with what is left.
 // When the patrol (issue #32) has a shortfall open (a material_short plant event), the plate turns red and a ring
-// pulses on the floor round the pallet, like a machine in trouble. Read-only.
+// pulses on the floor round the pallet, like a machine in trouble. Read-only. Demo (?demo=1): no plate while all six
+// are fine (a non-answer as loud as a real shortage); it shows up once one is low.
 import { Html } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import * as THREE from 'three'
+import { DEMO_MODE } from '../components/DemoStrip'
 import type { Event, WorldMaterial } from '../contracts'
 import { LIGHT_HEX, PALLETS } from './layout'
 
@@ -26,6 +28,7 @@ export function MaterialStock({ materials, events }: { materials: WorldMaterial[
     r.scale.set(1 + u * 0.6, 1 + u * 0.6, 1)
     ;(r.material as THREE.MeshBasicMaterial).opacity = 0.8 * (1 - u)
   })
+  if (DEMO_MODE && !short && off.length === 0) return null
   return (
     <group position={[PX, 0, PZ]} name="material-stock">
       {short && (

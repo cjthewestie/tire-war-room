@@ -6,6 +6,8 @@
 // 停用檢修 task instead of a temperature-drop checklist.
 import { useEffect, useState } from 'react'
 import { AiStatusLine } from '../AiStatusLine'
+import { CH_LABEL, expectationOf } from '../aiStatus'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { STATE_LABEL } from '../components/common'
 import type { Event, MetricTile, WorkTask } from '../contracts'
 import { fmtHM } from '../format'
@@ -100,13 +102,15 @@ function FieldSopSteps({ machineId, tiles, ev }: { machineId: string; tiles: Met
         </ol>
       )}
       {sent
-        ? <p className="field-sop-ok" data-testid="field-sop-done">✓ 已回報現場處置完成。讀數回穩後，系統會驗證並結案{ev ? `（目前：${STATE_LABEL[ev.state]}）` : ''}。</p>
+        ? <p className="field-sop-ok" data-testid="field-sop-done">{DEMO_MODE
+          ? `已回報。${CH_LABEL[expectationOf(ev)?.channel ?? 'temp_c']}回到正常就會自動結束這件異常。`
+          : `✓ 已回報現場處置完成。讀數回穩後，系統會驗證並結案${ev ? `（目前：${STATE_LABEL[ev.state]}）` : ''}。`}</p>
         : steps.length > 0 && (
           <button className="field-sop-go" disabled={!all || busy || !transport?.clearFault} onClick={() => void finish()} data-testid="field-sop-finish">
-            {busy ? '回報中…' : all ? '回報處置完成' : `勾完 ${steps.length} 步才能回報（已完成 ${done.size}）`}
+            {busy ? '回報中…' : all ? '回報處置完成' : DEMO_MODE ? `還有 ${steps.length - done.size} 步` : `勾完 ${steps.length} 步才能回報（已完成 ${done.size}）`}
           </button>
         )}
-      {!transport?.clearFault && <p className="muted small">模擬資料模式不能回報；接上伺服器才能排除異常。</p>}
+      {!transport?.clearFault && <p className="muted small">{DEMO_MODE ? '示範資料不能回報。' : '模擬資料模式不能回報；接上伺服器才能排除異常。'}</p>}
       {err && <p className="err">{err}</p>}
     </section>
   )

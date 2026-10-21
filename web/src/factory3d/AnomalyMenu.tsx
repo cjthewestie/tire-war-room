@@ -4,6 +4,7 @@
 // 情境疊加: a scenario picked while another one's event or approval is open is added on top (scenarioOverlay.ts).
 import { useState } from 'react'
 import type { ScenarioName, SimControl } from '../contracts'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
 import { useSimEvents } from '../components/useSimEvents'
 import { SCENARIOS } from '../mock/engine'
@@ -23,11 +24,12 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
   if (!transport) return null
   const paused = !!state.clock?.paused
   /** fn may return the note to show when it is done (情境疊加: what was added).
-   *  #85: only a scenario load (or an overlay) shows a wait note first; speed / pause / reset / single events are instant */
+   *  #85: only a scenario load (or an overlay) shows a wait note first (`wait`, the whole note); speed / pause / reset /
+   *  single events are instant */
   const run = async (text: string, fn: () => Promise<unknown>, wait: string | null = null) => {
     setBusy(true)
     onOpen(false)
-    if (wait !== null) onNote(`${text}…${wait}`)
+    if (wait !== null) onNote(wait)
     try {
       const done = await fn()
       if (typeof done === 'string') onNote(done, OVERLAY_NOTE_MS)
@@ -37,9 +39,11 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
   const control = (c: SimControl, text: string, wait: string | null = null) => run(text, () => transport.control(c), wait)
   const scenario = (n: ScenarioName) => {
     // 情境疊加: another scenario's event or approval still open → add this one on top (the demo strip's rule)
-    if (scenarioClick(n, state) === 'overlay') return run(`疊加異常：${label(n)}`, async () => overlayNote(label(n), await transport.overlay(n)), '')
+    if (scenarioClick(n, state) === 'overlay') return run(`疊加異常：${label(n)}`, async () => overlayNote(label(n), await transport.overlay(n)), `疊加異常：${label(n)}…`)
     const s = SCENARIOS.find((x) => x.name === n)
-    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, `載入異常：${label(n)}`, '（載入中，第一次較久）')
+    // demo: say what is happening, not that the first load is slow
+    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, DEMO_MODE ? `已觸發：${label(n)}` : `載入異常：${label(n)}`,
+      DEMO_MODE ? `正在載入：${label(n)}` : `載入異常：${label(n)}…（載入中，第一次較久）`)
   }
   return (
     <div className="f3-anom" data-testid="f3-anomaly">
@@ -49,12 +53,12 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
       </button>
       {open && (
         <div className="f3-anom-menu" role="menu" data-testid="f3-anomaly-menu">
-          <p>選一個異常開始 Demo</p>
+          <p>{DEMO_MODE ? '選一個異常開始' : '選一個異常開始 Demo'}</p>
           {ANOMALIES.map((n) => (
             <button key={n} role="menuitem" disabled={busy} data-scenario={n} onClick={() => void scenario(n)}>{label(n)}</button>
           ))}
           {ev.live && ev.catalog.length > 0 && <>
-            <p>單一事件（照目前情境加一件）</p>
+            <p>{DEMO_MODE ? '再加一件異常' : '單一事件（照目前情境加一件）'}</p>
             {ev.catalog.map((c) => (
               <button key={c.kind} role="menuitem" disabled={busy} data-kind={c.kind}
                 onClick={() => void run(`已觸發：${c.label}`, () => ev.fire(c.kind))}>

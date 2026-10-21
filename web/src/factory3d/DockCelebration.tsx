@@ -1,5 +1,6 @@
 // A small celebration at the loading dock when a shipment leaves (issue #36): coloured confetti pops up over the
-// dock and falls for ~3 s. `at` changes once per shipment_departed.
+// dock and falls for ~3 s. `at` changes once per shipment_departed. `quiet` (demo, an anomaly open): a shipment then
+// gets no confetti, and confetti already in the air stops; it would steal the story.
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
@@ -8,7 +9,7 @@ import { DOCK } from './layout'
 const N = 36
 const COLORS = ['#76b900', '#ffc94d', '#4fb3d9', '#ff8a50', '#b39ddb']
 
-export function DockCelebration({ at }: { at: number | null }) {
+export function DockCelebration({ at, quiet = false }: { at: number | null; quiet?: boolean }) {
   const group = useRef<THREE.Group>(null)
   const parts = useMemo(() => Array.from({ length: N }, (_, i) => {
     const a = (i / N) * Math.PI * 2
@@ -19,9 +20,9 @@ export function DockCelebration({ at }: { at: number | null }) {
   useFrame(({ clock }) => {
     const g = group.current
     if (!g) return
-    if (start.current === -1) start.current = clock.elapsedTime
+    if (start.current === -1) start.current = quiet ? null : clock.elapsedTime
     const t = start.current == null ? 99 : clock.elapsedTime - start.current
-    g.visible = t < 3.2
+    g.visible = t < 3.2 && !quiet
     if (!g.visible) return
     g.children.forEach((c, i) => {
       const p = parts[i]

@@ -26,6 +26,20 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-ev { font-size: 14px; }
 .f3-ev.open { color: #fff !important; background: #c0352a !important; font-weight: 700; }
 .f3-pend.has { color: #5a3a00 !important; background: #ffd77a !important; font-weight: 700; }
+/* demo answer card: the headline answers what to do now, the line under it is Agent Nemo's action and time
+   (AiStatusLine compact), then what waits on the phone, then the clock and the link chip as small print. The bar on
+   the left is the story's colour: red open, amber 回溫中, green 已恢復正常 */
+.f3-hud > .f3-answer { display: grid; gap: 3px; padding: 10px 16px 9px 13px; border-left: 5px solid transparent; }
+.f3-answer > b { font-size: 18px; font-weight: 800; line-height: 1.35; }
+.f3-answer.bad { border-left-color: var(--c-red); } .f3-answer.bad > b { color: var(--c-red); }
+.f3-answer.warm { border-left-color: #e08a00; } .f3-answer.warm > b { color: var(--c-amber); }
+.f3-answer.ok { border-left-color: #2f9e44; } .f3-answer.ok > b { color: var(--c-green); }
+.f3-answer .ai-status { font-size: 14px; gap: 0; }
+.f3-answer .ai-status > span::before { content: none; }
+.f3-answer .ai-status > span + span::before { content: "・"; margin: 0; opacity: .6; }
+.f3-ask { justify-self: start; margin-top: 2px; padding: 1px 10px; border-radius: 999px; background: #ffd77a; color: #5a3a00; font-size: 14px; font-weight: 700; }
+.f3-answer > small { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; color: var(--c-ink-dim); font-size: 12px; }
+.f3-answer > small .f3-conn { font-size: 12px; }
 
 /* proximity bubble just under the figure's feet (drei <Html> anchored at the feet), so it never covers the machine
    in front of the lead or its reading tag */
@@ -109,6 +123,7 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-thumb { position: absolute; left: -28px; bottom: 18%; width: 46px; height: 120px; border-radius: 24px; background: linear-gradient(90deg, #d9a47c, #e8b98f); transform: rotate(-18deg); box-shadow: 0 6px 18px rgba(60, 40, 20, .3); pointer-events: none; }
 @media (max-width: 600px) {
   .f3-thumb { display: none; } .f3-keys { display: none; }
+  .f3-repair { padding: 3px 9px; font-size: 12px; }
   /* narrow screens: the HUD stack fills the top-left, so the toast drops to the bottom, full width */
   .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
 }
@@ -145,6 +160,16 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-anom-menu small { color: var(--c-ink-dim); font-size: 11px; }
 .f3-anom-row { display: flex; gap: 6px; margin-top: 4px; }
 .f3-anom-row button { flex: 1; justify-content: center; }
+
+/* demo: 觸發異常 is the presenter's control, in paper with red text (the scene's red belongs to the story), bottom
+   right with its menu opening upward (touch: still under the HUD, the on-screen buttons hold that corner) */
+.f3-anom-corner { position: absolute; z-index: 11; right: 14px; bottom: 12px; }
+.f3-anom-corner .f3-anom { display: flex; flex-direction: column-reverse; align-items: flex-end; gap: 6px; pointer-events: auto; }
+.f3-root.demo .f3-anom-btn { background: var(--c-paper-solid); color: var(--c-red); box-shadow: var(--c-shadow), inset 0 0 0 2px rgba(192, 53, 42, .3); }
+.f3-root.demo .f3-anom-btn.on, .f3-root.demo .f3-anom-btn:hover { background: #fde3df; }
+.f3-root.demo .f3-anom-btn kbd { background: #fffdf7; color: var(--c-red); border: 1px solid #e8c9c4; }
+/* demo: the machine drawer keeps the dashboard's dark theme; a dim like the desk monitor's makes it read as a screen */
+.f3-root.demo .drawer-wrap { background: radial-gradient(ellipse at center, rgba(40, 34, 28, .45), rgba(40, 34, 28, .78)); }
 
 /* #72 現場處置 SOP inside the machine drawer (3D only) */
 .field-sop { margin: 10px 0; padding: 12px 14px; border-radius: 12px; border: 2px solid #f0a33a; background: rgba(240, 163, 58, .1); display: grid; gap: 8px; }

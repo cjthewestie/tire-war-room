@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
 import { DEMO_MODE } from '../components/DemoStrip'
-import { LINES } from '../factory'
+import { LINES, machineLabel } from '../factory'
 import type { WarRoomState } from '../store'
 import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
@@ -220,10 +220,11 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       {focus && (
         <LateHtml position={[0, lampY + 0.2, lz]} zIndexRange={[11, 10]} style={{ pointerEvents: 'none' }}>
           <div className={`f3-tag ${light}`} data-testid={`tag-${p.id}`}>
-            <b>{tile?.short_name ?? p.short}</b>
+            <b>{DEMO_MODE ? machineLabel(p.id) : tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
             <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>
-            {work && <em data-testid={`work-${p.id}`}>{work}</em>}
+            {/* demo: an alarm ring's 「異常」 under the status 「異常」 said it twice */}
+            {work && !(DEMO_MODE && tile && work === STATUS_LABEL[tile.status]) && <em data-testid={`work-${p.id}`}>{work}</em>}
           </div>
         </LateHtml>
       )}
@@ -774,11 +775,14 @@ export function World({ state, focusId, pinId = null, active, fp, celebrate = nu
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => <PressNo key={p.id} p={p} hot={hot.has(p.id)} />)}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
-        <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
-        {WALL_DOORS.map((d) => (
-          <RoomSign key={d.to} id={d.to === 'break' ? 'break' : 'restroom'} label={d.label} door={d.color}
-            x={d.x + d.out[0] * 0.12} z={d.z + d.out[1] * 0.12} y={DOOR_H + 0.22} />
-        ))}
+        {/* demo: no 員工待命區 / 休息區 / 廁所 plates (not the supervisor's story; the doors do not lead anywhere either) */}
+        {!DEMO_MODE && <>
+          <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
+          {WALL_DOORS.map((d) => (
+            <RoomSign key={d.to} id={d.to === 'break' ? 'break' : 'restroom'} label={d.label} door={d.color}
+              x={d.x + d.out[0] * 0.12} z={d.z + d.out[1] * 0.12} y={DOOR_H + 0.22} />
+          ))}
+        </>}
       </>}
       <BigScreen active={active} />
       <WarRoomScreen />
@@ -792,8 +796,9 @@ export function World({ state, focusId, pinId = null, active, fp, celebrate = nu
       {active && state.world && <MaterialStock materials={state.world.materials} events={state.snapshot?.events ?? []} />}
       <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} recs={recs} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
-      <DockCelebration at={celebrate} />
-      <Ambient />
+      {/* demo: no confetti over an open anomaly, and no chimney steam (smoke off a press that is fine reads as trouble) */}
+      <DockCelebration at={celebrate} quiet={DEMO_MODE && hot.size > 0} />
+      {!DEMO_MODE && <Ambient />}
     </group>
   )
 }
