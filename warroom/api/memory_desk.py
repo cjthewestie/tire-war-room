@@ -87,6 +87,34 @@ class MemoryDesk:
         day, loop = self.today_key()
         return self.obs.day(ML.day_name(day, loop))
 
+    def today_card(self) -> dict[str, Any]:
+        """總覽 今日總結 (CJ, 2026-10-22: 「為什麼不能像claude mem 有前面session總結 應該要有個今日總結」): today's counts and
+        key observations, live from the observations (no day summary exists until the day ends), plus the day summary
+        when there is one and the previous day's as 前一日總結. Code only, read-only."""
+        obs = self.today()
+        day, loop = self.today_key()
+        name = ML.day_name(day, loop)
+        fx = [o["facts"] for o in obs]
+        open_now = sum(1 for e in (self.rt.events() if hasattr(self.rt, "events") else [])
+                       if getattr(getattr(e, "state", None), "value", getattr(e, "state", None)) not in ("closed", "safe_stop"))
+        key = [o for o in obs if o["type"] in ("event", "safety", "approve", "reject", "ship", "note")
+               and not str(o["title"]).endswith("送核准")]
+        doc, prev = self.files.read("daily", name), self.daily(before=name)
+        return {"name": name, "label": ML.day_label(day, loop), "source": "summary" if doc else "live",
+                "observations": len(obs),
+                "orders_in": sum(1 for f in fx if f.get("kind") in ("order_new", "order_rush")),
+                "rush": sum(1 for f in fx if f.get("kind") == "order_rush"),
+                "shipped": sum(1 for o in obs if o["type"] == "ship"),
+                "events": {"closed": sum(1 for f in fx if f.get("state") == "closed"),
+                           "safe_stop": sum(1 for f in fx if f.get("state") == "safe_stop"), "open": open_now},
+                "approvals": {"approve": sum(1 for o in obs if o["type"] == "approve"),
+                              "reject": sum(1 for o in obs if o["type"] == "reject"),
+                              "sent": sum(1 for o in obs if str(o["title"]).endswith("送核准"))},
+                "key": [{k: o[k] for k in ("id", "ts", "type", "title")} | {"icon": ML.ICON[o["type"]]}
+                        for o in sorted(key, key=ML.cursor, reverse=True)[:5]],
+                "summary": ML.summary_card(doc) if doc else None,
+                "previous": ML.summary_card(prev) if prev and prev["name"] != name else None}
+
     def day_index(self) -> str:
         return ML.day_index(self.today())
 
