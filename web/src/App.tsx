@@ -9,6 +9,7 @@ import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
+import { PendingApprovalAlert } from './components/PendingApprovalAlert'
 import { ScheduleTab } from './components/ScheduleTab'
 import { OrdersTab } from './components/OrdersTab'
 import { EarlyWarnings } from './components/EarlyWarnings'
@@ -26,6 +27,9 @@ const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default:
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
 
+/** `#approve?event=<id>` (the 待核准 bar on /factory, /report, /handover): 主控台 with that card selected. */
+const readApproveEvent = (): string | null => (location.hash.startsWith('#approve') ? readConsoleEvent() : null)
+
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
   return h === '#schedule' ? 'schedule' : h === '#monitor' || h === '#world' ? 'monitor' : h === '#orders' ? 'orders'
@@ -37,8 +41,9 @@ function Dashboard() {
   const [consoleEvent, setConsoleEvent] = useState<string | null>(readConsoleEvent)
   const [machine, setMachine] = useState<string | null>(() => new URLSearchParams(location.search).get('machine'))
   const { state } = useWarRoom()
+  const [agentEvent, setAgentEvent] = useState<string | null>(readApproveEvent)
   useEffect(() => {
-    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()) }
+    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()); const a = readApproveEvent(); if (a) setAgentEvent(a) }
     window.addEventListener('hashchange', f)
     return () => window.removeEventListener('hashchange', f)
   }, [])
@@ -47,7 +52,6 @@ function Dashboard() {
     setTab(t); window.scrollTo(0, 0)
   }
   const [asks, setAsks] = useState<LocalItem[]>([])
-  const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
   // a ticker item: 產線監控 on that machine (its drawer) or line, scrolled into view and flashed
   const focusPlant = (m?: string, line?: Line) => {
@@ -60,6 +64,15 @@ function Dashboard() {
       el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
     }, 120)
   }
+  // the 待核准 bar: 主控台 with the oldest card selected, its row scrolled into view and flashed
+  const goApprove = (eventId: string) => {
+    openAgent(eventId)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-testid="home-item-${CSS.escape(eventId)}"]`)
+      el?.scrollIntoView({ block: 'nearest' })
+      el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
+    }, 120)
+  }
   const openConsole = (eventId?: string) => { setConsoleEvent(eventId ?? null); go('console', eventId ? `?event=${encodeURIComponent(eventId)}` : '') }
   const [demoOpen, setDemoOpen] = useState(false)
   const [moreOpen, setMoreOpen] = useState(false)   // phones: 狀態機 and 後台 live under 「更多」 (issue #52)
@@ -68,6 +81,7 @@ function Dashboard() {
   return (
     <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
       <Header tab={tab} onTab={go} />
+      <PendingApprovalAlert variant={tab === 'agent' ? 'compact' : 'bar'} onGo={goApprove} stickyBelow=".topbar" />
       <div className="demo-sheet" role="region" aria-label="展示控制">
         <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
         <DemoStrip />
