@@ -93,6 +93,12 @@ log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
 
 
+class QaAsk(BaseModel):
+    """QA 模式 (warroom/agent/qa.py): a judge's question about the agent framework."""
+    question: str = Field(min_length=1, max_length=300)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
+
+
 class MainMessage(BaseModel):
     """Issue #54: a message to the Agent Nemo (it classifies it itself)."""
     text: str = Field(min_length=1, max_length=300)
@@ -1199,6 +1205,37 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
                                                   "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
         return res
+
+    # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)
+    def _qa_agent(r: Runtime):
+        if "qa" not in holder:
+            from warroom.agent.qa import QaAgent
+            from warroom.kb.framework import FrameworkKB
+            holder["qa"] = QaAgent(r.settings, kb=FrameworkKB.from_settings(r.settings))
+        return holder["qa"]
+
+    @app.post("/api/qa/ask")
+    async def qa_ask(body: QaAsk, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """QA 模式 (warroom/agent/qa.py): a short spoken answer to a judge's question about the agent framework, only
+        from the framework knowledge base (its own collection, not the plant SOPs), with evidence ids. No tool, no event,
+        no write; the model call waits in the ModelQueue at the plant-question priority, behind incidents."""
+        r = rt()
+        from warroom.agent.orchestrator import PRIORITY
+        key = getattr(r.audit, "_key", None)
+        return await _qa_agent(r).ask(
+            body.question, conversation_id=body.conversation_id, audit=r.audit,
+            slot=lambda: r.orch.queue.slot(PRIORITY["task"], "qa", None, "QA 模式"),
+            secrets=[access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+
+    @app.get("/api/qa/doc")
+    async def qa_doc(path: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
+        """The evidence viewer: the text of one file the framework KB indexes or a curated answer cites. Any other
+        path is a 404 (no file browsing)."""
+        from warroom.agent.qa import viewable
+        text = await asyncio.to_thread(viewable, path, _qa_agent(rt())._kb())
+        if text is None:
+            raise _404(path)
+        return {"path": path, "text": text}
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")

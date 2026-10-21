@@ -131,6 +131,9 @@ async function postJSON<T>(path: string, body: unknown, retried = false): Promis
   return (await r.json()) as T
 }
 
+/** QA 模式 (POST /api/qa/ask): same supervisor rule as 問戰情室 — the on-site seat needs no PIN. */
+export const supervisorPost = postJSON
+
 /** 後台 (issue #37): every admin call, reads included, carries the supervisor PIN when this tab has one and
  *  asks for it on a 401 — same PIN rule as approvals, plus the server's factory-network check. */
 export async function adminFetch<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
