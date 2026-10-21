@@ -48,7 +48,10 @@ export function CureSchedule({ onAgent }: { onAgent?: (eventId?: string) => void
   const load = useCallback(() => {
     transport?.scheduleVersions().then(setVersions).catch((e) => setMsg(`排程讀取失敗：${e}`))
   }, [transport])
-  useEffect(() => { load() }, [load, state.scheduleRev])
+  // the server announces only the active version; a proposed one arrives with its approval, and this page stays open
+  // while it does, so refetch when the pending approvals change too
+  const pendingKey = state.pending.map((p) => p.id).join(',')
+  useEffect(() => { load() }, [load, state.scheduleRev, pendingKey])
 
   const active = versions.find((v) => v.status === 'active') ?? state.schedule ?? null
   const prev = active ? versions.find((v) => v.version === active.parent_version) : undefined
