@@ -49,8 +49,10 @@ try {
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'scenario', scenario: 'normal' } })
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'speed', speed: 1 } })
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'reset' } })
-  // ?demo=1: the desk screen's 展示列 (loaded below) shows only with it, the iframe inheriting the factory's query
-  await page.goto(`${BASE}/factory?demo=1&test=1`, { waitUntil: 'domcontentloaded' })
+  // ?scenarios=all: the desk screen's 展示列 (loaded below) shows only with it or ?demo=1, the iframe inheriting the
+  // factory's query; ?demo=1 would also fold the 3D HUD into the presenter's one answer card (d/3d-polish), and this
+  // walk checks the full HUD
+  await page.goto(`${BASE}/factory?scenarios=all&test=1`, { waitUntil: 'domcontentloaded' })
   const canvas = await page.waitForSelector('.f3-canvas canvas', { timeout: 15000 })
   await sleep(1000)
   const box = await canvas.boundingBox()
@@ -142,10 +144,11 @@ try {
   const pk = await pos()
   check('doors open onto the loading dock (and the dock edge holds)', pk.z > 6.4 && pk.z <= 7.79, `z=${pk.z.toFixed(2)}`)
 
-  // the big screen on the war-room wall is the REAL dashboard page (one iframe, same origin)
+  // the big screen on the war-room wall is the REAL dashboard page (one iframe, same origin); it opens on 產線監控,
+  // which has its own <h1> since #102: read the header's
   await page.evaluate(() => window.__factory3d.teleport(7.7, 0, -Math.PI / 2))   // in front of the desk, facing the screen
   const big = page.frameLocator('[data-testid=f3-bigscreen] iframe')
-  const bigH1 = await big.locator('h1').innerText({ timeout: 15000 }).catch(() => '')
+  const bigH1 = await big.locator('.topbar h1').innerText({ timeout: 15000 }).catch(() => '')
   check('big screen shows the real dashboard (/)', bigH1.includes('實心胎智慧製造戰情室'), bigH1)
   const bigBox = await until(() => page.locator('[data-testid=f3-bigscreen]').boundingBox(), 8000, 300)
   check('big screen fills the view from the desk', !!bigBox && bigBox.width > 600 && bigBox.x > 0 && bigBox.x + bigBox.width < 1440, JSON.stringify(bigBox && { x: Math.round(bigBox.x), y: Math.round(bigBox.y), w: Math.round(bigBox.width), h: Math.round(bigBox.height) }))
@@ -164,7 +167,8 @@ try {
   check('one big-screen iframe, one desk iframe, one phone iframe', frames.big === 1 && frames.all.length === 3, frames.all.join(' , '))
   await desk.locator('.demo button:has-text("7 號硫化機溫降")').click()
   await sleep(600)
-  await desk.locator('.demo button:has-text("10×")').click()
+  // the 展示列 has no speed buttons since #100: 10× over the API, as the presenter's server setting would
+  await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'speed', speed: 10 } })
   await sleep(2500)
   await page.screenshot({ path: `${OUT}/factory-desk.png` })
   await desk.locator('h1').click()   // focus inside the dashboard: Esc there stands up too
