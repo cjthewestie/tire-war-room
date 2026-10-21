@@ -149,6 +149,28 @@ export async function adminFetch<T>(path: string, init: { method?: string; body?
   return (await r.json()) as T
 }
 
+/** 後台 稽核紀錄 匯出: the same PIN rule as adminFetch, but the body is a file the browser saves. Returns the row count. */
+export async function adminDownload(path: string, retried = false): Promise<number> {
+  const pin = supervisorPin()
+  const r = await fetch(path, { headers: pin ? { 'X-Supervisor-Pin': pin } : {} })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('後台需要主管 PIN')
+    if (p) {
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return adminDownload(path, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+  const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') ?? '')?.[1] ?? 'audit.jsonl'
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a')
+  a.href = url; a.download = name
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return Number(r.headers.get('X-Rows') ?? 0)
+}
+
 export class LiveTransport implements Transport {
   mode: Mode = 'live'
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void) {

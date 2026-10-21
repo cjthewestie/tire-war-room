@@ -466,6 +466,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     if runtime is not None:
         app.state.runtime = runtime
     app.state.access = access
+    app.state.pin_guard, app.state.weak_push_delay_s, app.state.holder = guard, weak_push_delay_s, holder   # 後台 系統參數 / 健康
 
     # ------------------------------------------------------------------ on-site seat pairing
     @app.get("/kiosk", include_in_schema=False)
