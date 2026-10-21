@@ -121,6 +121,8 @@ NOT_CHANGED = "計劃沒有改。" + PLAN_EDIT_Q
 NOT_DONE = "我還沒有改任何東西，也沒有擬計劃。要安排的話，直接說要做什麼和對象，例如「請安排 9 號機明天保養」。"
 NO_FACTS = "這個我沒有查到資料，不能給你數字。要我查哪台機台或哪張訂單？例如：「#A-311 會不會晚交？」"
 NO_SUCH_ORDER = "沒有這張訂單：{what}，所以查不到交期。你要查的是哪一張？例如：「#A-311 會不會晚交？」"
+NUMBERS_OFF = "我查了資料，但整理出來的數字跟資料對不上，先不回答，免得說錯。要我直接列出查到的項目嗎？"
+PIN_ACK = "好，記下了：{pin}。這段對話裡回答和擬計劃都會照這個。"
 INJECT_REPLY = "這個我不能直接做：我沒有任何寫入工具，變更都要擬計劃送你核准才會執行。要改什麼，直接說要做的事就好。"
 INJECTED_DATA_REPLY = "查到的資料裡有一段像指令的文字（要我照某句話回覆），我沒有照做。要判斷現況，我需要讀機台讀值，要我現在去讀嗎？"
 KB_LOADING = "知識庫還在載入，請稍候再問。"
@@ -553,6 +555,11 @@ class MainAgent:
         """The current conversation's 前情摘要, pinned constraints and the turns waiting to be summarised."""
         return self._notes.setdefault(self._key, {"summary": "", "pins": [], "overflow": []})
 
+    @staticmethod
+    def _pin_of(text: str) -> str | None:
+        t = text.strip()
+        return t[:60] if _PIN_RX.search(t) and (machines_in(t) or orders_in(t)) else None
+
     def _pin(self, text: str) -> None:
         """A constraint said in chat (「不要…」「優先…」「擔心…」 with an order or machine id) is pinned for the
         conversation, at most MAX_PINS, newest kept."""
@@ -968,6 +975,11 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+            if (code is None and not out["steps"] and not out["event_id"] and self._pin_of(t)
+                    and not wants_task(t) and not _QUESTION_RX.search(t)):
+                # the supervisor only set a constraint (「#A-311 優先，不要動 9 號機」): code confirms it is pinned (the
+                # model answered with a plant status dump, real run 10-22)
+                words = PIN_ACK.format(pin=self._pin_of(t))
             if code is None and casual and _NO_DATA_TOPIC_RX.search(t):
                 out["intent"] = "no_data"
                 said = _ADMITS_NO_DATA_RX.search(words)
@@ -1012,8 +1024,11 @@ class MainAgent:
             # first try the model's words without the sentences that carry it (a whole reply replaced by raw results
             # read worse than one dropped line: 「今天有哪些訂單」 → 「查到：工廠資料（訂單）：pipeline: …」, preview 10-21)
             kept = "".join(x for x in _SENTENCE_RX.findall(words) if not ungrounded(x, source)).strip()
-            if kept and len(kept) >= len(words) // 2 and not (waiting_plan and about_edit):
+            if kept and not (waiting_plan and about_edit):
                 return kept
+            if steps and all(s["tool"] == QUERY for s in steps if s["ok"]) and not (waiting_plan and about_edit):
+                # query_plant data is JSON: pasted back it read as noise (「查到：工廠資料（之前的訂單）：completed_or_shipped: id:…」)
+                return NUMBERS_OFF
             fixed = self._results_reply(steps) or (PLAN_EDIT_Q if waiting_plan and about_edit else "")
             if fixed:
                 return fixed

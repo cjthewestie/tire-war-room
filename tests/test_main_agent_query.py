@@ -374,3 +374,17 @@ async def test_a_question_about_the_conversation_is_answered_from_its_record():
     assert "tools" not in m.calls[n] and "previous_turn" not in sent and "instruction" in sent
     assert sent["pinned_constraints"] == ["#A-311 優先，不要動 9 號機"] and m.calls[n]["temperature"] == 0.0
     assert "9 號機" in out["reply"]
+
+
+async def test_a_constraint_said_in_chat_is_confirmed_not_answered_with_a_status_dump():
+    from warroom.agent.main_agent import PIN_ACK
+    m = Model(("say", "今天運轉 5 台、待機 6 台，在班 10 人。"))
+    out, _ = await _turn(m, "#A-311 優先，不要動 9 號機")
+    assert out["reply"] == PIN_ACK.format(pin="#A-311 優先，不要動 9 號機")
+
+
+async def test_query_plant_numbers_that_do_not_match_give_an_honest_line_not_raw_json():
+    from warroom.agent.main_agent import NUMBERS_OFF
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("say", "有 7 張遲交。"), ("say", "還是 7 張遲交。"))
+    out, _ = await _turn(m, "之前有哪些訂單遲交", Reader({"late": []}))
+    assert out["reply"] == NUMBERS_OFF and "completed_or_shipped" not in out["reply"]
