@@ -145,11 +145,11 @@ async def test_general_knowledge_is_answered_directly():
     assert out["reply"] == say and not f.tools and len(m.calls) == 1 and not out["fell_back"]
 
 
-async def test_a_poem_is_written_not_refused():
-    poem = "爐火映夜長\n橡膠化為鋼\n一模一模出\n輪向遠方。"
-    m = Model(("say", poem))
+async def test_a_poem_is_not_written():
+    """CJ 2026-10-22: 「不要jok」 (it was written before)."""
+    m = Model(("say", "爐火映夜長\n橡膠化為鋼"))
     out, f = await _turn(m, "幫我寫一首詩")
-    assert "爐火映夜長" in out["reply"] and "遠方" in out["reply"] and not f.tools and not f.proposed
+    assert "爐火" not in out["reply"] and out["reply"].endswith(OFFERS) and not f.tools and not f.proposed
 
 
 async def test_weather_goes_to_the_model_and_a_made_up_answer_is_replaced_after_it():
@@ -476,3 +476,43 @@ async def test_materials_topic_counts_and_lists_what_is_in_transit(tmp_path):
         d = plant_query.query(p.rt, "materials")
         assert d["material_count"] == len(d["materials"]) == 6
         assert d["in_transit"] == "目前沒有在途的採購" or all("name" in x for x in d["in_transit"])
+
+
+# ---------------------------------------------------------------- no jokes (CJ 2026-10-22: 「不要jok」), live bugs 10-22
+async def test_jokes_and_poems_get_a_polite_line_a_fact_and_an_offer():
+    from warroom.agent.main_agent import NO_FUN_LINES
+    for q in ("講個笑話", "幫我講個笑話", "寫一首詩", "說個故事"):
+        m = Model(("say", "有一天小明去上學，老師問…哈哈。"))
+        out, _f = await _turn_ctx(m, q)
+        assert out["reply"].startswith(NO_FUN_LINES) and out["reply"].endswith(OFFERS), (q, out["reply"])
+        assert "小明" not in out["reply"] and any(x in out["reply"] for x in ("16:00", "1 件事件", "7 號", "在班 10 人"))
+    assert "笑話" not in SYSTEM.split("不講笑話")[0] and "寫一首短詩" not in SYSTEM
+
+
+async def _turn_ctx(m, text):
+    f = Floor()
+    out = await MainAgent(_settings(), client=m).turn(text, context=TODAY, waiting_plan=None, run_tool=f.run_tool,
+                                                      propose=f.propose, discuss=None, read_plant=Reader())
+    return out, f
+
+
+async def test_a_degenerate_repetition_is_regenerated_once():
+    m = Model(("say", "因因因因因因因因因因"), ("say", "硫化是讓橡膠交聯的加熱步驟。"))
+    out, _ = await _turn(m, "硫化是什麼")
+    assert out["reply"] == "硫化是讓橡膠交聯的加熱步驟。" and "上一句重複" in m.calls[1]["messages"][-1]["content"]
+
+
+async def test_small_talk_is_not_carried_into_the_next_lookup():
+    m = Model(("say", "辛苦了！"), ("tool", "read_sensors", {"machine_ids": ["CURE-07"]}), ("say", "7 號機 122.3°C。"))
+    agent = MainAgent(_settings(), client=m)
+    f = Floor()
+    for q in ("今天好累喔", "7 號機現在溫度多少？"):
+        await agent.turn(q, context=TODAY, waiting_plan=None, run_tool=f.run_tool, propose=f.propose, discuss=None,
+                         read_plant=Reader())
+    sent = json.loads(m.calls[1]["messages"][1]["content"])
+    assert "previous_turn" not in sent and not sent["earlier_messages"]
+
+
+def test_no_internal_field_names_in_a_reply():
+    r = tidy("目前沒有機台停機（stops 為空、count 為 0）。雖然 earlier context 裡有兩件事件，但都在等核准。", True)
+    assert "stops" not in r and "count" not in r and "earlier" not in r and r.startswith("目前沒有機台停機")

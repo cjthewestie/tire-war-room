@@ -95,6 +95,16 @@ CJ, 2026-10-20: 「我希望主控台的 agent 叫做主 agent，是 orchestrato
 - API: `GET /api/subagents` (rows + the model queue), WS `subagents`; `GET /api/preclass` (the detector's pre-classification: rule, checks, validation, forecast, routing; rejected bad data).
 - Checks: `tests/test_orchestrator.py`, `node web/e2e/orch54.mjs http://127.0.0.1:<port>`.
 
+## Agent Nemo chat: a machine's way back (departure from SOP-SD-01 §4)
+
+SOP-SD-01 §4 asks for the Safety Core release on the on-site screen only. CJ decided on 2026-10-22, asked whether the chat may release a Safety Core machine stop: 「開放」. Since then Agent Nemo's chat can do it, with these guards in code (`warroom/agent/main_agent.py` release_safety_stop, `warroom/api/app.py` main_message Control):
+
+- It runs only after the supervisor answers 「好／確認」 to Agent Nemo's own question 「要恢復 X 運轉嗎？…」 (or 「報廢」 for a cure-low hold). The model alone never triggers it.
+- It calls the same path as the buttons: `Runtime.safety_release` (③ 確認恢復運轉, all of `SafetyCases.check_release`: ① field check done, ② reading back in range for the core's re-arm count, the QC 放行／報廢 choice for cure-low) and `Runtime.return_to_service` for a repaired out-of-service machine. A failed precondition is said with its count (例：連續 8/30 筆); nothing is bypassed.
+- The same session rule as the buttons applies: on the LAN without the supervisor PIN the chat answers 401; with the LAN down only the on-site screen.
+- Audited as `<supervisor> via Agent Nemo`: the question (SYSTEM, confirmed false), the release row (`safety_release`) and the chat-control row (confirmed true).
+- `warroom/safety/` is untouched; the commander and the state machine still cannot release (tests/test_resolve.py). Approving a plan stays the button only.
+
 ## Key numbers
 
 | What | Value | Page |

@@ -1142,6 +1142,20 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             @staticmethod
             def blocked(action: str, eid: str) -> str | None:
                 """Why this action cannot run on this task now (asked before the confirmation, never after)."""
+                if action == "release_safety_stop":
+                    from warroom.agent.narrate import machine_label
+                    from warroom.contracts import SafetyRelease
+                    c = Control._case(eid)
+                    if c is not None:
+                        try:              # the button's own precondition check: ① field check, ② safe samples, decision
+                            r.cases.check_release(c, SafetyRelease(decision=c.decisions[0]), r._board())
+                        except ValueError as e:
+                            return f"{machine_label(eid)}還不能恢復：{e}。"
+                        return None
+                    tile = Control._tile(eid)
+                    if tile is not None and tile.status.value == "out_of_service":
+                        return None if tile.repaired else f"{machine_label(eid)}還沒檢修完成，不能恢復運轉。"
+                    return f"{machine_label(eid)}現在沒有安全核心停機，也不是停用狀態，不用恢復。"
                 st = sm.get(eid).state.value
                 if action == "interrupt_task" and st in ("closed", "safe_stop"):
                     return "這件已經結束了，不用中斷。"
@@ -1163,11 +1177,58 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                     return "這件已經處理過了（已結案或已重新規劃）。"
                 return None
 
+            # ---- a machine's way back (CJ 2026-10-22: 「開放」): the SAME paths as the ③ 確認恢復運轉 button
+            # (warroom/api/resolve.py, every precondition) and the 恢復運轉 button (Runtime.return_to_service)
+            @staticmethod
+            def _case(mid: str):
+                return r.cases.open_for(mid)
+
+            @staticmethod
+            def _tile(mid: str):
+                return next((t for t in r.machine_tiles() if t.machine_id == mid), None)
+
+            @staticmethod
+            def resolve_for(action: str, ref: str) -> tuple[str, str] | None:
+                if action != "release_safety_stop":
+                    return Control.resolve(ref)
+                from warroom.agent.ask import machines_in
+                from warroom.agent.narrate import machine_label
+                mids = machines_in(ref or "")
+                if not mids and body.event_id:
+                    ev = _safe(lambda: sm.get(body.event_id), None)
+                    mids = [ev.machine_id] if ev is not None and ev.machine_id in F.MACHINE_BY_ID else []
+                if not mids:
+                    stopped = [c.machine_id for c in r.cases.view(r._board()) if c.status == "open"]
+                    stopped += [t.machine_id for t in r.machine_tiles() if t.status.value == "out_of_service"
+                                and t.machine_id not in stopped]
+                    mids = stopped if len(stopped) == 1 else []
+                return (mids[0], machine_label(mids[0])) if len(mids) == 1 else None
+
+            @staticmethod
+            def question(action: str, target: str, label: str) -> str | None:
+                if action != "release_safety_stop":
+                    return None
+                c = Control._case(target)
+                if c is not None and "qc_pass" in c.decisions:
+                    return (f"{label}是低溫停機，要 QC 合格放行嗎？現場檢查和讀值都過了。回「好」就放行恢復運轉，"
+                            "要報廢這一模請說「報廢」，其他回覆就不做。")
+                if c is not None:
+                    return f"要恢復{label}運轉嗎？現場檢查和讀值都過了。回「好」或「確認」就恢復，其他回覆就不做。"
+                return f"要讓{label}恢復運轉嗎？檢修已經完成。回「好」或「確認」就恢復，其他回覆就不做。"
+
             def audit_request(self, action: str, eid: str) -> None:
+                if action == "release_safety_stop":   # a machine, not an event: the row names it, under the case's event
+                    c = Control._case(eid)
+                    r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
+                                                                  "confirmed": False, "machine_id": eid},
+                                   event_id=c.event_id if c is not None else None)
+                    return
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
                                                               "confirmed": False}, event_id=eid)
 
-            async def run(self, action: str, eid: str) -> str:
+            async def run(self, action: str, eid: str, words: str = "") -> str:
+                if action == "release_safety_stop":
+                    return self._release(eid, words)
                 ev = sm.get(eid)
                 state = ev.state.value
                 try:
@@ -1200,6 +1261,29 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": action, "confirmed": True,
                                                               "state_before": state, "result": result[:200]}, event_id=eid)
                 return result
+
+        def _release(self, mid: str, words: str) -> str:
+            """After the supervisor's 好 in chat: the ③ release (all its preconditions again) or the return to service."""
+            from warroom.agent.narrate import machine_label
+            from warroom.contracts import SafetyRelease
+            c = Control._case(mid)
+            try:
+                if c is not None:
+                    d = "scrap" if ("報廢" in words and "scrap" in c.decisions) else c.decisions[0]
+                    r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"), self.actor)
+                    result = (f"已報廢{machine_label(mid)}這一模，換模後再入模。" if d == "scrap"
+                              else f"已恢復{machine_label(mid)}運轉（{'QC 合格放行' if d == 'qc_pass' else '確認恢復運轉'}）。")
+                else:
+                    r.return_to_service(mid, self.actor)
+                    result = f"已讓{machine_label(mid)}恢復運轉（檢修完成）。"
+            except (KeyError, ValueError) as e:
+                result = f"沒有恢復：{e}"
+            r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": "release_safety_stop",
+                                                          "confirmed": True, "machine_id": mid, "result": result[:200]},
+                           event_id=(c.event_id if c is not None else None))
+            return result
+
+        Control._release = _release
 
         def waiting_of(eid: str) -> bool:
             return getattr(sm, "waiting_card", lambda _e: None)(eid) is not None
