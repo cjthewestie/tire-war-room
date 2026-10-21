@@ -8,7 +8,7 @@
 // right under it once the event ends (ReportBlock), then the 完整紀錄.
 import { useMemo, useState } from 'react'
 import type { ApprovalRequest, Event, EventState, ToolName, WorkTask } from '../contracts'
-import { CH_LABEL, REPAIR_KINDS, expectationOf, recoverWord } from '../aiStatus'
+import { CH_LABEL, REPAIR_KINDS, expectationOf, recoverWord, released } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { useHealth } from '../health'
@@ -75,7 +75,10 @@ export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
   const subs = new Map((state.subagents?.items ?? []).map((x) => [x.id, x]))
   const tasks = state.world?.tasks?.items ?? []
   const openOf = (e: Event) => { const sa = subs.get(e.id); return sa ? isOpen(sa) : e.state !== 'closed' && e.state !== 'safe_stop' }
+  // a card waiting first (concurrent_3: the waiting B 線開煉機, third by time, was cut off at the bottom of the list)
+  const waits = new Set(state.pending.map((p) => p.event_id))
   const listed = events.filter((e) => scope === 'all' || (scope === 'open') === openOf(e))
+    .sort((a, b) => Number(waits.has(b.id)) - Number(waits.has(a.id)))
   const thread = useMainThread(asks, true)
   if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
   return (
@@ -201,7 +204,9 @@ function conclusion(ev: Event, card: ApprovalRequest | null, tasks: WorkTask[], 
   const approved = decided ? `主管 ${fmtHM(decided.ts)} 已核准${opt ? `方案 ${opt.id}「${opt.label}」` : ''}，` : ''
   if (ev.repaired_at) return { tone: 'wait', big: `${m}維修完成，${recoverWord(x)}`, more: `${fmtHM(ev.repaired_at)} 維修完成，${ch}回到正常才算完成。`, act: null }
   const fix = tasks.filter((t) => REPAIR_KINDS.has(t.kind) && t.status !== '完成')
-  if (fix.length && (ev.state === 'execute' || ev.state === 'verify')) {
+  // the crew on it: also while code re-solves the approved round's stale schedule (concurrent_3: simulate / gate), not
+  // 「Agent Nemo 規劃中」 while the phone and the 3D say 維修中
+  if (fix.length && (ev.state === 'execute' || ev.state === 'verify' || fix.some(released))) {
     const t = fix.find((f) => f.status !== '待派') ?? fix[0]
     const doing = DOING[t.kind] ?? t.kind
     const left = fast ? secText(Math.max(...fix.map((f) => taskLeftS(f, fast)))) : t.eta ? `預計 ${fmtHM(t.eta)} 完成` : ''

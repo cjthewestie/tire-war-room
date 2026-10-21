@@ -2,14 +2,19 @@
 // (PlanArea returned null); IA prototype v12 (docs/ux/war-room-ia-prototype.html): 「沒事時不是空白：告訴你下一件會發生的事」.
 // One home per piece of info: summaries and links only — machine detail stays on 產線監控, each event's full process on
 // the Agent page (#console?event=<id>). Sections: the result strip of the latest decision (until something new arrives),
-// 今日進度, 機台摘要, 接下來, 今天處理過的事 (history.ts, kept across scenario switches) and, live only, 人力・出貨・品質.
+// 今日進度, 機台摘要, 接下來, 今天處理過的事 and, live only, 人力・出貨・品質. 今天處理過的事 reads the Agent page's durable
+// task log when live (GET /api/tasklog, veteran 10-22: the two pages said 「還沒有」 and 「5 件」 side by side); the
+// browser mock keeps the page-session history (history.ts, kept across scenario switches).
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { Shift } from '../contracts'
 import { factoryMidnight, fmtHM, fmtMD, fmtNum, fmtWeekday, ms } from '../format'
 import { useHistory, type HistRow } from '../history'
 import { useWarRoom } from '../useWarRoom'
+import { machineLabel } from '../factory'
+import { plain } from '../plain'
 import { machineSummary, upcoming, when } from './overviewModel'
 import { ResultStrip } from './ResultStrip'
+import { decisionsText, outcomeText, useTaskLog, type TaskRow } from './tasklogData'
 
 const H = 3_600_000
 /** 「剩餘約 6.5 小時」; past two days in days (「剩餘約 11 天」), which an operator reads faster than 265 小時. */
@@ -18,6 +23,7 @@ const remaining = (h: number) => (h < 48 ? `剩餘約 ${fmtNum(h)} 小時` : `�
 export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; onFull?: (eventId?: string) => void }) {
   const { state, transport } = useWarRoom()
   const hist = useHistory()
+  const log = useTaskLog()
   const snap = state.snapshot
   const now = ms(state.clock?.factory_time ?? snap?.header.factory_time)
   const day = isNaN(now) ? 0 : Math.floor(now / (6 * H))
@@ -79,7 +85,16 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
         </Sec>
 
         <Sec title="今天處理過的事" testId="ov-done">
-          {today.length || before.length ? (
+          {log ? (
+            log[0]?.groups.length ? (
+              <ul className="ov-list ov-hist">
+                {log[0].groups.flatMap((g) => g.rows).reverse().slice(0, 12).map((r) => {
+                  const row = taskHist(r)
+                  return <HistLine key={row.key} r={row} now={now} href={events.some((e) => e.id === r.id) ? r.id : null} onClick={full} />
+                })}
+              </ul>
+            ) : <p className="muted ov-empty">今天還沒有處理過的異常</p>
+          ) : today.length || before.length ? (
             <ul className="ov-list ov-hist">
               {today.map((r) => <HistLine key={r.key} r={r} now={now} href={events.some((e) => e.id === r.eventId) ? r.eventId : null} onClick={full} />)}
               {!today.length && <li className="muted ov-empty">今天還沒有處理過的事</li>}
@@ -101,6 +116,19 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
       </div>
     </section>
   )
+}
+
+/** A task-log row in this list's words: no 結案 on 主控台 (veteran glossary): 已恢復正常 once a reading confirmed the
+ *  repair, else 已處理完; the decision and the outcome after the title. */
+function taskHist(r: TaskRow): HistRow {
+  const fixed = /^已修復/.test(r.outcome ?? '')
+  const tag = r.final === '結案' ? (fixed ? '已恢復正常' : '已處理完') : r.final
+  const detail = [decisionsText(r), r.outcome ? outcomeText(r) : ''].filter(Boolean).join('；')
+  return {
+    key: `log:${r.id}:${r.opened_at}`, run: 0, kind: 'event', at: r.closed_at ?? r.opened_at, eventId: r.id,
+    subject: r.order_id ?? (r.machine_id ? machineLabel(r.machine_id) : '任務'), text: plain(r.title ?? r.id), tag,
+    tone: r.final === '安全停止' ? 'stop' : r.final === '處理中' ? 'decide' : fixed ? 'back' : 'ok', detail: detail || null,
+  }
 }
 
 function Sec({ title, testId, link, children }: { title: string; testId: string; link?: ReactNode; children: ReactNode }) {

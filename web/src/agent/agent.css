@@ -367,6 +367,7 @@
 .hl-pill.tone-wait, .hl-pill.tone-risk { background: var(--warn-soft); color: var(--warn); }
 .hl-pill.tone-bad { background: var(--alarm-soft); color: var(--alarm); }
 .hl-pill.tone-run { background: var(--panel-3); color: var(--info); }
+.hl-pill.is-back { background: var(--accent-soft); color: var(--accent); }   /* ④ 已恢復正常, field work left (veteran 10-22: green) */
 .hl-t { font-weight: 600; font-size: 14px; line-height: 1.4; }
 .hl-s { display: none; font-size: 12.5px; color: var(--ink-dim); }
 .hl-item.on .hl-s { display: block; }
@@ -735,8 +736,10 @@ a.ov-row:hover { background: var(--panel-2); }
 .trace-h-r { display: flex; align-items: center; gap: 8px; flex: none; }
 
 /* 今天處理過的任務 (TaskLog): read-only, from the audit file */
-.tasklog { border-top: 1px solid var(--line, #ddd); padding-top: 8px; overflow-y: auto; min-height: 0; flex: 1 1 55%; }
-.trace-side .trace-list { flex: 1 1 45%; min-height: 140px; }   /* the events list keeps its room next to the task log */
+.tasklog { border-top: 1px solid var(--line, #ddd); padding-top: 8px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+/* the events list takes what its rows need (3 at once: the third, often the one waiting, was cut in half), up to about
+   half the screen (it scrolls past that); the task log gets the rest and scrolls */
+.trace-side .trace-list { flex: 0 0 auto; max-height: 45vh; min-height: 140px; }
 .tasklog .tl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .tasklog .tl-row { display: flex; align-items: flex-start; gap: 6px; }
 .tasklog .tl-row button { flex: 1; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; display: flex; flex-wrap: wrap; gap: 2px 8px; color: var(--ink); }
@@ -744,5 +747,6 @@ a.ov-row:hover { background: var(--panel-2); }
 .tasklog .tl-t { font-variant-numeric: tabular-nums; color: var(--muted); }
 .tasklog .tl-final { margin-left: auto; font-size: 12px; }
 .tasklog .tl-out { flex-basis: 100%; }
+.tasklog .tl-what, .tasklog .tl-out { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; }
 .tasklog .tl-report { font-size: 12px; white-space: nowrap; padding-top: 7px; }
 .tasklog .tl-tag { margin: 6px 0 2px; }
