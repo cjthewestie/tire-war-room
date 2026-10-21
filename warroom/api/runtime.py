@@ -540,6 +540,7 @@ class Runtime:
         # issue #95: 問戰情室 conversations (order / event ids only). In this process; cleared with every scenario
         # load / reset and day-loop wrap, so a new scenario never answers about the old one's orders or events.
         self.ask_memory = AskMemory()
+        self.memory_resets: list[Callable[[], None]] = []    # Agent Nemo's chat memory forgets with the ask memory
         self._holds: dict[str, dict[str, Any]] = {}
         self._oob_seen: dict[str, datetime] = {}
         self._safety_unrecorded: list[SafetyAction] = []   # applied, but audit/attach failed: retried
@@ -1572,6 +1573,8 @@ class Runtime:
         """Forget every 問戰情室 conversation (issue #95); the audit log says how many and why."""
         try:
             n = self.ask_memory.reset()
+            for forget in self.memory_resets:
+                forget()
             if n:
                 self.audit.append(AuditKind.SYSTEM, "system", {"msg": "ask memory cleared", "why": why,
                                                                "conversations": n, "generation": self.ask_memory.generation})

@@ -95,6 +95,7 @@ class MainMessage(BaseModel):
     """Issue #54: a message to the Agent Nemo (it classifies it itself)."""
     text: str = Field(min_length=1, max_length=300)
     event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
 
 
 class RollbackBody(BaseModel):
@@ -942,6 +943,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if "main" not in holder:
             from warroom.agent.main_agent import MainAgent
             holder["main"] = MainAgent(r.settings)
+            r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
 
     @app.post("/api/main/message")
@@ -1011,7 +1013,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant)
+                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}")
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],

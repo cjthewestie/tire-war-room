@@ -268,3 +268,33 @@ async def test_a_text_written_tool_call_is_run_not_shown():
     m = Model(("say", '工具：read_sensors；{"machine_ids": ["CURE-08"]}'), ("say", "8 號機 122.3°C。"))
     out, f = await _turn(m, "8 號機現在怎樣")
     assert f.tools and f.tools[0][0] == "read_sensors" and out["reply"] == "8 號機 122.3°C。"
+
+
+# ---------------------------------------------------------------- memory per conversation
+async def test_two_conversations_do_not_see_each_other():
+    """A 「謝謝」 in one chat answered 「好累」 said in another: memory is keyed by actor + conversation_id."""
+    m = Model(("say", "辛苦了！"), ("say", "不客氣！"), ("say", "還是很累嗎？"))
+    agent = MainAgent(_settings(), client=m)
+    f = Floor()
+
+    async def say(text, conv):
+        return await agent.turn(text, context=TODAY, waiting_plan=None, run_tool=f.run_tool, propose=f.propose,
+                                discuss=None, read_plant=Reader(), conversation=conv)
+    await say("今天好累", "supervisor|A")
+    await say("謝謝", "supervisor|B")
+    sent = m.calls[1]["messages"][1]["content"]
+    assert "好累" not in sent and "辛苦了" not in sent                       # B never saw A
+    await say("謝謝", "supervisor|A")
+    assert "今天好累" in m.calls[2]["messages"][1]["content"]                # A still remembers its own turn
+    agent.clear()
+    assert not agent._memories.get("supervisor|A")
+
+
+async def test_api_conversations_are_separate_and_reset_on_scenario_load(tmp_path):
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        await p.http.post("/api/main/message", json={"text": "今天好累", "conversation_id": "A"})
+        r = await p.http.post("/api/main/message", json={"text": "謝謝", "conversation_id": "B"})
+        assert r.status_code == 200 and "累" not in r.json()["reply"]
+        ok = await p.http.post("/api/sim/control", json={"action": "scenario", "scenario": "normal"})
+        assert ok.status_code == 200
+        assert p.rt.memory_resets                                           # the agent registered its clear

@@ -62,6 +62,7 @@ MAX_CALLS_PER_STEP = 4
 MAX_SOP_SEARCHES = 2   # real run 10-21: 「硫化機溫度掉下來要怎麼處理？」 → 6 sop_search with reworded queries, then no words
 BUDGET_S = 60.0
 MEMORY_TURNS = 8
+MAX_CONVERSATIONS = 64
 READ_TOOLS = sorted(t.value for t in ASK_TOOLS)
 PROPOSE = "propose_plan"
 DISCUSS = "discuss_waiting_plan"
@@ -415,7 +416,10 @@ class MainAgent:
             self.client = AsyncOpenAI(base_url=settings.base_url, api_key=settings.api_key_effective,
                                       timeout=min(25.0, settings.llm_timeout_s), max_retries=0)
             self.server_kind = detect_server_kind(settings.base_url)
-        self.memory: deque[tuple[str, str]] = deque(maxlen=MEMORY_TURNS)
+        # memory per conversation (actor + the page's conversation_id, as #99's convo.py): one shared buffer let a
+        # 「謝謝」 in one chat answer 「好累」 said in another. `memory` is the current turn's conversation.
+        self._memories: dict[str, deque[tuple[str, str]]] = {}
+        self.memory: deque[tuple[str, str]] = self._mem(None)
         self._ids = itertools.count(1)
         self._turns = -1                   # rotation index of the canned replies (the first call picks variant 0)
         self._read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
@@ -426,13 +430,15 @@ class MainAgent:
                    propose: Callable[[str], Awaitable[dict[str, Any]]],
                    discuss: Callable[[str], Awaitable[dict[str, Any]]] | None,
                    slot: Callable[[], Any] | None = None,
-                   read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None) -> dict[str, Any]:
+                   read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None,
+                   conversation: str | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         tid = f"MAIN-{next(self._ids):04d}"
         steps: list[dict[str, Any]] = []
         out: dict[str, Any] = {"id": tid, "reply": "", "steps": steps, "event_id": None, "by": "rules",
                                "fell_back": False, "error": None, "intent": None}
         self._read_plant = read_plant
+        self.memory = self._mem(conversation)
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
         if not (self.llm and self.client is not None) and is_gibberish(text):
@@ -490,10 +496,19 @@ class MainAgent:
             return self._rot(IDENTITY_REPLIES), "identity"
         return self._with_fact(self._rot(HELLO_REPLIES if _HELLO_RX.match(t) else THANKS_REPLIES), context), "chat"
 
+    def _mem(self, conversation: str | None) -> deque[tuple[str, str]]:
+        key = conversation or ""
+        if key not in self._memories:
+            if len(self._memories) >= MAX_CONVERSATIONS:          # the oldest conversation goes first
+                self._memories.pop(next(iter(self._memories)))
+            self._memories[key] = deque(maxlen=MEMORY_TURNS)
+        return self._memories[key]
+
     def clear(self) -> None:
-        """Forget the conversation (a scenario was loaded or reset: 「你好」 → 「您剛才說『降到 120』…」 from the
+        """Forget every conversation (a scenario was loaded or reset: 「你好」 → 「您剛才說『降到 120』…」 from the
         previous rehearsal). Turn ids keep counting so the console never mixes an old turn with a new one."""
-        self.memory.clear()
+        self._memories.clear()
+        self.memory = self._mem(None)
 
     def _done(self, out: dict[str, Any], text: str, t0: float) -> dict[str, Any]:
         out["reply"] = (out["reply"] or UNCLEAR_REPLY).strip()
