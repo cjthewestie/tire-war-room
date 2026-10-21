@@ -1,9 +1,9 @@
 // The guided demo on two screens at once, against a running backend (headless only): the 3D factory starts it (its
-// driver), the war room follows the shared cue (/api/demo/state). At every beat it records the server's cue, the 3D's
+// driver) and the war room follows the shared cue (/api/demo/state), or with START=warroom the other way round. At every beat it records the server's cue, the 3D's
 // cue and the war room's page / spotlight / caption, and screenshots all screens. The war room presses 繼續 at continue
 // checkpoints (the 3D must follow), tries it at approvals (must be refused), approves the 急單 card on the war room and
 // the 7 號機 cards on /phone, checks 「討論」 brings the chat input into view (390 wide), and ends with Esc.
-//   node web/e2e/demo-sync.mjs http://localhost:8180 <out dir>
+//   [START=warroom] node web/e2e/demo-sync.mjs http://localhost:8180 <out dir>
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -33,10 +33,15 @@ await phone.goto(BASE + '/phone')
 await wr390.goto(BASE + '/')
 await f3.goto(BASE + '/factory?test=1', { timeout: 45000 })
 await f3.waitForTimeout(4000)
-const intro = f3.locator('[data-testid="demo-start-intro"]')
-if (await intro.isVisible().catch(() => false)) await intro.click(); else await f3.click('[data-testid="demo-start"]')
+// START=warroom: the war room's 「▶ Demo 模式」 starts it and the 3D follows (DemoFollow); default: the 3D starts it
+const FROM_WR = process.env.START === 'warroom'
+if (FROM_WR) await wr.click('[data-testid="demo-mode-button"]')
+else {
+  const intro = f3.locator('[data-testid="demo-start-intro"]')
+  if (await intro.isVisible().catch(() => false)) await intro.click(); else await f3.click('[data-testid="demo-start"]')
+}
 const started = await (async () => { for (let i = 0; i < 40; i++) { const s = await api('/api/demo/state'); if (s.running) return s; await wr.waitForTimeout(500) } return null })()
-check('3D Demo starts the shared demo (driver 3d)', !!started && started.driver === '3d', started?.driver)
+check(`${FROM_WR ? 'war room' : '3D'} Demo starts the shared demo (driver ${FROM_WR ? 'warroom' : '3d'})`, !!started && String(started.driver).startsWith(FROM_WR ? 'warroom' : '3d'), started?.driver)
 
 const rows = []
 let last = null, n = 0, cueSeenAt = 0, triedSkip = '', discussed = false, approvals = 0
