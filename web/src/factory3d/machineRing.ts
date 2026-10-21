@@ -8,6 +8,7 @@
 // 回溫中 ring fills over that time, then 已恢復 (green) for a few seconds once the event recovered (recovered_at / closed).
 import type { Event, MachineTile, WorkTask, WorldSnapshot } from '../contracts'
 import { REPAIR_KINDS, expectationOf, recoverWord } from '../aiStatus'
+import { LIGHT_HEX, WORK_HEX } from './layout'
 
 export type RingKind = 'task' | 'recover' | 'maint' | 'alarm' | 'batch' | 'idle'
 export interface MachineRing { kind: RingKind; progress: number; color: string; label: string }
@@ -17,14 +18,14 @@ export type RingRecovery = { phase: 'recovering'; frac: number; label: string } 
 
 const TASK_COLOR: Record<string, string> = {
   暖機: '#ff8a50', 檢修: '#b39ddb', 停用檢修: '#b39ddb', 品管: '#b39ddb',
-  補料: '#f5b83d', 調料: '#f5b83d', 換模準備: '#f5b83d', 盤點: '#f5b83d',
+  補料: WORK_HEX, 調料: WORK_HEX, 換模準備: WORK_HEX, 盤點: WORK_HEX,
 }
 const ALARM = new Set(['alarm', 'stopped', 'out_of_service'])
 const STATUS_ZH: Record<string, string> = { alarm: '異常', stopped: '停機', out_of_service: '停用', warning: '注意' }
-const DONE_GREEN = '#3fcf5a'      // the status lamp's green (layout.ts LIGHT_HEX)
+const DONE_GREEN = LIGHT_HEX.green      // the status lamp's green
 const DONE_HOLD_WALL_S = 6        // a finished repair stays green this long (wall seconds; at least one factory minute)
 const DONE_GRACE_WALL_S = 2       // a finished repair over a machine still red stays at 100% this long (the fix landing)
-const RECOVER_AMBER = '#f5b83d'   // the status lamp's amber (WARNING) while the readings come back
+const RECOVER_AMBER = LIGHT_HEX.amber   // the status lamp's amber (WARNING) while the readings come back
 const clamp = (x: number) => Math.max(0, Math.min(1, x))
 
 /** Where an event's machine is after its repair: readings coming back, or recovered (null: not a repaired event). */
@@ -101,13 +102,13 @@ export function machineRing(id: string, tile: MachineTile | undefined, world: Wo
     return { kind: 'maint', progress: p, color: '#b39ddb', label: `${m.title} ${Math.round(p * 100)}%` }
   }
   const st = tile?.status
-  if (st && ALARM.has(st)) return { kind: 'alarm', progress: 1, color: '#ff5d52', label: STATUS_ZH[st] ?? st }
+  if (st && ALARM.has(st)) return { kind: 'alarm', progress: 1, color: LIGHT_HEX.red, label: STATUS_ZH[st] ?? st }
   const sp = tile?.step_progress
   if ((st === 'running' || st === 'warning') && sp != null) {
     const press = id.startsWith('CURE-')
-    return { kind: 'batch', progress: clamp(sp), color: st === 'warning' ? '#f5b83d' : '#76b900',
+    return { kind: 'batch', progress: clamp(sp), color: st === 'warning' ? LIGHT_HEX.amber : LIGHT_HEX.green,
       label: `${press ? '硫化' : '本批'} ${Math.round(sp * 100)}%${st === 'warning' ? `・${STATUS_ZH.warning}` : ''}` }
   }
-  if (st === 'running') return { kind: 'idle', progress: 0, color: '#76b900', label: '運轉中' }   // no batch data (mock)
+  if (st === 'running') return { kind: 'idle', progress: 0, color: LIGHT_HEX.green, label: '運轉中' }   // no batch data (mock)
   return { kind: 'idle', progress: 0, color: '#6b7280', label: st === 'offline' ? '離線' : '閒置' }
 }

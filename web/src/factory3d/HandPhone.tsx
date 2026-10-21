@@ -4,6 +4,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { LIGHT_HEX } from './layout'
 
 /** A tiny phone-screen layout (status bar, header, three cards), used as the emissive map so the screen colour
  *  (green: all clear, amber: approvals waiting, white flash: buzzing) tints it. */
@@ -40,7 +41,7 @@ export function HandPhone({ pending, buzzUntil, away, visible }: { pending: numb
     i.position.lerp(v.current, 0.2)
     i.rotation.set(-0.35, -0.35, buzzing ? Math.sin(t * 60) * 0.05 : 0.08)
     if (screen.current) {
-      const base = pending > 0 ? '#f2b33d' : '#3fcf5a'
+      const base = pending > 0 ? LIGHT_HEX.amber : LIGHT_HEX.green
       screen.current.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : base)
       screen.current.emissiveIntensity = pending > 0 ? 1.2 + Math.sin(t * 5) * 0.3 : 0.9
     }
@@ -51,7 +52,7 @@ export function HandPhone({ pending, buzzUntil, away, visible }: { pending: numb
         <mesh><boxGeometry args={[0.09, 0.17, 0.014]} /><meshStandardMaterial color="#22262c" flatShading /></mesh>
         <mesh position={[0, 0, 0.0075]}>
           <planeGeometry args={[0.076, 0.148]} />
-          <meshStandardMaterial ref={screen} color="#000000" emissive="#3fcf5a" emissiveIntensity={0.5} emissiveMap={ui} />
+          <meshStandardMaterial ref={screen} color="#000000" emissive={LIGHT_HEX.green} emissiveIntensity={0.5} emissiveMap={ui} />
         </mesh>
         {/* yellow case rim, then a low-poly hand: palm + thumb, in the chibi skin tone */}
         <mesh position={[0, 0, -0.009]}><boxGeometry args={[0.098, 0.178, 0.006]} /><meshStandardMaterial color="#f2c14e" flatShading /></mesh>

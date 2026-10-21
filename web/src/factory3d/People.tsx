@@ -8,7 +8,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import type { WorldSnapshot, WorldTruck, WorldWorker } from '../contracts'
 import { box, cyl, makeFigure, rbox, restPose, walkCycle, type Figure } from './kit'
-import { DESK, DOCK, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS } from './layout'
+import { DESK, DOCK, LIGHT_HEX, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS, WORK_HEX } from './layout'
 
 type P = [number, number]
 const AISLES = [-3.5, -1.3, 0.9, 3.25, 5.6]
@@ -159,10 +159,10 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
         const f = makeFigure(LOOKS[idx])
         f.root.scale.setScalar(0.85)
         restPose(f)
-        const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: '#f5b83d' }))
+        const task = new THREE.Mesh(new THREE.OctahedronGeometry(0.09), new THREE.MeshBasicMaterial({ color: WORK_HEX }))
         task.position.set(0, 1.05, 0)
         f.root.add(task)
-        const ring = new THREE.Mesh(ringGeo(), new THREE.MeshBasicMaterial({ color: '#76b900', side: THREE.DoubleSide }))
+        const ring = new THREE.Mesh(ringGeo(), new THREE.MeshBasicMaterial({ color: LIGHT_HEX.green, side: THREE.DoubleSide }))
         ring.position.set(0, 1.3, 0)
         f.root.add(ring)
         group.add(f.root)
@@ -178,7 +178,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       }
       wk.yaw = s.yaw
       wk.key = `${w.state}|${t.id}`
-      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
+      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? LIGHT_HEX.green : WORK_HEX)
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
         ringTo(wk.ring.geometry, t.progress)

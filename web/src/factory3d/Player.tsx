@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
-import { OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
+import { LIGHT_HEX, OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
 import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, player, stick, view } from './pose'
 import { SPACES } from './spaces'
 import { lock, releaseLook, requestLook } from './look'
@@ -43,7 +43,7 @@ function buildLead() {
   const phone = new THREE.Group()
   phone.position.set(0, -0.03, 0.05)
   phone.add(rbox(0.075, 0.012, 0.13, '#22262c', 0, 0, 0, 0.015))
-  const screenMat = new THREE.MeshStandardMaterial({ color: '#000000', emissive: '#3fcf5a', emissiveIntensity: 0.6 })
+  const screenMat = new THREE.MeshStandardMaterial({ color: '#000000', emissive: LIGHT_HEX.green, emissiveIntensity: 0.6 })
   const screen = new THREE.Mesh(new THREE.PlaneGeometry(0.06, 0.11), screenMat)
   screen.rotation.x = -Math.PI / 2
   screen.position.y = 0.0135
@@ -242,7 +242,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     phone.rotation.x = phoneUp ? 1.05 : 0.9
     if (phoneUp) { f.armL.rotation.x = -1.2; f.armL.rotation.z = 0.35 }
     phone.position.x = buzzing ? Math.sin(t * 70) * 0.012 : 0
-    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? '#f5a623' : '#3fcf5a')
+    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? LIGHT_HEX.amber : LIGHT_HEX.green)
     screenMat.emissiveIntensity = pending > 0 ? 0.9 + Math.sin(t * 5) * 0.4 : 0.6
 
     // orbit camera pose: ease toward the targets (snap after a teleport)

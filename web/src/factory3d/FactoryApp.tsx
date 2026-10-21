@@ -312,8 +312,9 @@ export function FactoryApp() {
           gl.toneMappingExposure = 1.05
         }}
       >
-        <color attach="background" args={['#e9dfcf']} />
-        <fog attach="fog" args={['#e9dfcf', 46, 110]} />
+        {/* a step darker than the building's cream walls and floor, so the white hall stands out like a model on a table */}
+        <color attach="background" args={['#ddd2bf']} />
+        <fog attach="fog" args={['#ddd2bf', 46, 110]} />
         <Lights />
         <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
         {scene === 'break' && <BreakRoom />}

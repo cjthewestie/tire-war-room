@@ -7,10 +7,10 @@ import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import type { GoodsStatus, GoodsView } from '../contracts'
-import { PLACED_BY_ID } from './layout'
+import { LIGHT_HEX, PLACED_BY_ID, WORK_HEX } from './layout'
 
 const COLOR: Record<GoodsStatus, string> = {
-  待補料: '#9aa0a8', 備料中: '#f5b83d', 生產中: '#f5b83d', 硫化中: '#76b900', 完成: '#4fb3d9', 待出貨: '#4fb3d9', 已出貨: '#4fb3d9',
+  待補料: '#9aa0a8', 備料中: WORK_HEX, 生產中: WORK_HEX, 硫化中: LIGHT_HEX.green, 完成: '#4fb3d9', 待出貨: '#4fb3d9', 已出貨: '#4fb3d9',
 }
 const MAX_STACK = 3
 const R_IN = 0.1, R_OUT = 0.15, STEP_Y = 0.36, SEG = 32
@@ -52,8 +52,8 @@ export function GoodsRings({ goods }: { goods: GoodsView }) {
       const k = per[g.machine_id] ?? 0
       per[g.machine_id] = k + 1
       if (k >= MAX_STACK) continue
-      out.push({ mid: g.machine_id, status: g.status, progress: g.progress, order: g.order_id, color: g.late ? '#ff5d52' : COLOR[g.status],
-        dot: g.rush ? '#ff5d52' : COLOR[g.status], at: [m.x, m.h + 0.55 + k * STEP_Y, m.z] })
+      out.push({ mid: g.machine_id, status: g.status, progress: g.progress, order: g.order_id, color: g.late ? LIGHT_HEX.red : COLOR[g.status],
+        dot: g.rush ? LIGHT_HEX.red : COLOR[g.status], at: [m.x, m.h + 0.55 + k * STEP_Y, m.z] })
     }
     return out
   }, [goods.items])

@@ -42,7 +42,7 @@ function buildToy(p: Placed): Toy {
   const moving = new THREE.Group()
   const anim: Anim[] = []
   const { w, d, h } = p
-  const col = soften(LINE_HEX[p.line], 0.25)
+  const col = soften(LINE_HEX[p.line], 0.55)   // a hint of the line only: the floor pad and sign carry it, the lamp the status
   const roller = (len: number, r: number, x: number, y: number, z: number, along: 'x' | 'z' = 'x', speed = 2) => {
     const g = new THREE.Group(); g.position.set(x, y, z)
     const c = cyl(r, r, len, ROLL, 0, 0, 0, 10)
@@ -167,7 +167,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
   const alarm = light === 'red' || light === 'amber'
   useFrame(({ clock }) => {
     const t = clock.elapsedTime
-    const blink = light === 'red' ? 0.5 + 0.5 * Math.sin(t * 9) : light === 'amber' ? 0.5 + 0.5 * Math.sin(t * 4.5) : 1
+    const blink = light === 'red' ? 0.5 + 0.5 * Math.sin(t * 6) : light === 'amber' ? 0.5 + 0.5 * Math.sin(t * 4.5) : 1
     if (lampRef.current) lampRef.current.emissiveIntensity = light === 'grey' ? 0.15 : 0.5 + blink * 1.3
     if (lampMesh.current) lampMesh.current.scale.setScalar(alarm ? 1.5 + blink * 0.25 : 1)
     if (glowRef.current) {
@@ -175,7 +175,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       glowRef.current.scale.set(s, s, 1)
       ;(glowRef.current.material as THREE.SpriteMaterial).opacity = light === 'green' ? 0.45 : 0.45 + blink * 0.5
     }
-    if (shellRef.current) shellRef.current.opacity = 0.12 + blink * (light === 'red' ? 0.22 : 0.14)
+    if (shellRef.current) shellRef.current.opacity = 0.08 + blink * (light === 'red' ? 0.14 : 0.1)   // ≤ 0.22: the machine's shape still shows
     if (ringRef.current) {
       const u = (t * 0.8) % 1
       const s = 1 + u * 0.6
@@ -190,7 +190,7 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       {alarm && (
         <mesh position={[0, p.h / 2 + 0.02, 0]} renderOrder={1}>
           <boxGeometry args={[p.w + 0.1, p.h + 0.12, p.d + 0.1]} />
-          <meshBasicMaterial ref={shellRef} color={LIGHT_HEX[light]} transparent opacity={0.25} depthWrite={false} toneMapped={false} />
+          <meshBasicMaterial ref={shellRef} color={LIGHT_HEX[light]} transparent opacity={0.15} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
       <mesh ref={lampMesh} position={[lx, lampY, lz]} castShadow>
@@ -730,10 +730,10 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
   const R = ROOMS
   return (
     <group visible={active}>
-      {/* soft cream ground round the building (no sea: the building sits on the backdrop) */}
+      {/* a darker sand ground round the building (no sea: the building sits on the backdrop), so its walls read */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.3, 0]} receiveShadow>
         <circleGeometry args={[160, 48]} />
-        <meshStandardMaterial color="#e6dac6" roughness={0.95} />
+        <meshStandardMaterial color="#cbbda4" roughness={0.95} />
       </mesh>
       <Building />
       <OuterWalls />
