@@ -66,6 +66,8 @@ export interface Transport {
   /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
    *  approvals. 409 when the event has no pending review. */
   review?(eventId: string, note?: string): Promise<Event>
+  /** Live only (#104): 恢復運轉, the supervisor puts a machine whose 檢修 is done back in service. PIN like approvals. */
+  returnToService?(machineId: string): Promise<{ machine_id: string; status: string }>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
@@ -197,6 +199,7 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
+  returnToService(machineId: string) { return postJSON<{ machine_id: string; status: string }>(apiPath(API.returnToService, { machine_id: machineId }), {}) }
   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }

@@ -542,6 +542,8 @@ export interface MachineTile {
   temp_c: number | null
   /** issue #36: current batch / step progress 0-1 (press: cure elapsed / required); null = no batch */
   step_progress?: number | null
+  /** issue #104: 檢修完成 while still out of service (green), waiting for the supervisor's 恢復運轉 */
+  repaired?: boolean
 }
 
 export interface HeaderStatus {
@@ -767,6 +769,7 @@ export const API = {
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
   review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
+  returnToService: "/api/machines/{machine_id}/return-to-service", // POST -> {machine_id, status} (#104 主管恢復運轉, 409 unless 檢修完成)
   ws: "/ws",
 } as const
 

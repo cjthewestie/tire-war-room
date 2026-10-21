@@ -504,6 +504,7 @@ class Runtime:
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self._orch: Any = None
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._repaired_out: dict[str, str] = {}   # #104 machine id -> event id: 檢修完成 while out of service
         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
         self.speed = float(self.settings.sim_speed)
@@ -516,6 +517,7 @@ class Runtime:
         # 討論」): on in the served app; tests that drive tick() opt in (WARROOM_PREPLAN=0/1 overrides)
         self.preplan_on = os.environ.get("WARROOM_PREPLAN", "1" if run_loop else "0") == "1"
         self._preplanned: dict[str, tuple[str, str]] = {}   # order id -> (risk signature, event id)
+        self._preplan_keys: dict[str, tuple] = {}             # order id -> inputs at its last pre-plan (_preplan_inputs)
         self._preplan_at: datetime | None = None
         self.started_wall = time.monotonic()
         self.safety_log: list[SafetyAction] = []
@@ -1065,6 +1067,9 @@ class Runtime:
             if fast and callable(snap):
                 snap(mid)                        # no slow cool-down: the next reading is normal
             self.c.detector.reset(mid, repaired=True)
+            status_of = getattr(self.sim, "status_of", None)
+            if callable(status_of) and status_of(mid) is MachineStatus.OUT_OF_SERVICE:
+                self._repaired_out[mid] = eid      # 檢修完成: green, still out of service until 恢復運轉
             self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
             on_repaired = getattr(self.state_machine, "on_repaired", None)
             if fast and callable(on_repaired):
@@ -1081,6 +1086,7 @@ class Runtime:
                                       board=lambda: getattr(getattr(self.sim, "world", None), "tasks", None),
                                       dispatcher=Dispatcher(self.settings))
             self._orch.queue.on_change = self._orch.publish
+            self._orch.precheck = lambda ev: self.precheck_line(self._preplan_order(ev))
             self._orch_c = self.c
         return self._orch
 
@@ -1150,6 +1156,9 @@ class Runtime:
             mine = events.get(prior[1]) if prior else None
             if mine is not None and (prior[0] == sig or mine.state not in TERMINAL_STATES):
                 continue                                         # planned already (or still drafting)
+            inputs = self._preplan_inputs(oid)
+            if mine is not None and not mine.approvals and self._preplan_keys.get(oid) == inputs:
+                continue          # it found nothing to change: a new ETA alone (a schedule version bump) is no reason
             asked = [e for e in events.values() if e.source == "supervisor" and (e.command or "").startswith(f"{oid} ")]
             if any(e.state not in TERMINAL_STATES for e in asked) or (asked and mine is None and prior is None):
                 # the supervisor (or an earlier pre-plan before a restart) already asked for this order
@@ -1160,11 +1169,63 @@ class Runtime:
             t, _p = self.orch.queue.tags.get(ev.id, ("order", 0))
             self.orch.queue.tags[ev.id] = (t, PRIORITY["preplan"])    # also when the run opens later (Orchestrator._opened)
             self._preplanned[oid] = (sig, ev.id)
+            self._preplan_keys[oid] = inputs
             self.audit.append(AuditKind.SYSTEM, "agent_nemo", {"msg": "pre-plan", "order_id": oid, "signature": sig},
                               event_id=ev.id)
             running += 1
             started.append(ev.id)
         return started
+
+    def return_to_service(self, machine_id: str, actor: str) -> None:
+        """#104 恢復運轉: the supervisor puts a repaired machine back in service (OUT_OF_SERVICE -> RUNNING). Human only:
+        reachable from the supervisor-session route, never from a plan or a tool. Only after 檢修完成 (its repair tasks
+        done and the fault cleared). Audited with the supervisor as actor. (#105 releases Safety Core STOPPED holds;
+        OUT_OF_SERVICE is this one.)"""
+        if machine_id not in F.MACHINE_BY_ID:
+            raise KeyError(machine_id)
+        status_of = getattr(self.sim, "status_of", None)
+        if not callable(status_of) or status_of(machine_id) is not MachineStatus.OUT_OF_SERVICE:
+            raise ValueError(f"{machine_id} 不是停用狀態")
+        if machine_id not in self._repaired_out:
+            raise ValueError(f"{machine_id} 還沒檢修完成，不能恢復運轉")
+        eid = self._repaired_out.pop(machine_id)
+        self.sim.set_machine_status(machine_id, MachineStatus.RUNNING, "主管恢復運轉")
+        self.c.detector.reset(machine_id, repaired=True)
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "恢復運轉", "machine_id": machine_id, "after": "檢修完成"}, eid)
+        self._publish_periodic(force=True)
+
+    def _available_presses(self, size: Any) -> int:
+        """Curing presses that can take this size and are not out of service (a Safety Core hold is temporary)."""
+        pool = F.SMALL_ONLY_PRESSES if getattr(size, "value", size) == "S" else F.ML_PRESSES
+        status_of = getattr(self.sim, "status_of", None)
+        if not callable(status_of):
+            return len(pool)
+        return sum(1 for p in pool if status_of(p) is not MachineStatus.OUT_OF_SERVICE)
+
+    def _preplan_inputs(self, order_id: str) -> tuple:
+        """What a pre-plan's answer depends on: the order's due date, quantity and size, and the presses that can cure
+        it. A pre-plan that found nothing to change runs again only when one of these changed (#104)."""
+        o = next((x for x in (self.sim.orders() if callable(getattr(self.sim, "orders", None)) else []) if x.id == order_id),
+                 None)
+        if o is None:
+            return (order_id,)
+        return (o.due, o.qty, o.done, getattr(o.size, "value", o.size), self._available_presses(o.size))
+
+    @staticmethod
+    def _preplan_order(ev: Any) -> str:
+        return (getattr(ev, "command", None) or "").split(" ", 1)[0]
+
+    def precheck_line(self, order_id: str) -> str | None:
+        """The report for a pre-plan that found nothing to change (CJ, 2026-10-22: 「計劃已經先擬好，只等核准或討論」):
+        what was checked and what to do, e.g. 「已預先檢查：SO-012 明天無法交齊（7 台小胎機都滿），建議聯絡客戶延交或分批」."""
+        o = next((x for x in (self.sim.orders() if callable(getattr(self.sim, "orders", None)) else []) if x.id == order_id),
+                 None)
+        if o is None:
+            return None
+        days = (o.due - self.clock.now().date()).days
+        when = "今天" if days <= 0 else "明天" if days == 1 else f"{o.due:%m/%d} 前"
+        kind = "小胎機" if getattr(o.size, "value", o.size) == "S" else "中大胎機"
+        return f"已預先檢查：{order_id} {when}無法交齊（{self._available_presses(o.size)} 台{kind}都滿），建議聯絡客戶延交或分批"
 
     def _spawn(self, an: Anomaly) -> None:
         task = asyncio.create_task(self.state_machine.handle(an), name=f"event-{an.id}")
@@ -1291,6 +1352,7 @@ class Runtime:
                 self._baseline.clear()
                 self._oob_seen.clear()
                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+                self._repaired_out.clear()
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
                 self.audit.append(AuditKind.SYSTEM, "supervisor",
@@ -1679,7 +1741,8 @@ class Runtime:
             out.append(MachineTile(machine_id=d.id, line=d.line, short_name=d.short_name,
                                    status=self._effective_status(m),
                                    temp_c=m.last_reading.temp_c if m.last_reading else None,
-                                   step_progress=self._step_progress(m)))
+                                   step_progress=self._step_progress(m),
+                                   repaired=m.machine_id in self._repaired_out and m.status is MachineStatus.OUT_OF_SERVICE))
         return out
 
     @staticmethod

@@ -329,6 +329,8 @@ main { padding: 16px 0 0; }
 .mdot.press.st-out_of_service { border: 1px dashed var(--alarm); background: repeating-linear-gradient(135deg, var(--alarm-soft) 0 6px, transparent 6px 12px); color: var(--alarm); text-decoration: none; }
 .mdot.press.st-warning { border-color: var(--warn); color: var(--warn); }
 .mdot.press.st-alarm .press-s, .mdot.press.st-out_of_service .press-s, .mdot.press.st-stopped .press-s { color: var(--alarm); }
+.mdot.press.st-out_of_service.repaired { border: 1px dashed var(--accent); background: var(--accent-soft); color: var(--accent); }   /* #104 檢修完成, waiting for 恢復運轉 */
+.mdot.press.repaired .press-s { color: var(--accent); }
 .mdot.press.is-focus { outline: 2px solid var(--alarm); outline-offset: 2px; }
 .mdot.press.is-focus:not(.st-alarm):not(.st-out_of_service):not(.st-stopped) { outline-color: var(--accent); }
 @keyframes ring { 0% { box-shadow: 0 0 0 0 rgb(var(--alarm-rgb, 255 93 82) / .55); } 70% { box-shadow: 0 0 0 8px rgb(var(--alarm-rgb, 255 93 82) / 0); } 100% { box-shadow: 0 0 0 0 rgb(var(--alarm-rgb, 255 93 82) / 0); } }

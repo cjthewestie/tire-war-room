@@ -1042,6 +1042,9 @@ class MachineTile(_M):
     # issue #36: how far the current batch / step is (0-1): a press's cure (elapsed / required), any other
     # machine's batch (MachineState.step_elapsed_min / its cycle). None = no batch (an empty press).
     step_progress: float | None = None
+    # issue #104: 檢修完成 — its repair tasks are done and the fault is cleared, but it stays OUT_OF_SERVICE until the
+    # supervisor's 恢復運轉 (POST /api/machines/{id}/return-to-service); no AI plan lifts it
+    repaired: bool = False
 
 
 class BadDataMark(_M):

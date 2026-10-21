@@ -14,7 +14,7 @@ import pytest
 
 from warroom import factory as F
 from warroom.config import Settings
-from warroom.contracts import ApprovalDecision, DecisionKind, EventState, SafetyActionKind, ScenarioName
+from warroom.contracts import ApprovalDecision, DecisionKind, EventState, MachineStatus, SafetyActionKind, ScenarioName
 from warroom.sim import Factory
 from warroom.sim.scenarios import (
     MR_AT_RISK_ORDER,
@@ -146,6 +146,54 @@ async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
     assert not [a for a in safety if a.machine_id == "B-OPEN"]
     left = [e for e in world.events if e.kind == "shipment_departed"]
     assert left and left[0].ts == _at(10, 0)
+    # one pre-plan per change of SO-012's inputs (here: the start, and press 7 going out of service), never one per
+    # schedule version; each reports 「已預先檢查：…」 instead of 「沒有可執行的動作」
+    pre = [e for e in events if (e.command or "").startswith(f"{MR_AT_RISK_ORDER} ")]
+    assert 1 <= len(pre) <= 2, [(e.id, e.opened_at) for e in pre]
+    reports = [a for a in rt.audit.tail(0, 100000) if a.payload.get("orch") == "report" and a.event_id in {e.id for e in pre}]
+    assert len(reports) == len(pre) and all(r.payload["text"].startswith(f"已預先檢查：{MR_AT_RISK_ORDER} 明天無法交齊（")
+                                            for r in reports), [r.payload["text"] for r in reports]
+
+
+async def test_preplan_is_not_rerun_for_a_new_eta_alone(tmp_path, monkeypatch):
+    """A pre-plan that found nothing to change runs again only when the order's due date, quantity or the presses
+    that can cure it change; a new ETA (a schedule version bump) alone does not start another one."""
+    monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
+    from warroom.api import Runtime
+    s = Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched", qdrant_path=tmp_path / "qdrant",
+                 scenario="morning_rush", llm_mode="mock")
+    rt = Runtime(s, allow_fallback=False, run_loop=False)
+    await rt.start()
+    try:
+        while rt.now() < _at(7, 9):                               # the rush re-plan (SO-012 in it) is approved
+            await rt.tick(1.0, publish=False)
+            for req in rt.approvals.pending():
+                rt.approvals.decide(ApprovalDecision(request_id=req.id, decision=DecisionKind.APPROVE,
+                                                     option_id=req.options[0].id if req.options else None,
+                                                     reason="test", via="auto", decided_at=rt.now()))
+        await rt.wait_events(30)
+        sig = {"SO-012": "eta 1"}
+        rt.at_risk_orders = lambda: dict(sig)
+
+        async def preplan() -> int:
+            rt._preplan_at = None
+            rt._preplan_orders()
+            mine = [e for e in rt.events() if (e.command or "").startswith("SO-012 ")]
+            for _ in range(600):                                   # the run needs sim seconds to finish
+                if all(e.state in (EventState.CLOSED, EventState.SAFE_STOP) for e in rt.events() if e.id in {m.id for m in mine}):
+                    break
+                await rt.tick(1.0, publish=False)
+            return len(mine)
+        assert await preplan() == 1
+        ev = next(e for e in rt.events() if (e.command or "").startswith("SO-012 "))
+        assert ev.state is EventState.CLOSED and not ev.approvals                   # nothing to change (mock)
+        sig["SO-012"] = "eta 2"                                                     # a new ETA only
+        assert await preplan() == 1
+        o = next(o for o in rt.sim.orders() if o.id == "SO-012")
+        rt.sim._orders["SO-012"] = o.model_copy(update={"qty": o.qty + 2})         # the customer adds two tyres
+        assert await preplan() == 2
+    finally:
+        await rt.stop()
 
 
 async def test_morning_rush_long_cut(tmp_path, monkeypatch):
@@ -211,6 +259,27 @@ async def test_page11_fast_repair_keeps_h1_rejected_until_h2(tmp_path):
         ev = next(e for e in rt.events() if e.machine_id == "CURE-07")
         tasks = [t for t in rt.world_snapshot().tasks.items if t.event_id == ev.id]
         faults = [f for f in rt.sim.faults(active_only=False) if f.machine_id == "CURE-07"]
+        tile = next(m for m in rt.machine_tiles() if m.machine_id == "CURE-07")
+        # 檢修完成 shows green but the press stays out of service: only the supervisor's 恢復運轉 lifts it
+        assert tile.status is MachineStatus.OUT_OF_SERVICE and tile.repaired
+        import httpx
+        from warroom.api.app import create_app
+        app = create_app(rt, supervisor_pin="mr-pin")
+        url = "/api/machines/CURE-07/return-to-service"
+
+        def client(addr=("127.0.0.1", 1)):
+            return httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=addr), base_url="http://local")
+        async with client(("192.168.1.20", 5000)) as phone, client() as local:
+            assert (await phone.post(url)).status_code == 401                         # LAN without the PIN
+            assert (await local.post("/api/machines/CURE-01/return-to-service")).status_code == 409   # not out of service
+            assert (await local.post("/api/machines/NOPE/return-to-service")).status_code == 404
+            r = await phone.post(url, headers={"X-Supervisor-Pin": "mr-pin"})
+            assert r.status_code == 200, r.text
+            assert (await local.post(url)).status_code == 409                          # running again
+        assert rt.sim.status_of("CURE-07") is MachineStatus.RUNNING
+        assert not next(m for m in rt.machine_tiles() if m.machine_id == "CURE-07").repaired
+        back = [e for e in rt.audit.tail(0, 100000) if e.payload.get("msg") == "恢復運轉"]
+        assert len(back) == 1 and back[0].actor.startswith("supervisor") and back[0].event_id == ev.id
     finally:
         await rt.stop()
     h1 = ev.hypotheses[0]

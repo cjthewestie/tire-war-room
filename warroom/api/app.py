@@ -596,6 +596,21 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
 
+    @app.post("/api/machines/{machine_id}/return-to-service")
+    async def return_to_service(machine_id: str, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """#104 恢復運轉: the supervisor puts a machine whose 檢修 is done back in service (OUT_OF_SERVICE -> RUNNING).
+        Same session rule as approvals; 409 when it is not out of service or not repaired yet. Audited."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        try:
+            r.return_to_service(machine_id, session.actor)
+        except KeyError:
+            raise _404(machine_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        return {"machine_id": machine_id, "status": "running"}
+
     # ------------------------------------------------------------------ approvals
     @app.get("/api/approvals", response_model=list[ApprovalRequest])
     async def approvals(status: str | None = None) -> list[ApprovalRequest]:
