@@ -179,7 +179,9 @@ def test_prompt_and_reply_length():
 def test_approval_and_report_lines_are_plain_event_words():
     from warroom.agent.orchestrator import Orchestrator
     rows = []
-    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07")
+    from warroom.contracts import EventState
+    # state: the reporter (warroom/agent/reporter.py, merged later) also listens to on_decided and reads it
+    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07", state=EventState.EXECUTE)
     sm = SimpleNamespace(get=lambda _i: ev, events=list)
     o = Orchestrator(sm, SimpleNamespace(append=lambda *a, **k: rows.append(a[2])))
     o.on_decided(SimpleNamespace(event_id="EV-1", id="AP-1",
@@ -430,3 +432,37 @@ async def test_every_chat_and_summary_model_call_is_an_llm_call_row():
     assert first[2]["conversation"] != "sup|c1" and len(first[2]["conversation"]) == 16      # hashed
     assert first[2]["tool_calls"] == [QUERY]
     assert any(r[2]["phase"] == "summary" for r in rows)
+
+
+# ---------------------------------------------------------------- rag-fix findings (PR #122)
+def test_qing_jia_and_how_questions_are_not_task_requests():
+    from warroom.agent.main_agent import wants_task
+    for q in ("員工請假怎麼調人", "夜班有人請假要不要加班", "請問 7 號機怎麼了", "S13 請病假，人力怎麼補"):
+        assert not wants_task(q), q
+    for q in ("請安排 9 號機明天保養", "幫我通知夜班組長", "請幫我調人補夜班", "#A-311 可能晚交，請重排保交期"):
+        assert wants_task(q), q
+
+
+async def test_qing_jia_question_is_answered_not_proposed():
+    m = Model(("say", "請假時先看同組有沒有能頂的人，不夠再跨組調人或加班。"))
+    out, f = await _turn(m, "員工請假怎麼調人")
+    assert not f.proposed and out["event_id"] is None and "調人" in out["reply"]
+    rules = await MainAgent(None).turn("員工請假怎麼調人", context={"abnormal": []}, waiting_plan=None,
+                                       run_tool=f.run_tool, propose=f.propose, discuss=None)
+    assert not f.proposed and rules["event_id"] is None
+
+
+async def test_a_wrong_material_count_is_not_kept():
+    data = {"material_count": 6, "materials": [{"name": "尼龍布", "stock": 180}], "in_transit": "目前沒有在途的採購",
+            "waiting_ship_tyres": 12}
+    m = Model(("tool", QUERY, {"topic": "materials"}), ("say", "我們有 12 種原料，尼龍布 180 m。"),
+              ("say", "我們有 12 種原料。尼龍布剩 180 m。"))
+    out, _ = await _turn(m, "缺料怎麼辦", Reader(data))
+    assert "12 種" not in out["reply"]
+
+
+async def test_materials_topic_counts_and_lists_what_is_in_transit(tmp_path):
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        d = plant_query.query(p.rt, "materials")
+        assert d["material_count"] == len(d["materials"]) == 6
+        assert d["in_transit"] == "目前沒有在途的採購" or all("name" in x for x in d["in_transit"])

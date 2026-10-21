@@ -355,10 +355,23 @@ def has_object(text: str) -> bool:
                 or re.search(r"\d{1,2}\s*號", text))
 
 
+# 請 that is no request (請假、請問、請教、申請…): 「員工請假怎麼調人」 proposed a plan (rag-fix, PR #122)
+_NOT_REQUEST_RX = re.compile(r"請假|請病假|請問|請教|申請|邀請|請款|聲請")
+# a how / whether question (「…怎麼調人」「…要不要加班」) asks for an answer, unless it opens with 請／幫我
+_HOW_RX = re.compile(r"怎麼|怎樣|如何|要怎|該怎|要不要|可不可以|能不能|是否|嗎|呢")
+
+
+def _imperative(text: str) -> bool:
+    t = _NOT_REQUEST_RX.sub("", text.strip())
+    if _HOW_RX.search(t) and not re.match(r"\s*(?:請|幫我|麻煩)", t):
+        return False
+    return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t))
+
+
 def wants_task(text: str) -> bool:
-    """「請／幫我…」 with a concrete object, and not a question."""
+    """「請／幫我…」 with a concrete object, and not a question (請假／請問 are not 「請…」)."""
     t = text.strip()
-    return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t)) and has_object(t) and not re.search(r"[?？]\s*$", t)
+    return _imperative(t) and has_object(t) and not re.search(r"[?？]\s*$", t)
 
 
 def _order_id(v: Any) -> str | None:
@@ -458,6 +471,18 @@ def tidy(reply: str, keep_intro: bool, limit: int = MAX_SENTENCES) -> str:
         cut = max(r.rfind(c, 0, MAX_CHARS) for c in "。；;，")
         r = r[:cut].rstrip("；;，, ") + "…" if cut > MAX_CHARS // 2 else r[:MAX_CHARS] + "…"
     return r.strip()
+
+
+_MATERIAL_COUNT_RX = re.compile(r"(\d+)\s*(?:種|項|樣)\s*(?:原料|材料)")
+
+
+def miscounted(reply: str, source: str) -> list[str]:
+    """「12 種原料」 when the data says material_count 6: a count passes the number check whenever any 12 is in the
+    context (12 tyres waiting to ship), so a material count is checked against the count itself."""
+    m = re.search(r'"material_count":\s*(\d+)', source)
+    if not m:
+        return []
+    return [n for n in _MATERIAL_COUNT_RX.findall(reply) if n != m.group(1)]
 
 
 def ungrounded(reply: str, source: str) -> list[str]:
@@ -1068,7 +1093,7 @@ class MainAgent:
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": "主管給了這份待核准計劃的具體改法。請呼叫 discuss_waiting_plan，text 寫成完整一句，再回覆。"}]
                 continue
-            bad = ungrounded(tidy(reply, True), source)
+            bad = ungrounded(tidy(reply, True), source) + miscounted(tidy(reply, True), source)
             if bad and not regrounded and not last and any(st["ok"] and st["tool"] in CHAT_READS for st in out["steps"]):
                 # a number the reads did not give (「25」 from query_plant handled_today, preview run 10-21): one retry
                 # before code replaces the words with the raw results
@@ -1154,12 +1179,12 @@ class MainAgent:
             return nothing
         words = tidy(reply, True)
         # a general answer with no plant read (「硫化是什麼」 → 「通常在 140–160°C」) is general knowledge, not a plant number
-        bad = [] if general else ungrounded(words, source)
+        bad = [] if general else ungrounded(words, source) + miscounted(words, source)
         if bad:                                       # a number the tools did not give: the results speak instead
             out["error"] = f"ungrounded numbers {bad}"
             # first try the model's words without the sentences that carry it (a whole reply replaced by raw results
             # read worse than one dropped line: 「今天有哪些訂單」 → 「查到：工廠資料（訂單）：pipeline: …」, preview 10-21)
-            kept = "".join(x for x in _SENTENCE_RX.findall(words) if not ungrounded(x, source)).strip()
+            kept = "".join(x for x in _SENTENCE_RX.findall(words) if not (ungrounded(x, source) or miscounted(x, source))).strip()
             # what is left must still answer: only 「若主管還有其他想查的項目，請說。」 left was no answer (real run 10-22)
             if kept and len(kept) >= len(words) // 3 and not (waiting_plan and about_edit):
                 return kept
@@ -1218,8 +1243,8 @@ class MainAgent:
         if _APPROVE_RX.search(t):                     # approving and releasing are buttons, never a proposal
             out.update(reply=APPROVE_REPLY, intent="refused")
             return
-        imperative = bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t))
-        if _TASK_RX.search(t) and not asks and has_object(t) and (imperative or not _QUESTION_RX.search(t)):
+        imperative = _imperative(t)
+        if _TASK_RX.search(_NOT_REQUEST_RX.sub("", t)) and not asks and has_object(t) and (imperative or not _QUESTION_RX.search(t)):
             out["intent"] = "new_task"
             await self._tool(PROPOSE, {"task": t}, t, out, tid, run_tool, propose, discuss)
             out["reply"] = self._propose_reply(out["steps"])
