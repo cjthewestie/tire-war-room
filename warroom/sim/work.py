@@ -234,6 +234,10 @@ class TaskBoard:
         self._listeners: list[Any] = []
         # set by the runtime (Settings.repair_fast_s and its sim speed); 0 = every task takes its factory minutes
         self.fast_s: float = 0.0
+        # set by the runtime: True while the task's event still waits for the supervisor's decision. A fast repair
+        # task (e.g. the R1 檢修 the gate lets through before the card) stays 待派 until then: nobody walks to the
+        # machine before 主管核准 (Spark timing 10-21: 前往中 13 s before the card)
+        self.hold: Callable[[str | None], bool] | None = None
         self.speed: Callable[[], float] = lambda: 1.0
 
     # ---- public
@@ -314,15 +318,12 @@ class TaskBoard:
                 t.status, t.done_at = "完成", t.started_at + timedelta(minutes=t.work_min)
                 self._emit(t, now, "done")
 
-    def advance_fast(self, now: datetime, wall_dt: float, hold: Callable[[str | None], bool] | None = None) -> bool:
+    def advance_fast(self, now: datetime, wall_dt: float) -> bool:
         """Fast repair: run every open fast task `wall_dt` wall seconds further (the runtime calls this every loop turn
-        and tick, never while paused). `hold(event_id)` True = its event still waits for the supervisor's decision: the
-        task does not start yet (an R1 檢修 the gate let through before the card would otherwise be 完成 before 主管核准,
-        reviewers 10-21). True while any is still open (the world view should be republished)."""
+        and tick, never while paused); a task whose event still waits for the supervisor's decision (self.hold) does not
+        start yet. True while any is still open (the world view should be republished)."""
         open_ = [t for t in self._tasks.values() if t.fast_s is not None and t.status != "完成"]
         for t in open_:
-            if hold is not None and hold(t.event_id):
-                continue
             self._advance_fast(t, now, wall_dt)
         if open_:
             self.w.rev += 1                  # the ring above the machine moves on the wall clock, not the world grid
@@ -331,7 +332,7 @@ class TaskBoard:
     def _advance_fast(self, t: _Task, now: datetime, wall_dt: float) -> None:
         """待派 → 前往中 → 執行中 → 完成 of a fast repair task: assigned at once (its team first, else any free person on
         duty); done within fast_s wall seconds of its creation even when nobody was free."""
-        if t.status == "完成" or t.fast_s is None:
+        if t.status == "完成" or t.fast_s is None or (self.hold is not None and self.hold(t.event_id)):
             return
         t.fast_done_s += max(0.0, wall_dt)
         frac = min(1.0, t.fast_done_s / max(t.fast_s - FAST_SLACK_S, 1e-6))

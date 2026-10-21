@@ -976,6 +976,7 @@ class Runtime:
         board._audited = True
         board.fast_s = float(self.settings.repair_fast_s)    # fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒)
         board.speed = lambda: self.speed
+        board.hold = self._awaits_decision                    # fast repair starts after 主管核准, not at the card
 
         def on_task(what: str, t: Any, now: datetime) -> None:
             if what == "created":
@@ -1001,15 +1002,25 @@ class Runtime:
         if not running or self._switching or self.settings.repair_fast_s <= 0 or \
                 not callable(getattr(board, "advance_fast", None)):
             return
-        board.advance_fast(self.clock.now(), dt, hold=self._awaits_decision)
+        board.advance_fast(self.clock.now(), dt)
         self._apply_repairs()
 
     def _awaits_decision(self, event_id: str | None) -> bool:
-        """The event is still before the supervisor's decision (planning, gate, waiting card, replanning)."""
+        """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
+        auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
+        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
+        檢修 walked to 7 號 13 s before the card)."""
         ev = self._event_obj(event_id)
-        return ev is not None and ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN,
-                                               EventState.SIMULATE, EventState.GATE, EventState.AWAIT_APPROVAL,
-                                               EventState.REPLAN)
+        if ev is None:
+            return False
+        if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
+                        EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
+            return True
+        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+                    for sr in ev.steps)
+        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+                      for r in self.approvals.all())
+        return needs and not decided
 
     def _apply_repairs(self) -> None:
         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
