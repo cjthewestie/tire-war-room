@@ -62,7 +62,8 @@ function buildLead() {
   return { f, phone, screenMat }
 }
 
-/** `focus` (demo): where the overview centres instead of the lead, the machine of the anomaly being told (FactoryApp). */
+/** `focus` (demo): where the overview centres instead of the lead, the anomaly being told (FactoryApp: its machine with the
+ *  other open ones, pulled toward the hall's centre). */
 export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzzUntil, phoneUp, mode, scene, focus = null }: {
   enabled: boolean; started: boolean; onNear: (n: Near) => void; onDoor: (to: SceneId) => void; prompt: string | null
   pending: number; buzzUntil: number; phoneUp: boolean; mode: 'first' | 'third'; scene: SceneId; focus?: [number, number] | null
@@ -245,7 +246,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     phone.rotation.x = phoneUp ? 1.05 : 0.9
     if (phoneUp) { f.armL.rotation.x = -1.2; f.armL.rotation.z = 0.35 }
     phone.position.x = buzzing ? Math.sin(t * 70) * 0.012 : 0
-    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? LIGHT_HEX.amber : LIGHT_HEX.green)
+    screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? LIGHT_HEX[DEMO_MODE ? 'red' : 'amber'] : LIGHT_HEX.green)
     screenMat.emissiveIntensity = pending > 0 ? 0.9 + Math.sin(t * 5) * 0.4 : 0.6
 
     // orbit camera pose: ease toward the targets (snap after a teleport)

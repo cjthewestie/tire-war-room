@@ -1,9 +1,11 @@
 // First person: the supervisor phone held low in the right hand. It buzzes (shakes, screen flashes) on a new approval,
-// glows amber while approvals wait, and drops out of view while the real /phone page is raised (PhoneOverlay).
+// glows amber while approvals wait (red in the demo: amber there only means 回溫中), and drops out of view while the
+// real /phone page is raised (PhoneOverlay).
 // Kept small and close to the eye (inside the lead's collision radius), so it never pokes into a wall.
 import { useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
+import { DEMO_MODE } from '../components/DemoStrip'
 import { LIGHT_HEX } from './layout'
 
 /** A tiny phone-screen layout (status bar, header, three cards), used as the emissive map so the screen colour
@@ -41,7 +43,7 @@ export function HandPhone({ pending, buzzUntil, away, visible }: { pending: numb
     i.position.lerp(v.current, 0.2)
     i.rotation.set(-0.35, -0.35, buzzing ? Math.sin(t * 60) * 0.05 : 0.08)
     if (screen.current) {
-      const base = pending > 0 ? LIGHT_HEX.amber : LIGHT_HEX.green
+      const base = pending > 0 ? LIGHT_HEX[DEMO_MODE ? 'red' : 'amber'] : LIGHT_HEX.green
       screen.current.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : base)
       screen.current.emissiveIntensity = pending > 0 ? 1.2 + Math.sin(t * 5) * 0.3 : 0.9
     }

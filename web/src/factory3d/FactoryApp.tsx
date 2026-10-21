@@ -16,12 +16,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
-import type { AnomalyKind, Event, SimControl } from '../contracts'
+import type { AnomalyKind, ApprovalRequest, Event, SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useLinkStatus } from '../linkStatus'
-import { alertText, diffPending, repairNotices, type PushState } from '../phone/alert'
-import { repairStage, type RepairStage } from '../aiStatus'
+import { alertText, diffPending, repairNotices, type AlertItem, type PushState } from '../phone/alert'
+import { expectationOf, recoverWord, repairStage, type RepairStage } from '../aiStatus'
 import { plain } from '../plain'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
@@ -32,7 +32,7 @@ import { FieldSop } from './FieldSop'
 import { AiStatusLine } from '../AiStatusLine'
 import { recoveryPhase } from './machineRing'
 import { successTitle, useSuccessMoments } from './success'
-import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
+import { OVERVIEW_CENTER, PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
 import { Player } from './Player'
 import { PhoneOverlay } from './PhoneOverlay'
@@ -73,6 +73,25 @@ function headline(ev: Event | null, stage: RepairStage | null, waiting: boolean)
   if (stage === 'repairing') return `${m} 維修中`
   const what = PROBLEM[ev.anomaly.kind] ? `${m}${PROBLEM[ev.anomaly.kind]}` : plain(ev.alert_card?.title ?? ev.anomaly.message)
   return waiting ? `${what}，等你核准` : what
+}
+
+const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
+
+/** Demo toast (Kyle 10-22 review): the answer card's words, not the phone's engineering text (「R3・假設 H1：…」,
+ *  「待核准：異常：…」), coloured by what it is: a card waiting (red), 維修完成 (amber: the readings coming back). The
+ *  report does not toast (the green 已恢復正常 capsule and the answer card say it); the phone still buzzes and rings. */
+function demoToast(fire: AlertItem[], pending: ApprovalRequest[], events: Event[]): { title: string; body: string; tone: 'bad' | 'warm' } | null {
+  const asks = fire.filter((a) => !a.notice), fixed = fire.filter((a) => a.notice === 'repaired')
+  const evOf = (a: AlertItem) => events.find((e) => (a.notice ? a.id.startsWith(`${a.notice}:${e.id}:`) : pending.find((p) => p.id === a.id)?.event_id === e.id))
+  const what = (a: AlertItem) => { const e = evOf(a); return e ? headline(e, null, false) : plain(a.title) }
+  if (asks.length) {
+    return asks.length === 1 ? { title: what(asks[0]), body: '等你核准', tone: 'bad' }
+      : { title: `${asks.length} 件異常等你核准`, body: asks.map(what).join('；'), tone: 'bad' }
+  }
+  if (!fixed.length) return null
+  const e = evOf(fixed[0])
+  return fixed.length === 1 ? { title: `${e ? machineLabel(e.machine_id) : fixed[0].title} 維修完成`, body: recoverWord(expectationOf(e ?? null)), tone: 'warm' }
+    : { title: `${fixed.length} 台維修完成`, body: fixed.map((a) => a.title).join('；'), tone: 'warm' }
 }
 
 /** The HUD's 已暫停 chip, in the amber tone of the link chip (.f3-conn.t-warn). */
@@ -133,7 +152,7 @@ export function FactoryApp() {
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
-  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean } | null>(null)
+  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean; tone?: 'bad' | 'warm' } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
@@ -146,6 +165,8 @@ export function FactoryApp() {
   useEffect(() => { nearRef.current = near }, [near])
   const fadingRef = useRef(false)
   const push = useRef<PushState>({ seen: new Set(), held: [] })
+  const eventsRef = useRef<Event[]>([])     // the demo toast names the events (read when it fires, not a dependency)
+  useEffect(() => { eventsRef.current = state.snapshot?.events ?? [] }, [state.snapshot?.events])
 
   const ev = primaryEvent(state.snapshot?.events)
   const evOpen = ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
@@ -157,14 +178,31 @@ export function FactoryApp() {
   const repairing = stages.filter((x) => x === 'repairing' || x === 'recovering').length
   const unread = stages.filter((x) => x === 'report').length
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
-  // demo: the event the story is about, while open and for the green hold after it recovered (machineRing's 已恢復 ring):
-  // its reading tag stays up and the overview (V) centres on its machine
-  const back = ev && !evOpen && recoveryPhase(ev) === 'recovered' ? Date.parse(ev.recovered_at ?? ev.closed_at ?? '') : NaN
-  const story = DEMO_MODE && ev && (evOpen || (Date.parse(ft ?? '') - back <= Math.max(60_000, 6_000 * (state.clock?.speed ?? 1)))) ? ev : null
-  const storyAt = story ? PLACED_BY_ID[story.machine_id] : undefined
+  // demo: the event the story is about (Kyle 10-22 review: concurrent_3 told 10 號's, the newest, while B 線開煉機 was the
+  // card approved, repaired and recovered): the one being repaired or coming back, else the one that just recovered (the
+  // green hold of machineRing's 已恢復 ring), else the phone's first card, else the newest open one
+  const events = state.snapshot?.events ?? []
+  const tasks = state.world?.tasks.items ?? []
+  const nowMs = Date.parse(ft ?? '')
+  const hold = Math.max(60_000, 6_000 * (state.clock?.speed ?? 1))
+  const backAt = (e: Event) => (recoveryPhase(e) === 'recovered' ? Date.parse(e.recovered_at ?? e.closed_at ?? '') : NaN)
+  const storyEv = !DEMO_MODE ? ev
+    : events.find((e) => isOpen(e) && ['repairing', 'recovering'].includes(repairStage(e, tasks) ?? ''))
+      ?? events.filter((e) => nowMs - backAt(e) <= hold).sort((a, b) => backAt(b) - backAt(a))[0]
+      ?? events.find((e) => e.id === pending[0]?.event_id)
+      ?? ev
+  // while open and for the green hold: its reading tag stays up, and the overview (V) centres on it
+  const story = DEMO_MODE && storyEv && (isOpen(storyEv) || nowMs - backAt(storyEv) <= hold) ? storyEv : null
+  // the overview's centre on a wide screen: every open event's machine with the story's (concurrent_3: B 線開煉機 and the
+  // presses both in view), pulled toward the hall's centre (the presses are the west end: the machine alone left the
+  // frame half empty); a portrait phone has room for the story's machine only
+  const wide = window.innerWidth > window.innerHeight, pull = wide ? 0.45 : 0
+  const focusAt = !story ? [] : (wide ? [...new Set([story, ...events.filter(isOpen)].map((e) => e.machine_id))] : [story.machine_id]).flatMap((id) => PLACED_BY_ID[id] ?? [])
+  const mid = (k: 'x' | 'z') => (1 - pull) * focusAt.reduce((a, p) => a + p[k], 0) / focusAt.length + pull * OVERVIEW_CENTER[k]
+  const focus: [number, number] | null = focusAt.length ? [mid('x'), mid('z')] : null
   // demo answer card: the headline, its tone (the one red / amber / green), and what waits on the phone
-  const evStage = ev ? repairStage(ev, state.world?.tasks.items ?? []) : null
-  const big = headline(ev, evStage, !!ev && pending.some((p) => p.event_id === ev.id))
+  const evStage = storyEv ? repairStage(storyEv, tasks) : null
+  const big = headline(storyEv, evStage, !!storyEv && pending.some((p) => p.event_id === storyEv.id))
   const tone = big === '目前沒有異常' ? '' : evStage === 'recovered' || evStage === 'report' ? ' ok' : evStage === 'recovering' ? ' warm' : ' bad'
   const ask = [pending.length ? `${pending.length} 件等你核准` : '', unread ? `${unread} 份異常報告` : ''].filter(Boolean).join('、')
   const overlay = panel !== null || phoneUp
@@ -176,8 +214,10 @@ export function FactoryApp() {
   useEffect(() => {
     const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
     if (!out.fire.length) return
-    const { title, body } = alertText(out.fire, out.flushed)
-    setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
+    const t = DEMO_MODE ? demoToast(out.fire, pending, eventsRef.current) : alertText(out.fire, out.flushed)
+    if (t) setToast({ ...t, at: Date.now(), notice: out.fire.every((a) => a.notice) })
+    // demo: the report (back to normal) takes down an amber 維修完成 still up, so the green ending stands alone
+    else setToast((x) => (x?.tone === 'warm' ? null : x))
     setBuzzUntil(performance.now() + 2200)
     setBuzz(true)
     try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
@@ -351,8 +391,8 @@ export function FactoryApp() {
         {scene === 'toilet' && <Restroom />}
         <Player
           enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
-          pending={pending.length + notices.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
-          prompt={prompt} focus={storyAt ? [storyAt.x, storyAt.z] : null}
+          pending={pending.length + (DEMO_MODE ? 0 : notices.length)} buzzUntil={buzzUntil} mode={mode} scene={scene}
+          prompt={prompt} focus={focus}
         />
         <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
       </Canvas>
@@ -370,8 +410,9 @@ export function FactoryApp() {
         {DEMO_MODE ? (
           <div className={`f3-answer${tone}`} data-testid="f3-event">
             <b>{big}</b>
-            {ev && tone && <AiStatusLine ev={ev} compact className="f3-ai" />}
-            {ask && <span className="f3-ask" data-testid="f3-pending">手機上有 {ask}{TOUCH_DEVICE ? '（點「手機」）' : '（按 P）'}</span>}
+            {storyEv && tone && <AiStatusLine ev={storyEv} compact className="f3-ai" />}
+            {/* red while a card waits, green when only the report is left (amber means 回溫中 only) */}
+            {ask && <span className={`f3-ask ${pending.length ? 'bad' : 'ok'}`} data-testid="f3-pending">手機上有 {ask}{TOUCH_DEVICE ? '（點「手機」）' : '（按 P）'}</span>}
             <small>
               {ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}
               {scene !== 'factory' && <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>}
@@ -418,7 +459,7 @@ export function FactoryApp() {
       )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
-        <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
+        <div className={`f3-toast${toast.tone ? ` ${toast.tone}` : ''}`} role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
           <b>{DEMO_MODE ? '' : '📱 '}{toast.title}</b><span>{toast.body}</span>
           <i>{TOUCH_DEVICE ? (DEMO_MODE ? '點這裡' : '點這裡拿起手機') : DEMO_MODE ? '按 P ' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
         </div>

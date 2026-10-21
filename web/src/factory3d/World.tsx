@@ -164,7 +164,7 @@ function LateHtml(props: ComponentProps<typeof Html>) {
 
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
-function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null }) {
+function MachineStatus({ p, tile, hot, focus, work, warm = false }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null; warm?: boolean }) {
   const light: Light = statusLight(tile?.status)
   useEffect(() => { DRAWN_LIGHT[p.id] = light }, [p.id, light])
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
@@ -214,7 +214,8 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
       {hot && (
         <mesh ref={ringRef} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
           <ringGeometry args={[Math.max(p.w, p.d) * 0.7, Math.max(p.w, p.d) * 0.7 + 0.08, 32]} />
-          <meshBasicMaterial color={LIGHT_HEX.red} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
+          {/* demo: amber while the readings come back (回溫中), so that beat is not red and amber at once */}
+          <meshBasicMaterial color={LIGHT_HEX[DEMO_MODE && light === 'amber' ? 'amber' : 'red']} transparent opacity={0.7} depthWrite={false} toneMapped={false} />
         </mesh>
       )}
       {focus && (
@@ -222,7 +223,8 @@ function MachineStatus({ p, tile, hot, focus, work }: { p: Placed; tile: Machine
           <div className={`f3-tag ${light}`} data-testid={`tag-${p.id}`}>
             <b>{DEMO_MODE ? machineLabel(p.id) : tile?.short_name ?? p.short}</b>
             <span>{temp == null ? '—' : `${temp.toFixed(1)}°C`}</span>
-            <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>
+            {/* demo: 回溫中 says it already, not 「注意」 above it as well */}
+            {!(DEMO_MODE && warm) && <i>{tile ? STATUS_LABEL[tile.status] : '…'}</i>}
             {/* demo: an alarm ring's 「異常」 under the status 「異常」 said it twice */}
             {work && !(DEMO_MODE && tile && work === STATUS_LABEL[tile.status]) && <em data-testid={`work-${p.id}`}>{work}</em>}
           </div>
@@ -729,17 +731,20 @@ const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 /** Demo (?demo=1): number plates on the floor in front of the curing presses, so the audience can find 「7 號」 from the
  *  overview: the two ends (1 and 11) as a ruler, plus every press with an open event. A DOM chip like the line signs,
  *  mounted a frame late like them. */
-function PressNo({ p, hot }: { p: Placed; hot: boolean }) {
+function PressNo({ p, hot, warm }: { p: Placed; hot: boolean; warm: boolean }) {
   const [ready, setReady] = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
   return ready ? (
     <Html position={[p.x, 0.05, p.z + p.d / 2 + 0.32]} center zIndexRange={[9, 5]} style={{ pointerEvents: 'none' }}>
-      <div className={`f3-sign f3-press-no${hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號</div>
+      <div className={`f3-sign f3-press-no${warm ? ' warm' : hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號</div>
     </Html>
   ) : null
 }
 const PRESSES = PLACED.filter((p) => p.line === 'CURE')
 const RULER = new Set([PRESSES[0].id, PRESSES[PRESSES.length - 1].id])
+/** A fast repair's task label on the demo's reading tag: its % follows the task's ETA, about half the real repair, so it
+ *  sat at 99% for seconds; the tag says 維修中 instead (the ring keeps its %). */
+const FIX_PCT = /^(檢修|停用檢修|放慢投料|暫停投料) \d+%$/
 
 /** Live light per machine as last drawn (read by the e2e test hook). */
 export const DRAWN_LIGHT: Record<string, Light> = {}
@@ -768,12 +773,16 @@ export function World({ state, focusId, pinId = null, active, fp, celebrate = nu
       <Machines />
       {PLACED.map((p) => {
         const tag = active && (focusId === p.id || pinId === p.id)
-        return <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={tag}
-          work={tag ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />
+        const ring = tag ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null) : null
+        const work = ring && DEMO_MODE && ring.kind === 'task' && FIX_PCT.test(ring.label) ? '維修中' : ring?.label ?? null
+        return <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={tag} work={work}
+          warm={ring?.kind === 'recover' && ring.label !== '已恢復'} />
       })}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
-        {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => <PressNo key={p.id} p={p} hot={hot.has(p.id)} />)}
+        {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => (
+          <PressNo key={p.id} p={p} hot={hot.has(p.id)} warm={hot.has(p.id) && statusLight(tiles[p.id]?.status) === 'amber'} />
+        ))}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
         {/* demo: no 員工待命區 / 休息區 / 廁所 plates (not the supervisor's story; the doors do not lead anywhere either) */}
         {!DEMO_MODE && <>
