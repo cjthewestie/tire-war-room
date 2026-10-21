@@ -27,7 +27,7 @@ const want = {
   console: ['agent', 'home-item-{id}', '計劃已經先擬好，只等核准或討論'],
   event: ['agent', 'plan-area', 'AI 只在規劃時被叫醒'],
   phone: ['agent', 'approve-bar', '📱 主管手機核准（R2 以上一定要人）'],
-  worker: ['agent', 'result-strip', '員工完成，程式驗證讀值'],
+  worker: ['monitor', 'data-machine', '員工完成，程式驗證讀值'],
   agent: ['console', 'hyp-rejected', '每一步都在稽核鏈上'],
   robot: ['sm', 'sm-stages', '只有「規劃」和「換假設」會叫 AI'],
   rush: ['agent', 'approve-bar', '急單進來：先核准'],
@@ -80,6 +80,10 @@ check('the incident card is', S.signals({ ...base, pending: [{ id: 'AP-7', event
 check('worker not yet: the approval was before the demo', S.signals(base, seen).worker === false)
 check('worker not on an order approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R')] }, seen).worker === false)
 check('worker after the incident approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R'), ok('EV-7')] }, seen).worker === true)
+const tiles = (repaired) => ({ machines: [{ machine_id: 'CURE-07', status: 'out_of_service', repaired }] })
+check('workerDone not before the repair (停用, not green)', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(false) } }, seen).workerDone === false)
+check('workerDone on machines[].repaired (green 檢修完成・待恢復運轉)', S.signals({ ...base, snapshot: { ...base.snapshot, ...tiles(true) } }, seen).workerDone === true)
+check('worker beat spotlights the 7 號機 tile', B.beatView('worker', { snapshot: { events } }).anchors[0] === '[data-machine="CURE-07"]')
 check('incident followed', seen.id === 'EV-7' && seen.machine === 'CURE-07')
 
 // the Xbox pad: A continues, Menu pauses, a held button fires once

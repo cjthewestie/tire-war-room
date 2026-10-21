@@ -60,9 +60,10 @@ export const BEATS: Record<string, Beat> = {
     tab: 'agent', focus: 'incident', caption: 'AI 換假設：程式驗證失敗才會換',
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
   },
+  // 員工完成 → 變綠: the press tile on 產線監控 turns green 「檢修完成・待恢復運轉」 (morning_rush, machines[].repaired)
   worker: {
-    tab: 'agent', focus: 'incident', caption: '員工完成，程式驗證讀值',
-    anchors: ['?[data-testid="result-strip"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
+    tab: 'monitor', focus: 'incident', caption: '員工完成，程式驗證讀值',
+    anchors: ['[data-machine="{machine}"]', '[data-testid="early-warnings"]'],
   },
   agent: {
     tab: 'console', focus: 'incident', caption: '每一步都在稽核鏈上',
