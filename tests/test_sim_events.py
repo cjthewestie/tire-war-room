@@ -21,8 +21,10 @@ from warroom.contracts import (
     PlantInput,
     ScenarioName,
 )
+from warroom.factory import CURE_PRESS_IDS
 from warroom.sim import Factory
-from warroom.sim.events import CATALOG, CATALOG_BY_KIND, SimEvents, WorldInput
+from warroom.sim.day_loop import LoopFactory
+from warroom.sim.events import CATALOG, CATALOG_BY_KIND, SimEvents, WorldInput, curing
 
 pytestmark = pytest.mark.timeout(300)
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -145,6 +147,62 @@ async def test_random_machine_event_goes_through_the_detector(tmp_path, monkeypa
     audit = [json.loads(x) for x in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()]
     assert any(a["payload"].get("msg") == "fault injected" for a in audit)
     assert any(a["payload"].get("msg") == "模擬事件" and a["actor"] == "sim_events" for a in audit)
+
+
+# ------------------------------------------------------------------ 觸發異常 always gets a card (10-21)
+async def test_steam_faults_go_to_a_press_curing_a_tyre(tmp_path):
+    """10-21: steam_low on an idle press safe-stopped with no card (3 of 5 demo fires): its cure cannot be extended.
+    A steam fault goes to a press curing a tyre with an hour or more to go; a busy one is never stacked on."""
+    rt = await _runtime(tmp_path, "normal")
+    try:
+        await rt.tick(1.0, publish=False)
+        f = rt.sim
+    finally:
+        await rt.stop()
+    working = {p for p in CURE_PRESS_IDS if curing(f, p)}
+    assert working and set(CURE_PRESS_IDS) - working                       # the plant's NORMAL has idle presses too
+    picks = set()
+    for seed in range(40):
+        ev = SimEvents()
+        ev.configure(seed=seed)
+        for kind in ("steam_low", "steam_leak"):
+            picks.add(ev.build(kind, f, f.now(), set()).machine_id)
+    assert picks <= working and len(picks) > 1, picks
+    last = sorted(working)[-1]
+    assert SimEvents().build("steam_low", f, f.now(), working - {last}).machine_id == last
+    # every curing press busy: a free one all the same (never stacked), as before
+    assert SimEvents().build("steam_low", f, f.now(), working).machine_id not in working
+
+
+def test_day_loop_faults_never_go_to_a_replayed_machine():
+    """一日循環 replays the dataset day on six machines (7 號 among them): a fault there never shows in the readings."""
+    f = LoopFactory(scenario=ScenarioName.DAY_LOOP)
+    f.step(60)
+    hidden = f.replayed_machines()
+    assert "A-BIGOPEN" in hidden and hidden & set(CURE_PRESS_IDS), hidden
+    assert LoopFactory(scenario=ScenarioName.NORMAL).replayed_machines() == set()
+    for seed in range(40):
+        ev = SimEvents()
+        ev.configure(seed=seed)
+        for kind in ("steam_low", "steam_leak", "water_low"):
+            mid = ev.build(kind, f, f.now(), set()).machine_id
+            assert mid not in hidden, (seed, kind, mid)
+            assert kind == "water_low" or curing(f, mid), (seed, kind, mid)
+
+
+async def test_fired_steam_low_gets_a_card(tmp_path):
+    rt = await _runtime(tmp_path, "normal")
+    try:
+        await rt.tick(1.0, publish=False)
+        mid = rt.fire_sim_event("steam_low")["ref"]
+        assert curing(rt.sim, mid)
+        for _ in range(1200):
+            await rt.tick(1.0, publish=False)
+            if rt.approvals.pending():
+                break
+        assert [p.event_id for p in rt.approvals.pending()] == [e.id for e in rt.events() if e.machine_id == mid]
+    finally:
+        await rt.stop()
 
 
 async def test_material_events_stay_in_the_world(tmp_path):

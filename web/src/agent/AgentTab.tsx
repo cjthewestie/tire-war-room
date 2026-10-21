@@ -1,4 +1,4 @@
-// Home 主控台: the 核准區 list, the plan of the selected item (核准並派發 / 討論), and the conversation with the 主 agent
+// Home 主控台: the 核准區 list, the plan of the selected item (核准 / 討論), and the conversation with the 主 agent
 // (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
 // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
 import { useEffect, useMemo, useState } from 'react'
@@ -114,24 +114,24 @@ function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide }: {
   const askReady = !!transport?.message && (transport.mode !== 'live' || connected)
   const guide = (
     <div className="con-guide" data-testid="con-guide">
-      <h3>我是 NemoClaw</h3>
+      <h3>我是 Agent Nemo</h3>
       <p className="muted small">戰情室的主 agent。我可以幫你：</p>
       <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
       <p className="muted small">試試這些問題：</p>
       {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
-      {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 NemoClaw 問答</p>}
+      {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent Nemo 問答</p>}
     </div>
   )
 
   return (
-    <section className="console panel" aria-label="NemoClaw 對話">
+    <section className="console panel" aria-label="Agent Nemo 對話">
       <header className="con-h">
         <div className="con-title">
-          <h2>NemoClaw 對話</h2>
+          <h2>Agent Nemo 對話</h2>
           <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
         </div>
       </header>
-      <Bubbles items={thread} empty="跟 NemoClaw 說要做的事，或問工廠現在的狀況。" extra={extra} guide={guide} follow />
+      <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" extra={extra} guide={guide} follow />
       <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
   )

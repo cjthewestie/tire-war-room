@@ -9,7 +9,6 @@ import { COMPOUND_STOP_C, CURATIVE_STOP_C, LINES, LINE_SHORT, machineLabel } fro
 import { fmtHM, fmtHMS, fmtMD, ms } from '../format'
 import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
-import { STATE_CODE } from '../agent/stateGraph'
 import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import { BOARD, CATEGORY_LABEL, categoryOf, enteredAt, waitingOn, type Category, type Day, type DayRun } from './runs'
@@ -19,7 +18,7 @@ import './statemachine.css'
 type View = 'live' | 'day'
 const CHANNEL: Record<string, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽' }
 const OUTCOME: Record<string, string> = { closed: '結案', safe_stop: '安全停止', open: '處理中', answered: '已回答' }
-const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: 'NemoClaw 對話' }
+const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: 'Agent Nemo 對話' }
 
 export function StateMachinePage() {
   const { transport } = useWarRoom()
@@ -38,7 +37,6 @@ export function StateMachinePage() {
           <button className={view === 'live' ? 'on' : ''} aria-pressed={view === 'live'} onClick={() => go('live')} data-testid="sm-view-live">即時看板</button>
           <button className={view === 'day' ? 'on' : ''} aria-pressed={view === 'day'} onClick={() => go('day')} data-testid="sm-view-day">每日事件紀錄</button>
         </nav>
-        <span className="muted small">唯讀・狀態名稱同 warroom/contracts.py（EventState）</span>
       </header>
       {transport?.mode === 'mock' && view === 'day' ? <p className="note">每日事件紀錄來自稽核紀錄，需要連線後端。</p> : view === 'live' ? <Live /> : <DayLog />}
     </div>
@@ -123,7 +121,7 @@ function Live() {
             const cards = onBoard(s)
             return (
               <section key={s} className={`sm-col ${cards.length ? '' : 'empty'} ${done ? 'done' : ''}`} data-state={s} aria-label={`${STATE_LABEL[s]} ${cards.length} 件`}>
-                <header><b>{STATE_LABEL[s]}</b><small>{STATE_CODE[s]}</small><span className="sm-n">{cards.length}</span></header>
+                <header><b>{STATE_LABEL[s]}</b><span className="sm-n">{cards.length}</span></header>
                 {(!done || showDone) && cards.map((e) => <Card key={e.id} ev={e} run={runOf.get(e.id)} now={now} />)}
                 {done && !showDone && cards.length > 0 && <button className="btn-ghost sm-more" onClick={() => setShowDone(true)}>顯示 {cards.length} 件</button>}
               </section>
@@ -154,7 +152,6 @@ function Card({ ev, run, now }: { ev: Event; run: DayRun | undefined; now: numbe
         <span>第 {(ev.prior_rounds?.length ?? 0) + 1} 輪</span>
         {wait !== '—' && <span className="sm-wait">等{wait}</span>}
       </span>
-      <small className="muted sm-id">{ev.id}</small>
     </a>
   )
 }
@@ -264,7 +261,7 @@ function DayLog() {
         <div className="admin-cards" data-testid="day-summary">
           <div className="admin-card"><span className="admin-card-k">件數</span><b>{s.runs} 件</b><span>{Object.entries(s.by_type).map(([t, n]) => `${TYPE[t] ?? t} ${n}`).join('・')}</span></div>
           <div className="admin-card"><span className="admin-card-k">結果</span><b>{Object.entries(s.by_outcome).map(([o, n]) => `${OUTCOME[o] ?? o} ${n}`).join('・')}</b><span>&nbsp;</span></div>
-          <div className="admin-card"><span className="admin-card-k">平均結案時間</span><b>{s.avg_close_min != null ? `${s.avg_close_min} 分` : '—'}</b><span>從開事件到結案／安全停止</span></div>
+          <div className="admin-card"><span className="admin-card-k">平均耗時</span><b>{s.avg_close_min != null ? `${s.avg_close_min} 分` : '—'}</b><span>從開事件到結案／安全停止</span></div>
           <div className="admin-card"><span className="admin-card-k">核准</span><b>已決定 {s.approvals_decided}・待核准 {s.approvals_pending}</b><span>&nbsp;</span></div>
         </div>
       )}
@@ -280,7 +277,7 @@ function DayLog() {
                 <td className="day-path">{r.path.map((p, i) => <span key={i} className={`pp st-${p.state}`} title={fmtHMS(p.ts)}>{STATE_LABEL[p.state as EventState] ?? p.state}</span>)}</td>
                 <td>{r.type === 'ask' ? '—' : r.rounds}</td>
                 <td className={`o-${r.outcome}`}>{OUTCOME[r.outcome] ?? r.outcome}</td>
-                <td>{r.approvals.map((a) => `${a.decision === 'approve' ? '核准' : a.decision === 'reject' ? '駁回' : a.decision}・${a.by === 'supervisor' ? '主管' : a.by}${a.via ? `（${a.via}）` : ''}`).join('；') || (r.pending_approvals ? `待核准 ${r.pending_approvals}` : '—')}</td>
+                <td>{r.approvals.map((a) => `${a.decision === 'approve' ? '核准' : a.decision === 'reject' ? '駁回' : a.decision === 'expired' ? '逾時未決定' : a.decision}・${a.by === 'supervisor' ? '主管' : a.by === 'system' ? '系統' : a.by}${a.via ? `（${a.via}）` : ''}`).join('；') || (r.pending_approvals ? `待核准 ${r.pending_approvals}` : '—')}</td>
                 <td>{r.duration_min != null ? `${r.duration_min} 分` : '—'}</td>
               </tr>
             ))}</tbody>
@@ -308,7 +305,7 @@ function PreClassPanel() {
   return (
     <section className="panel sm-pre" aria-label="事件預分類" data-testid="sm-preclass">
       <header className="panel-h"><h2>事件預分類（Python 偵測器，LLM 之前）</h2><span className="muted small">規則 → 驗證 → 預測 → 分派</span></header>
-      {!d?.items.length && <p className="muted small">還沒有異常。偵測器每秒檢查 28 台機台；觸發時這裡會列出是哪條規則、門檻、驗證結果與預測，再交給NemoClaw 分派。</p>}
+      {!d?.items.length && <p className="muted small">還沒有異常。偵測器每秒檢查 28 台機台；觸發時這裡會列出是哪條規則、門檻、驗證結果與預測，再交給 Agent Nemo 分派。</p>}
       <ol className="pre-list">
         {(d?.items ?? []).slice(0, 8).map((a) => (
           <li key={a.id} className={`pre sev-${a.severity}`} data-testid="preclass-item">
@@ -316,12 +313,12 @@ function PreClassPanel() {
               <span className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</span><b>{machineLabel(a.machine_id)}</b>
               <span className="tag">{a.preclass?.label ?? a.kind}</span>
               <span className={`tag ${a.severity === 'critical' ? 'rush' : ''}`}>{a.severity === 'critical' ? '嚴重' : a.severity === 'warn' ? '注意' : '資訊'}</span>
-              <span className="pre-route" data-testid="preclass-route">→ NemoClaw 派給 <b>{a.route.type_label}</b>（優先 {a.route.priority_label}）</span>
+              <span className="pre-route" data-testid="preclass-route">→ 交給 Agent Nemo（優先 <b>{a.route.priority_label}</b>）</span>
               {a.event_id ? <a className="panel-link" href={`#console?event=${encodeURIComponent(a.event_id)}`}>{a.event_state ? STATE_LABEL[a.event_state as EventState] : ''} →</a> : <span className="muted small">併入既有事件</span>}
             </div>
             <div className="pre-grid">
               <div><h4>規則</h4><code>{a.preclass?.rule ?? a.kind}</code><ul>{(a.preclass?.checks ?? []).map((c, i) => <li key={i}>{c}</li>)}</ul></div>
-              <div><h4>訊號</h4><p>{CHANNEL[a.channel] ?? a.channel} {a.value} ／ 基準 {a.baseline}{a.preclass ? `（雜訊 σ ${a.preclass.sigma}）` : ''}</p>{a.preclass?.limit != null && <p className="muted small">上限 {a.preclass.limit}°C</p>}</div>
+              <div><h4>訊號</h4><p>{CHANNEL[a.channel] ?? a.channel} {a.value} ／ 基準 {a.baseline}{a.preclass ? `（雜訊 ±${a.preclass.sigma}）` : ''}</p>{a.preclass?.limit != null && <p className="muted small">上限 {a.preclass.limit}°C</p>}</div>
               <div><h4>驗證</h4><ul>{Object.entries(a.preclass?.validation ?? {}).map(([k, v]) => <li key={k}>{VAL_LABEL[k] ?? k}：{QUALITY[v] ?? (v === 'ok' ? '通過' : v)}</li>)}</ul></div>
               <div><h4>預測</h4>{a.preclass?.forecast ? <p>{a.preclass.forecast.horizon_min} 分後 {a.preclass.forecast.predicted}°C（{a.preclass.forecast.band[0]}–{a.preclass.forecast.band[1]}）<br /><small className="muted">模型 {FIT[a.preclass.forecast.model] ?? a.preclass.forecast.model}・斜率 {a.preclass.forecast.trend_per_min}°C/分</small></p> : <p className="muted">—</p>}</div>
             </div>

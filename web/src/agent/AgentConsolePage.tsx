@@ -3,8 +3,8 @@
 // (sensor readings, orders, SOP hits with their source), gate verdicts, approvals and replans — with filters
 // and an event picker. CJ, 2026-10-20: 「在那個大的單獨的 agent 的 page 那邊才要去有這些步驟讓我們看到她思考的過程
 // 跟調用工具調用資料的過程」. Rows come from the same audit-log transcript as the home panel (useTranscript).
-// Fast repair (Kyle 10-21): the 處理歷程 also has the workers' tasks, 維修完成 and 覆核, and ends with the 處理報告 once the
-// event closes (ReportBlock).
+// Fast repair (Kyle 10-21): the 處理歷程 also has the workers' tasks, 維修完成, 已恢復正常, 異常報告已產生 and 主管已讀報告, and
+// ends with the 處理報告 once the event closes (ReportBlock).
 import { useMemo, useState } from 'react'
 import type { Event, EventState, ToolName } from '../contracts'
 import { machineLabel } from '../factory'
@@ -25,17 +25,18 @@ import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import { ReportBlock } from './ReportBlock'
+import { TaskLog } from './TaskLog'
 import './agent.css'
 
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
 const KINDS: { id: Kind; label: string; hint: string }[] = [
   { id: 'all', label: '全部', hint: '每一步' },
-  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與覆核' },
-  { id: 'think', label: '計畫與判斷', hint: '指揮官回傳的計畫、假設、程式驗證' },
+  { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與恢復' },
+  { id: 'think', label: '計畫與判斷', hint: 'Agent Nemo 回傳的計畫、假設、程式驗證' },
   { id: 'tool', label: '工具', hint: '每次工具呼叫：參數、結果、耗時' },
   { id: 'data', label: '讀資料', hint: '只讀的工具：感測器、預測、SOP、訂單班表、排程求解' },
   { id: 'gate', label: '把關', hint: '動作把關的判定與攔截' },
-  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件、主管覆核' },
+  { id: 'approval', label: '核准', hint: '送核准、主管決定、核准卡改版、主管條件、異常報告' },
   { id: 'talk', label: '對話', hint: '主管訊息與 Agent 回覆' },
 ]
 const READ_TOOLS: ToolName[] = ['read_sensors', 'predict_anomaly', 'cure_formula', 'sop_search', 'query_orders_shifts', 'solve_schedule']
@@ -81,9 +82,9 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
     <>
     <ModelQueueBar />
     <div className="trace" data-testid="agent-page">
-      <aside className="trace-side panel" aria-label="NemoClaw 與處理中的事件">
+      <aside className="trace-side panel" aria-label="Agent Nemo 與處理中的事件">
         <button type="button" className={`tree-root ${main ? 'on' : ''}`} onClick={() => pick(MAIN)} data-testid="tree-root" aria-pressed={main}>
-          <span className="tree-title"><span className="tree-dot" aria-hidden />NemoClaw ▸ 處理中的事件</span>
+          <span className="tree-title"><span className="tree-dot" aria-hidden />Agent Nemo ▸ 處理中的事件</span>
           <span className="muted small">事件 {events.length}・進行中 {events.filter(openOf).length}</span>
         </button>
         <div className="seg sm" role="group" aria-label="事件範圍">
@@ -91,8 +92,8 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
             <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'all' ? '全部' : s === 'open' ? '處理中' : '已結案'}</button>
           ))}
         </div>
-        <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="NemoClaw 或事件">
-          <option value={MAIN}>NemoClaw 對話</option>
+        <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
+          <option value={MAIN}>Agent Nemo 對話</option>
           {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa)}` : evName(e)}</option> })}
         </select>
         <ul className="trace-list tree" role="listbox" aria-label="處理中的事件">
@@ -109,11 +110,12 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           })}
           {!listed.length && <li className="muted small">{scope === 'open' ? '目前沒有進行中的事件。' : '沒有。'}</li>}
         </ul>
+        <TaskLog onPick={pick} />
       </aside>
       {main ? (
-        <section className="panel trace-main main-thread" aria-label="NemoClaw" data-testid="main-thread">
-          <h2 className="trace-h">NemoClaw</h2>
-          <Bubbles items={thread} empty="跟NemoClaw 說要做的事，或問工廠現在的狀況。" />
+        <section className="panel trace-main main-thread" aria-label="Agent Nemo" data-testid="main-thread">
+          <h2 className="trace-h">Agent Nemo</h2>
+          <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
           <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={null} /></div>
         </section>
       ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
@@ -142,8 +144,8 @@ function ModelQueueBar() {
   )
 }
 
-/** The selected subagent: how it was dispatched, what it waits on, its workers' tasks, and 「中斷」. */
-function SubagentHead({ ev }: { ev: Event }) {
+/** The selected event: where it stands, its workers' tasks, and 「中斷」 (no dispatch or typed agent: CJ 2026-10-21). */
+function EventHead({ ev }: { ev: Event }) {
   const { state, transport } = useWarRoom()
   const sa = state.subagents?.items.find((x) => x.id === ev.id)
   const [busy, setBusy] = useState(false)
@@ -152,17 +154,15 @@ function SubagentHead({ ev }: { ev: Event }) {
   const open = ev.state !== 'closed' && ev.state !== 'safe_stop'
   const stop = async () => {
     if (!transport?.interrupt) return
-    if (!window.confirm(`中斷 NemoClaw 處理這件事（${sa?.type_label ?? ''}・${ev.id}）？\n不會再呼叫工具；待核准的卡作廢、還沒做完的人員任務取消；排程維持現狀。這個動作會寫進稽核紀錄。`)) return
+    if (!window.confirm(`中斷這件事（${ev.id}）？\n不會再呼叫工具；待核准的卡作廢、還沒做完的人員任務取消；排程維持現狀。這個動作會寫進稽核紀錄。`)) return
     setBusy(true); setMsg(null)
-    try { await transport.interrupt(ev.id); setMsg('已中斷：NemoClaw 已回報') } catch (e) { setMsg(`中斷失敗：${String(e).replace(/^Error: /, '')}`) } finally { setBusy(false) }
+    try { await transport.interrupt(ev.id); setMsg('已中斷') } catch (e) { setMsg(`中斷失敗：${String(e).replace(/^Error: /, '')}`) } finally { setBusy(false) }
   }
   return (
-    <section className="sub-head" aria-label="NemoClaw" data-testid="sub-head">
+    <section className="sub-head" aria-label="事件狀態" data-testid="sub-head">
       <div className="sub-head-row">
-        <span className="tree-from">NemoClaw →</span>
-        <b>{sa?.type_label ?? 'NemoClaw'}</b>
+        <b>{evName(ev)}</b>
         {sa && <span className={`sub-pill t-${SUB_TONE[sa.status]}`}>{SUB_STATUS[sa.status]}</span>}
-        {sa && <small className="muted">{sa.via === 'code' ? '程式依偵測種類派發' : sa.via === 'model' ? 'Nemotron 選派' : '關鍵字規則派發'}・優先 {sa.priority_label}{sa.reason ? `・${sa.reason}` : ''}</small>}
         {open && transport?.interrupt && <button className="btn-ghost danger sub-stop" onClick={() => void stop()} disabled={busy} data-testid="interrupt">{busy ? '中斷中…' : '中斷'}</button>}
       </div>
       {msg && <p className="muted small">{msg}</p>}
@@ -208,7 +208,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
           <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>
         </span>}
       </header>
-      {ev && <SubagentHead ev={ev} />}
+      {ev && <EventHead ev={ev} />}
       {ev && <StateDiagram ev={ev} path={path} pick={pick} onPick={setPick} />}
       <dl className="trace-stats">
         <div><dt>步驟</dt><dd>{items.length}</dd></div>
@@ -229,7 +229,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
         })}
         <label className="trace-open"><input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} />展開工具細節</label>
       </div>
-      <p className="muted small trace-note">指揮官以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
+      <p className="muted small trace-note">Agent Nemo 以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
       <div className="con-body trace-body" data-testid="trace-body">
         {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}

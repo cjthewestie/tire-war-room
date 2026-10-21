@@ -77,9 +77,12 @@ async def test_page11_round1_says_what_is_approved(tmp_path):
     assert card.delivery_impact == "不受影響"
 
 
-async def test_page11_round2_done_row_lists_only_what_ran(tmp_path):
+async def test_page11_round2_done_row_lists_only_what_ran(tmp_path, monkeypatch):
     """Page 11 phone card, round 2: 已做 安全核心已處置；#A-311 改 4 號 — no 「將做：…」 and no
     staffing note in that row; the round-1 transfer is named in 核准內容 instead."""
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     cards = await _cards(tmp_path, "press7_temp_drop", minutes=21)
     r2 = cards["CURE-07"][1]
     assert r2.done[0] == "安全核心已處置" and any(d.startswith("#A-311 改 ") for d in r2.done), r2.done

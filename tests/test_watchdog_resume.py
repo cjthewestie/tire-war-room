@@ -82,6 +82,9 @@ def _serve(tmp: Path, port: int, log_name: str) -> subprocess.Popen:
     env = {k: v for k, v in os.environ.items() if not k.startswith("WARROOM_")}
     env.update({"AUDIT_PATH": str(tmp / "audit.jsonl"), "SCHEDULE_DIR": str(tmp / "sched"),
                 "LLM_MODE": "mock", "WARROOM_INGEST": "direct", "WARROOM_DEMO_CONTROLS": "1",
+                # the press-7 safety hold needs the temperature to keep falling: the demo's fast repair (3 s wall)
+                # fixed the machine first and the hold never came (failing on main a20416b too)
+                "REPAIR_FAST_S": "0",
                 "QDRANT_PATH": str(tmp / "qdrant")})
     env.pop("WARROOM_SUPERVISOR_PIN", None)
     log = open(tmp / log_name, "w")  # noqa: SIM115 - closed with the process
@@ -101,7 +104,10 @@ def _stop(p: subprocess.Popen) -> None:
 
 
 @pytest.mark.timeout(240)
-def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path, healthy_url):
+def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path, monkeypatch, healthy_url):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     port = _port()
     base = f"http://127.0.0.1:{port}"
     p1 = _serve(tmp_path, port, "serve1.log")

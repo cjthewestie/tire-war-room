@@ -142,9 +142,10 @@ async def test_page11_unchanged_under_the_main_agent(tmp_path):
     kinds = [r["orch"] for r in rows]
     assert kinds[0] == "dispatch" and kinds[-1] == "report" and kinds.count("queue") >= 2
     d, rep = rows[0], rows[-1]
-    assert d["type"] == "machine" and d["by"] == "code" and "新任務：機台處理（7 號機" in d["text"]
-    # the report names the machine (the 主控台 showed 「機台處理 agent 完成：…」 for every event alike)
-    assert rep["text"].startswith("7 號機・NemoClaw（機台處理）完成") and rep["writes"] and rep["approvals"] and not rep["interrupted"]
+    # plain event words, no dispatch (CJ 2026-10-21: 「現在先不要派發」): 「7 號機・…：開始處理」, 「7 號機已修復：…」
+    assert d["type"] == "machine" and d["by"] == "code" and d["text"].startswith("7 號機") and "開始處理" in d["text"]
+    assert rep["text"].startswith("7 號機已修復：") and rep["writes"] and rep["approvals"] and not rep["interrupted"]
+    assert not any("Agent Nemo（" in r.get("text", "") or "派" in r.get("text", "") for r in rows)
     sub = o.subagents()[0]
     assert sub["status"] == "done" and sub["round"] == 2 and sub["tools_called"] >= 4
 
@@ -218,7 +219,7 @@ async def test_supervisor_task_dispatch_then_report(tmp_path):
     disp = next(r for r in rows if r["orch"] == "dispatch")
     assert disp["type"] == "order" and disp["dispatch"] == "dispatch_order_task" and disp["by"] == "rules"
     # the outcome already quotes the command, so the report does not name it twice
-    assert rows[-1]["orch"] == "report" and rows[-1]["text"].startswith("NemoClaw（訂單處理）完成：主管指令「#A-311 可能晚交")
+    assert rows[-1]["orch"] == "report" and rows[-1]["text"].startswith("任務完成：主管指令「#A-311 可能晚交")
 
 
 # ---------------------------------------------------------------- API
@@ -238,7 +239,8 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
         r = await p.http.post("/api/command", json={"text": "#M-201 可能晚交，請重排保交期"})
         assert r.status_code == 200, r.text
         eid = r.json()["event_id"]
-        assert "已開新任務：訂單處理" in r.json()["reply"]
+        # one supervisor-command event, no model dispatch and no typed agent in the reply
+        assert r.json()["reply"].startswith("已開新任務：") and "處理" not in r.json()["reply"]
         await p.until(lambda: p.pending(eid) or p.rt.state_machine.get(eid).state.value in ("closed", "safe_stop"))
         if p.pending(eid):
             d = await p.http.post(f"/api/approvals/{p.pending(eid)[0].id}/decision",
@@ -246,13 +248,14 @@ async def test_runtime_end_to_end_dispatch_approve_report_and_interrupt(tmp_path
             assert d.status_code == 200, d.text
         await p.until(lambda: any(e.actor == "main_agent" and e.payload.get("orch") == "report" for e in p.audit(eid)))
         rows = [e.payload for e in p.audit(eid) if e.actor == "main_agent"]
-        assert rows[0]["orch"] == "dispatch" and rows[0]["type"] == "order"
-        assert rows[-1]["text"].startswith("NemoClaw（訂單處理）完成：主管指令「#M-201")
+        assert rows[0]["orch"] == "dispatch" and "開始處理" in rows[0]["text"]
+        assert rows[-1]["text"].startswith("任務完成：主管指令「#M-201")
         execute = next(x for x in rows if x["orch"] == "dispatch" and x.get("phase") == "execute")
         assert execute["text"].startswith("已核准主管指令「#M-201")          # 「已核准，…」 named nothing
+        assert execute["text"].endswith("，執行中") and "Agent Nemo" not in execute["text"]   # no dispatch wording
         subs = (await p.http.get("/api/subagents")).json()
         me = next(x for x in subs["items"] if x["id"] == eid)
-        assert me["status"] in ("done", "waiting_tasks", "running") and me["parent"] == "main" and me["type_label"] == "訂單處理"
+        assert me["status"] in ("done", "waiting_tasks", "running") and me["parent"] == "main"
         # interrupt a second task while it waits for approval
         r2 = await p.http.post("/api/command", json={"text": "夜班缺一人，請調人並重排"})
         e2 = r2.json()["event_id"]
@@ -412,9 +415,10 @@ async def test_main_agent_numbers_only_from_tools_and_fallback():
     out = await h.turn(MainAgent(_settings(), client=llm), "7 號機現在怎樣")
     assert "118" not in out["reply"] and "122.3" in out["reply"]          # an invented number is replaced by the results
     h = _Harness()
-    llm = Model()
+    llm = Model(("say", "我是 Agent Nemo，戰情室的 AI 同事。"))
     out = await h.turn(MainAgent(_settings(), client=llm), "妳是誰")
-    assert out["reply"] == IDENTITY_REPLY and not llm.calls                # fixed reply, no model call
+    # every message goes to the model (CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」)
+    assert out["reply"] == "我是 Agent Nemo，戰情室的 AI 同事。" and len(llm.calls) == 1 and not h.tools
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=Model(("say", "這句我看不懂，你要查哪台機台？"))), "vu04y94u.3s83uv,")
     assert not h.tools and not h.proposed                                 # reaches the model, opens nothing

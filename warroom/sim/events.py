@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
 
-from warroom.contracts import FaultKind, FaultSpec, MachineKind, Order, PlantInput, TeamId, TireSize
+from warroom.contracts import FaultKind, FaultSpec, MachineKind, MachineStatus, Order, PlantInput, TeamId, TireSize
 from warroom.factory import CURE_PRESS_IDS, LINE_LABELS, MACHINE_BY_ID, TEAM_LABELS
 
 DEFAULT_EVERY_MIN = 30.0
@@ -123,8 +123,7 @@ class SimEvents:
         self.n += 1
         tag = f"{now:%H%M%S}-{self.n:02d}"
         if kind in ("steam_low", "steam_leak"):
-            free = free_machines(CURE_PRESS_IDS, busy) or list(CURE_PRESS_IDS)
-            mid = rng.choice(free)
+            mid = rng.choice(working_pool(CURE_PRESS_IDS, sim, busy, curing))
             if kind == "steam_low":
                 return FaultSpec(id=f"F-SIM-{tag}-{mid}", machine_id=mid, kind=FaultKind.STEAM_PRESSURE_DROP,
                                  params={"target_c": round(rng.uniform(121.5, 123.5), 1)})
@@ -132,8 +131,7 @@ class SimEvents:
                              params={"rate_c_per_min": round(rng.uniform(0.25, 0.4), 2), "floor_kgf_cm2": 2.0,
                                      "header_drop": 0.1})
         if kind == "water_low":
-            free = free_machines(WATER_MILLS, busy) or list(WATER_MILLS)
-            mid = rng.choice(free)
+            mid = rng.choice(working_pool(WATER_MILLS, sim, busy, running))
             return FaultSpec(id=f"F-SIM-{tag}-{mid}", machine_id=mid, kind=FaultKind.WATER_FLOW_DROP,
                              params={"target_lpm": round(rng.uniform(15.0, 20.0), 1), "ramp_s": 10.0})
         if kind == "sensor_glitch":
@@ -214,6 +212,34 @@ def _material_name(key: str) -> str:
 def free_machines(pool: tuple[str, ...] | list[str], busy: set[str]) -> list[str]:
     """The machines of `pool` with no open event and no active fault (never stacked)."""
     return [m for m in pool if m not in busy]
+
+
+CURE_LEFT_MIN_H = 1.0     # a press picked for a steam fault has at least this much of its cure to go
+
+
+def curing(sim: Any, machine_id: str) -> bool:
+    """The press is curing a tyre now (running, its cure job not about to end). A steam fault on an idle press has no
+    cure to extend: the plan's solve is refused, the event safe-stops with no card (3 of 5 demo fires, 10-21)."""
+    st = sim.machine(machine_id)
+    job = st.cure_job
+    return st.status is MachineStatus.RUNNING and job is not None and \
+        job.cure_required_h - job.cure_elapsed_h >= CURE_LEFT_MIN_H
+
+
+def running(sim: Any, machine_id: str) -> bool:
+    """The mill is running: a cooling-water fault goes to a working mill, as a steam fault to a press curing a tyre."""
+    return sim.machine(machine_id).status is MachineStatus.RUNNING
+
+
+def working_pool(pool: tuple[str, ...], sim: Any, busy: set[str], working: Any) -> list[str]:
+    """Where a machine fault goes so the demo gets its card: a free machine of `pool` that is working (`working`) and
+    whose readings the plant produces (not a dataset replay, 一日循環 / team_ev*, which would hide the fault). Falls back
+    to any free machine the plant produces, then any free one, then the whole pool."""
+    free = free_machines(pool, busy)
+    replayed = getattr(sim, "replayed_machines", None)
+    hidden = replayed() if callable(replayed) else set()
+    live = [m for m in free if m not in hidden]
+    return [m for m in live if working(sim, m)] or live or free or list(pool)
 
 
 def same_kind_pool(machine_id: str, fault_kind: FaultKind | None = None) -> tuple[str, ...]:

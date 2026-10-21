@@ -7,6 +7,7 @@ import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import { buildReport, reportText } from '../report/build'
 import { ToolIcon } from './ToolIcon'
+import { AiReport } from './AiReport'
 
 export function ReportBlock({ ev }: { ev: Event }) {
   const { state, transport } = useWarRoom()
@@ -36,6 +37,7 @@ export function ReportBlock({ ev }: { ev: Event }) {
   const parts = report.parts.filter((p) => p.id !== 'audit' && p.rows.length)
   return (
     <section className="r-report" id={`report-${ev.id}`} data-testid="trace-report" data-event={ev.id} aria-label="處理報告">
+      <AiReport ev={ev} />
       <header>
         <ToolIcon name="confirm_schedule" /><b>處理報告</b><small>由系統紀錄整理，不經 AI 撰寫</small>
         <a href={`/report?event=${encodeURIComponent(ev.id)}`} target="_blank" rel="noopener" data-testid="trace-report-link">開啟完整報告</a>
