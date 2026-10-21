@@ -52,10 +52,10 @@ export function MonitorTab({ onMachine, onAgent, onOrders }: { onMachine: (id: s
   )
 }
 
-/** What the AI is doing, in the supervisor's words. */
+/** What Agent Nemo is doing, in the supervisor's words (veteran glossary 10-22: Agent Nemo is the only subject; detection is rules). */
 const AI_STEP: Record<EventState, string> = {
-  detected: 'AI 判斷中', classify: 'AI 判斷中', plan: 'AI 擬計畫中', simulate: 'AI 試算排程', gate: '安全把關中',
-  await_approval: '等你核准', execute: '照計畫處理中', verify: '確認有沒有恢復', replan: 'AI 改用別的方法', closed: '已處理完', safe_stop: '已安全停止',
+  detected: '偵測到異常', classify: 'Agent Nemo 判斷中', plan: 'Agent Nemo 規劃中', simulate: '排程模擬中', gate: '安全把關中',
+  await_approval: '待核准', execute: '照計畫處理中', verify: '確認有沒有恢復', replan: '重新判斷中', closed: '已處理完', safe_stop: '已安全停止',
 }
 const KIND_WORD: Partial<Record<AnomalyKind, string>> = {
   overheat: '溫度過高', temp_drop: '溫度下降', pressure_low: '壓力偏低', water_flow_low: '水流偏低', steam_low: '蒸汽偏低',
@@ -109,21 +109,21 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
   const h1 = calm ? `${s.machines.length} 台機台都正常`
     : mach.length === 1 ? `${mach[0].name}${mach[0].problem}`
     : mach.length > 1 ? <>{mach.length} 台機台異常：{mach.map((r, i) => <span key={r.id} className="nw">{r.name}{i < mach.length - 1 && '、'}</span>)}</>
-    : `全廠：${plant?.problem ?? '有事件'}`
+    : `全廠：${plant?.problem ?? '有異常'}`
   // abnormal with no open event: out of service waits for maintenance, a 注意 reading is watched by the detector,
   // anything else (異常／停機 after its event ended) needs someone on site
   const idle = (st: string[]) => rows.filter((r) => !r.ev && st.includes(r.tile?.status ?? 'alarm'))
   const [check, out, watch] = [idle(['alarm', 'stopped']), idle(['out_of_service']), idle(['warning'])]
   const names = (rs: BadRow[]) => rs.map((r) => r.name).join('、')
   const said = [
-    main && `AI 已擬好處理計畫，${pending.length} 件等你核准`,
-    working.length > 0 && `${names(working)}${main ? ' AI 還在處理' : ' AI 正在處理，目前不用你做什麼'}`,
+    main && `Agent Nemo 已擬好處理計畫，${pending.length} 件待核准`,
+    working.length > 0 && `${names(working)}${main ? ' Agent Nemo 還在處理' : ' Agent Nemo 正在處理，目前不用你做什麼'}`,
     check.length > 0 && `${names(check)}沒有在處理中，請到現場確認`,
     out.length > 0 && `${names(out)}已停用，等維修；排程不再排入`,
     watch.length > 0 && `${names(watch)}讀值偏離，事件偵測監看中`,
-    calm ? '機台全天自動監看，有異常 1 分鐘內交給 AI 處理' : `其他 ${s.header.normal_count} 台正常`,
+    calm ? '機台全天自動監看，有異常 1 分鐘內交給 Agent Nemo 處理' : `其他 ${s.header.normal_count} 台正常`,
   ].filter(Boolean).join('。') + '。'
-  const k = main ? `要你處理 ${pending.length} 件` : calm ? '全廠正常' : check.length ? '要你到現場確認' : working.length ? 'AI 處理中' : out.length ? '停用中，等維修' : '監看中'
+  const k = main ? `要你處理 ${pending.length} 件` : calm ? '全廠正常' : check.length ? '要你到現場確認' : working.length ? 'Agent Nemo 處理中' : out.length ? '停用中，等維修' : '監看中'
   const ended = [...check, ...out].find((r) => r.ended?.outcome)?.ended ?? null
   return (
     <section className={`panel mon-answer ${calm ? 'is-calm' : ''}`} aria-label="產線現在的結論" data-testid="mon-answer">
@@ -141,7 +141,7 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
         </div>
       ) : working.length > 0 ? (
         <div className="mon-fix">
-          <span className="mon-fix-k">AI 正在做</span>
+          <span className="mon-fix-k">Agent Nemo 正在做</span>
           <b>{working[0].name}：{AI_STEP[working[0].ev!.state]}</b>
           <small>目前沒有要你核准的事</small>
         </div>
@@ -152,7 +152,7 @@ function Answer({ s, pending, onAgent }: { s: DashboardSnapshot; pending: Approv
         </div>
       ) : (
         <div className="mon-fix">
-          <span className="mon-fix-k">{ended ? `上一次處理（${machineLabel(ended.machine_id)}）` : '目前沒有 AI 在處理'}</span>
+          <span className="mon-fix-k">{ended ? `上一次處理（${machineLabel(ended.machine_id)}）` : 'Agent Nemo 沒有在處理'}</span>
           <b title={ended?.outcome ? plain(ended.outcome) : undefined}>{ended?.outcome ? plain(ended.outcome) : '請到現場確認'}</b>
           <small>{check.length ? '機台還沒恢復正常，請到現場確認' : out.length ? '維修確認後才恢復排入' : '不用你做什麼'}</small>
         </div>

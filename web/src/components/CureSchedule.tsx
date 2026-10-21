@@ -94,7 +94,7 @@ export function CureSchedule({ onAgent }: { onAgent?: (eventId?: string) => void
       <span title={`${plain(active.reason)}（${fmtMD(active.created_at)} ${fmtHM(active.created_at)}）`}>使用中：<b>第 {active.version} 版</b></span>
       {proposed.length > 0 && (
         <button type="button" className="cs-wait" onClick={() => onAgent?.(state.pending[0]?.event_id)} data-testid="cs-proposed">
-          另有 {proposed.length} 版等你核准 →
+          另有 {proposed.length} 版待核准 →
         </button>
       )}
       {active.parent_version != null && <button type="button" className="btn-ghost cs-back" onClick={rollback} title="一鍵回復上一版排程">↶ 回復上一版</button>}
@@ -102,7 +102,7 @@ export function CureSchedule({ onAgent }: { onAgent?: (eventId?: string) => void
   )
   return (
     <Panel title="硫化機排程（今天＋明天）" className="cs-panel" fold="phone" testId="cure-schedule"
-      summary={active ? `使用中第 ${active.version} 版${proposed.length ? `・另有 ${proposed.length} 版等你核准` : ''}` : undefined} right={ver}>
+      summary={active ? `使用中第 ${active.version} 版${proposed.length ? `・另有 ${proposed.length} 版待核准` : ''}` : undefined} right={ver}>
       <p className="mon-sub">一條＝一條胎，上面是訂單編號；顏色是胎型。</p>
       {msg && <p className="note">{msg}</p>}
       {active && !isNaN(now)
