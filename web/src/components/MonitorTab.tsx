@@ -1,4 +1,5 @@
-import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress } from '../contracts'
+import { useState } from 'react'
+import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress, TimelineItem } from '../contracts'
 import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
@@ -12,7 +13,8 @@ import { ORDER_STAGES } from './orderModel'
 
 /** 產線監控 (proposal page 2) with the whole plant below it — issue #37 merged the 工廠全貌 tab in here, so the
  *  page reads top-down: 預警 (rendered by App), the KPI strip, the approval card, ③ event / ④ 28 machines /
- *  ①② orders and semi-finished goods, then people, materials, dock, goods rings and the rest of the plant. */
+ *  ①② orders and semi-finished goods, then people and materials (dock, goods, tasks and the rest of the plant fold into
+ *  「更多全廠資訊」). UX declutter: the page is for the 現場主管; on a phone ①②④ and the plant fold into their headers. */
 export function MonitorTab({ onMachine, onAgent, onOrders }: { onMachine: (id: string) => void; onAgent?: (eventId?: string) => void; onOrders?: () => void }) {
   const { state } = useWarRoom()
   const s = state.snapshot
@@ -34,8 +36,10 @@ export function MonitorTab({ onMachine, onAgent, onOrders }: { onMachine: (id: s
   )
 }
 
-/** One full visual card (the focus event's, else the oldest) above the monitor; any other pending
- *  approval is a one-line row that opens the Agent tab on its event, so the plant view stays near the top. */
+/** One visual card (the focus event's, else the oldest) above the monitor; any other pending
+ *  approval is a one-line row that opens the Agent tab on its event, so the plant view stays near the top.
+ *  UX declutter: the card is compact here — risk, title, reason, the system's recommended option and 核准 / 討論
+ *  stay; the evidence (plan, schedule before/after, options, tools, conclusion) opens with 「展開」. */
 function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalRequest[]; focusEvent: string | null; onAgent?: (eventId?: string) => void }) {
   const { state } = useWarRoom()
   if (!pending.length) return null
@@ -44,7 +48,7 @@ function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalReque
   const machineOf = (a: ApprovalRequest) => state.snapshot?.events.find((e) => e.id === a.event_id)?.machine_id
   return (
     <>
-      <PendingApproval key={main.id} req={main} onAgent={onAgent ? () => onAgent(main.event_id) : undefined} />
+      <CompactApproval key={main.id} req={main} onAgent={onAgent ? () => onAgent(main.event_id) : undefined} />
       {rest.length > 0 && (
         <ul className="apv-more" aria-label="其他待核准" data-testid="pending-more">
           {rest.map((a) => {
@@ -66,10 +70,28 @@ function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalReque
   )
 }
 
-/** Four numbers a judge reads first: machines running, what needs attention, what waits for the supervisor, where the AI is. */
+/** The shared approval card with its evidence grid folded away (CSS hides `.apv-grid` until 「展開」); the card
+ *  itself lives in agent/ and is not changed, so 核准 / 討論 and the option ids keep their test hooks. */
+function CompactApproval({ req, onAgent }: { req: ApprovalRequest; onAgent?: () => void }) {
+  const [open, setOpen] = useState(false)
+  const rec = req.options.find((o) => o.recommended) ?? null
+  return (
+    <div className={`apv-compact ${open ? 'is-open' : ''}`} data-testid="approval-compact">
+      <PendingApproval req={req} onAgent={onAgent} />
+      <div className="apv-fold">
+        {rec ? <span className="apv-fold-rec"><b>系統建議</b>{rec.id} {plain(rec.label)}{req.options.length > 1 ? `（共 ${req.options.length} 個方案）` : ''}</span> : <span />}
+        <button type="button" className="btn-ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="apv-expand">
+          {open ? '收起 ▴' : '展開：處理計畫、排程前後對照、方案與結論 ▾'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+/** The numbers a supervisor reads first: machines running, what needs attention, what waits for approval, where the AI
+ *  is, who is in the plant. Low materials are not repeated here: they are already rows in 預警 (UX declutter). */
 function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalRequest[] }) {
   const w = useWarRoom().state.world
-  const low = (w?.materials ?? []).filter((m) => m.status === 'low' || m.status === 'out')
   const h = s.header
   const total = h.normal_count + h.abnormal_count
   const bad = s.machines.filter((m) => isAbnormal(m.status))
@@ -105,25 +127,19 @@ function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalReque
           <span className="kpi-s">在機台 {w.people.by_state['在機台'] ?? 0}・請假 {w.people.by_state['請假'] ?? 0}</span>
         </div>
       )}
-      {w && (
-        <div className={`kpi ${low.length ? 'is-alarm' : ''}`}>
-          <span className="kpi-l">原料</span>
-          <span className={`kpi-v ${low.length ? 'kpi-word' : ''}`}>{low.length ? `${low.map((m) => m.name).join('、')} 偏低` : <>正常<small> {w.materials.length} 項</small></>}</span>
-          <span className="kpi-s">在途採購 {w.purchase_orders.filter((p) => p.status !== '已收貨').length} 筆</span>
-        </div>
-      )}
     </section>
   )
 }
 
-/** ① 訂單: the proposal's per-size progress (page 2), then the order pipeline and the open orders with their goods
- *  rings (was 工廠全貌's 訂單流程). Search, ETA vs due and risk are on the 訂單 tab. */
+/** ① 訂單: the proposal's per-size progress (page 2) with 剩餘約 N 小時; the order pipeline, the open orders with their
+ *  goods rings (was 工廠全貌's 訂單流程) and today's counts fold into 「訂單明細」 so ①②③④ fit the first screen
+ *  (UX declutter). Search, ETA vs due and risk are on the 訂單 tab. */
 function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?: () => void }) {
   const w = useWarRoom().state.world
   const open = (w?.orders.items ?? []).filter((o) => o.status === '待排程' || o.status === '生產中')
     .sort((a, b) => Number(b.rush) - Number(a.rush) || (a.due < b.due ? -1 : 1)).slice(0, 4)
   return (
-    <Panel num="①" title="訂單進度" className="orders"
+    <Panel num="①" title="訂單進度" className="orders" fold="phone"
       right={onOrders && <a className="panel-link" href="#orders" onClick={(e) => { e.preventDefault(); onOrders() }}>全部訂單 →</a>}>
       {orders.map((o) => (
         <div className="order" key={o.size}>
@@ -138,7 +154,8 @@ function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?:
         </div>
       ))}
       {w && (
-        <>
+        <details className="orders-more" data-testid="orders-more">
+          <summary>訂單明細（流程、生產中的單、今日新單與庫存）</summary>
           <ol className="pipe" data-testid="order-pipeline" aria-label="訂單流程">
             {ORDER_STAGES.map((st) => <li key={st} className={w.orders.pipeline[st] ? 'has' : ''}><b>{w.orders.pipeline[st] ?? 0}</b><span>{st}</span></li>)}
           </ol>
@@ -154,16 +171,19 @@ function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?:
             ))}
           </ul>
           <p className="muted small w-note">今日新單 {w.orders.new_today}{w.orders.rush_open ? `・急單 ${w.orders.rush_open}` : ''}・庫存成品 {w.finished_goods.total}/{w.finished_goods.capacity} 條・待出貨 {w.finished_goods.waiting_ship} 條</p>
-        </>
+        </details>
       )}
     </Panel>
   )
 }
 
+/** ② stays open on desktop as a compact one-line-per-part list. The data has one planned mold-in time for the
+ *  whole tyre (not per part), so it sits in the header; the note trails in small text. */
 function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
   return (
-    <Panel num="②" title={`半成品進度（${semi.tire_label}）`} className="semi">
-      <ul className="semi-list">
+    <Panel num="②" title={`半成品進度（${semi.tire_label}）`} className="semi" fold="phone"
+      right={semi.planned_mold_in_at && <span className="muted small">預計 {fmtHM(semi.planned_mold_in_at)} 入硫化機</span>}>
+      <ul className="semi-list compact">
         {semi.parts.map((p) => (
           <li key={p.part}>
             <span>{p.label}</span>
@@ -171,7 +191,6 @@ function SemiPanel({ semi }: { semi: SemiFinishedProgress }) {
           </li>
         ))}
       </ul>
-      {semi.planned_mold_in_at && <p className="muted small">預計 {fmtHM(semi.planned_mold_in_at)} 入硫化機</p>}
       {semi.note && <p className={`small semi-note semi-st ${semi.note_state ?? ''}`}>{plain(semi.note)}</p>}
     </Panel>
   )
@@ -232,13 +251,25 @@ function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending:
         )}
       </ul>
       <p className="impact"><b>排程影響<span className="sr">：</span></b>{plain(focus.schedule_impact)}</p>
-      {focus.timeline.length > 0 && (
-        <details className="focus-tl">
-          <summary>事件時間軸（{focus.timeline.length} 筆）</summary>
-          <TimelineTable items={focus.timeline.slice(-6)} compact />
-        </details>
-      )}
+      {focus.timeline.length > 0 && <FocusTimeline items={focus.timeline} />}
     </Panel>
+  )
+}
+
+/** ③'s 事件時間軸 (the demo opens it here): the last 6 rows, 「看全部」 for the rest. The full table used to be ⑦ on
+ *  人力排程; that copy was removed in the UX declutter, so this is where the whole timeline is read now. */
+function FocusTimeline({ items }: { items: TimelineItem[] }) {
+  const [all, setAll] = useState(false)
+  return (
+    <details className="focus-tl" data-testid="focus-timeline">
+      <summary>事件時間軸（{items.length} 筆）</summary>
+      <TimelineTable items={all ? items : items.slice(-6)} compact />
+      {items.length > 6 && (
+        <button type="button" className="btn-ghost tl-all" aria-expanded={all} onClick={() => setAll((a) => !a)} data-testid="timeline-all">
+          {all ? '只看最近 6 筆' : `看全部（${items.length} 筆）`}
+        </button>
+      )}
+    </details>
   )
 }
 
@@ -278,8 +309,10 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
     return b ? `・壞資料 ${b.count} 筆（${QUALITY_LABEL[b.last_quality] ?? b.last_quality}，未喚醒 AI）` : ''
   }
   const presses = machines.filter((m) => m.line === 'CURE')
+  const off = machines.filter((m) => isAbnormal(m.status))
   return (
-    <Panel num="④" title="機台狀態" className="machines">
+    <Panel num="④" title="機台狀態" className="machines" fold="phone"
+      summary={off.length ? <span className="late">需要注意：{off.map((m) => machineLabel(m.machine_id)).join('、')}</span> : `${machines.length} 台・全部正常`}>
       <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・7–10 號可做中大胎</small></p>
       <div className="presses" data-line="CURE">
         {presses.map((m) => (

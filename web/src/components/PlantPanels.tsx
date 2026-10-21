@@ -7,6 +7,7 @@ import { LINE_LABELS } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { useWarRoom } from '../useWarRoom'
+import { PHONE_QUERY, useMediaQuery } from '../media'
 import { Panel } from './common'
 import { GoodsCounts, GoodsQueue } from './GoodsQueue'
 import { movedText } from './goods'
@@ -23,24 +24,38 @@ const MAT_STATUS = { ok: '充足', reorder: '已達再訂購點', low: '偏低',
 
 export function PlantPanels() {
   const { state, transport } = useWarRoom()
+  const phone = useMediaQuery(PHONE_QUERY)
   const w = state.world
   if (!w) {
     return <p className="muted plant-wait">{transport?.mode === 'mock' ? '人員、原料、碼頭與貨品需要連線後端（瀏覽器模擬資料不含這部分）。' : '等待全廠資料…'}</p>
   }
+  // UX declutter: 人員分布 and 原料庫存 stay open (a supervisor's first look); the other seven fold into
+  // 「更多全廠資訊」, closed by default. On a phone the whole section folds into its heading.
+  const body = (
+    <>
+      <div className="world world-main">
+        <PeoplePanel w={w} />
+        <MaterialsPanel w={w} />
+      </div>
+      <details className="world-more" data-testid="plant-more">
+        <summary>更多全廠資訊（7）：貨品狀態、人員任務、碼頭進出、品質檢驗、用電、保養與維修、工廠動態</summary>
+        <div className="world">
+          <GoodsPanel w={w} />
+          <TasksPanel w={w} />
+          <DockPanel w={w} />
+          <QualityPanel w={w} />
+          <EnergyPanel w={w} />
+          <MaintenancePanel w={w} />
+          <FeedPanel w={w} />
+        </div>
+      </details>
+    </>
+  )
   return (
     <section className="world-wrap" data-testid="plant-panels" data-rev={w.rev} aria-label="全廠：人、料、貨、車">
-      <h2 className="section-h">全廠：人、料、貨、車</h2>
-      <div className="world">
-        <GoodsPanel w={w} />
-        <PeoplePanel w={w} />
-        <TasksPanel w={w} />
-        <MaterialsPanel w={w} />
-        <DockPanel w={w} />
-        <QualityPanel w={w} />
-        <EnergyPanel w={w} />
-        <MaintenancePanel w={w} />
-        <FeedPanel w={w} />
-      </div>
+      {phone
+        ? <details className="world-fold"><summary className="section-h">全廠：人、料、貨、車</summary>{body}</details>
+        : <><h2 className="section-h">全廠：人、料、貨、車</h2>{body}</>}
       <p className="foot-note" data-testid="world-sources">資料來源：人員與班表（含加班、病假）、換模、異常紀錄、每日產出＝<b>團隊資料集</b>（日期依情境對齊）；訂單到達、原料採購、出貨、用電、檢驗、計畫保養、維修／品管／主管人員＝<b>模擬生成</b>（假設值）</p>
     </section>
   )
