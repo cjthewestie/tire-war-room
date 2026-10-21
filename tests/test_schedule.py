@@ -177,6 +177,9 @@ def test_fallback_to_backup_solver(primary):
     res = FallbackScheduler(primary=primary).solve(SolveRequest(now=now, orders=_orders(now.date()), shifts=[]))
     assert res.fell_back and res.solver is SolverName.HEURISTIC and res.schedule is not None and res.feasible
     assert "備援" in res.schedule.warnings[0]
+    # plain words on 預警 / 人力排程, never the enum values ("cp-sat timeout", "heuristic")
+    want = "排程求解器在時限內沒排出結果" if isinstance(primary, _TimeoutSolver) else "排程求解器這次無法求解"
+    assert res.schedule.warnings[0] == f"{want}，已改用備援排法（仍可行，交期已檢查）"
 
 
 def test_real_cpsat_tiny_time_limit_still_answers():

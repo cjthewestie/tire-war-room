@@ -1158,7 +1158,11 @@ class FallbackScheduler:
         if res.schedule is not None and res.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE):
             return res
         back = self.backup.solve(req)
-        note = f"主求解器 {res.solver.value} {res.status.value}，改用備援 {back.solver.value}"
+        # plain words for the 預警 list and 人力排程 (the old 「主求解器 cp-sat timeout，改用備援 heuristic」 read as code)
+        why = {SolveStatus.TIMEOUT: "在時限內沒排出結果", SolveStatus.INFEASIBLE: "找不到符合所有條件的排法"}.get(
+            res.status, "這次無法求解")
+        note = (f"排程求解器{why}，已改用備援排法"
+                + ("（仍可行，交期已檢查）" if back.feasible else "（備援排法也排不出可行排程）"))
         sched = back.schedule
         if sched is not None:
             sched = sched.model_copy(update={"warnings": [note, *sched.warnings]})
