@@ -59,6 +59,8 @@ export function Phone() {
     ) })),
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+  const noticeCards = notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
+    onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
   const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines)], connected && !lanDown)
   return (
     <div className="phone-wrap">
@@ -83,8 +85,9 @@ export function Phone() {
         {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
-        {notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
-          onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
+        {/* the notices go under a waiting card: with 3 件同時異常 a 維修完成 notice above pushed 核准 off the screen
+            (review 10-21); with nothing to approve they lead */}
+        {pending.length === 0 && noticeCards}
         {pending.length === 0 ? (
           <div className="ph-card idle">
             <h2>目前沒有待核准事項</h2>
@@ -103,6 +106,7 @@ export function Phone() {
               {pending.filter((p) => p.id !== top.id).map((p) => <button key={p.id} className="ph-more-i" onClick={() => setPick(p.id)}>{RISK_PLAIN[p.risk]}・{plain(p.title)}</button>)}
             </div>
           )}
+          {noticeCards}
         </>}
         {transport?.ask && <AskBox disabled={lanDown} />}
       </div>
