@@ -1099,6 +1099,10 @@ class Runtime:
         ev = self._event_obj(event_id)
         if ev is None:
             return False
+        if ev.state in TERMINAL_STATES and getattr(ev, "follow_up", None) is not None:
+            # a SAFE_STOP the supervisor handed to the floor (交給現場處理): nobody decides on it any more, its tasks
+            # run at once (#105 had this; main lost it in the merge, see docs/merge-compare/pr105.md)
+            return False
         rebase = getattr(self.state_machine, "approved_rebase", None)
         if callable(rebase) and rebase(ev.id):
             return False

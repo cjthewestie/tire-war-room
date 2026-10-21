@@ -32,6 +32,7 @@ import contextlib
 import hmac
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -1097,12 +1098,31 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             actor = f"{session.actor} via Agent Nemo"
 
             @staticmethod
+            def _label(e) -> str:
+                from warroom.agent.narrate import machine_label
+                return f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件"
+
+            @staticmethod
+            def candidates() -> list[tuple[str, str]]:
+                """Tasks a bare command (「重新排」「結案」) could mean: open ones, and SAFE_STOPs nobody has followed up."""
+                evs = [e for e in r.events() if e.closed_at is None
+                       or (e.state.value == "safe_stop" and (e.follow_up is None or e.follow_up.status == "manual"))]
+                return [(e.id, Control._label(e)) for e in sorted(evs, key=lambda e: e.opened_at)]
+
+            @staticmethod
             def resolve(ref: str) -> tuple[str, str] | None:
                 from warroom.agent.ask import machines_in, orders_in
-                from warroom.agent.narrate import machine_label
                 evs = list(r.events())
-                ref = (ref or body.event_id or "").strip()
-                hit = [e for e in evs if e.id == ref]
+                ref = (ref or "").strip()
+                names = bool(re.search(r"EV-\d", ref) or machines_in(ref) or orders_in(ref))
+                if not names:
+                    # 「重新排」: the selected task, else the one obvious task (CJ 10-22)
+                    sel = [e for e in evs if e.id == body.event_id]
+                    if sel:
+                        return sel[0].id, Control._label(sel[0])
+                    c = Control.candidates()
+                    return c[0] if len(c) == 1 else None
+                hit = [e for e in evs if e.id == ref or e.id in ref]
                 if not hit:
                     mids, oids = machines_in(ref), orders_in(ref)
 
@@ -1115,8 +1135,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                         hit = ended[-1:]
                 if len(hit) != 1:
                     return None
-                e = hit[0]
-                return e.id, (f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件")
+                return hit[0].id, Control._label(hit[0])
 
             @staticmethod
             def blocked(action: str, eid: str) -> str | None:
@@ -1129,8 +1148,17 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                             "或先中斷它再重開一件。")
                 if action == "replan_task" and st not in ("closed", "safe_stop"):
                     return "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
-                if action == "hand_to_field" and not (st == "safe_stop" and callable(getattr(r, "stop_handoff", None))):
-                    return "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有。"
+                fu = getattr(sm.get(eid), "follow_up", None)
+                if action == "hand_to_field" and st != "safe_stop":
+                    return "「交給現場」只用在安全停止的任務。"
+                if action == "hand_to_field" and fu is not None:
+                    return "這件已經交給現場處理了。"
+                if action == "close_task" and st != "safe_stop":
+                    return "「確認結案」只用在安全停止的任務；其他任務驗證通過會自己結案。"
+                if action == "close_task" and fu is not None and fu.status in ("closed", "replanned"):
+                    return "這件已經處理過了（已結案或已重新規劃）。"
+                if action == "replan_task" and st == "safe_stop" and fu is not None and fu.status in ("closed", "replanned"):
+                    return "這件已經處理過了（已結案或已重新規劃）。"
                 return None
 
             def audit_request(self, action: str, eid: str) -> None:
@@ -1145,9 +1173,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                         d = await r.orch.interrupt(eid, self.actor)
                         result = str(d.get("text") or "已中斷")
                     elif action == "replan_task":
-                        replan = getattr(r, "stop_replan", None)        # resolve-safety-paths: SAFE_STOP → 請 AI 重新規劃
-                        if state == "safe_stop" and callable(replan):
-                            nev = replan(eid, self.actor)
+                        if state == "safe_stop":                         # #105: SAFE_STOP → 請 AI 重新規劃
+                            nev = r.stop_replan(eid, self.actor)
                             result = f"已請 AI 重新規劃（新的一件 {nev.id}），計劃擬好會送你核准。"
                         elif state in ("closed", "safe_stop"):
                             what = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
@@ -1159,13 +1186,13 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                       "或先中斷它再重開一件。這次沒有執行。")
                         else:
                             result = "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
-                    else:
-                        handoff = getattr(r, "stop_handoff", None)      # resolve-safety-paths: SAFE_STOP → 交給現場處理
-                        if state == "safe_stop" and callable(handoff):
-                            handoff(eid, self.actor)
-                            result = "已交給現場處理：依 SOP 派工，這件會顯示人工處理中。"
-                        else:
-                            result = "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有；這次沒有執行。"
+                    elif action == "hand_to_field":                      # #105: SAFE_STOP → 交給現場處理
+                        e2 = r.stop_handoff(eid, self.actor)
+                        n = len(e2.follow_up.task_ids) if e2.follow_up else 0
+                        result = f"已交給現場處理：依 SOP 派了 {n} 項任務，這件顯示人工處理中；做完後說「結案」。"
+                    else:                                                # #105: SAFE_STOP → 確認結案
+                        r.stop_close(eid, self.actor)
+                        result = "已確認結案，這件安全停止處理完了。"
                 except (KeyError, ValueError) as e:
                     result = f"沒有執行：{e}"
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": action, "confirmed": True,

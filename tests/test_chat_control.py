@@ -151,3 +151,102 @@ async def test_an_action_that_cannot_run_on_that_task_says_so_before_asking():
     agent = MainAgent(_settings(), client=m)
     out = await _say(agent, "7 號機那件重新規劃", ctl)
     assert out["reply"].startswith("這件在等你核准") and "pending" not in agent.notes and not ctl.asked
+
+
+# ---------------------------------------------------------------- bare commands (CJ 10-22: 「重新排」 got a lookup fallback)
+class Picked(FakeControl):
+    """resolve("") is the selected task (or None); candidates() the open ones."""
+
+    def __init__(self, selected=None, cands=()):
+        super().__init__(known=tuple(c[0] for c in cands) + ((selected,) if selected else ()))
+        self.selected, self.cands = selected, list(cands)
+
+    def resolve(self, ref):
+        if ref in self.known:
+            return ref, "7 號硫化機那件"
+        if self.selected:
+            return self.selected, "7 號硫化機那件"
+        return self.cands[0] if len(self.cands) == 1 else None
+
+    def candidates(self):
+        return self.cands
+
+
+async def test_bare_replan_on_the_selected_task_asks_then_runs():
+    ctl = Picked(selected="EV-7")
+    m = Model(("tool", "query_plant", {"topic": "schedule"}), ("say", "我查了排程。"))
+    agent = MainAgent(_settings(), client=m)
+    q = await _say(agent, "重新排", ctl)
+    assert q["reply"] == CONFIRM_Q.format(verb="重新規劃", label="7 號硫化機那件", eid="EV-7")
+    offered = {t["function"]["name"] for t in m.calls[0]["tools"]}
+    assert "query_plant" not in offered and "read_sensors" not in offered and "replan_task" in offered
+    done = await _say(agent, "好", ctl)
+    assert ctl.ran == [("replan_task", "EV-7")] and done["by"] == "control"
+
+
+async def test_bare_command_with_several_open_tasks_asks_which():
+    ctl = Picked(cands=[("EV-3", "3 號硫化機那件"), ("EV-10", "10 號硫化機那件")])
+    out = await _say(MainAgent(_settings(), client=Model(("say", "好。"))), "交給現場", ctl)
+    assert out["reply"].startswith("要交給現場處理哪一件？") and "EV-3" in out["reply"] and "EV-10" in out["reply"]
+    assert not ctl.asked and not ctl.ran
+
+
+async def test_bare_replan_with_nothing_open_proposes_a_reschedule():
+    ctl = Picked()
+    f = Floor()
+    out = await MainAgent(_settings(), client=Model(("say", "好。"))).turn(
+        "重新排", context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool, propose=f.propose, discuss=None,
+        control=ctl)
+    assert f.proposed == ["重新排程"] and out["event_id"] and "送你核准" in out["reply"]
+
+
+def test_a_reschedule_request_with_an_order_is_a_new_task_not_a_control():
+    from warroom.agent.main_agent import control_intent
+    assert control_intent("#A-311 可能晚交，請重排保交期") is None
+    assert control_intent("重新排") == "replan_task" and control_intent("結案") == "close_task"
+    assert control_intent("7 號機那件交給現場") == "hand_to_field" and control_intent("中斷") == "interrupt_task"
+
+
+async def test_close_asks_then_runs():
+    ctl = Picked(selected="EV-7")
+    agent = MainAgent(_settings(), client=Model(("say", "好。")))
+    q = await _say(agent, "結案", ctl)
+    assert q["reply"] == CONFIRM_Q.format(verb="確認結案", label="7 號硫化機那件", eid="EV-7")
+    await _say(agent, "確認", ctl)
+    assert ctl.ran == [("close_task", "EV-7")]
+
+
+async def test_a_lookup_whose_numbers_do_not_match_lists_the_data_instead_of_offering():
+    m = Model(("tool", "query_plant", {"topic": "materials"}), ("say", "有 99 種原料。"), ("say", "還是 99 種原料。"))
+    out = await _say(MainAgent(_settings(), client=m), "原料還夠嗎", None)
+    assert out["reply"].startswith("我的整理和資料對不上，直接列出查到的資料") and "要我直接列出" not in out["reply"]
+
+
+async def test_safe_stop_replan_handoff_and_close_through_chat(tmp_path, monkeypatch):
+    import warroom.agent.main_agent as MA
+    settings = type("S", (), {"llm_mode": "llm", "model": "m", "base_url": "x", "llm_timeout_s": 5, "api_key_effective": "n"})()
+    async with Plant(_rt(tmp_path, "concurrent_3")) as p:
+        await p.until(lambda: len([e for e in p.rt.events() if e.machine_id in ("CURE-03", "CURE-10")]) >= 2, 120)
+        e3 = next(e.id for e in p.rt.events() if e.machine_id == "CURE-03")
+        e10 = next(e.id for e in p.rt.events() if e.machine_id == "CURE-10")
+        await p.rt.orch.interrupt(e3, "supervisor")
+        await p.rt.orch.interrupt(e10, "supervisor")
+        agent = MA.MainAgent(settings, client=Model(*[("say", "好。") for _ in range(8)]))
+        monkeypatch.setattr(MA, "MainAgent", lambda *_a, **_k: agent)
+
+        async def say(text, eid):
+            return (await p.http.post("/api/main/message", json={"text": text, "event_id": eid, "conversation_id": "z"})).json()
+        q = await say("重新排", e3)
+        assert "要重新規劃" in q["reply"] and e3 in q["reply"]
+        done = await say("好", e3)
+        assert "重新規劃" in done["reply"] and p.rt.state_machine.get(e3).follow_up.status == "replanned"
+        q = await say("交給現場", e10)
+        assert "要交給現場處理" in q["reply"]
+        await say("好", e10)
+        ev10 = p.rt.state_machine.get(e10)
+        assert ev10.follow_up.status == "manual" and not p.rt._awaits_decision(e10)   # hand-off tasks run at once
+        q = await say("結案", e10)
+        assert "要確認結案" in q["reply"]
+        r = await say("好", e10)
+        assert ("已確認結案" in r["reply"] and p.rt.state_machine.get(e10).follow_up.status == "closed") \
+            or "現場任務還沒完成" in r["reply"]
