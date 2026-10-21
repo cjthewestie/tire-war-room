@@ -50,6 +50,8 @@ function baseNoise(id: string, t: number, amp: number): number {
 
 export const SCENARIOS: { name: ScenarioName; label: string; start: string; speed: number }[] = [
   { name: 'day_loop', label: '一日循環', start: '2026-10-21T00:00:00+08:00', speed: 60 },
+  // issue #104 the finals demo: the day starts, orders flood in, then incidents (backend only; mock plays it as normal)
+  { name: 'morning_rush', label: '一早訂單湧入', start: '2026-10-23T06:59:00+08:00', speed: 40 },
   { name: 'normal', label: '正常運轉', start: '2026-10-22T14:20:00+08:00', speed: 1 },
   { name: 'open_mill_overheat', label: '大開煉機過熱（p.2）', start: '2026-10-22T14:25:30+08:00', speed: 10 },
   { name: 'press7_temp_drop', label: '7 號硫化機溫降（p.11）', start: '2026-10-03T02:12:00+08:00', speed: 10 },

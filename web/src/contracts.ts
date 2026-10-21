@@ -37,6 +37,7 @@ export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
   | "day_loop"  // issue #36 一日循環
+  | "morning_rush"  // issue #104 一早訂單湧入
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
@@ -597,6 +598,8 @@ export interface MachineTile {
   temp_c: number | null
   /** issue #36: current batch / step progress 0-1 (press: cure elapsed / required); null = no batch */
   step_progress?: number | null
+  /** issue #104: 檢修完成 while still out of service (green), waiting for the supervisor's 恢復運轉 */
+  repaired?: boolean
 }
 
 export interface HeaderStatus {
@@ -824,6 +827,7 @@ export const API = {
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
   review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
+  returnToService: "/api/machines/{machine_id}/return-to-service", // POST -> {machine_id, status} (#104 主管恢復運轉, 409 unless 檢修完成)
   safetyCases: "/api/safety/cases", // GET SafetyCase[]
   safetyDispatch: "/api/safety/{case_id}/dispatch", // POST -> SafetyCase (① 派現場檢查)
   safetyRelease: "/api/safety/{case_id}/release", // POST SafetyRelease -> SafetyCase (③ 確認恢復運轉; human only)

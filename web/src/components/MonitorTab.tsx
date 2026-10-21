@@ -348,13 +348,13 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
       <p className="mon-sub">{ML_RANGE} 號硫化機可做中、大胎。點機台看溫度、壓力、水流。</p>
       <div className="presses" data-line="CURE">
         {presses.map((m) => (
-          <button key={m.machine_id} className={`mdot press st-${m.status}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
+          <button key={m.machine_id} className={`mdot press st-${m.status}${m.repaired ? ' repaired' : ''}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
             onClick={() => onMachine(m.machine_id)} data-machine={m.machine_id}
             title={`${machineLabel(m.machine_id)}・${STATUS_LABEL[m.status]}${m.temp_c != null ? `・${m.temp_c}°C` : ''}${dqText(m.machine_id)}`}
             aria-label={`${machineLabel(m.machine_id)} ${STATUS_LABEL[m.status]}${m.temp_c != null ? ` ${m.temp_c}°C` : ''}${dqText(m.machine_id)}`}>
             <span className="press-n">{m.short_name}<small>號</small></span>
             <span className="press-t">{m.temp_c != null ? `${Math.round(m.temp_c * 10) / 10}°` : '—'}</span>
-            <span className="press-s">{STATUS_LABEL[m.status]}{ML_PRESSES.includes(m.machine_id) && <span className="press-ml" title="可做中、大胎">中大</span>}</span>
+            <span className="press-s">{m.repaired ? '檢修完成' : STATUS_LABEL[m.status]}{ML_PRESSES.includes(m.machine_id) && <span className="press-ml" title="可做中、大胎">中大</span>}</span>
           </button>
         ))}
       </div>

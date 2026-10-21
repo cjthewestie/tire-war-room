@@ -287,6 +287,7 @@ class ScenarioName(StrEnum):
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
     DAY_LOOP = "day_loop"                      # issue #36 一日循環: one dataset day 00:00 -> 24:00, repeated
+    MORNING_RUSH = "morning_rush"              # issue #104 一早訂單湧入: shift start, order flood, p.11, truck
 
 
 class AuditKind(StrEnum):
@@ -445,6 +446,9 @@ class ScenarioStep(_M):
     fault: FaultSpec | None = None
     note: str | None = None
     plant: PlantInput | None = None   # issue #17
+    # issue #104: a normal order arrives. It joins the order book (the scheduler sees it on the next solve) and the
+    # world feed; unlike a rush order it opens no plant event
+    order: Order | None = None
 
 
 class Scenario(_M):
@@ -1111,6 +1115,9 @@ class MachineTile(_M):
     # issue #36: how far the current batch / step is (0-1): a press's cure (elapsed / required), any other
     # machine's batch (MachineState.step_elapsed_min / its cycle). None = no batch (an empty press).
     step_progress: float | None = None
+    # issue #104: 檢修完成 — its repair tasks are done and the fault is cleared, but it stays OUT_OF_SERVICE until the
+    # supervisor's 恢復運轉 (POST /api/machines/{id}/return-to-service); no AI plan lifts it
+    repaired: bool = False
 
 
 class BadDataMark(_M):

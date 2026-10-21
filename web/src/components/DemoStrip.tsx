@@ -9,9 +9,9 @@ const Q = new URLSearchParams(location.search)
 /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
 export const DEMO_MODE = Q.get('demo') === '1'
 /** ?scenarios=all (developer; the 3D desk, wall screen and phone iframes inherit it): every scenario plus the
- *  day-loop jumps and the 隨機事件／觸發事件 controls. Without it the strip is the presenter's: three scenarios only. */
+ *  day-loop jumps and the 隨機事件／觸發事件 controls. Without it the strip is the presenter's: four scenarios only. */
 export const ALL_SCENARIOS = Q.get('scenarios') === 'all'
-const DEFAULT_SCENARIOS: ScenarioName[] = ['normal', 'press7_temp_drop', 'concurrent_3']
+const DEFAULT_SCENARIOS: ScenarioName[] = ['morning_rush', 'normal', 'press7_temp_drop', 'concurrent_3']
 const JUMPS: Partial<Record<ScenarioName, { label: string; iso: string }[]>> = {
   press7_temp_drop: [
     { label: '02:14 偵測', iso: '2026-10-03T02:13:55+08:00' },

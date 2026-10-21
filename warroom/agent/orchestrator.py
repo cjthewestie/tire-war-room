@@ -289,6 +289,8 @@ class Orchestrator:
         self.dispatcher = dispatcher or Dispatcher()
         self.subs: dict[str, SubAgent] = {}
         self.preplan_ids: set[str] = set()      # events the runtime pre-plans: they wait behind incidents
+        # #104: the report line for a pre-plan that found nothing to change (Runtime.precheck_line), or None
+        self.precheck: Callable[[Event], str | None] | None = None
         self._pending_dispatch: list[dict[str, Any]] = []      # supervisor dispatch decided, event not open yet
         from warroom.agent.reporter import ReportDesk  # Agent Nemo 異常報告 (Kyle 10-21, option A)
         self.reports = ReportDesk(self, reporter)
@@ -449,6 +451,11 @@ class Orchestrator:
                 if r.decision is not None:
                     decided.append(f"{_DECISION.get(r.decision.decision.value, r.decision.decision.value)}"
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
+        if self.precheck is not None and ev.id in self.preplan_ids and ev.state is EventState.CLOSED and not ev.approvals:
+            line = self.precheck(ev)     # 「已預先檢查：SO-012 明天無法交齊（…），建議…」 instead of 「沒有可執行的動作」
+            if line:
+                return line, {"writes": [], "approvals": [], "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
+                              "interrupted": sub.interrupted, "prechecked": True}
         repaired = ev.source == "detector" and ev.state is EventState.CLOSED and not sub.interrupted
         head = "已中斷" if sub.interrupted else "已修復" if repaired else "完成" if ev.state is EventState.CLOSED else "已停止"
         outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
