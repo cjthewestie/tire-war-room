@@ -7,7 +7,6 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Line, Shift } from '../contracts'
 import { ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { ThemeToggle } from '../components/ThemeToggle'
 import { successOf, successText, tickerItems, type Success, type TickItem } from './tickerItems'
 
 const NET_SHORT: Record<string, string> = { online: '網路正常', weak: '弱網', wan_down: 'WAN 中斷', lan_down: 'LAN 中斷・現場操作' }
@@ -49,7 +48,6 @@ export function HomeStatus({ onMonitor, onFocus }: { onMonitor?: () => void; onF
           </div>
         </div>
       </div>
-      <ThemeToggle />
       <SuccessToast />
     </div>
   )

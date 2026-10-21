@@ -2,6 +2,7 @@ import { machineLabel } from '../factory'
 import { useEffect, useRef, useState } from 'react'
 import { fmtHM, fmtMD } from '../format'
 import { QUALITY_LABEL } from './common'
+import { ThemeToggle } from './ThemeToggle'
 import { useLinkStatus } from '../linkStatus'
 import { useWarRoom } from '../useWarRoom'
 
@@ -47,6 +48,7 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
           </span>
         )}
         <UserMenu />
+        <ThemeToggle />
         {/* .live = connected to the backend (e2e waits on it); tone: ok | warn | mock | down */}
         <span className={`mode t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''} ${transport?.mode === 'mock' ? 'mock' : ''}`} title={link.title} data-testid="link-chip" role="status">
           {link.text}
