@@ -122,7 +122,7 @@ function Live() {
           )
         })}
       </section>
-      <p className="sm-pitch">只有「規劃」會叫 AI；其他都是程式</p>
+      <p className="sm-pitch">只有「規劃」和「換假設」會叫 AI；其他都是程式</p>
       <section className="panel sm-rows-p" aria-label="每件事走到哪一步">
         <header className="panel-h"><h2>處理中的事件</h2><span className="muted small">點一列看完整過程</span></header>
         {rows.length ? (

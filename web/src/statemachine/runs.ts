@@ -31,11 +31,13 @@ export function categoryOf(ev: Event): Category {
   return 'machine'
 }
 
-export type WaitOn = '模型' | '工具' | '主管核准' | '人員任務' | '程式驗證' | '—'
+export type WaitOn = '模型' | '程式' | '工具' | '主管核准' | '人員任務' | '程式驗證' | '—'
 export function waitingOn(ev: Event, tasks: WorkTask[]): WaitOn {
   const open = tasks.filter((t) => t.event_id === ev.id && t.status !== '完成').length
   switch (ev.state) {
-    case 'detected': case 'classify': case 'plan': case 'replan': return '模型'
+    // only the commander is an LLM, called in plan and replan; detection and classification are code (warroom/agent/state_machine.py)
+    case 'detected': case 'classify': return '程式'
+    case 'plan': case 'replan': return '模型'
     case 'simulate': case 'gate': return '工具'
     case 'await_approval': return '主管核准'
     case 'execute': return open ? '人員任務' : '工具'
@@ -70,8 +72,8 @@ export function statusText(ev: Event, tasks: WorkTask[], mins: number): string {
   const open = tasks.filter((t) => t.event_id === ev.id && t.status !== '完成').length
   const v = (ev.prior_rounds?.length ?? 0) + 1
   switch (ev.state) {
-    case 'detected': return '偵測到異常，AI 正在看資料'
-    case 'classify': return 'AI 正在判斷是哪一類問題'
+    case 'detected': return '偵測到異常，程式正在讀感測值、做預測'
+    case 'classify': return '程式正在分類、查 SOP'
     case 'plan': return v > 1 ? `AI 正在排第 ${v} 版計劃` : 'AI 正在想原因、排計劃'
     case 'simulate': return `計劃 v${v} 排好了，程式正在試算影響`
     case 'gate': return `程式正在檢查計劃 v${v} 安不安全、要不要你核准`
