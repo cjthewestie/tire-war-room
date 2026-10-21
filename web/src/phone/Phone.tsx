@@ -1,7 +1,7 @@
 // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
 // talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
 // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ApprovalRequest, AskAnswer } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
@@ -13,6 +13,21 @@ import { useWarRoom } from '../useWarRoom'
 import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
+import { BriefingView } from '../components/BriefingView'
+import { buildBriefing, optionBriefs, type BriefCtx } from '../briefing'
+
+
+/** Everything the briefing needs besides the card itself, read from the live store. */
+function useBriefCtx(): Pick<BriefCtx, 'resolved' | 'tasks' | 'machines' | 'now' | 'maintenance'> {
+  const { state } = useWarRoom()
+  return {
+    resolved: state.resolved,
+    tasks: state.world?.tasks.items ?? [],
+    machines: state.snapshot?.machines ?? [],
+    now: state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? null,
+    maintenance: (state.world?.maintenance.in_progress ?? []).map((m) => ({ machine_id: m.machine_id, title: m.title, status: m.status })),
+  }
+}
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -29,6 +44,8 @@ export function Phone() {
   const ev = primaryEvent(state.snapshot?.events)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const alerts = useApprovalAlerts(pending, connected && !lanDown)
+  const bctx = useBriefCtx()
+  const idleBrief = useMemo(() => (pending.length === 0 ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [pending.length, ev, bctx])
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -54,10 +71,14 @@ export function Phone() {
         {pending.length === 0 ? (
           <div className="ph-card idle">
             <h2>目前沒有待核准事項</h2>
-            {ev ? (
+            {idleBrief ? (
+              <BriefingView b={idleBrief} />
+            ) : ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
-            {ev && ev.state !== 'closed' && ev.state !== 'safe_stop' && <RepairEta ev={ev} />}
+            {ev && ev.state !== 'closed' && ev.state !== 'safe_stop' && (
+              <details className="ph-why"><summary>查看處置依據</summary><RepairEta ev={ev} /></details>
+            )}
             {state.resolved.slice(0, 3).map((r) => (
               <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
             ))}
@@ -135,6 +156,8 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
+  const [submitted, setSubmitted] = useState(false)   // 核准 went through: keep the button locked until the card leaves
+  const bctx = useBriefCtx()
   const base = (a.options.find((o) => o.recommended) ?? a.options[0])?.id ?? null
   const chosen = opt ?? base
   // 核准 executes the chosen option (the system's unless the supervisor picked another one)
@@ -144,6 +167,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     setBusy(true); setErr(null)
     try {
       await transport.decide({ request_id: a.id, decision: 'approve', option_id: chosen, reason: defaultReason(a, chosen), modified_args: null, decided_by: '主管', via: 'phone' })
+      setSubmitted(true)
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
   // 討論: changing or refusing the plan is said in words; the agent replans and the card comes back as a new version
@@ -152,6 +176,14 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     setBusy(true); setErr(null)
     try { const t = text.trim(); onSent(t); setText(''); setTalk(false); await transport.discuss(a.event_id, t) } catch (e) { setErr(`送出失敗：${String(e)}`) } finally { setBusy(false) }
   }
+  const opts = optionBriefs(a, ev)
+  const staffing = opts.filter((o) => o.staffing)
+  const picked = opts.find((o) => o.id === chosen)
+  const brief = buildBriefing({ ev, req: a, chosen, ...bctx })
+  const locked = disabled || busy || submitted
+  // what 核准 will run: the schedule/cure actions plus the picked staffing option (named, not just a letter)
+  const scope = [...(a.actions ?? []).filter((x) => !x.startsWith('人力：依所選')).map(plain).filter(Boolean),
+    ...(picked && staffing.length ? [`人力${opts.length > 1 ? `方案 ${picked.id}` : ''}：${picked.label}`] : [])]
   return (
     <div className="ph-card ph-approval">
       <div className="ph-col-a">
@@ -160,38 +192,32 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
         <span className="ph-round">{ROUND[a.round] ?? `第${a.round}輪`}核准</span>
         {(a.version ?? 1) > 1 && <span className="ph-round ph-ver" data-testid="phone-version">v{a.version}（最新）</span>}
       </div>
-      <h2 className="ph-title">{plain(a.title)}</h2>
-      <p className="ph-problem">{plain(a.reason)}</p>
+      {brief && <BriefingView b={brief} testId="phone-briefing" />}
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">
           <b>與 v{(a.version ?? 2) - 1} 相比：</b>{(a.changes ?? []).length ? (a.changes ?? []).map(plain).join('；') : '排程內容相同'}
           {(a.constraints ?? []).length > 0 && <div className="muted">主管條件：{(a.constraints ?? []).join('、')}</div>}
         </div>
       )}
-      <dl className="ph-info">
-        {a.actions?.length ? (<>
-          <dt>建議</dt>
-          <dd><ul className="ph-acts-list">{a.actions.map((x, i) => <li key={i}>{plain(x)}</li>)}</ul></dd>
-        </>) : null}
-        <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
-        {a.gaps.length > 0 && <><dt>缺口</dt><dd>{a.gaps.map(plain).join('；')}</dd></>}
-      </dl>
-      <RepairEta ev={ev} />
       <details className="ph-why">
-        <summary>為什麼</summary>
+        <summary>查看處置依據</summary>
+        <RepairEta ev={ev} />
         {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
+        <p className="muted small">判斷依據：{plain(a.reason)}</p>
         {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
         {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       </details>
       </div>
       <div className="ph-col-b">
-      {a.options.length > 1 && <>
-        <p className="ph-q">選一個人力方案</p>
+      {staffing.length > 0 && <>
+        <p className="ph-q">{opts.length > 1 ? '選一個人力方案' : '建議人力方案'}</p>
         <div className="ph-opts" role="radiogroup" aria-label="方案">
-          {a.options.map((o) => (
-            <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={disabled || busy}
-              className={`ph-opt ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
-              <b>{o.id}</b>　{o.label}{o.recommended ? <small>系統建議</small> : null}
+          {staffing.map((o) => (
+            <button key={o.id} role="radio" aria-checked={chosen === o.id} disabled={locked || opts.length < 2}
+              className={`ph-opt ph-optc ${chosen === o.id ? 'on' : ''}`} onClick={() => setOpt(o.id)}>
+              <span className="ph-opt-t"><b>{o.id}</b><span>{o.label}</span>{o.recommended ? <small>系統建議</small> : null}</span>
+              {o.effect.map((e, i) => <span key={i} className="ph-opt-e">{e}</span>)}
+              {o.high && <span className="ph-opt-e ph-opt-risk">高風險：需附理由</span>}
             </button>
           ))}
         </div>
@@ -201,9 +227,12 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
           placeholder="例如：不要加班／9 號機今晚要保養／這個不行，改用 B" aria-label="跟 AI 討論這個計劃" data-testid="phone-discuss-input" />
       )}
       {err && <p className="err">{err}</p>}
+      {scope.length > 0 && <p className="ph-scope" data-testid="phone-scope">核准範圍：{scope.join('；')}</p>}
       <div className="ph-acts">
-        <button className="ph-approve" disabled={disabled || busy || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>{busy ? '送出中…' : `核准${chosen && a.options.length > 1 ? `（${chosen}）` : ''}`}</button>
-        <button className="ph-sec" disabled={disabled || busy || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
+        <button className="ph-approve" disabled={locked || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>
+          {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label}` : ''}`}
+        </button>
+        <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
       </div>
       <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
       </div>

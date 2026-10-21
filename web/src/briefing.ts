@@ -1,0 +1,280 @@
+// 主管摘要 (supervisor briefing): the short, sectioned text a supervisor reads on the phone card and in the desktop
+// Agent panel. Built ONLY from data the server already sends (the event, its approval card, the world's task board,
+// the machine tiles); nothing here is hard-coded or invented. A missing optional field leaves its line out; a
+// missing required field reads 待確認. Display only: the approval, the tools and the audit log are untouched.
+//
+// Three states (CJ, 2026-10-21):  待核准 · 執行中 · 處置完成  (a safe stop is its own state, 已安全停止, because
+// it must never read as a finished fix).  Wording rules the builder keeps:
+//   - 「已核准」 is not 「已執行」; 「維修已通知」 is not 「設備已修復」: schedule done and equipment status are separate.
+//   - a delivery verdict is 預估 (solver) unless a real outcome exists; an unresolved gap is always listed.
+//   - a cause is 疑似 until its hypothesis is confirmed by a reading.
+import {
+  WRITE_TOOLS, type ApprovalOption, type ApprovalRequest, type Event, type MachineStatus, type MachineTile, type StepRun, type WorkTask,
+} from './contracts'
+import { machineLabel } from './factory'
+import { fmtHM, fmtMD } from './format'
+import { hypLabel, plain } from './plain'
+import { NOTIFY_LABEL, resultText } from './stepText'
+import { cureChange, optionViews, type OptionView } from './agent/approvalView'
+import { expectationText, repairWindow } from './phone/RepairEta'
+
+export type BriefState = 'pending' | 'running' | 'done' | 'stopped'
+export type SectionKey = 'advice' | 'impact' | 'deadline' | 'progress' | 'eta' | 'result' | 'equipment' | 'todo'
+
+export interface BriefSection {
+  key: SectionKey
+  title: string           // bolded by the view (strong); the body keeps normal weight
+  lines: string[]         // one point per line
+  plain?: boolean         // true: render the lines as short paragraphs instead of bullets
+}
+export interface Briefing {
+  state: BriefState
+  stateLabel: string
+  name: string            // 「7 號硫化機」「全廠」「主管指令」
+  lead: string            // one sentence under the header
+  sections: BriefSection[]
+  /** 待核准 only: the 請核准 chip and its deadline (null time = no reliable deadline, the chip shows alone) */
+  deadline: { time: string | null } | null
+  eventId: string
+}
+
+export interface BriefCtx {
+  ev: Event | null
+  /** the card waiting for the supervisor (待核准) */
+  req: ApprovalRequest | null
+  /** the staffing option currently picked on the card (null = the system's recommendation) */
+  chosen: string | null
+  resolved: ApprovalRequest[]
+  tasks: WorkTask[]
+  machines: MachineTile[]
+  now: string | null
+  /** maintenance in progress, per machine id (world.maintenance.in_progress) */
+  maintenance?: { machine_id: string; title: string; status: string }[]
+}
+
+const STATUS_PLAIN: Record<MachineStatus, string> = {
+  running: '運轉中', idle: '待機', warning: '注意（讀值偏離）', alarm: '異常', stopped: '已停機', out_of_service: '停用中', offline: '離線',
+}
+
+const isMachineEvent = (ev: Event) => ev.source !== 'plant' && ev.source !== 'supervisor' && ev.machine_id !== 'PLANT'
+
+export function eventName(ev: Event): string {
+  if (ev.source === 'supervisor') return '主管指令'
+  return machineLabel(ev.machine_id)
+}
+
+/** The card's recommended (or the picked) option, in words the supervisor can decide on. */
+function optionText(o: OptionView | undefined, opt: ApprovalOption | undefined, kind: 'transfer' | 'overtime' | null): string {
+  if (!o && !opt) return '待確認'
+  if (o?.who && o.kind === 'transfer' && kind === 'transfer') return `從 ${o.who.split(' → ')[0]}調 ${o.people ?? 1} 人${o.shift ? `（${o.shift}）` : ''}`
+  if (o?.who && o.kind === 'overtime') return `${o.who}${o.shift ? `・${o.shift}` : ''}`
+  return plain(opt?.label ?? '待確認')
+}
+
+/** One option for the phone selector: the plan, who is affected, how risky. Shared by the briefing and the selector. */
+export interface OptionBrief { id: string; label: string; recommended: boolean; effect: string[]; high: boolean; staffing: boolean }
+/** transfer | overtime | null, from the solver's staffing change, the option's args (real backend: notify kind
+ *  staff_move / overtime; mock: staffing transfer / overtime) or, last, the option's own label. */
+function staffingKind(v: OptionView): 'transfer' | 'overtime' | null {
+  const raw = String(v.kind ?? v.opt.args.staffing ?? '')
+  if (raw === 'transfer' || raw === 'staff_move') return 'transfer'
+  if (raw === 'overtime') return 'overtime'
+  if (/調\s*\d*\s*人|跨組/.test(v.opt.label)) return 'transfer'
+  if (/加班/.test(v.opt.label)) return 'overtime'
+  return null
+}
+
+export function optionBriefs(req: ApprovalRequest, ev: Event | null): OptionBrief[] {
+  return optionViews(req, ev).map((v) => {
+    const kind = staffingKind(v)
+    const effect: string[] = []
+    if (kind === 'transfer') {
+      const from = v.who ? v.who.split(' → ')[0] : '來源組'
+      effect.push(`${from}少 ${v.people ?? 1} 人${v.shift ? `（${v.shift}）` : ''}，可能影響該組產能`)
+    } else if (kind === 'overtime') {
+      effect.push(`${v.who?.replace('（原班人員加班）', '') ?? '原班人員'}原班加班${v.shift ? `（${v.shift}）` : ''}，不從其他組調人`)
+    }
+    const label = optionText(v, v.opt, kind)
+    return { id: v.opt.id, label, recommended: v.opt.recommended, effect, high: kind === 'transfer' && req.risk === 'R3', staffing: kind !== null }
+  })
+}
+
+function actionLines(req: ApprovalRequest): string[] {
+  // 「排程生效」 and 「硫化總時數」 usually describe the same change: say it once (only when the hours match)
+  const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：依所選')).map((a) => plain(a))
+  const sched = acts.find((a) => /排程.*生效/.test(a))
+  return acts.filter((a) => {
+    if (!sched || a === sched || !/硫化總時數/.test(a)) return true
+    const h = a.match(/(\d+(?:\.\d+)?) h/)
+    return !(h && sched.includes(`${h[1]} h`))
+  })
+}
+
+function deliveryLine(text: string | null | undefined): string | null {
+  const t = plain(text).trim()
+  if (!t) return null
+  if (t.startsWith('不受影響')) return `預估訂單交期不受影響${t.length > 4 ? t.slice(4) : ''}`
+  if (t.startsWith('延誤')) return `預估${t}`
+  return t
+}
+
+function gapLines(req: ApprovalRequest | null | undefined): string[] {
+  return (req?.gaps ?? []).map((g) => plain(g)).filter(Boolean)
+}
+
+/** What the commander currently believes caused a machine event; 疑似 until a reading confirmed it. */
+function causeText(ev: Event): string | null {
+  if (!isMachineEvent(ev)) return null
+  const h = ev.plan?.hypothesis ?? [...ev.hypotheses].reverse().find((x) => x.status !== 'rejected')
+  if (!h || !h.statement) return null
+  return `${h.status === 'confirmed' ? '' : '疑似'}${plain(h.statement)}`
+}
+
+function headline(ev: Event, req: ApprovalRequest | null): string {
+  const what = plain(req?.title ?? ev.alert_card?.title ?? ev.anomaly.message)
+  const cause = causeText(ev)
+  if (isMachineEvent(ev)) return cause ? `${what}，${cause}。` : `${what}。`
+  const why = plain(req?.reason ?? ev.anomaly.message)
+  return what && why && what !== why ? `${what}：${why}。` : `${what || why}。`
+}
+
+const stepName = (sr: StepRun): string => {
+  const a = sr.step.args
+  try {
+    return resultText(sr.step.tool, a, sr.result?.data ?? {})
+  } catch { return NOTIFY_LABEL[String(a.kind)] ?? sr.step.tool }
+}
+const STEP_STATE: Record<StepRun['state'], string> = {
+  ok: '已完成', running: '進行中', pending: '等待中', awaiting_approval: '等待核准', failed: '失敗', skipped: '未執行', rejected: '被攔下',
+}
+/** Gated writes of the current round (what the approval actually runs), oldest first. */
+function writeSteps(ev: Event): StepRun[] {
+  return ev.steps.filter((s) => WRITE_TOOLS.includes(s.step.tool))
+}
+const taskLine = (t: WorkTask): string =>
+  `${t.title}（${t.worker_name ?? t.team_label}）：${t.status}${t.status !== '完成' && t.eta ? `，預計 ${fmtHM(t.eta)}` : ''}${t.status === '完成' && t.done_at ? `，${fmtHM(t.done_at)} 完成` : ''}`
+
+function approvedOf(ev: Event, resolved: ApprovalRequest[]): ApprovalRequest | null {
+  return resolved.filter((r) => r.event_id === ev.id && r.status === 'approved')
+    .sort((a, b) => ((a.decision?.decided_at ?? a.created_at) < (b.decision?.decided_at ?? b.created_at) ? 1 : -1))[0] ?? null
+}
+function approvedLabel(req: ApprovalRequest, ev: Event): string {
+  const id = req.decision?.option_id
+  if (req.options.length > 1 && id) {
+    const ob = optionBriefs(req, ev).find((o) => o.id === id)
+    return `方案 ${id}：${ob?.label ?? plain(req.options.find((o) => o.id === id)?.label)}`
+  }
+  const acts = actionLines(req)
+  return acts[0] ? `${acts[0]}` : plain(req.title)
+}
+
+function equipmentLine(ev: Event, c: BriefCtx): string | null {
+  if (!isMachineEvent(ev)) return null
+  const m = c.machines.find((t) => t.machine_id === ev.machine_id)
+  const fix = c.maintenance?.find((x) => x.machine_id === ev.machine_id)
+  const parts: string[] = []
+  if (m) parts.push(`${machineLabel(ev.machine_id)}${STATUS_PLAIN[m.status]}${m.temp_c != null ? `（${Math.round(m.temp_c * 10) / 10}°C）` : ''}`)
+  if (fix) parts.push(fix.status === 'in_progress' ? `維修進行中：${fix.title}` : `維修已排入：${fix.title}`)
+  else if (hypLabel('active', ev) === '未驗證・交維修') parts.push('已交維修，尚未回報修復')
+  return parts.length ? parts.join('；') : '待確認'
+}
+
+export function buildBriefing(c: BriefCtx): Briefing | null {
+  const { ev, req } = c
+  if (!ev) return null
+  const name = eventName(ev)
+  const base = { name, eventId: ev.id }
+
+  // ------------------------------------------------------------ 待核准
+  if (req) {
+    const opts = optionBriefs(req, ev)
+    const rec = opts.find((o) => o.recommended) ?? opts[0]
+    const pick = opts.find((o) => o.id === (c.chosen ?? rec?.id)) ?? rec
+    const advice: string[] = []
+    if (pick) {
+      const prefix = opts.length > 1 ? `方案 ${pick.id}：` : ''
+      advice.push(pick.id === rec?.id ? `${prefix}${pick.label}` : `${prefix}${pick.label}（你改選；系統建議方案 ${rec?.id}）`)
+    }
+    advice.push(...actionLines(req))
+    const impact: string[] = []
+    const cure = cureChange(ev)
+    if (cure) impact.push(`${machineLabel(cure.press)}硫化總時數 ${round1(cure.from)} h → ${round1(cure.to)} h`)
+    if (pick?.effect.length) impact.push(...pick.effect.map((e) => `人力：${e}`))
+    const d = deliveryLine(req.delivery_impact)
+    if (d) impact.push(d)
+    impact.push(...gapLines(req).map((g) => `缺口：${g}`))
+    const sections: BriefSection[] = []
+    if (advice.length) sections.push({ key: 'advice', title: '建議處置', lines: advice })
+    if (impact.length) sections.push({ key: 'impact', title: '預期影響', lines: impact })
+    return {
+      ...base, state: 'pending', stateLabel: '待核准', lead: headline(ev, req), sections,
+      deadline: { time: req.expires_at ? fmtHM(req.expires_at) : null },
+    }
+  }
+
+  // ------------------------------------------------------------ 已安全停止
+  if (ev.state === 'safe_stop') {
+    return {
+      ...base, state: 'stopped', stateLabel: '已安全停止', deadline: null,
+      lead: `${plain(ev.alert_card?.title ?? ev.anomaly.message)}：自動處置未能完成，已安全停止、保留原排程。`,
+      sections: [
+        { key: 'result', title: '處理結果', lines: [plain(ev.outcome) || '待確認'] },
+        { key: 'todo', title: '後續待辦', lines: ['需要人工判斷與處置'] },
+      ],
+    }
+  }
+
+  const approved = approvedOf(ev, c.resolved)
+
+  // ------------------------------------------------------------ 處置完成
+  if (ev.state === 'closed') {
+    const exec = writeSteps(ev).filter((s) => s.state === 'ok').map(stepName)
+    const result = [...new Set(exec)]
+    if (approved && approved.options.length > 1 && approved.decision?.option_id) {
+      const t = `人力：${approvedLabel(approved, ev)}`
+      if (!result.some((r) => r.includes(approved.decision!.option_id ?? '~'))) result.push(t)
+    }
+    const dl = deliveryLine(approved?.delivery_impact)
+    if (dl) result.push(dl)
+    const eq = equipmentLine(ev, c)
+    const openTasks = c.tasks.filter((t) => t.event_id === ev.id && t.status !== '完成')
+    const todo = [...openTasks.map((t) => taskLine(t))]
+    if (approved && !(approved.options.length > 1 && approved.decision?.option_id)) todo.push(...gapLines(approved).map((g) => `缺口：${g}`))
+    const sections: BriefSection[] = [{ key: 'result', title: '處理結果', lines: result.length ? result : [plain(ev.outcome) || '待確認'] }]
+    if (eq) sections.push({ key: 'equipment', title: '設備狀態', lines: [eq], plain: true })
+    if (todo.length) sections.push({ key: 'todo', title: '後續待辦', lines: todo })
+    return { ...base, state: 'done', stateLabel: '處置完成', lead: plain(ev.outcome) ? `${plain(ev.outcome)}。` : '處置流程已結案。', sections, deadline: null }
+  }
+
+  // ------------------------------------------------------------ 執行中 (approved, not closed yet)
+  if (approved) {
+    const steps = writeSteps(ev)
+    const progress: string[] = steps.map((s) => `${stepName(s)}：${STEP_STATE[s.state]}`)
+    const tasks = c.tasks.filter((t) => t.event_id === ev.id)
+    progress.push(...tasks.map((t) => taskLine(t)))
+    if (ev.state === 'replan') progress.push('驗證未達預期：正在換假設重新規劃')
+    else if (ev.state === 'verify') progress.push('動作完成後，系統正依讀值驗證是否達到預期')
+    const w = repairWindow(ev, c.now, c.tasks, c.resolved)
+    const eta = w.doneBy
+      ? `預計 ${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)} 完成${w.lastEta ? '（含現場任務）' : w.x ? `（${expectationText(w.x)}）` : ''}，完成後將通知你。`
+      : '待確認，完成後將通知你。'
+    const impact: string[] = []
+    const dl = deliveryLine(approved.delivery_impact)
+    if (dl) impact.push(dl)
+    const staffed = approved.options.length > 1 && !!approved.decision?.option_id
+    if (staffed) {
+      const ob = optionBriefs(approved, ev).find((o) => o.id === approved.decision?.option_id)
+      if (ob?.effect.length) impact.push(...ob.effect.map((e) => `人力：${e}`))
+    } else impact.push(...gapLines(approved).map((g) => `缺口：${g}`))
+    const sections: BriefSection[] = [
+      { key: 'progress', title: '處理進度', lines: progress.length ? progress : ['待確認'] },
+      { key: 'eta', title: '預計完成', lines: [eta], plain: true },
+    ]
+    if (impact.length) sections.push({ key: 'impact', title: '預期影響', lines: impact })
+    return { ...base, state: 'running', stateLabel: '執行中', lead: `${approvedLabel(approved, ev)} 已核准。`, sections, deadline: null }
+  }
+  return null   // still planning: the existing 「AI 指揮官…中」 line covers it
+}
+
+const round1 = (n: number) => Math.round(n * 10) / 10
+

@@ -4,7 +4,7 @@
 // - 預計完成: the approval time (or now, before approval) + that window, or the latest field-task ETA if later
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
-import type { Channel, Event, Expectation, WorkTask } from '../contracts'
+import type { ApprovalRequest, Channel, Event, Expectation, WorkTask } from '../contracts'
 import { fmtHM, fmtMD, ms } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
@@ -17,17 +17,42 @@ const CH: Record<Channel, { label: string; unit: string }> = {
 }
 
 /** The expectation the event will be verified against: the plan's hypothesis first, else any open one. */
-function expectationOf(ev: Event | null): Expectation | null {
+export function expectationOf(ev: Event | null): Expectation | null {
   if (!ev) return null
   return ev.plan?.hypothesis.expectation
     ?? ev.hypotheses.find((h) => h.status !== 'rejected' && h.expectation)?.expectation
     ?? null
 }
 
-function expectationText(x: Expectation): string {
+export function expectationText(x: Expectation): string {
   const c = CH[x.channel]
   const target = x.op === 'between' ? `${x.value}–${x.value_hi}${c.unit}` : `${x.op === '>=' ? '≥' : '≤'}${x.value}${c.unit}`
   return `${x.within_min} 分內${c.label}回到 ${target}`
+}
+
+export interface RepairWindow {
+  x: Expectation | null
+  tasks: WorkTask[]
+  open: WorkTask[]
+  lastEta: string | null
+  decided: string | null
+  doneBy: number | null
+}
+
+/** The 修復預估 numbers as plain data (the card below and the briefing both use it): the verification window
+ *  from the approval (or now, before approval), or the latest open field-task ETA when that is later. */
+export function repairWindow(ev: Event | null, now: string | null, allTasks: WorkTask[], resolved: ApprovalRequest[]): RepairWindow {
+  const x = expectationOf(ev)
+  const tasks = ev ? allTasks.filter((t) => t.event_id === ev.id) : []
+  const open = tasks.filter((t) => t.status !== '完成')
+  const lastEta = open.map((t) => t.eta).filter((e): e is string => !!e).sort().at(-1) ?? null
+  // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
+  const decided = ev ? resolved.filter((r) => r.event_id === ev.id && r.status === 'approved' && r.decision?.decided_at)
+    .map((r) => r.decision!.decided_at as string).sort().at(-1) ?? null : null
+  const from = decided ?? now
+  const byWindow = x && from ? ms(from) + x.within_min * 60_000 : null
+  const doneBy = lastEta ? Math.max(ms(lastEta), byWindow ?? 0) : byWindow
+  return { x, tasks, open, lastEta, decided, doneBy }
 }
 
 export function RepairEta({ ev }: { ev: Event | null }) {
@@ -44,16 +69,7 @@ export function RepairEta({ ev }: { ev: Event | null }) {
   }, [ev?.id, machine])
   if (!ev) return null
   const now = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? null
-  const x = expectationOf(ev)
-  const tasks: WorkTask[] = (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id)
-  const open = tasks.filter((t) => t.status !== '完成')
-  const lastEta = open.map((t) => t.eta).filter((e): e is string => !!e).sort().at(-1) ?? null
-  // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
-  const decided = state.resolved.filter((r) => r.event_id === ev.id && r.status === 'approved' && r.decision?.decided_at)
-    .map((r) => r.decision!.decided_at).sort().at(-1) ?? null
-  const from = decided ?? now
-  const byWindow = x && from ? ms(from) + x.within_min * 60_000 : null
-  const doneBy = lastEta ? Math.max(ms(lastEta), byWindow ?? 0) : byWindow
+  const { x, tasks, lastEta, decided, doneBy } = repairWindow(ev, now, state.world?.tasks.items ?? [], state.resolved)
   if (!x && !tasks.length && !sop?.steps.length) return null
   return (
     <div className="ph-eta" data-testid="phone-eta">
