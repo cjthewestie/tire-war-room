@@ -127,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
     for name in ("serve", "demo", "check"):
         sp = sub.add_parser(name)
         sp.add_argument("--scenario", choices=["normal", "press7_temp_drop", "open_mill_overheat", "bad_data",
-                                               "concurrent_3", "shift_start", "rush_order", "staffing"])
+                                               "concurrent_3", "shift_start", "rush_order", "staffing",
+                                               "morning_rush"])
         sp.add_argument("--speed", type=float)
         sp.add_argument("--llm-mode", choices=["mock", "llm"])
         sp.add_argument("--strict", action="store_true", help="fail instead of using fallback components")
