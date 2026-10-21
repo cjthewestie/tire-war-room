@@ -1190,6 +1190,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             # (warroom/api/resolve.py, every precondition) and the 恢復運轉 button (Runtime.return_to_service)
             @staticmethod
             def _case(mid: str):
+                """The open Safety Core case to release — none for an OUT_OF_SERVICE machine: its way back is 恢復運轉
+                (return_to_service), and the core's release never lifts OUT_OF_SERVICE (press 7 after H2 has both,
+                and the chat asked for the core's field check instead; live run 10-22)."""
+                tile = Control._tile(mid)
+                if tile is not None and tile.status.value == "out_of_service":
+                    return None
                 return r.cases.open_for(mid)
 
             @staticmethod
