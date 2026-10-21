@@ -29,7 +29,7 @@ const EXAMPLES: Record<BarMode, string[]> = {
 const PLACEHOLDER: Record<BarMode, string> = {
   discuss: '跟 AI 討論等待核准的計劃，例如：9 號機今晚要保養（Enter 送出）',
   command: '交辦新任務，例如：通知維修組明早檢查 3 號機（Enter 送出）',
-  ask: '問戰情室，例如：9 號機下一模是哪張訂單？（Enter 送出）',
+  ask: '輸入問題，按 Enter 送出',
 }
 
 export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
@@ -103,21 +103,15 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
   }
   return (
     <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }} data-mode={mode}>
-      <div className="askbar-modes" role="radiogroup" aria-label="輸入模式">
-        {MODES.map((m) => {
-          const off = m.id === 'discuss' && !waiting
-          return (
-            <button type="button" key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} disabled={off || !!busy}
-              title={off ? '目前沒有等待核准的計劃' : m.hint} onClick={() => setPicked(m.id)} data-testid={`mode-${m.id}`}>{m.label}</button>
-          )
-        })}
+      <div className="askbar-modes">
         <span className="askbar-hint">{MODES.find((m) => m.id === mode)?.hint}{mode === 'discuss' && ev ? `・${machineLabel(ev.machine_id)}` : ''}</span>
+        {mode !== 'ask' && <button type="button" disabled={!!busy} onClick={() => setPicked('ask')} data-testid="mode-ask">改為提問</button>}
       </div>
       <div className="askbar-ex">
         {EXAMPLES[mode].map((x) => <button type="button" key={x} disabled={!can || !!busy} onClick={() => void send(x)}>{x}</button>)}
       </div>
       <div className="askbar-in">
-        <textarea ref={input} rows={1} maxLength={300} value={q} disabled={!can || !!busy} aria-label={MODES.find((m) => m.id === mode)?.label}
+        <textarea ref={input} rows={2} maxLength={300} value={q} disabled={!can || !!busy} aria-label={MODES.find((m) => m.id === mode)?.label}
           data-testid="chat-input"
           placeholder={can ? (lanDown ? 'LAN 中斷時請在現場觸控螢幕操作' : PLACEHOLDER[mode]) : transport?.mode === 'mock' ? '模擬資料模式不支援，需連線後端' : '目前沒有等待核准的計劃'}
           onChange={(e) => setQ(e.target.value)}

@@ -8,7 +8,7 @@
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
-import { fmtHM, fmtHM12, fmtMD, ms } from '../format'
+import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
@@ -109,5 +109,6 @@ export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | 
   if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
   if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
-  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+  const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
+  return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
 }

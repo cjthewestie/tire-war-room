@@ -122,7 +122,7 @@
 .askbar-ex button { background: var(--panel-2); border: 1px solid var(--panel-3); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; color: var(--ink-dim); }
 .askbar-ex button:hover:not(:disabled) { color: var(--ink); border-color: var(--ink-faint); }
 .askbar-in { display: flex; gap: 8px; align-items: stretch; }
-.askbar textarea { flex: 1; resize: none; min-height: 42px; max-height: 120px; background: var(--bg); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 15px; }
+.askbar textarea { flex: 1; resize: none; min-height: 56px; max-height: 120px; line-height: 1.4; background: var(--bg); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 10px; padding: 10px 12px; font: inherit; font-size: 15px; }
 .askbar textarea:focus { outline: none; border-color: var(--accent); }
 .btn-send { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 0 18px; font-weight: 700; flex: none; }
 
@@ -308,6 +308,7 @@
 .askbar-modes button.on { background: var(--accent-soft); color: var(--ink); border-color: var(--accent); font-weight: 700; }
 .askbar-modes button:disabled { opacity: .45; cursor: not-allowed; }
 .askbar-hint { font-size: 12px; color: var(--ink-faint); margin-left: 4px; }
+.askbar-modes:empty { display: none; }
 .askbar[data-mode="command"] textarea:focus { border-color: var(--info); }
 .apv-ver { font-size: 12.5px; padding: 2px 10px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); font-weight: 700; border: 1px solid rgb(var(--warn-rgb, 245 184 61) / .45); }
 .apv-changed { margin: 8px 0 0; padding: 8px 12px; border-radius: 8px; background: var(--warn-soft); font-size: 14px; color: var(--ink); }
