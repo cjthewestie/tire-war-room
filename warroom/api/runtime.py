@@ -1569,6 +1569,17 @@ class Runtime:
         except Exception:  # noqa: BLE001
             return []
 
+    @property
+    def tasklog(self) -> Any:
+        """今天處理過的任務 from the audit file (warroom/api/tasklog.py), never cleared."""
+        tl = self.__dict__.get("_tasklog")
+        if tl is None:
+            from warroom.api.tasklog import TaskLog
+            path = getattr(self.audit, "path", None)
+            tl = TaskLog(path) if path is not None and str(path) else TaskLog(entries=lambda: self.audit.tail(0, 0))
+            self.__dict__["_tasklog"] = tl
+        return tl
+
     def _clear_ask_memory(self, why: str) -> None:
         """Forget every 問戰情室 conversation (issue #95); the audit log says how many and why."""
         try:

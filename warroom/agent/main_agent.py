@@ -195,6 +195,7 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 # 「（discuss_waiting_plan 回覆：…）」: a tool name in the reply
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
+MAX_TOKENS = 350           # a reply is cut at MAX_CHARS anyway; 500 let it write 400-token lists (6–8 s, real run 10-22)
 MAX_CHARS = 260            # a chat bubble, not a report; the full data stays in the reply's tool line
 MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
 # a plant question that query_plant answers (「明天要出幾台車」「原料還夠嗎」「今天處理過什麼」): keyword -> topic, used for
@@ -413,7 +414,7 @@ def tidy(reply: str, keep_intro: bool, limit: int = MAX_SENTENCES) -> str:
         r = _INTRO_RX.sub("", r, count=1).strip() or r
     r = _ODD_RX.sub("", r).strip() or r
     # at 0.7: 「👋；---；(這是一個一般知識問題，我直接解釋了…)」 and 「【詩】；」 (preview runs 10-21)
-    r = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", r)
+    r = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", r).replace("`", "")
     r = re.sub(r"[；;]?\s*-{3,}\s*[；;]?", "", r)
     r = re.sub(r"[（(][^（）()]*(?:我直接|這是一個|這個問題|標註)[^（）()]*[）)]", "", r)
     r = re.sub(r"^\s*(?:【[^】]{0,6}】|[（(][^）)]{0,6}[）)])\s*[；;]?\s*", "", r)
@@ -858,7 +859,7 @@ class MainAgent:
             loose = casual and not out["steps"]
             async with (_slot(slot, small) if slot else contextlib.nullcontext()):
                 r = await self.client.chat.completions.create(
-                    model=self.settings.model, temperature=CASUAL_TEMPERATURE if loose else 0.0, max_tokens=500, messages=msgs,
+                    model=self.settings.model, temperature=CASUAL_TEMPERATURE if loose else 0.0, max_tokens=MAX_TOKENS, messages=msgs,
                     **({} if last or not tools else {"tools": tools, "tool_choice": "auto"}),
                     **({"extra_body": extra} if extra else {}))
             m = r.choices[0].message
@@ -1037,7 +1038,8 @@ class MainAgent:
             # first try the model's words without the sentences that carry it (a whole reply replaced by raw results
             # read worse than one dropped line: 「今天有哪些訂單」 → 「查到：工廠資料（訂單）：pipeline: …」, preview 10-21)
             kept = "".join(x for x in _SENTENCE_RX.findall(words) if not ungrounded(x, source)).strip()
-            if kept and not (waiting_plan and about_edit):
+            # what is left must still answer: only 「若主管還有其他想查的項目，請說。」 left was no answer (real run 10-22)
+            if kept and len(kept) >= len(words) // 3 and not (waiting_plan and about_edit):
                 return kept
             if steps and all(s["tool"] == QUERY for s in steps if s["ok"]) and not (waiting_plan and about_edit):
                 # query_plant data is JSON: pasted back it read as noise (「查到：工廠資料（之前的訂單）：completed_or_shipped: id:…」)
