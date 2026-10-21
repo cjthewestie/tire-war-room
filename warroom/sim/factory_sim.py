@@ -824,6 +824,22 @@ class Factory:
         if note is not None:
             m.note = note
 
+    def scrap_held_job(self, press_id: str) -> str | None:
+        """QC 報廢 of the tyre a CURE_HOLD kept in the mold (supervisor decision, warroom/api/resolve.py): the job
+        leaves the press, the order counts it as not made, and the press goes idle for the next mold-in after the usual
+        de-mold / mold-in time. Returns the scrapped job id (None: no job in the press)."""
+        ps = self._press.get(press_id)
+        if ps is None or ps.job is None:
+            return None
+        job = ps.job
+        if job.order_id in self._in_press:
+            self._in_press[job.order_id] = max(0, self._in_press[job.order_id] - 1)
+        ps.job = None
+        ps.idle_until = self._t + timedelta(minutes=DEMOLD_MOLDIN_MIN)
+        m = self._m[press_id]
+        m.status, m.note = MachineStatus.IDLE, f"QC 報廢 {job.order_id}，換模入模中"
+        return job.job_id
+
     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
         self._m[machine_id].active_event_id = event_id
 

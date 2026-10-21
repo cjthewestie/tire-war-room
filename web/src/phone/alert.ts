@@ -6,8 +6,9 @@
 // event closed with its report, Event.review pending) ring once each, as notices: nothing waits for them, so they do not
 // re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Event, MachineTile } from '../contracts'
+import type { Event, MachineTile, SafetyCase } from '../contracts'
 import { expectationOf, normalOf, recoverText } from '../aiStatus'
+import { caseTitle } from '../resolveText'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 
@@ -42,6 +43,15 @@ export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] 
     }
   }
   return out
+}
+
+/** Open Safety Core cases and unresolved SAFE_STOPs ring like a new approval (CJ 2026-10-22: they need the supervisor). */
+export function resolveAlerts(cases: SafetyCase[] | undefined, events: Event[] | undefined): AlertItem[] {
+  return [
+    ...(cases ?? []).filter((c) => c.status === 'open').map((c) => ({ id: `safety:${c.id}`, title: caseTitle(c), reason: plain(c.message), risk: 'R3' })),
+    ...(events ?? []).filter((e) => e.state === 'safe_stop' && !e.follow_up).map((e) => ({
+      id: `stop:${e.id}`, title: `安全停止：${machineLabel(e.machine_id)}`, reason: e.stop_reason_text ?? plain(e.outcome), risk: 'R3' })),
+  ]
 }
 
 /** 「待核准」 or what the notices say, for the multi-item alert. */

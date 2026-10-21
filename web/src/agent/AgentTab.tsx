@@ -17,6 +17,7 @@ import { Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { useTranscript } from './useTranscript'
 import { BriefingView } from '../components/BriefingView'
+import { SafetyBanner } from '../components/Resolve'
 import { useEventBriefing } from '../useBriefing'
 import './agent.css'
 
@@ -54,6 +55,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   return (
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
+    <SafetyBanner />
     <div className="home">
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
