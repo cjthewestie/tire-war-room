@@ -23,4 +23,10 @@
 .tag.moved.earlier { color: var(--accent); }
 .order-ring { display: inline-flex; align-items: center; gap: 6px; }
 .event-tasks { margin-top: 8px; }
+.task-rep { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; }
+.task-overdue { color: var(--warn); font-weight: 600; }
+.task-ovr { padding: 2px 10px; min-height: 28px; }
+.task-ovr-f { display: flex; flex-wrap: wrap; gap: 6px; flex: 1; min-width: 0; }
+.task-ovr-f input { flex: 1; min-width: 12em; min-height: 28px; padding: 0 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); }
+.task-err { color: var(--alarm); }
 @media (prefers-reduced-motion: reduce) { .pring-fg { transition: none; } }

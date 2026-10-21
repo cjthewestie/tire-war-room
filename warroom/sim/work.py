@@ -15,6 +15,12 @@ Goods status
   level, from the dock). A tyre whose order has an open 補料 task stays 待補料 until that task is done: this is the
   link between the people and the goods. The view reads the active schedule and the presses; it never changes
   them.
+
+Report mode (CJ, 2026-10-22: 「加回報」; WORKER_REPORT=1 or the 後台 switch)
+  Code still assigns a task (待派 → 前往中), but nothing moves on a timer after that: the assigned worker taps
+  「到達・開始」 (前往中 → 執行中) and 「完成」 (執行中 → 完成) on /worker, or the supervisor completes it for them with a
+  reason (代為完成). Fast repair does not apply. A task 執行中 for more than OVERDUE_FACTOR × its work_min is marked
+  overdue (a gentle reminder on the 主控台, audited once). Auto mode (the default, demos) is unchanged.
 """
 from __future__ import annotations
 
@@ -64,6 +70,7 @@ REPAIR_KINDS = frozenset({"檢修", "停用檢修", "放慢投料", "暫停投�
 # turn that would otherwise overshoot repair_fast_s.
 FAST_WALK_FRAC = 1.0 / 3.0
 FAST_SLACK_S = 0.25
+OVERDUE_FACTOR = 2.0                 # report mode: 執行中 longer than 2 × work_min -> reminder on the 主控台
 UNASSIGNED_ANY_TEAM_MIN = 5.0        # a task nobody of its team can take goes to any free operator after 5 min
 # (調派支援: to a free person of the receiving team instead; 宣達: anyone free brings the notice. At night 2 線 has
 # nobody on shift, so 「從 2 線調 1 人」 stayed 待派 for good and its ETA kept slipping)
@@ -132,12 +139,20 @@ class WorkTask(_W):
     after: str | None = None         # waits for this task (SOP order)
     order_ids: list[str] = []        # 補料 / 換模準備: the orders whose tyres wait for it
     source: Literal["code"] = "code"
+    # report mode (WORKER_REPORT): who moved it on, and how
+    mode: Literal["auto", "report"] = "auto"
+    reported_by: str | None = None   # worker id of the 完成 report, or "supervisor@…" for 代為完成
+    report_note: str | None = None
+    photo_sha256: str | None = None  # the 完成 photo (GET /api/tasks/{id}/photo)
+    override_reason: str | None = None
+    overdue: bool = False            # 執行中 longer than OVERDUE_FACTOR × work_min
 
 
 class TasksView(_W):
     items: list[WorkTask]
     counts: dict[str, int]           # by status
     open: int
+    mode: Literal["auto", "report"] = "auto"
 
 
 class GoodsItem(_W):
@@ -206,6 +221,11 @@ class _Task:
     work_min: float = 10.0
     fast_s: float | None = None      # fast repair: wall seconds this task takes (None = factory minutes above)
     fast_done_s: float = 0.0         # wall seconds of it run so far (paused time does not count)
+    reported_by: str | None = None
+    report_note: str | None = None
+    photo_sha256: str | None = None
+    override_reason: str | None = None
+    overdue: bool = False
 
 
 @dataclass
@@ -239,6 +259,8 @@ class TaskBoard:
         # machine before 主管核准 (Spark timing 10-21: 前往中 13 s before the card)
         self.hold: Callable[[str | None], bool] | None = None
         self.speed: Callable[[], float] = lambda: 1.0
+        # set by the runtime (WORKER_REPORT / 後台): people report 開始 and 完成 themselves (report(), override())
+        self.report_mode: bool = False
 
     # ---- public
     def add_listener(self, fn) -> None:
@@ -277,7 +299,7 @@ class TaskBoard:
             self._seq += 1
             t = _Task(id=f"TK-{self._seq:04d}", event_id=req.event_id, approval_id=req.approval_id, step_id=req.step_id,
                       created_at=now, **spec)
-            if self.fast_s > 0 and t.kind in REPAIR_KINDS:
+            if self.fast_s > 0 and t.kind in REPAIR_KINDS and not self.report_mode:
                 # fast repair: shown in factory minutes worth repair_fast_s wall seconds at the current speed
                 total = self.fast_s * max(float(self.speed() or 1.0), 1e-6) / 60.0
                 t.fast_s, t.walk_min, t.work_min = self.fast_s, total * FAST_WALK_FRAC, total * (1 - FAST_WALK_FRAC)
@@ -322,21 +344,14 @@ class TaskBoard:
 
     def update(self, now: datetime) -> None:
         for t in list(self._tasks.values()):
+            if self.report_mode:
+                self._update_reported(t, now)
+                continue
             if t.fast_s is not None:
                 self._advance_fast(t, now, 0.0)
                 continue
-            if t.status == "待派":
-                if t.after and self._tasks.get(t.after) is not None and self._tasks[t.after].status != "完成":
-                    continue
-                waited = (now - t.created_at).total_seconds() >= UNASSIGNED_ANY_TEAM_MIN * 60
-                wid = self.w.pick_worker(t.team, t.machine_id, self.busy_worker_ids(), any_team=t.any_team_ok and waited)
-                if wid is None and waited and t.fallback_team is not None:
-                    wid = self.w.pick_worker(t.fallback_team, t.machine_id, self.busy_worker_ids())
-                if wid is None:
-                    continue
-                t.worker_id, t.assigned_at, t.status = wid, now, "前往中"
-                t.walk_min = self.w.walk_minutes(wid, t.zone)
-                self._emit(t, now, "assigned")
+            if t.status == "待派" and not self._assign(t, now):
+                continue
             if t.status == "前往中" and t.assigned_at is not None and now >= t.assigned_at + timedelta(minutes=t.walk_min):
                 t.status, t.started_at = "執行中", t.assigned_at + timedelta(minutes=t.walk_min)
                 self._emit(t, now, "started")
@@ -344,10 +359,82 @@ class TaskBoard:
                 t.status, t.done_at = "完成", t.started_at + timedelta(minutes=t.work_min)
                 self._emit(t, now, "done")
 
+    def _assign(self, t: _Task, now: datetime) -> bool:
+        """待派 → 前往中: a free person of the task's team (any free operator after UNASSIGNED_ANY_TEAM_MIN). False
+        while it waits (its `after` task is open, or nobody is free)."""
+        if t.after and self._tasks.get(t.after) is not None and self._tasks[t.after].status != "完成":
+            return False
+        waited = (now - t.created_at).total_seconds() >= UNASSIGNED_ANY_TEAM_MIN * 60
+        wid = self.w.pick_worker(t.team, t.machine_id, self.busy_worker_ids(), any_team=t.any_team_ok and waited)
+        if wid is None and waited and t.fallback_team is not None:
+            wid = self.w.pick_worker(t.fallback_team, t.machine_id, self.busy_worker_ids())
+        if wid is None:
+            return False
+        t.worker_id, t.assigned_at, t.status = wid, now, "前往中"
+        t.walk_min = self.w.walk_minutes(wid, t.zone)
+        self._emit(t, now, "assigned")
+        return True
+
+    def _update_reported(self, t: _Task, now: datetime) -> None:
+        """Report mode: code assigns (after 主管核准: self.hold); the person reports 開始 / 完成. An unreported 執行中
+        past OVERDUE_FACTOR × work_min becomes overdue (emitted once)."""
+        if t.status == "待派":
+            if self.hold is None or not self.hold(t.event_id):
+                self._assign(t, now)
+        elif t.status == "執行中" and not t.overdue and t.started_at is not None \
+                and now >= t.started_at + timedelta(minutes=t.work_min * OVERDUE_FACTOR):
+            t.overdue = True
+            self._emit(t, now, "overdue")
+
+    def report(self, task_id: str, action: Literal["start", "done"], worker_id: str, now: datetime,
+               note: str | None = None, photo_sha256: str | None = None) -> WorkTask:
+        """A worker's own report from /worker: start = 到達・開始 (前往中 → 執行中), done = 完成 (執行中 → 完成).
+        KeyError: no such task; PermissionError: not the assigned worker; ValueError: not in report mode, or the
+        task is not in the status this action moves on from."""
+        t = self._tasks[task_id]
+        if not self.report_mode:
+            raise ValueError("人員回報模式未開啟（自動模式由模擬推進）")
+        if t.worker_id is None or t.worker_id != worker_id:
+            raise PermissionError(f"{task_id} 不是派給 {worker_id} 的任務")
+        want = "前往中" if action == "start" else "執行中"
+        if t.status != want:
+            raise ValueError(f"{task_id} 目前是「{t.status}」，不能{'開始' if action == 'start' else '回報完成'}"
+                             f"（需要「{want}」）")
+        if action == "start":
+            t.status, t.started_at = "執行中", now
+            t.report_note = note or t.report_note
+            self._emit(t, now, "reported_start")
+        else:
+            t.status, t.done_at, t.reported_by = "完成", now, worker_id
+            t.report_note, t.photo_sha256 = note or t.report_note, photo_sha256
+            self._emit(t, now, "reported_done")
+        self.w.rev += 1
+        return self._view(t)
+
+    def override(self, task_id: str, by: str, reason: str, now: datetime) -> WorkTask:
+        """代為完成: the supervisor completes a task for a worker who cannot use the phone. A reason is required.
+        KeyError: no such task; ValueError: no reason, or the task is already done."""
+        t = self._tasks[task_id]
+        reason = (reason or "").strip()
+        if not reason:
+            raise ValueError("代為完成需要填寫原因")
+        if t.status == "完成":
+            raise ValueError(f"{task_id} 已經完成")
+        t.started_at = t.started_at or now
+        t.status, t.done_at, t.reported_by, t.override_reason = "完成", now, by, reason
+        self._emit(t, now, "override_done")
+        self.w.rev += 1
+        return self._view(t)
+
+    def get(self, task_id: str) -> WorkTask:
+        return self._view(self._tasks[task_id])
+
     def advance_fast(self, now: datetime, wall_dt: float) -> bool:
         """Fast repair: run every open fast task `wall_dt` wall seconds further (the runtime calls this every loop turn
         and tick, never while paused); a task whose event still waits for the supervisor's decision (self.hold) does not
         start yet. True while any is still open (the world view should be republished)."""
+        if self.report_mode:
+            return False                     # people report 開始 / 完成 themselves: nothing runs on the wall clock
         open_ = [t for t in self._tasks.values() if t.fast_s is not None and t.status != "完成"]
         for t in open_:
             self._advance_fast(t, now, wall_dt)
@@ -376,7 +463,7 @@ class TaskBoard:
             self._emit(t, now, "done")
 
     def fast_open(self) -> bool:
-        return any(t.fast_s is not None and t.status != "完成" for t in self._tasks.values())
+        return not self.report_mode and any(t.fast_s is not None and t.status != "完成" for t in self._tasks.values())
 
     def view(self) -> TasksView:
         items = [self._view(t) for t in self._tasks.values()]
@@ -385,7 +472,8 @@ class TaskBoard:
         counts = {s: 0 for s in TASK_STATUSES}
         for x in items:
             counts[x.status] += 1
-        return TasksView(items=items, counts=counts, open=sum(v for k, v in counts.items() if k != "完成"))
+        return TasksView(items=items, counts=counts, open=sum(v for k, v in counts.items() if k != "完成"),
+                         mode="report" if self.report_mode else "auto")
 
     # ---- internals
     def _trim(self) -> None:
@@ -409,6 +497,12 @@ class TaskBoard:
         total = max(1e-6, t.walk_min + t.work_min)
         if t.status == "完成":
             prog = 1.0
+        elif self.report_mode and t.status in ("前往中", "執行中"):
+            # the ring shows where the person said they are, never more than they reported
+            base, since = (0.0, t.assigned_at) if t.status == "前往中" else (0.5, t.started_at)
+            span = t.walk_min if t.status == "前往中" else t.work_min
+            el = (now - since).total_seconds() / 60.0 if since is not None else 0.0
+            prog = base + 0.45 * min(1.0, max(0.0, el / max(span, 1e-6)))
         elif t.fast_s is not None:           # fast repair: the share of its wall seconds already run
             prog = min(1.0, t.fast_done_s / max(t.fast_s - FAST_SLACK_S, 1e-6))
         elif t.status == "待派" or t.assigned_at is None:
@@ -417,6 +511,8 @@ class TaskBoard:
             prog = min(1.0, max(0.0, (now - t.assigned_at).total_seconds() / 60.0 / total))
         if t.done_at is not None:
             eta = t.done_at
+        elif self.report_mode and t.started_at is not None:
+            eta = t.started_at + timedelta(minutes=t.work_min)
         elif t.fast_s is not None:
             eta = t.created_at + timedelta(minutes=total)
         elif t.assigned_at is not None:
@@ -430,7 +526,9 @@ class TaskBoard:
                         where=where_label(t.machine_id, t.zone), status=t.status,  # type: ignore[arg-type]
                         created_at=t.created_at, assigned_at=t.assigned_at, started_at=t.started_at, done_at=t.done_at,
                         eta=eta, walk_min=round(t.walk_min, 1), work_min=t.work_min, progress=round(prog, 3),
-                        after=t.after, order_ids=list(t.order_ids))
+                        after=t.after, order_ids=list(t.order_ids), mode="report" if self.report_mode else "auto",
+                        reported_by=t.reported_by, report_note=t.report_note, photo_sha256=t.photo_sha256,
+                        override_reason=t.override_reason, overdue=t.overdue)
 
 
 # ------------------------------------------------------------------ step -> tasks (code, never the model)
