@@ -7,8 +7,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { MACHINES, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { plain } from '../plain'
-import { STATE_LABEL } from '../components/common'
-import { headline, outcomeText } from '../report/build'
+import { API, type HealthStatus } from '../contracts'
+import { headline, outcomeText, stateLabel } from '../report/build'
 import { adminFetch } from '../transport'
 import { useWarRoom } from '../useWarRoom'
 import './admin.css'
@@ -18,7 +18,7 @@ const PAGES: { id: Page; label: string }[] = [
   { id: 'status', label: '狀態' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
-interface Job { state: 'idle' | 'running' | 'done' | 'failed'; phase: string; files: number; chunks: number | null; team_chunks: number | null; mode: string | null; error: string | null; elapsed_s: number | null }
+interface Job { state: 'idle' | 'running' | 'done' | 'failed'; phase: string; files: number; chunks: number | null; team_chunks: number | null; mode: string | null; error: string | null; started_at: number | null; elapsed_s: number | null }
 interface Status {
   llm_mode: string; model: string; llm_host: string | null; llm_reachable: boolean; kb_ok: boolean; kb_mode: string
   audit_chain_ok: boolean; audit_entries: number; degraded: Record<string, string>; network: string
@@ -74,18 +74,22 @@ function Err({ err }: { err: string | null }) {
 }
 
 // ---------------------------------------------------------------- 狀態
-/** The answer first (人力排程 v2), true to the mode: rules mode (LLM_MODE=mock) never says the model is connected. */
+/** The answer first (人力排程 v2), true to the mode: rules mode (LLM_MODE=mock) never says the model is connected. An
+ *  index not loaded yet (kb_mode unloaded: the start-up ingest is still running, kb_ok false until it ends) is not a
+ *  fault: the first search loads it (kb/store.py _ensure_ready). */
 function statusLead(s: Status): { text: string; ok: boolean } {
+  const unloaded = s.kb_mode === 'unloaded'
   const issues = [
     s.llm_mode !== 'mock' && !s.llm_reachable ? '模型連不上，Agent Nemo 先用規則產生計畫' : '',
-    !s.kb_ok ? 'SOP 知識庫不能用，Agent Nemo 查不到 SOP' : '',
+    !unloaded && !s.kb_ok ? 'SOP 知識庫不能用，Agent Nemo 查不到 SOP' : '',
     !s.audit_chain_ok ? '稽核紀錄驗證失敗，請通知主管' : '',
     s.network === 'lan_down' ? '網路斷線' : '',
   ].filter(Boolean)
   if (issues.length) return { text: `要處理 ${issues.length} 件：${issues.join('；')}。`, ok: false }
+  const sop = unloaded ? 'SOP 還沒載入（第一次查詢時自動載入）' : 'SOP 查得到'
   return s.llm_mode === 'mock'
-    ? { text: 'Agent Nemo 用規則模式運作（沒有呼叫模型）；SOP 查得到、稽核紀錄完整。', ok: true }
-    : { text: 'Agent Nemo 正常：模型已連線、SOP 查得到、稽核紀錄完整。', ok: true }
+    ? { text: `Agent Nemo 用規則模式運作（沒有呼叫模型）；${sop}、稽核紀錄完整。`, ok: true }
+    : { text: `Agent Nemo 正常：模型已連線、${sop}、稽核紀錄完整。`, ok: true }
 }
 
 const KB_MODE: Record<string, string> = { vector: '向量＋字詞混合搜尋', lexical: '只有字詞搜尋（嵌入模型未載入）', unloaded: '還沒載入（第一次查詢時自動載入）' }
@@ -126,8 +130,33 @@ function Card({ title, tone, children }: { title: string; tone: 'ok' | 'bad' | '
 }
 
 // ---------------------------------------------------------------- RAG
+/** Whether the index holds the folder's current content. Equal counts are not enough: a file replaced under the same
+ *  name with the same sections counts the same. The server builds the index at start and on 重新索引 (from the files as
+ *  they are then), so a file last changed before that build is in it and one changed after it is not. Times in epoch
+ *  seconds; the server start is taken on this device's clock (60 s for the skew), 「modified」 is cut to the second. */
+function indexState(r: Rag, startedAt: number | null): 'fresh' | 'stale' | 'unknown' {
+  if (r.indexed_chunks !== r.folder_chunks) return 'stale'
+  const built = r.reindex.state === 'done' && r.reindex.started_at != null ? { at: r.reindex.started_at, slack: 1 }
+    : startedAt != null ? { at: startedAt, slack: 60 } : null
+  if (!built) return 'unknown'
+  const last = Math.max(0, ...r.docs.map((d) => Date.parse(d.modified) / 1000))
+  return last > built.at + built.slack ? 'stale' : last + built.slack < built.at ? 'fresh' : 'unknown'
+}
+
+/** When the server started, on this device's clock (GET /api/health uptime_s), read when the page loads. */
+function useServerStart(): number | null {
+  const [at, setAt] = useState<number | null>(null)
+  useEffect(() => {
+    let off = false
+    fetch(API.health).then((x) => x.json() as Promise<HealthStatus>).then((h) => { if (!off) setAt(Date.now() / 1000 - h.uptime_s) }, () => {})
+    return () => { off = true }
+  }, [])
+  return at
+}
+
 function RagPage() {
   const { data: r, err, reload } = useLoad<Rag>('/api/admin/rag')
+  const startedAt = useServerStart()
   const [job, setJob] = useState<Job | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const running = (job ?? r?.reindex)?.state === 'running'
@@ -152,7 +181,8 @@ function RagPage() {
   const j = job ?? r?.reindex
   // not loaded yet: nothing is indexed until the first search loads it, which is not a stale index
   const unloaded = r?.kb_mode === 'unloaded'
-  const stale = !!r && !unloaded && r.indexed_chunks !== r.folder_chunks
+  const idx = r && !unloaded ? indexState(r, startedAt) : null
+  const stale = idx === 'stale'
   const sops = r ? [['本廠', r.docs.length], ['團隊', r.team.length]].filter(([, n]) => n).map(([k, n]) => `${k} ${n} 份`).join('、') : ''
   const total = r ? r.docs.length + r.team.length : 0
   return (
@@ -165,7 +195,8 @@ function RagPage() {
           <p className={`admin-lead ${stale ? 't-warn' : 't-ok'}`} data-testid="rag-lead">
             {stale ? '有文件改過，請按「重新索引」，Agent Nemo 才查得到新內容。'
               : unloaded ? `SOP 知識庫還沒載入，第一次查詢時自動載入；共 ${total} 份 SOP（${sops}）。`
-                : `Agent Nemo 查得到 ${total} 份 SOP（${sops}），索引是最新的。`}
+                : idx === 'fresh' ? `Agent Nemo 查得到 ${total} 份 SOP（${sops}），索引是最新的。`
+                  : `Agent Nemo 查得到 ${total} 份 SOP（${sops}）。文件改過的話，請按「重新索引」。`}
           </p>
           <div className="admin-row">
             <button className="btn-approve" onClick={reindex} disabled={running} data-testid="reindex">{running ? '重新索引中…' : '重新索引'}</button>
@@ -307,7 +338,7 @@ function MemoryPage() {
             <ul className="mem-list">
               {g.notes.map((n) => <li key={n.id} className="k-note"><span className="mem-k">筆記</span><span>{n.text}<small className="muted">{fmtMD(n.created_at)} {fmtHM(n.created_at)}・{n.author}</small></span></li>)}
               {g.inc.map((i) => <li key={i.id} className="k-inc"><span className="mem-k">過去異常</span><span>{i.date}・{i.symptom} → {i.action}（停 {i.downtime_min} 分・{i.outcome}）</span></li>)}
-              {g.ev.map((e) => <li key={e.id} className="k-ev"><span className="mem-k">{STATE_LABEL[e.state as keyof typeof STATE_LABEL] ?? e.state}</span><span>{headline(e.machine_id, e.what ?? e.id)}{e.outcome ? ` → ${outcomeText(e.machine_id, e.state, e.outcome)}` : ''}<small className="muted">{fmtMD(e.closed_at)} {fmtHM(e.closed_at)}</small></span></li>)}
+              {g.ev.map((e) => <li key={e.id} className="k-ev"><span className="mem-k">{stateLabel(e.state)}</span><span>{headline(e.machine_id, e.what ?? e.id)}{e.outcome ? ` → ${outcomeText(e.machine_id, e.state, e.outcome)}` : ''}<small className="muted">{fmtMD(e.closed_at)} {fmtHM(e.closed_at)}</small></span></li>)}
             </ul>
           </section>
         ))}
@@ -364,7 +395,7 @@ function RunsPage() {
               <td>{r.kind === 'event' || r.kind === 'command'
                 ? <a href={`#console?event=${encodeURIComponent(r.id)}`}>{r.kind === 'event' ? headline(r.machine_id, r.title ?? r.id) : plain(r.title ?? r.id)}</a>
                 : <>{r.question}<small className="muted"> {r.id}</small></>}</td>
-              <td>{r.state ? STATE_LABEL[r.state as keyof typeof STATE_LABEL] ?? r.state : r.answer ? '已回答' : '—'}</td>
+              <td>{r.state ? stateLabel(r.state) : r.answer ? '已回答' : '—'}</td>
               <td className="muted">{r.kind === 'event' && r.state && r.outcome ? outcomeText(r.machine_id, r.state, r.outcome) : plain(r.outcome ?? r.answer ?? '')}</td>
             </tr>
           ))}</tbody>
