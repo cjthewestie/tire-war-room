@@ -134,3 +134,76 @@ async def test_mill_event_gets_no_press_maintenance_step(tmp_path):
     await asyncio.wait_for(sm.handle(mill_anomaly()), 10)
     sup.cancel()
     assert not any(e.payload.get("maintenance_notice_added") for e in audit.tail(0, 0))
+
+
+# ---------------------------------------------------------------- re-approval after another event's schedule
+def _stale_rig(tmp_path, staffing: bool = True):
+    """The approved schedule goes stale (another event's version took effect first) and the re-solve moves
+    #A-311 elsewhere: the content differs, so the supervisor must approve again."""
+    from warroom.contracts import ToolResult
+    clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable)
+    real_confirm, real_solve = tools._confirm_schedule, tools._solve_schedule
+    state = {"confirm": 0, "solve": 0}
+
+    def flaky(a):
+        state["confirm"] += 1
+        if state["confirm"] <= 2:
+            raise RuntimeError("schedule v2 is stale: solved against v1, but v9 is active now")
+        return real_confirm(a)
+
+    def solve(a):
+        state["solve"] += 1
+        d = real_solve(a)
+        if state["solve"] >= 2:
+            d["moves"] = [{**d["moves"][0], "to_press": "CURE-10"}]
+        if not staffing:
+            d["staffing_options"], d["gaps"] = [], []
+            d["schedule"]["staffing_changes"] = []
+        return d
+    tools._confirm_schedule, tools._solve_schedule = flaky, solve
+    real_call = tools.call
+
+    def call(c):
+        try:
+            return real_call(c)
+        except RuntimeError as e:
+            return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
+    tools.call = call
+    return clock, audit, sim, store, tools, approvals, sm
+
+
+async def test_stale_reapproval_is_v2_of_the_same_card_and_keeps_the_staffing_choice(tmp_path):
+    clock, audit, sim, store, tools, approvals, sm = _stale_rig(tmp_path)
+    sup = asyncio.create_task(auto_approve(approvals, 1, option="A"))     # the supervisor picks 夜班加班
+    task = asyncio.create_task(sm.handle(page11_anomaly()))
+    await sup
+    while len(approvals.all()) < 2:
+        await asyncio.sleep(0.001)
+    v1, v2 = approvals.all()
+    assert (v2.round, v2.version, v2.supersedes) == (v1.round, 2, v1.id)
+    assert v2.id == f"{v1.id}v2" and v2.title == v1.title
+    assert v2.changes[0].startswith("另一事件的排程先生效；7 號依現行排程重算：#A-311：9 號 → 10 號"), v2.changes
+    assert "人力沿用主管上次的選擇：A 夜班加班" in v2.changes
+    assert [(o.id, o.label, o.recommended) for o in v2.options] == [("A", "夜班加班", True), ("B", "從 2 線調 1 人", False)]
+    await auto_approve(approvals, 1, option="A")
+    ev = await asyncio.wait_for(task, 10)
+    assert ev.state is EventState.CLOSED and ev.consecutive_failures == 0
+    texts = [t.text for t in ev.timeline]
+    assert not any(t.startswith("動作未完成") for t in texts), texts     # not shown as a failed approval
+    assert any("依現行排程重算（不算失敗）" in t for t in texts)
+    assert any(t.startswith("排程已被另一事件更新 → 依現行排程重算（H1") for t in texts), texts
+    assert any(t.startswith("新核准卡 v2 取代 v1：") for t in texts)
+    summary = [t for t in texts if t.startswith(f"{ev.id}（v2）｜請核准：")]
+    assert summary and summary[0].endswith("人力：A 夜班加班。"), summary
+
+
+async def test_stale_reapproval_with_one_option_says_run_the_new_schedule(tmp_path):
+    clock, audit, sim, store, tools, approvals, sm = _stale_rig(tmp_path, staffing=False)
+    sup = asyncio.create_task(auto_approve(approvals, 2))
+    ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
+    await sup
+    v1, v2 = approvals.all()
+    assert v1.options[0].label.startswith("核准全部：")
+    assert [o.label for o in v2.options] == ["照新排程執行"] and v2.version == 2
+    assert not any("人力方案" in c for c in v2.changes), v2.changes       # a lone approve-all is no 人力方案
+    assert ev.state is EventState.CLOSED

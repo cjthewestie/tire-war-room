@@ -299,6 +299,7 @@ class StateMachine:
         self._runs: dict[str, _Run] = {}         # open event id -> its run (issue #10: discussion)
         self._plant_inputs: dict[str, Any] = {}  # issue #17: plant event id -> its PlantInput
         self._open: dict[str, str] = {}          # machine_id -> open event id
+        self._activated_by: dict[int, str] = {}  # schedule version -> the event whose approval put it in force
         self._ids = itertools.count(1)
         # issue #54: the main agent (orchestrator) hooks a run's start and end; a supervisor interrupt sets the reason
         self.on_open: Callable[[Event], None] | None = None
@@ -909,7 +910,7 @@ class StateMachine:
                 await self._execute(run, auto, auto_tag=True)
 
             reused = self._reuse_stale_approval(run, needs, options) if needs else None
-            run.stale_approval = None
+            stale, run.stale_approval = run.stale_approval, None
             if not needs and run.supersede is not None:
                 # the discussed plan needs no approval (e.g. nothing left to change): no new card
                 run.supersede = None
@@ -919,7 +920,7 @@ class StateMachine:
                     res = reused
                 else:
                     self._to(ev, EventState.AWAIT_APPROVAL, f"{req_risk.value} approval")
-                    req = self._request_approval(run, needs, options, req_risk)
+                    req = self._request_approval(run, needs, options, req_risk, stale=stale)
                     run.waiting_req = req
                     self._settle_discussion(run, req)
                     res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
@@ -1005,21 +1006,25 @@ class StateMachine:
                 # the gate: the plan did not do what it claimed. That is a miss for the ACTION, not a
                 # test of the hypothesis: count the failure and re-plan (re-solve against the schedule
                 # that is active now), keeping the hypothesis.
-                self._action_miss(run)
                 stale_only = run.stale_approval is not None and all(
                     (p["state"] == "failed" and "is stale" in str(p.get("error", ""))) or p["state"] == "skipped"
                     for p in run.round_problems)
+                self._action_miss(run, note=not stale_only)
                 if stale_only:
                     # another event's schedule took effect first (concurrent anomalies, page 10): not a
-                    # failure of this plan; re-solve against the schedule in force now
+                    # failure of this plan; re-solve against the schedule in force now. Said as that on the
+                    # timeline, not as 「動作未完成…執行失敗」 (on stage it read as a failed approval)
                     self.audit.append(AuditKind.SYSTEM, "state_machine",
                                       {"stale_schedule": run.stale_approval.get("version"),
                                        "counted_as_failure": False}, event_id=ev.id)
+                    self._note(ev, "驗證（程式）", f"{self._first_in_force()}排程先生效，核准的動作尚未執行 → "
+                               f"{machine_label(ev.machine_id, short=True)}依現行排程重算（不算失敗）", "dynamic")
                 elif self._fail(run, "動作未完成"):
                     return
                 ctx = {"write_failed": {"steps": run.round_problems, "active_version": self._active_version(),
                                         "at": self._now().isoformat()}}
-                if not await self._replan(run, ctx, "動作未完成 → 重新規劃"):
+                why = "排程已被另一事件更新 → 依現行排程重算" if stale_only else "動作未完成 → 重新規劃"
+                if not await self._replan(run, ctx, why):
                     return
                 continue
             verdict, observed = await self._verify(run)
@@ -1422,7 +1427,8 @@ class StateMachine:
             else:
                 # nothing was disproved: a supervisor reject, a failed write or an infeasible solve
                 why = (run.replan_why or "換方案").split(" → ")[0]
-                text = f"{why} → 換方案（{h.id}：{h.statement}）"
+                text = (f"{run.replan_why}（{h.id}：{h.statement}）" if run.replan_why.endswith("依現行排程重算")
+                        else f"{why} → 換方案（{h.id}：{h.statement}）")
             run.newly_rejected = None
             if via:
                 text += f"；{via}"
@@ -2239,12 +2245,31 @@ class StateMachine:
                         f"{self._gap_prefix(c)} {c.get('label')}" for c in left) + " 未列入核准，該班缺口維持原狀）")
         return out
 
+    def _first_in_force(self) -> str:
+        """Whose schedule took effect first: 「3 號機」 for the event that activated the version in force, else
+        「另一事件的」 (concurrent_3: 3 號 approved first, 10 號's approved schedule went stale)."""
+        store = self._store()
+        try:
+            cur = store.current() if store is not None else None
+        except Exception:  # noqa: BLE001 - empty store
+            cur = None
+        eid = (self._activated_by.get(cur.version) or cur.event_id) if cur is not None else None
+        other = self._events.get(eid) if eid else None
+        return machine_label(other.machine_id) if other is not None else "另一事件的"
+
     def _request_approval(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption],
-                          risk: RiskLevel) -> ApprovalRequest:
+                          risk: RiskLevel, stale: dict[str, Any] | None = None) -> ApprovalRequest:
         ev, plan = run.ev, run.plan
         assert plan is not None
         sup, run.supersede = run.supersede, None
         old: ApprovalRequest | None = sup["old"] if sup else None
+        # concurrent events: the supervisor approved this card, but another event's schedule took effect first and
+        # the re-solve differs. The new card is the next VERSION of the approved one (what changed and why), not a
+        # fresh round with the same title, which on stage read as a failed approval
+        rebased = old is None and stale is not None and stale.get("req") is not None
+        if rebased:
+            old = stale["req"]
+            options = self._rebased_options(old, options)
         if old is not None:          # issue #10: a new version of the same round replaces the discussed card
             rnd, version = old.round, old.version + 1
             rid = f"AP-{ev.id}-{rnd}v{version}"
@@ -2275,6 +2300,12 @@ class StateMachine:
         now = self._now()
         snap = self._card_snap(run, needs, options, delivery)
         changes = self._card_changes(run.card_snaps.get(old.id) if old else None, snap) if old else []
+        if rebased:
+            prev = next((o for o in old.options if old.decision and o.id == old.decision.option_id), None)
+            keep = next((o for o in options if prev is not None and o.label == prev.label and len(options) > 1), None)
+            changes = [f"{self._first_in_force()}排程先生效；{machine_label(ev.machine_id, short=True)}依現行排程重算"
+                       + ("：" + "；".join(changes) if changes else "（機台異動同上一版）")] \
+                + ([f"人力沿用主管上次的選擇：{keep.id} {keep.label}"] if keep is not None else [])
         req = ApprovalRequest(
             id=rid, event_id=ev.id, step_id=needs[0].step.id, round=rnd, created_at=now,
             risk=risk, title=plan.alert_card.title, reason=reason, done=done, gaps=list(dict.fromkeys(gaps)),
@@ -2294,6 +2325,18 @@ class StateMachine:
         self._publish(WsType.EVENT, ev)
         return req
 
+    @staticmethod
+    def _rebased_options(old: ApprovalRequest, options: list[ApprovalOption]) -> list[ApprovalOption]:
+        """Options of the re-approval card: a lone 「核准全部：…」 becomes 「照新排程執行」 (what changed is in the
+        card's changes), and the staffing option the supervisor picked on the approved card stays the
+        recommended one while the new solve still offers it."""
+        prev = next((o for o in old.options if old.decision and o.id == old.decision.option_id), None)
+        if len(options) == 1 and options[0].args.get("kind") not in STAFFING_KINDS:
+            return [options[0].model_copy(update={"label": "照新排程執行"})]
+        if prev is not None and any(o.label == prev.label for o in options):
+            return [o.model_copy(update={"recommended": o.label == prev.label}) for o in options]
+        return options
+
     # ---- issue #10: what a card proposes, what changed since the card it replaced, and the plain summary
     def _card_snap(self, run: _Run, needs: list[StepRun], options: list[ApprovalOption], delivery: str) -> dict[str, Any]:
         moves: dict[str, dict[str, Any]] = {}
@@ -2305,8 +2348,9 @@ class StateMachine:
                 if d.get("schedule_version") == v:
                     for m in d.get("moves") or []:
                         moves[str(m.get("job_id"))] = dict(m)
-        return {"moves": moves, "options": [o.label for o in options],
-                "recommended": next((o.label for o in options if o.recommended), None),
+        staff = [o for o in options if o.args.get("kind") in STAFFING_KINDS]   # the 人力方案 (A/B), not 核准全部
+        return {"moves": moves, "options": [o.label for o in staff],
+                "recommended": next((o.label for o in staff if o.recommended), None),
                 "delivery": delivery, "cure": sorted(f"{machine_label(str(sr.step.args.get('press_id')))} "
                                                      f"{fmt_num(sr.step.args.get('total_cure_h'))} h"
                                                      for sr in needs if sr.step.tool is ToolName.SET_CURE_TIME)}
@@ -2822,12 +2866,14 @@ class StateMachine:
                 out.append(int(res.data["version"]))
         return out
 
-    def _action_miss(self, run: _Run) -> None:
+    def _action_miss(self, run: _Run, note: bool = True) -> None:
         ev = run.ev
         probs = run.round_problems
         self.audit.append(AuditKind.SYSTEM, "verifier",
                           {"hypothesis": ev.hypotheses[-1].id if ev.hypotheses else None, "ok": False,
                            "action_problems": probs}, event_id=ev.id)
+        if not note:
+            return
         n_fail = sum(1 for p in probs if p["state"] == "failed")
         n_rej = sum(1 for p in probs if p["state"] == "rejected")
         n_skip = sum(1 for p in probs if p["state"] == "skipped")
@@ -2848,6 +2894,7 @@ class StateMachine:
             run.executed.append(f"排程 v{v} 生效")
             if isinstance(v, int):
                 run.activated.append(v)
+                self._activated_by[v] = ev.id
         elif step.tool is ToolName.SET_CURE_TIME:
             run.executed.append(f"{machine_label(str(step.args.get('press_id')))}硫化 {fmt_num(step.args.get('total_cure_h'))} h")
         elif step.tool is ToolName.NOTIFY_TEAMS:
