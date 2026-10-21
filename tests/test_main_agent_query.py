@@ -22,7 +22,7 @@ from warroom.agent.main_agent import (
     wants_lookup,
 )
 from warroom.api import plant_query
-from warroom.contracts import AuditKind, DecisionKind, ToolName
+from warroom.contracts import AuditKind, DecisionKind, EventState, ToolName
 
 SHIP = {"next_departure": "10/21 10:00", "dispatch_slots": {"今天 10/21（三）": ["10:00", "16:00"],
                                                              "明天 10/22（四）": ["10:00", "16:00"]}, "waiting_ship": 12}
@@ -178,15 +178,15 @@ def test_prompt_and_reply_length():
 def test_approval_and_report_lines_are_plain_event_words():
     from warroom.agent.orchestrator import Orchestrator
     rows = []
-    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07")
-    sm = SimpleNamespace(get=lambda _i: ev, events=list)
+    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07", state=EventState.AWAIT_APPROVAL)
+    sm = SimpleNamespace(get=lambda _i: ev, events=list)      # (the report desk reads the state since #109)
     o = Orchestrator(sm, SimpleNamespace(append=lambda *a, **k: rows.append(a[2])))
     o.on_decided(SimpleNamespace(event_id="EV-1", id="AP-1",
                                  decision=SimpleNamespace(decision=DecisionKind.APPROVE, option_id="A")))
     assert rows[-1]["text"] == "已核准 7 號機方案 A，執行中"
     o.on_decided(SimpleNamespace(event_id="EV-1", id="AP-2",
                                  decision=SimpleNamespace(decision=DecisionKind.REJECT, option_id=None)))
-    assert rows[-1]["text"] == "已駁回 7 號機的計劃，不執行"
+    assert rows[-1]["text"] == "已駁回 7 號機的計畫，不執行"
     assert not any("Agent Nemo" in r["text"] or "派" in r["text"] for r in rows)
 
 
