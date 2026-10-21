@@ -73,7 +73,8 @@ function Dashboard() {
         <DemoStrip />
       </div>
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
-      {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，警示燈已亮。AI 與安全核心照常在邊緣主機運作。</div>}
+      {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
+      {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <><TodayPlan /><ScheduleTab /></> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
