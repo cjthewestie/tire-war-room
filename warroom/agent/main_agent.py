@@ -848,6 +848,7 @@ class MainAgent:
         looked = waiting_plan is not None and not other
         called: set[tuple[str, str]] = set()
         regrounded = False
+        worded = False                                  # asked once for words after the tools
         edits = discuss is not None and not fresh and plan_edit(t)
         editing = vague or edits                      # the message is about changing the selected plan
         for i in range(MAX_STEPS + 1):
@@ -896,8 +897,17 @@ class MainAgent:
                     return
                 continue
             reply = (m.content or "").strip()
-            if not reply and out["steps"]:            # no words after the tools: the results speak
-                reply, out["error"] = self._results_reply(out["steps"]) or self._propose_reply(out["steps"]), "no reply after tools"
+            if not reply and out["steps"] and not worded and not last and not out["event_id"]:
+                # no words after the tools: ask once more for them (query_plant JSON pasted back read as noise,
+                # 「查到：工廠資料（之前的訂單）：completed_or_shipped: id:…」, real run 10-22)
+                worded = True
+                msgs.append({"role": "user", "content": "請依上面查到的資料，用繁體中文、最多 5 句回覆主管，不要再呼叫工具。"})
+                continue
+            if not reply and out["steps"]:            # still no words: the results speak
+                only_query = all(st["tool"] == QUERY for st in out["steps"] if st["ok"])
+                reply = (NUMBERS_OFF if only_query and not out["event_id"] else
+                         self._results_reply(out["steps"]) or self._propose_reply(out["steps"]))
+                out["error"] = "no reply after tools"
             if not reply:
                 raise ValueError("empty reply")
             if not out["steps"] and not recall and wants_lookup(text) and (waiting_plan is None or other):
