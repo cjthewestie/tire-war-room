@@ -4,7 +4,7 @@ import type { ScheduleJob, WorldOrder } from '../contracts'
 import { SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
-import { orderView } from './orderModel'
+import { RISK_TEXT, orderView, type OrderView } from './orderModel'
 
 const H = 3_600_000
 
@@ -15,8 +15,7 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
   const passed = (t: string) => isFinite(now) && ms(t) <= now
   const n = sorted.length
   const shipped = o.status === '已出貨'
-  const { stages, eta, lateH } = v
-  const late = lateH != null
+  const { stages, eta, risk, unscheduled } = v
   const inMold = sorted.filter((j) => passed(j.mold_in) && !passed(j.demold))
   const nextUp = sorted.find((j) => !passed(j.mold_in))
   const outOfService = new Set((state.snapshot?.machines ?? []).filter((m) => m.status === 'out_of_service').map((m) => m.machine_id))
@@ -31,7 +30,8 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
       <h2 className="order-title">{o.id}・{o.customer}・{SIZE_LABEL[o.size]} {o.qty} 條{o.rush && <em className="tag rush">急單</em>}</h2>
       <p className="order-eta">
         交期 <b>{fmtMD(o.due)}</b>
-        {isFinite(eta) && <>・最後一條預計 <b>{fmtMD(eta)} {fmtHM(eta)}</b> 出模・<b className={late || warnings.length ? 'late' : 'ontime'}>{late ? `會晚 ${lateH} h` : warnings.length ? (n < o.qty - o.done ? `其餘 ${o.qty - o.done - n} 條預估晚交` : '預估晚交') : '準時'}</b></>}
+        {/* the verdict is the list's (orderView): with tyres still outside the schedule, the time is the scheduled part's */}
+        {isFinite(eta) && <>・{unscheduled > 0 ? '已排程部分最後一條' : '最後一條'}預計 <b>{fmtMD(eta)} {fmtHM(eta)}</b> 出模・<b className={risk === 'late' ? 'late' : risk === 'unsched' ? 'unsched' : 'ontime'}>{verdict(v)}</b></>}
         {!isFinite(eta) && <>・{o.status}</>}
       </p>
       <ol className="order-stages" aria-label="各站進度">
@@ -59,4 +59,13 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
       </div>
     </section>
   )
+}
+
+/** The card's 交期 word, the same state as the 訂單 list (orderView): 會晚 N h, 預估晚交 (the solver's estimate past its
+ *  window), 還有 N 條未排程, else 準時 — with the tyres still outside the window when there are any. */
+function verdict(v: OrderView): string {
+  if (v.risk === 'late') return v.lateH != null ? `會晚 ${v.lateH} h` : v.projected ? (v.unscheduled > 0 ? `其餘 ${v.unscheduled} 條預估晚交` : '預估晚交') : RISK_TEXT.late
+  if (v.risk === 'unsched') return `還有 ${v.unscheduled} 條未排程`
+  if (v.risk === 'ok' && v.unscheduled > 0 && v.projected) return `準時（其餘 ${v.unscheduled} 條預估 ${v.projected} 完成）`
+  return RISK_TEXT[v.risk]
 }
