@@ -1427,10 +1427,12 @@ class World:
         return [m.model_dump() for m in self._materials_view()]
 
     def worker_name(self, worker_id: str | None) -> str | None:
+        """A dataset worker has only a staff id: 「S14（硫化機組）」, the team as every screen names it (TEAM_LABELS), not
+        the dataset's 「加硫組」."""
         w = next((w for w in self._workers if w.id == worker_id), None)
         if w is None:
             return None
-        return f"{w.name}（{w.group}）" if w.group and w.name == w.staff_id else w.name
+        return f"{w.name}（{TEAM_LABELS[w.team]}）" if w.group and w.name == w.staff_id else w.name
 
     def walk_minutes(self, worker_id: str, zone: str) -> float:
         from warroom.sim.work import WALK_DOCK_MIN, WALK_MIN, WALK_SAME_ZONE_MIN
