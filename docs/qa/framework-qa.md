@@ -61,7 +61,7 @@ A: 目標是讀值到動作 < 0.2 秒。Mac 上量到 28 台機台一輪的決�
 關鍵詞: 延遲, latency, 0.2 秒, 反應時間, p99, 安全核心速度, 確認取樣, confirm_samples
 
 ## Q: 安全核心停機後，AI 可以把機台開回來嗎？
-A: 不行。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。（未驗證：程式裡沒有找到一個明確的「只有人能解除」的解除按鈕；目前看到的是維修任務完成後由 runtime 清除故障。）
+A: 不行。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。安全核心停機後，要人到現場確認、在系統上按解除才會恢復，這個人工解除流程在 PR #105（待合併，分支 cj/resolve-safety-paths）；這個分支上目前是維修任務完成後由 runtime 清除故障。
 證據: `warroom/agent/state_machine.py:37`, `warroom/agent/state_machine.py:843`, `warroom/api/runtime.py:1062`
 關鍵詞: 解除停機, release, 人工復歸, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
 
@@ -96,8 +96,8 @@ A: App 跑在 OpenShell 沙箱（NemoClaw 的底層），Landlock 是硬性要�
 關鍵詞: OpenShell, NemoClaw, 沙箱, sandbox, Landlock, 網路政策, network policy, 隔離, 權限, 隔離, 怎麼隔離, 容器, 權限控管, 檔案系統
 
 ## Q: 用的是什麼模型？跑在哪裡？
-A: Nemotron 3.5 Lightning 30B-A3B NVFP4，目標部署在 DGX Spark 上用 vLLM（含 DSpark 推測解碼和 prefix cache），全離線。要誠實說明：手邊沒有 DGX Spark，所有模型數字都是 Mac M4 Max 用 Ollama 跑同一模型量的，Spark 路徑有寫好和單元測試但沒在 GB10 硬體上跑過。
-證據: `README.md:19`, `warroom/config.py:6`, `docs/ARCHITECTURE.md:126`, `README.md:186`, `README.md:206`
+A: Nemotron 3.5 Lightning 30B-A3B NVFP4（總參數 30B、每個 token 只啟用約 3B），部署在 DGX Spark 上用 vLLM，全離線。2026-10-21 在大會的 DGX Spark 實測：單流解碼 126.4 tokens/s，第一張告警卡 p90 2.11 秒（目標 2.0 秒，差一點），32k 熱快取首字 1.63 秒，3 件同時最慢一件 6.54 秒（這兩項沒過目標）。Mac 上開發用 Ollama 跑同一個模型。
+證據: `README.md:19`, `warroom/config.py:6`, `docs/ARCHITECTURE.md:126`, `bench/results/spark-lightning-20261021/README.md:31`, `bench/results/spark-lightning-20261021/README.md:32`, `bench/results/spark-lightning-20261021/README.md:34`, `bench/results/spark-lightning-20261021/README.md:36`
 關鍵詞: 模型, Nemotron, NVFP4, 30B-A3B, DGX Spark, vLLM, Ollama, 地端, on-prem, 硬體, 模型多大, 參數量, 跑在哪, 3B 活躍參數
 
 ## Q: 怎麼確保 LLM 輸出是合法的 JSON？

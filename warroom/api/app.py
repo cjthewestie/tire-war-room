@@ -1170,6 +1170,25 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise _404(path)
         return {"path": path, "text": text}
 
+    # QA 模式 live proofs + 「看一次怎麼運作」 (warroom/api/qa_demo.py): demo-control rights, everything tagged 「QA 展示」
+    from warroom.api.qa_demo import CHAT_CONVERSATION, install_qa_demo
+
+    async def _qa_chat(text: str, session: Session) -> dict[str, Any]:
+        return await main_message(MainMessage(text=text, conversation_id=CHAT_CONVERSATION), session)
+
+    async def _qa_plant_ask(question: str, session: Session) -> Any:
+        return await ask(AskRequest(question=question), session)
+
+    def _qa_network(network: str, session: Session) -> None:
+        r = rt()
+        r.network = network
+        r.audit.append(AuditKind.SYSTEM, session.actor, {"msg": "network tier", "network": network, "qa_demo": True,
+                                                         "tag": "QA 展示"})
+        r.sync_warning_light()
+        r.bus.publish(WsType.SNAPSHOT, r.snapshot())
+
+    install_qa_demo(app, rt, supervisor, demo, chat=_qa_chat, ask=_qa_plant_ask, set_network=_qa_network)
+
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")
     async def sim_control(ctl: SimControl, _: Session = Depends(demo)) -> dict[str, Any]:
