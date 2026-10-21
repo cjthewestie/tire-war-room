@@ -18,7 +18,8 @@ export function hypName(id: string): string {
 export function plain(s: string | null | undefined): string {
   if (!s) return ''
   return s
-    .replace(/CURE-0?(\d+)/g, '$1 號機')
+    // not inside an event id: 「EV-20261003-100145-CURE-03」 printed as 「EV-20261003-100145-3 號機」 in the chat confirm
+    .replace(/(?<![\w-])CURE-0?(\d+)/g, '$1 號機')
     .replace(/(^|[；;，,、\s（(→])S\d+b?\s+/g, '$1')
     .replace(/假設\s*H(\d)/g, (_, n) => hypName(`H${n}`))
     .replace(/\bH(\d)\b\s?/g, (_, n) => hypName(`H${n}`))
