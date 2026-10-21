@@ -14,6 +14,7 @@ import type { WarRoomState } from '../store'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
 import { GoodsRings } from './GoodsRings'
+import { MaterialStock } from './MaterialStock'
 import { MachineRings } from './MachineRings'
 import { machineRing } from './machineRing'
 import { DockCelebration } from './DockCelebration'
@@ -738,6 +739,7 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       <Walkers count={state.world ? 2 : WALKER_LOOPS.length} />
       {state.world && <WorldPeople world={state.world} />}
       {state.world?.goods && <GoodsRings goods={state.world.goods} />}
+      {active && state.world && <MaterialStock materials={state.world.materials} events={state.snapshot?.events ?? []} />}
       <MachineRings tiles={tiles} world={state.world} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />

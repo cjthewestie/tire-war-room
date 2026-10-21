@@ -1,0 +1,334 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>戰情室資訊架構原型</title>
+<style>
+/* Grayscale information-architecture prototype. No visual style decided yet. */
+:root,:root[data-theme=dark]{--bg:#16191d;--card:#1f2328;--ink:#e4e6e1;--mid:#a9afa6;--soft:#80867e;--line:#323840;--fill:#272c32;--dark:#7fbf1a;--on:#0d1400;--alarm:#ff5d52;--warn:#f5b83d}
+:root[data-theme=light]{--bg:#f4f5f2;--card:#ffffff;--ink:#1a1d1a;--mid:#4f564e;--soft:#7a8079;--line:#d9ddd5;--fill:#eef0eb;--dark:#4f8a00;--on:#ffffff;--alarm:#d63b2f;--warn:#a86a00}
+.btn.p,nav button.on,.pill.k,.modes button.on{color:var(--on)!important}
+.chips button,.modes button,.btn,nav button,.tog,.item,input{background:var(--card);color:var(--ink)}
+.item:hover,.item.on{background:var(--fill)}
+input{border-color:var(--line)!important}input::placeholder{color:var(--soft)}
+.ann{background:transparent;color:var(--warn);border-color:var(--warn)}
+.cell.a,.mc.a{background:var(--alarm)!important;border-color:var(--alarm)!important;color:#fff}
+.mc.w,.cell.w{border-color:var(--warn)!important}
+:root[data-theme=dark] .note{background:#2a2410;color:#e9d98a;border-color:#4a4018}
+:root[data-theme=light] .note{background:#fff8d6;color:#5a4f12;border-color:#e5d98a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,"PingFang TC","Noto Sans TC",sans-serif}
+button{font:inherit;cursor:pointer}
+.note{background:#fff8d6;border-bottom:1px solid #e5d98a;padding:6px 16px;font-size:13px;color:#5a4f12}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:8px 18px;padding:10px 16px;background:var(--card);border-bottom:1px solid var(--line)}
+header .name{font-weight:700}
+nav{display:flex;flex-wrap:wrap;gap:4px}
+nav button{border:1px solid var(--line);background:var(--card);padding:5px 12px;border-radius:4px}
+nav button.on{background:var(--dark);color:#fff;border-color:var(--dark)}
+.right{margin-left:auto;display:flex;gap:10px;align-items:center;color:var(--mid);font-size:13px}
+.tog{border:1px dashed var(--soft);background:none;padding:4px 10px;border-radius:4px;font-size:13px}
+main{max-width:1240px;margin:0 auto;padding:16px}
+.view{display:none}.view.on{display:block}
+/* band */
+.board{position:relative;height:260px;margin:12px 0;border:1px solid var(--line);border-radius:8px;background-color:var(--fill);background-image:radial-gradient(var(--line) 1px,transparent 1.5px);background-size:16px 16px;overflow:hidden}
+.bnode{position:absolute;width:19%;min-width:120px;background:var(--card);border:1.5px solid var(--line);border-radius:8px;padding:6px 8px;font-size:12px;display:grid;gap:1px;z-index:1}
+.bnode b{font-size:13px}.bnode span{color:var(--mid)}.bnode i{font-style:normal;font-size:11px;font-weight:700}
+.bnode.done i{color:var(--mid)}.bnode.wait{border-color:var(--warn);border-width:2px}.bnode.wait i{color:var(--warn)}.bnode.auto i{color:var(--dark)}
+.edges{position:absolute;inset:0;width:100%;height:100%}.edges path{stroke:var(--soft);stroke-width:.4;fill:none;vector-effect:non-scaling-stroke}
+.band .ph{padding:6px 14px}.band{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-bottom:14px}@media (max-width:860px){.band{grid-template-columns:1fr}}
+.lines{padding:6px 14px;display:grid;gap:2px}.lrow{display:grid;grid-template-columns:44px 1fr;gap:6px;align-items:center;font-size:12px;color:var(--mid)}.cells{display:flex;gap:3px;flex-wrap:wrap}.cell{width:20px;height:12px;border:1px solid var(--soft);border-radius:2px}.cell.w{border-style:dashed;border-color:var(--ink)}.cell.a{background:var(--dark);border-color:var(--dark)}
+.staff{padding:8px 14px;font-size:13px;display:grid;gap:4px}.staff table{font-size:12px}
+.status{display:flex;flex-wrap:wrap;gap:8px 22px;background:var(--card);border:1px solid var(--line);border-radius:6px;padding:10px 14px;margin-bottom:14px;font-size:14px}
+.status b{font-variant-numeric:tabular-nums}
+.layout{display:grid;grid-template-columns:260px 1fr 360px;grid-template-areas:'list plan chat';gap:12px;align-items:start}
+main{max-width:1600px}
+.layout .convo{grid-area:chat;display:flex;flex-direction:column;position:sticky;top:12px;height:calc(100vh - 200px)}
+.layout #list{grid-area:list;max-height:calc(100vh - 200px);overflow:auto;position:sticky;top:12px}
+#list .item .t{font-size:14px}
+#list .item{padding:6px 14px}#list .item .s{display:none}#list .item.on .s{display:block}#list .sec{padding:4px 14px 0}
+.layout .planarea{grid-area:plan;min-width:0}
+.convo .feed{overflow:auto;padding:12px 14px;flex:1}
+.convo .in{border-top:1px solid var(--line);padding:10px 14px}
+.convo .in input{width:100%;padding:8px;border:1px solid var(--line);border-radius:4px;font:inherit}
+.modes{display:flex;gap:6px;margin-bottom:6px}.modes button{border:1px solid var(--line);background:var(--card);border-radius:4px;padding:2px 10px;font-size:13px}.modes button.on{background:var(--dark);color:#fff}
+.tool{font-size:13px;color:var(--mid);border-left:3px solid var(--line);padding:2px 8px;margin:4px 0}
+.ctx{font-size:12px;color:var(--mid);margin-bottom:6px}
+@media (max-width:1100px){.layout{grid-template-columns:240px 1fr;grid-template-areas:'list plan' 'chat chat'}.layout .convo{position:static;height:420px}}
+@media (max-width:760px){.layout{grid-template-columns:1fr;grid-template-areas:'list' 'plan' 'chat'}.layout #list{position:static;max-height:none}}
+.panel{background:var(--card);border:1px solid var(--line);border-radius:6px}
+.ph{padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;display:flex;justify-content:space-between;align-items:center}
+.sec{padding:6px 14px 2px;font-size:12px;color:var(--mid);letter-spacing:.04em}
+.item{display:block;width:100%;text-align:left;border:0;border-top:1px solid var(--fill);background:none;padding:10px 14px}
+.item:hover,.item.on{background:var(--fill)}
+.item .t{font-weight:600}
+.item .s{font-size:13px;color:var(--mid)}
+.pill{display:inline-block;border:1px solid var(--soft);border-radius:999px;padding:0 8px;font-size:12px;margin-right:6px;color:var(--mid)}
+.pill.k{background:var(--dark);color:#fff;border-color:var(--dark)}
+.fyi summary{padding:8px 14px;border-top:1px solid var(--fill);cursor:pointer;color:var(--mid);font-size:13px}
+.empty{padding:28px 14px;text-align:center;color:var(--mid)}
+.detail{padding:16px}
+.detail h2{margin:0 0 4px;font-size:20px}
+.block{border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin:12px 0;background:var(--card)}
+.block h3{margin:0 0 6px;font-size:13px;color:var(--mid);letter-spacing:.04em}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:700px){.grid2{grid-template-columns:1fr}}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{border-bottom:1px solid var(--fill);padding:6px 4px;text-align:left}
+th{font-size:12px;color:var(--mid);font-weight:600}
+.num{font-variant-numeric:tabular-nums}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.btn{border:1px solid var(--dark);background:var(--card);padding:8px 16px;border-radius:4px}
+.btn.p{background:var(--dark);color:#fff}
+details.ev{border:1px solid var(--line);border-radius:6px;margin:8px 0}
+details.ev summary{padding:8px 12px;cursor:pointer;font-weight:600}
+details.ev>div{padding:0 12px 10px;font-size:14px}
+.chat{background:var(--fill);border-radius:6px;padding:10px}
+.msg{margin:6px 0}.msg b{font-size:12px;color:var(--mid)}
+.chat input{width:100%;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:4px;font:inherit}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chips button{border:1px solid var(--line);background:var(--card);border-radius:999px;padding:2px 10px;font-size:13px}
+.steps{display:flex;gap:6px;flex-wrap:wrap}
+.step{flex:1 1 110px;border:1px solid var(--line);border-radius:6px;padding:8px;font-size:13px;text-align:center}
+.ring{width:48px;height:48px;margin:0 auto 4px;display:block}
+.task{display:grid;grid-template-columns:90px 1fr 110px;gap:8px;padding:6px 0;border-bottom:1px solid var(--fill);font-size:14px}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin-top:6px}
+.bar i{display:block;height:100%;background:var(--mid)}
+.search{display:flex;gap:8px}.search input{flex:1;padding:8px;border:1px solid var(--line);border-radius:4px;font:inherit}
+.machines{display:grid;grid-template-columns:repeat(auto-fill,minmax(92px,1fr));gap:6px}
+.mc{border:1px solid var(--line);border-radius:4px;padding:6px 4px;font-size:11px;text-align:center;overflow-wrap:anywhere;color:var(--ink)}
+.mc.w{border-style:dashed;border-color:var(--ink)}.mc.a{background:var(--dark);color:#fff}
+/* phone */
+.phone{width:375px;max-width:100%;margin:0 auto;border:10px solid #2b2b2b;border-radius:28px;background:var(--bg);min-height:700px;overflow:hidden}
+.phone .bar0{background:var(--card);padding:10px 14px;border-bottom:1px solid var(--line);font-weight:700;display:flex;justify-content:space-between}
+.notif{margin:10px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px}
+.pcard{margin:10px;background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}
+.pcard .actions .btn{flex:1;text-align:center;padding:12px}
+.ann{font-size:12px;color:#7a6a00;background:#fff8d6;border:1px dashed #d8c55a;border-radius:4px;padding:2px 6px;display:inline-block;margin:4px 0}
+</style>
+</head>
+<body>
+<div class="note">資訊架構原型 v12 · 2026-10-20 · 套用原本配色（深色＋NVIDIA 綠），可切亮色。資料為示意（p.11 情境＋團隊資料集）。黃色框＝設計說明。　<button class="tog" id="emptyTog">原型：沒事時的畫面</button> <button class="tog" data-v="phone">原型：主管手機版</button></div>
+<header>
+  <span class="name">實心胎戰情室</span>
+  <nav>
+    <button data-v="todo" class="on">對話台</button>
+    <button data-v="plant">產線監控</button>
+    <button data-v="sched">人力排程</button>
+    <button data-v="orders">訂單</button>
+  </nav>
+  <span class="right"><span class="num">10/03 02:31</span><span>網路正常・離線運作</span></span>
+</header>
+<main>
+
+<!-- 待辦 = home -->
+<section class="view on" id="todo">
+  <div class="status"><span>機台 <b>27 正常・1 異常</b></span><span>今日產出 <b>18 / 24 條</b></span><span>下一次出貨 <b>10:00・3 單</b></span><span>夜班 <b>缺 1 人</b></span><button class="tog" id="themeTog" title="亮色／暗色" aria-label="切換亮色／暗色" style="margin-left:auto;border:0;padding:0 4px">☀︎</button></div>
+  <span class="ann">v12：左＝核准列表（窄）；中＝計劃板（步驟卡＋箭頭，像 canvas）；右＝Agent 對話（固定，不懸浮）。</span>
+  <div class="layout">
+    <div class="panel" id="list">
+      <div class="ph">核准區：等待列表 <span class="pill k">4</span></div>
+      <div class="sec">① 安全／機台異常</div>
+      <button class="item on" data-d="d1"><span class="pill k">待核准</span><span class="t">7 號硫化機溫降 → 延長硫化、移單</span><div class="s">影響 2 張單・#A-311 延 8.5 h・02:16 起</div></button>
+      <div class="sec">② 交期風險</div>
+      <button class="item" data-d="d2"><span class="pill">預警</span><span class="t">SO-009 可能晚 6 小時交貨</span><div class="s">原因：大胎排程擠在 V10・交期 11/05 17:00</div></button>
+      <div class="sec">③ 插單／人力決定</div>
+      <button class="item" data-d="d3"><span class="pill k">待決定</span><span class="t">夜班貼合組 S11 病假 → 補人</span><div class="s">方案 A 加班・方案 B 從 2 線調 1 人</div></button>
+      <div class="sec">④ 執行中，等確認完成</div>
+      <button class="item" data-d="d4"><span class="pill">執行中 2/3</span><span class="t">大開煉機降溫處置</span><div class="s">維修組檢查水路中・預計 02:50 完成</div></button>
+      <details class="fyi"><summary>⑤ AI 已自行處理（3）</summary>
+        <div class="item"><span class="t">通知維修組檢查 7 號機蒸汽閥</span><div class="s">R1 範本通知・02:16</div></div>
+        <div class="item"><span class="t">壞資料：6 號機 250°C 尖峰，判定感測器雜訊</span><div class="s">未喚醒 AI・02:05</div></div>
+        <div class="item"><span class="t">原料「鋼絲」低於安全量，已排補貨</span><div class="s">10:00 到貨・01:40</div></div>
+      </details>
+    </div>
+
+    <div class="panel convo">
+      <div class="ph">Agent 對話台 <span><span class="pill" id="ctxname">7 號硫化機溫降</span></span></div>
+      <div class="feed">
+        <div class="ctx">對話跟著右邊選的事項；點「全部」看所有對話</div>
+        <div class="msg"><b>系統 02:14</b><br>偵測到 7 號硫化機模溫 128 → 122°C，開事件。</div>
+        <div class="tool">讀感測器：7 號 122.3°C，6／8 號正常</div>
+        <div class="tool">SOP 檢索：SOP-CP-02 硫化機溫度偏低</div>
+        <div class="tool">硫化公式：122°C ×1.47 → 36.5 h</div>
+        <div class="tool">排程求解（OR-Tools）：#A-311 7→9 號，交期準時</div>
+        <div class="msg"><b>AI 02:16</b><br>我建議延長硫化並把 #A-311 移到 9 號機，因為 7 號機恢復前會拖到它的交期。計劃在中間的計劃板，等你核准。</div>
+        <div class="msg"><b>你</b><br>9 號機今晚要保養</div>
+        <div class="msg"><b>AI</b><br>收到，改成「9 號機今晚不可用」重排中… 新版會出現在右邊（第 2 版）。</div>
+      </div>
+      <div class="in">
+        <div class="modes"><button class="on">討論這個計劃</button><button>下新任務</button><button>只查不改</button><button>全部</button></div>
+        <input placeholder="例如：9 號機今晚要保養／不要加班／為什麼選 9 號？">
+      </div>
+    </div>
+    <div class="panel planarea">
+      <div class="ph">計劃</div>
+      <!-- d1: event decision -->
+      <div class="detail dview" id="d1">
+        <span class="pill k">待核准・R2</span><span class="pill">第 1 版</span>
+        <h2>7 號硫化機溫降：建議延長硫化並把 #A-311 移到 9 號機</h2>
+        <div class="s">模溫 128 → 119.5°C，6／8 號機正常，判定 7 號機單機問題（H1 疏水閥）。</div>
+<div class="board" aria-label="計劃板">
+          <div class="bnode done" style="left:2%;top:8%"><b>S1 讀感測器</b><span>7 號 122.3°C</span><i>完成</i></div>
+          <div class="bnode done" style="left:2%;top:56%"><b>S2 訂單／班表</b><span>下一模 #A-311</span><i>完成</i></div>
+          <div class="bnode done" style="left:28%;top:32%"><b>S3 硫化公式</b><span>122°C → 36.5 h</span><i>完成</i></div>
+          <div class="bnode wait" style="left:54%;top:8%"><b>S4 設定硫化時間</b><span>生管・立即</span><i>等你核准 R2</i></div>
+          <div class="bnode wait" style="left:54%;top:56%"><b>S5 排程改版</b><span>#A-311 7→9 號</span><i>等你核准 R2</i></div>
+          <div class="bnode auto" style="left:79%;top:32%"><b>S6 通知維修</b><span>維修組・02:40 前</span><i>已自動 R1</i></div>
+          <svg class="edges" viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M20 20 L28 42"/><path d="M20 66 L28 46"/><path d="M46 42 L54 20"/><path d="M46 46 L54 66"/><path d="M72 20 L79 40"/><path d="M72 66 L79 46"/></svg>
+        </div>
+        <div class="grid2">
+          <div class="block"><h3>對交期的影響</h3>
+            <table><tr><th>訂單</th><th>原本</th><th>改後</th><th>交期</th></tr>
+            <tr><td>#A-311</td><td class="num">7 號・10/04 04:30</td><td class="num">9 號・10/04 13:00</td><td>準時</td></tr>
+            <tr><td>#M-201</td><td class="num">9 號</td><td class="num">8 號</td><td>準時</td></tr></table>
+          </div>
+          <div class="block"><h3>核准後誰去做</h3>
+            <div class="task"><span>維修組</span><span>檢查 7 號機疏水閥</span><span class="num">02:40 前</span></div>
+            <div class="task"><span>生管</span><span>硫化時間改 36.5 h</span><span class="num">立即</span></div>
+            <div class="task"><span>夜班 A 組</span><span>#A-311 改上 9 號機</span><span class="num">10/04 13:00</span></div>
+          </div>
+        </div>
+        <div class="actions"><button class="btn p">核准</button><button class="btn discuss">討論</button></div>
+        <span class="ann">決定區只放：問題一句、建議、交期影響、誰去做；按鈕只有「核准」「討論」，要改或不同意就在左邊說。證據與工具已在左邊對話台，計劃區不重複。</span>
+      </div>
+
+      <!-- d2: delivery risk -->
+      <div class="detail dview" id="d2" hidden>
+        <span class="pill">交期預警</span>
+        <h2>SO-009 可能晚 6 小時交貨</h2>
+        <div class="block"><h3>為什麼</h3>大胎只能用 V08–V11，目前 V10 排滿到 11/05 23:00。</div>
+        <div class="block"><h3>AI 建議</h3>方案 A：週六加開 V11 一模（需夜班加班 4 h）→ 準時。方案 B：通知客戶延 1 天。</div>
+        <div class="actions"><button class="btn p">核准（選 A）</button><button class="btn discuss">討論</button></div>
+      </div>
+
+      <!-- d3: staffing -->
+      <div class="detail dview" id="d3" hidden>
+        <span class="pill k">待決定・R3</span>
+        <h2>夜班貼合組 S11 病假：怎麼補？</h2>
+        <div class="grid2">
+          <div class="block"><h3>方案 A：S09 加班 4 h（建議）</h3>本月加班 18 h，上限 46 h 內・不影響其他線</div>
+          <div class="block"><h3>方案 B：從 2 線調 S15</h3>2 線少 1 人，胎側膠產出 −10%</div>
+        </div>
+        <div class="actions"><button class="btn p">核准（選 A）</button><button class="btn discuss">討論</button></div>
+      </div>
+
+      <!-- d4: in execution -->
+      <div class="detail dview" id="d4" hidden>
+        <span class="pill">執行中 2/3</span>
+        <h2>大開煉機降溫處置</h2>
+        <span class="ann">核准不是結束：事項留在清單，直到人員做完。</span>
+        <div class="block"><h3>任務</h3>
+          <div class="task"><span>✓ 已完成</span><span>放慢投料（A 線操作員 S02）</span><span class="num">02:24</span></div>
+          <div class="task"><span>✓ 已完成</span><span>通知維修組</span><span class="num">02:21</span></div>
+          <div class="task"><span>執行中</span><span>檢查冷卻水路（維修 S18，人在 A 線）</span><span class="num">預計 02:50</span></div>
+          <div class="bar"><i style="width:66%"></i></div>
+        </div>
+        <div class="block"><h3>驗證</h3>系統每分鐘讀溫度；膠溫回到 110°C 以下且維持 10 分鐘即自動結案。</div>
+        <div class="actions"><button class="btn">標記完成</button><button class="btn">回報問題</button></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- empty state -->
+  <div class="panel empty" id="emptyState" hidden>
+    <div style="font-size:20px;font-weight:700;color:var(--ink)">全廠正常，沒有要你處理的事</div>
+    <div>接下來：10:00 出貨 3 單・10:00 鋼絲到貨・14:00 交班</div>
+    <div class="ann">沒事時不是空白：告訴你下一件會發生的事。</div>
+  </div>
+</section>
+
+<!-- 全廠 (patrol) -->
+<section class="view" id="plant">
+  <span class="ann">平常巡一下：先看「有沒有快出事」，再看全廠。</span>
+  <div class="block"><h3>預警（還沒出事，但在往壞的方向走）</h3>
+    <div class="task"><span>A 線</span><span>大開煉機膠溫 30 分鐘內 +6°C，往 120°C 上限走</span><span class="num">約 40 分鐘後</span></div>
+    <div class="task"><span>原料</span><span>天然膠庫存 1.6 天，低於 2 天安全量</span><span class="num">補貨單已開</span></div>
+  </div>
+  <div class="block"><h3>28 台機台（點了看細節）</h3>
+    <div class="machines" id="machines"></div>
+    <div class="s" style="margin-top:6px;color:var(--mid)">實線＝正常・虛線＝預警・紅色＝異常</div>
+  </div>
+  <div class="grid2">
+    <div class="block"><h3>今日產出</h3>18 / 24 條（照計劃 75%）<div class="bar"><i style="width:75%"></i></div></div>
+    <div class="block"><h3>人員在哪</h3>A 線 4・B 線 2・硫化區 3・休息區 1・待命 2</div>
+  </div>
+</section>
+
+<!-- 訂單 -->
+<section class="view" id="orders">
+  <span class="ann">查一張單：一個搜尋框，回答「做到哪、會不會準時、卡在哪」。</span>
+  <div class="search"><input value="#A-311"><button class="btn p">查</button></div>
+  <div class="block">
+    <h2 style="margin:0">#A-311・客戶 C・小胎 10 條・<span class="pill k">急件</span></h2>
+    <div class="s">交期 10/31 17:00・預計 10/30 10:40 完成・<b>準時</b></div>
+    <div class="steps" style="margin-top:10px" id="rings"></div>
+    <div class="block"><h3>現在在哪</h3>第 7 條在 9 號硫化機（剩 21 h）・第 8–10 條在貼合區待入模</div>
+    <div class="block"><h3>卡點</h3>無。〔若有：例如「等鋼絲到貨」〕</div>
+  </div>
+</section>
+
+<!-- 排程 -->
+<section class="view" id="sched">
+  <span class="ann">早上開工／交班：從「今日計劃」卡開始，核准一次。</span>
+  <div class="block">
+    <h2 style="margin:0">今日計劃・10/03 早班 <span class="pill k">待核准</span></h2>
+    <div class="grid2">
+      <div class="block"><h3>今天要開工的單</h3><table><tr><th>訂單</th><th>數量</th><th>機台</th><th>交期</th></tr><tr><td>SO-001</td><td class="num">6</td><td>V05</td><td>11/02</td></tr><tr><td>#A-311</td><td class="num">3</td><td>V09</td><td>10/31 急</td></tr><tr><td>SO-002</td><td class="num">4</td><td>V08</td><td>12/04</td></tr></table></div>
+      <div class="block"><h3>人</h3>到班 18・請假 1（S11 貼合組）・加班 0<br><h3 style="margin-top:8px">原料</h3>天然膠 1.6 天（已補貨）・鋼絲 3 天・尼龍布 5 天</div>
+    </div>
+    <div class="block"><h3>昨晚發生的事</h3>02:14 7 號機溫降（已處理，#A-311 移 9 號）・03:10 壞資料 1 次（忽略）</div>
+    <div class="block"><h3>今天的風險</h3>SO-009 交期緊・V10 下午換模 8 h</div>
+    <div class="block"><h3>班次負荷</h3>早班 <div class="bar"><i style="width:82%"></i></div> 晚班 <div class="bar"><i style="width:96%"></i></div></div>
+    <div class="actions"><button class="btn p">核准今日計劃</button><button class="btn">跟 AI 討論</button></div>
+  </div>
+</section>
+
+<!-- Agent 對話台 -->
+<section class="view" id="agent">
+  <span class="ann">對話台不再是首頁：給自由提問與「下新任務」。每個事項自己的討論在事項裡。</span>
+  <div class="panel detail">
+    <div class="chat">
+      <div class="msg"><b>你</b><br>今晚夜班缺誰？</div>
+      <div class="msg"><b>AI（查了：訂單班表）</b><br>10/03 夜班貼合組缺 1 人（S11 病假）。這件事已在待辦第 ③ 項。</div>
+      <input placeholder="問一句，或「下新任務：通知維修組明早檢查 3 號機」">
+      <div class="chips"><button>只查不改</button><button>下新任務</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- phone -->
+<section class="view" id="phone">
+  <span class="ann">主管手機只做一件事：決定。通知 → 一張決定卡 → 完成；外加「問一句」。</span>
+  <div class="phone">
+    <div class="bar0"><span>主管手機</span><span class="num">02:16</span></div>
+    <div class="notif"><b>戰情室・待你核准</b><br>7 號機溫降：建議移 #A-311 到 9 號機</div>
+    <div class="pcard">
+      <span class="pill k">待核准</span>
+      <h3 style="margin:6px 0">7 號硫化機溫降</h3>
+      <div>建議：延長硫化 36.5 h，#A-311 移到 9 號機</div>
+      <div class="s" style="color:var(--mid)">交期：都準時・核准後維修組 02:40 前檢查</div>
+      <details class="ev"><summary>為什麼</summary><div>模溫 128 → 119.5°C，6／8 號機正常。依 SOP-CP-02。</div></details>
+      <div class="actions"><button class="btn p">核准</button><button class="btn discuss">討論</button></div>
+    </div>
+    <div class="pcard"><b>問一句</b><input style="width:100%;margin-top:6px;padding:8px;border:1px solid var(--line);border-radius:4px" placeholder="例如：7 號機現在怎樣？"></div>
+  </div>
+</section>
+</main>
+
+<script>
+const views=[...document.querySelectorAll('.view')];
+function show(v){views.forEach(s=>s.classList.toggle('on',s.id===v));document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));scrollTo(0,0)}
+document.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>show(b.dataset.v));
+document.querySelectorAll('#list .item[data-d]').forEach(b=>b.onclick=()=>{document.querySelectorAll('#list .item').forEach(x=>x.classList.remove('on'));b.classList.add('on');document.querySelectorAll('.dview').forEach(d=>d.hidden=d.id!==b.dataset.d);document.getElementById('ctxname').textContent=b.querySelector('.t').textContent.split(/→|：|可能/)[0].trim()});
+(function(){const r=document.documentElement;let t=null;try{t=localStorage.getItem('ia-theme')}catch(e){}if(!t)t='light';r.dataset.theme=t;document.getElementById('themeTog').onclick=()=>{r.dataset.theme=r.dataset.theme==='dark'?'light':'dark';try{localStorage.setItem('ia-theme',r.dataset.theme)}catch(e){}}})();
+document.querySelectorAll('.discuss').forEach(b=>b.onclick=()=>document.querySelector('.convo input').focus());
+let empty=false;document.getElementById('emptyTog').onclick=()=>{empty=!empty;document.querySelector('#todo .layout').hidden=empty;document.getElementById('emptyState').hidden=!empty;show('todo')};
+const ms=['A-MIX','A-OPEN','A-BIGOPEN','A-SMALLOPEN','A-CAL','A-COOL','A-WIND','B-01','B-02','B-03','B-04','C-01','C-02','C-03','C-04','D-01','BOND-01'];for(let i=1;i<=11;i++)ms.push('CURE-'+String(i).padStart(2,'0'));
+document.getElementById('machines').innerHTML=ms.map(m=>`<div class="mc ${m==='CURE-07'?'a':m==='A-BIGOPEN'?'w':''}">${m}</div>`).join('');
+/*lines removed*/const L0=[['A',7,{2:'w'}],['B',4,{}],['C',4,{}],['D',1,{}],['貼合',1,{}],['硫化',11,{6:'a'}]];void 0&&L0.map(([n,k,m])=>`<div class="lrow"><span>${n}</span><div class="cells">${Array.from({length:k},(_,i)=>`<span class="cell ${m[i]||''}" title="${n}-${i+1}"></span>`).join('')}</div></div>`).join('');
+const st=[['備料',100],['混煉',100],['貼合',70],['硫化',40],['整修',0],['出貨',0]];
+document.getElementById('rings').innerHTML=st.map(([n,p])=>{const c=2*Math.PI*20,o=c*(1-p/100);return `<div class="step"><svg class="ring" viewBox="0 0 48 48"><circle cx="24" cy="24" r="20" fill="none" stroke="var(--line)" stroke-width="6"/><circle cx="24" cy="24" r="20" fill="none" stroke="var(--dark)" stroke-width="6" stroke-dasharray="${c}" stroke-dashoffset="${o}" transform="rotate(-90 24 24)"/></svg>${n}<br><span class="num">${p}%</span></div>`}).join('');
+</script>
+</body>
+</html>

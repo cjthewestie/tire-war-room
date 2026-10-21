@@ -170,7 +170,7 @@ OPTIMISED_SHIFTS: tuple[ShiftDef, ...] = (
 TEAM_LABELS: dict[TeamId, str] = {
     TeamId.CURING: "硫化機組", TeamId.BODY: "胎體／胎面膠組", TeamId.SIDE: "胎側膠組",
     TeamId.BEAD_NYLON: "鋼絲／尼龍組", TeamId.BIGOPEN: "大開煉機組", TeamId.BOND: "貼合組",
-    TeamId.MAINTENANCE: "維修組", TeamId.QC: "品管", TeamId.SUPERVISOR: "主管",
+    TeamId.MAINTENANCE: "維修組", TeamId.QC: "品管", TeamId.TRIM: "修邊組", TeamId.SUPERVISOR: "主管",
 }
 
 

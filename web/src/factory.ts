@@ -51,7 +51,7 @@ export const SIZE_LABEL: Record<TireSize, string> = { S: '小胎', M: '中胎', 
 
 export const TEAM_LABELS: Record<TeamId, string> = {
   curing: '硫化機組', body: '胎體／胎面膠組', side: '胎側膠組', bead_nylon: '鋼絲／尼龍組',
-  bigopen: '大開煉機組', bond: '貼合組', maintenance: '維修組', qc: '品管', supervisor: '主管',
+  bigopen: '大開煉機組', bond: '貼合組', maintenance: '維修組', qc: '品管', trim: '修邊組', supervisor: '主管',
 }
 /** Page 4 row order. */
 export const LABOR_TEAMS: TeamId[] = ['curing', 'body', 'side', 'bead_nylon', 'bigopen', 'bond']

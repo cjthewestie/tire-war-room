@@ -118,3 +118,10 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-loop { font-size: 12px; font-weight: 700; color: #3f7d00; background: #eaf6d8; border-radius: 999px; padding: 2px 9px; }
 .f3-success { position: absolute; z-index: 16; left: 50%; top: 18px; transform: translateX(-50%); background: #eaf6d8; color: #23410a; border: 3px solid #76b900; border-radius: 999px; padding: 8px 20px; font-size: 16px; font-weight: 800; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .25s ease-out; }
 @media (max-width: 700px) { .f3-success { top: auto; bottom: 150px; font-size: 14px; max-width: calc(100vw - 32px); white-space: normal; text-align: center; } }
+
+/* raw-material plate above the loading-area pallet (issue #48): same chip as a machine tag, one row per low material */
+.f3-stock { gap: 1px; }
+.f3-stock b { font-size: 14px; }
+.f3-stock.green { border-top-color: #3fcf5a; }
+.f3-stock.amber { border-top-color: #f5a623; } .f3-stock.amber b { color: var(--c-amber); }
+.f3-stock.red { border-top-color: #ff3b30; background: #ffe9e4; } .f3-stock.red b { color: var(--c-red); }
