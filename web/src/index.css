@@ -533,7 +533,6 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-opts { display: flex; flex-direction: column; gap: 10px; }
 .ph-opt { min-height: 54px; border-radius: 14px; border: 1px solid var(--c-4a4f58, #4a4f58); background: transparent; font-size: 17px; font-weight: 700; padding: 10px 14px; text-align: left; }
 .ph-opt b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; border: 2px solid currentColor; font-size: 14px; margin-right: 6px; }
-.ph-opt small { margin-left: 8px; font-size: 12px; color: var(--ink-dim); font-weight: 500; }
 .ph-opt.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .ph-ask .ph-opt { min-height: 44px; font-size: 15px; font-weight: 600; text-align: center; }
 .ph-modify-hint { font-size: 14px; color: var(--warn); margin: 6px 0 0; }
@@ -791,7 +790,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-more { display: grid; gap: 6px; background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 12px 14px; font-size: 14px; }
 .ph-more-i { text-align: left; background: var(--panel-2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; color: var(--ink); min-height: 44px; }
 
-.ph-opt.on small { color: inherit; opacity: .9; }
 .early-more > summary { cursor: pointer; font-size: 13.5px; color: var(--ink-dim); padding: 6px 0 0; }
 .early > .early-list .early-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
@@ -965,7 +963,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-optc.on .ph-opt-e { color: inherit; opacity: .92; }
 .ph-optc .ph-opt-why { color: var(--ink); }
 .ph-approval .ph-approve { white-space: normal; line-height: 1.3; }
-.ph-approval .br { margin-bottom: 12px; }
 /* the sticky 核准 bar must read as a bar: solid, with an edge, and a one-line label so it hides little */
 .ph-approval .ph-approve { font-size: 16px; padding: 8px 10px; min-height: 48px; }
 .ph-full { margin: 8px 0 0; font-size: 14px; }
@@ -976,8 +973,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-col-a { margin-bottom: 14px; }
 .ph-col-b > * { margin-top: 0; margin-bottom: 0; }
 .ph-q { margin: 0; }
-.ph-optc .ph-opt-t small { flex-basis: 100%; margin: 0; padding-left: 34px; }
-.ph-approval .br { margin-bottom: 0; }
 .ph-bar { margin-top: 0; }
 .ph-none { margin: 12px 0 0; font-size: 13px; }
 .br-more { margin-top: 0; }
