@@ -4,7 +4,8 @@
 // missing required field reads 待確認. Display only: the approval, the tools and the audit log are untouched.
 //
 // Three states (CJ, 2026-10-21):  待核准 · 執行中 · 處置完成  (a safe stop is its own state, 已安全停止, because
-// it must never read as a finished fix).  Wording rules the builder keeps:
+// it must never read as a finished fix). A fast repair that a reading confirmed closes as 已恢復正常 (veteran 10-22: the
+// moment it is fixed the screen says one thing, not 「已恢復正常」 above 「設備尚未確認修復」).  Wording rules the builder keeps:
 //   - 「已核准」 is not 「已執行」; 「維修已通知」 is not 「設備已修復」: schedule done and equipment status are separate.
 //   - a delivery verdict is 預估 (solver) unless a real outcome exists; an unresolved gap is always listed.
 //   - a cause is 疑似 until its hypothesis is confirmed by a reading.
@@ -17,6 +18,7 @@ import { hypLabel, plain } from './plain'
 import { NOTIFY_LABEL, resultText, staffingChoice } from './stepText'
 import { cureChange, deliveryFacts, optionViews, type OptionView } from './agent/approvalView'
 import { expectationText, repairWindow } from './phone/RepairEta'
+import { isRepairTask } from './phone/fastEta'
 
 export type BriefState = 'pending' | 'running' | 'followup' | 'done' | 'stopped'
 export type SectionKey = 'advice' | 'impact' | 'deadline' | 'progress' | 'blocker' | 'eta' | 'result' | 'equipment' | 'todo'
@@ -209,15 +211,25 @@ function approvedLead(req: ApprovalRequest, ev: Event): string {
   return `${approvedLabel(req, ev)}已核准。`
 }
 
-function equipmentLine(ev: Event, c: BriefCtx): string | null {
+function equipmentLine(ev: Event, c: BriefCtx, repaired = false): string | null {
   if (!isMachineEvent(ev)) return null
   const m = c.machines.find((t) => t.machine_id === ev.machine_id)
   const fix = c.maintenance?.find((x) => x.machine_id === ev.machine_id)
   const parts: string[] = []
   if (m) parts.push(`${machineLabel(ev.machine_id)}${STATUS_PLAIN[m.status]}${m.temp_c != null ? `（${Math.round(m.temp_c * 10) / 10}°C）` : ''}`)
-  if (fix) { const t = fix.title.split('：'); const short = t.length > 1 ? t[1] : t[0]; parts.push(fix.status === 'in_progress' ? `維修進行中：${short}` : `維修已排入：${short}`) }
+  if (repaired) parts.push(`${fmtHM(ev.repaired_at)} 維修完成`)
+  else if (fix) { const t = fix.title.split('：'); const short = t.length > 1 ? t[1] : t[0]; parts.push(fix.status === 'in_progress' ? `維修進行中：${short}` : `維修已排入：${short}`) }
   else if (hypLabel('active', ev) === '未驗證・交維修') parts.push('已交維修，尚未回報修復')
   return parts.length ? parts.join('；') : '待確認'
+}
+
+/** Fixed and back to normal (veteran 10-22): the repair is done (Event.repaired_at, no repair task still open) and a
+ *  reading confirmed it (the server's 「已修復：7 號硫化機 溫度回到 128°C（…）」 outcome; a machine taken out or an
+ *  unverified close never reads 已恢復正常). Returns the confirmed reading, 「128°C」, or null. */
+function recoveredReading(ev: Event, c: BriefCtx): string | null {
+  if (ev.state !== 'closed' || !ev.repaired_at || !/^已修復/.test(ev.outcome ?? '')) return null
+  if (c.tasks.some((t) => t.event_id === ev.id && isRepairTask(t) && t.status !== '完成')) return null
+  return ev.outcome?.match(/回到\s*([\d.]+\s*°?C?)/)?.[1] ?? ''
 }
 
 export function buildBriefing(c: BriefCtx): Briefing | null {
@@ -289,16 +301,18 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
   const writes = writeSteps(ev)
   const execLines = [...new Set(writes.filter((s) => s.state === 'ok').map(stepName))]
 
-  // ------------------------------------------------------------ 處置完成 / 排程已更新・現場處理中
+  // ------------------------------------------------------------ 已恢復正常 / 處置完成 / 排程已更新・現場處理中
   if (ev.state === 'closed') {
-    const followup = openTasks.length > 0 || fixing
+    // fixed and confirmed by a reading: 已恢復正常, whatever field work (宣達, 人力) is still going on
+    const back = recoveredReading(ev, c)
+    const followup = openTasks.length > 0 || (fixing && back == null)
     const result = execLines.map(shortAction)
     // 已核准 ≠ 已執行: while the staffing move is still a field task it is listed under 現場待辦, not 已完成
     if (approved && staffed && !followup) {
       const t = `人力：${approvedLabel(approved, ev)}`
       if (!result.some((r) => r.includes(approved.decision!.option_id ?? '~'))) result.push(t)
     }
-    const eq = equipmentLine(ev, c)
+    const eq = equipmentLine(ev, c, back != null)
     const concl = plain(ev.outcome).replace(/\u2060/g, '').replace(/\s+(?=生效)/g, '')
     const scheduled = execLines.some((l) => /排程.*生效/.test(l))
     const sections: BriefSection[] = [{ key: 'result', title: followup ? '已完成' : '處理結果', lines: result.length ? result : [concl || '待確認'] }]
@@ -307,6 +321,12 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
     const risk = riskLines()
     if (risk.length) sections.push({ key: 'impact', title: '交期與風險', lines: risk })
     const details = concl ? { title: '查看處理結論', lines: [concl] } : undefined
+    if (back != null) {
+      return {
+        ...base, state: 'done', stateLabel: '已恢復正常', deadline: null, details, sections,
+        lead: `${name}已恢復正常${back ? `（${back}）` : ''}${openTasks.length ? `；還有 ${openTasks.length} 件現場工作在做。` : '。'}`,
+      }
+    }
     if (followup) {
       const doneN = evTasks.length - openTasks.length
       return {

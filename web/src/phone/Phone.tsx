@@ -68,7 +68,8 @@ export function Phone() {
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
   const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines)], connected && !lanDown)
   const bctx = useBriefCtx()
-  const idle = pending.length === 0
+  // once repaired the notices (維修完成, 已恢復正常・報告) say it: no summary card under them that still reads 「處理中」
+  const idle = pending.length === 0 && !ev?.repaired_at && !ev?.review
   const idleBrief = useMemo(() => (idle ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [idle, ev, bctx])
   return (
     <div className="phone-wrap">
