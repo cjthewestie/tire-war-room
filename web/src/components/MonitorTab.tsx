@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress, TimelineItem } from '../contracts'
 import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
@@ -71,15 +71,36 @@ function PendingCards({ pending, focusEvent, onAgent }: { pending: ApprovalReque
 }
 
 /** The shared approval card with its evidence grid folded away (CSS hides `.apv-grid` until 「展開」); the card
- *  itself lives in agent/ and is not changed, so 核准 / 討論 and the option ids keep their test hooks. */
+ *  itself lives in agent/ and is not changed, so 核准 / 討論 and the option ids keep their test hooks.
+ *  Folded, a small A/B toggle picks the option without 展開: it clicks the card's own (hidden) option button, so the
+ *  card keeps the one selection and 「核准並派發（A）」 sends the same request and option ids. */
 function CompactApproval({ req, onAgent }: { req: ApprovalRequest; onAgent?: () => void }) {
   const [open, setOpen] = useState(false)
   const rec = req.options.find((o) => o.recommended) ?? null
+  const box = useRef<HTMLDivElement>(null)
+  const [pick, setPick] = useState<string | null>(null)
+  const chosen = pick ?? rec?.id ?? req.options[0]?.id ?? null
+  const choose = (id: string) => box.current?.querySelector<HTMLButtonElement>(`[data-testid="option-${id}"]`)?.click()
+  // follows a pick made in the expanded card too (its option buttons are data-testid="option-<id>")
+  const follow = (e: React.MouseEvent) => {
+    const b = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-testid^="option-"]')
+    if (b && !b.disabled && b.dataset.testid) setPick(b.dataset.testid.slice('option-'.length))
+  }
   return (
-    <div className={`apv-compact ${open ? 'is-open' : ''}`} data-testid="approval-compact">
+    <div ref={box} className={`apv-compact ${open ? 'is-open' : ''}`} data-testid="approval-compact" onClick={follow}>
       <PendingApproval req={req} onAgent={onAgent} />
       <div className="apv-fold">
-        {rec ? <span className="apv-fold-rec"><b>系統建議</b>{rec.id} {plain(rec.label)}{req.options.length > 1 ? `（共 ${req.options.length} 個方案）` : ''}</span> : <span />}
+        {req.options.length > 1 && !open ? (
+          <span className="apv-fold-pick" role="radiogroup" aria-label="人力方案" data-testid="apv-fold-pick">
+            <b>人力方案</b>
+            {req.options.map((o) => (
+              <button key={o.id} type="button" role="radio" aria-checked={chosen === o.id} className={chosen === o.id ? 'on' : ''}
+                onClick={(e) => { e.stopPropagation(); choose(o.id) }} data-testid={`apv-fold-opt-${o.id}`}>
+                {o.id} {plain(o.label)}{o.recommended ? <small>系統建議</small> : null}
+              </button>
+            ))}
+          </span>
+        ) : rec ? <span className="apv-fold-rec"><b>系統建議</b>{rec.id} {plain(rec.label)}{req.options.length > 1 ? `（共 ${req.options.length} 個方案）` : ''}</span> : <span />}
         <button type="button" className="btn-ghost" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="apv-expand">
           {open ? '收起 ▴' : '展開：處理計畫、排程前後對照、方案與結論 ▾'}
         </button>

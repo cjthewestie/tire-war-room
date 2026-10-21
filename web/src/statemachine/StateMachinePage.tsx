@@ -4,8 +4,8 @@
 //              waiting on), live; then 事件偵測 (per line: machines watched, last reading; recent anomalies not yet events).
 //   每日紀錄 — every event / task / question of a factory day (or demo loop) from GET /api/daylog, with a summary and CSV.
 import { useEffect, useMemo, useState } from 'react'
-import type { Anomaly, Event, EventState, Line, MachineState } from '../contracts'
-import { LINES, LINE_SHORT, machineLabel } from '../factory'
+import type { Anomaly, CompoundStage, Event, EventState, Line, MachineState } from '../contracts'
+import { COMPOUND_STOP_C, CURATIVE_STOP_C, LINES, LINE_SHORT, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD, ms } from '../format'
 import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
@@ -168,6 +168,24 @@ function AskList({ asks }: { asks: DayRun[] }) {
   )
 }
 
+/** 預測 column: a rising reading with an upper limit reads 「約 N 分後達上限 120°C」 (the detector's own words when its
+ *  message says so, else from the trend and the compound stage's stop line), not a linear extrapolation past the limit
+ *  (B 線開煉機 229.7°C（186.3–273.2）). */
+function forecastText(a: Anomaly, stage: CompoundStage | undefined): string {
+  const p = a.prediction
+  if (!p) return '—'
+  const r1 = (n: number) => Math.round(n * 10) / 10
+  const said = a.message.match(/預測約\s*(\d+)\s*分後達\s*(\d+(?:\.\d+)?)°C\s*上限/)
+  const stop = stage === 'curative_added' ? CURATIVE_STOP_C : stage === 'unvulcanized' ? COMPOUND_STOP_C : null
+  const limit = said ? Number(said[2]) : a.channel === 'temp_c' && p.trend_per_min > 0 ? stop : null
+  if (limit != null && (said || p.predicted_value > limit)) {
+    if (p.now_value >= limit) return `已達上限 ${limit}°C`
+    const min = said ? Number(said[1]) : Math.max(1, Math.round((limit - p.now_value) / p.trend_per_min))
+    return `約 ${min} 分後達上限 ${limit}°C`
+  }
+  return `${r1(p.predicted_value)}（${r1(p.band_lo)}–${r1(p.band_hi)}）`
+}
+
 /** 事件偵測: the detector watches every machine without the AI; per line, how many and when the last reading came;
  *  then recent anomalies, marked when they became an event. */
 function Detection({ events, today }: { events: Event[]; today: number }) {
@@ -206,7 +224,7 @@ function Detection({ events, today }: { events: Event[]; today: number }) {
             <tr key={a.id}>
               <td className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</td><td>{machineLabel(a.machine_id)}</td><td>{CHANNEL[a.channel] ?? a.channel}</td>
               <td>{Math.round(a.value * 10) / 10}／{Math.round(a.baseline * 10) / 10}</td>
-              <td>{a.prediction ? `${Math.round(a.prediction.predicted_value * 10) / 10}（${Math.round(a.prediction.band_lo * 10) / 10}–${Math.round(a.prediction.band_hi * 10) / 10}）` : '—'}</td>
+              <td>{forecastText(a, machines?.find((m) => m.machine_id === a.machine_id)?.compound_stage)}</td>
               <td>{evByAnom.has(a.id) ? <span className="tag">已開事件</span> : <span className="tag warn">未成事件</span>}</td>
             </tr>
           ))}</tbody>

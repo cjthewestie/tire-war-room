@@ -29,6 +29,11 @@ export function Phone() {
   const net = state.snapshot?.header.network ?? 'online'
   const lanDown = net === 'lan_down'
   const ev = primaryEvent(state.snapshot?.events)
+  // the idle card: one status line per open event (3 at most, 「3 件同時異常」), the 修復預估 for the newest only
+  const openEvs = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
+  // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line
+  const history = state.resolved.filter((r) => r.decision?.via !== 'auto').slice(0, 3)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const alerts = useApprovalAlerts(pending, connected && !lanDown)
   return (
@@ -59,10 +64,10 @@ export function Phone() {
             {ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
-            {ev && <AiStatusLine ev={ev} className="ph-ai" />}
-            {ev && ev.state !== 'closed' && ev.state !== 'safe_stop' && <RepairEta ev={ev} />}
-            {state.resolved.slice(0, 3).map((r) => (
-              <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
+            {openEvs.length ? openEvs.map((e) => <AiStatusLine key={e.id} ev={e} className="ph-ai" />) : ev && <AiStatusLine ev={ev} className="ph-ai" />}
+            {openEvs[0] && <RepairEta ev={openEvs[0]} />}
+            {history.map((r) => (
+              <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}{r.round > 1 ? `（${ROUND[r.round] ?? `第${r.round}輪`}）` : ''}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
             ))}
           </div>
         ) : <>
