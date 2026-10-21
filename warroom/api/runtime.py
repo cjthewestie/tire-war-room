@@ -1678,7 +1678,8 @@ class Runtime:
         self.audit.append(AuditKind.SYSTEM, "day_loop", {"msg": f"新的一天（循環 {n}）", "loop": n,
                                                          "ended_at": ended.isoformat(),
                                                          "factory_time": self.clock.now().isoformat()})
-        self.memory_desk.on_wrap(ended.astimezone(F.TZ).date().isoformat(), n - 1)   # 循環 n-1's daily summary
+        day0 = getattr(self.sim, "day0", None) or ended
+        self.memory_desk.on_wrap(day0.astimezone(F.TZ).date().isoformat(), n - 1)   # 循環 n-1's daily summary
         self._publish_periodic(force=True)
         self._publish_schedule()
 

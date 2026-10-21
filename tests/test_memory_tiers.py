@@ -96,6 +96,7 @@ def test_the_model_summary_is_kept_only_when_every_number_is_in_the_facts():
     f = _facts()
     assert ML.check_sentences("2026-10-21 處理 1 件任務，7 號機的 H1 被推翻，主管核准 v1 後結案。", f)
     assert ML.check_sentences("處理 3 件任務。", f) is None                     # 3 is not in the facts
+    assert ML.check_sentences("處理 1 件任務，1 號機被核准。", f) is None         # press 1 is not in the facts (real run 10-22)
     assert ML.check_sentences("。".join(["一件事"] * 9) + "。", f) is None      # more than 8 sentences
     assert all(not __import__("warroom.agent.main_agent", fromlist=["x"]).ungrounded(s, ML.facts_text(f))
                for s in ML.code_sentences(f))                                   # the code's own summary is grounded

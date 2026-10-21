@@ -9,6 +9,7 @@ Two sources, both read-only here:
 query_plant machine_history; `closed_events()` / `incidents()` are what 後台 記憶 lists. Nothing here writes."""
 from __future__ import annotations
 
+import functools
 import re
 from datetime import date, datetime
 from typing import Any
@@ -49,14 +50,20 @@ def _day(t: Any) -> str:
 
 def incidents() -> list[dict[str, Any]]:
     """The team dataset's past incidents (empty when the dataset is not in this checkout)."""
+    return [dict(i) for i in _incidents()]
+
+
+@functools.lru_cache(maxsize=1)
+def _incidents() -> tuple[dict[str, Any], ...]:
+    """Loaded once: the dataset is read-only, and parsing it on every plan slowed the plant's clock (page-11 timing)."""
     try:
         from warroom.data.team_dataset import IncidentStore
         rows = IncidentStore().all()
     except Exception:  # noqa: BLE001 - no dataset: that source is left out
-        return []
-    return [{"id": i.incident_id, "date": i.date.isoformat(), "machine_id": i.machine_id, "equipment": i.equipment,
-             "symptom": i.symptom, "action": i.action, "downtime_min": i.downtime_min, "outcome": i.outcome,
-             "source": "team_dataset"} for i in rows]
+        return ()
+    return tuple({"id": i.incident_id, "date": i.date.isoformat(), "machine_id": i.machine_id, "equipment": i.equipment,
+                  "symptom": i.symptom, "action": i.action, "downtime_min": i.downtime_min, "outcome": i.outcome,
+                  "source": "team_dataset"} for i in rows)
 
 
 def closed_events(audit: Any, events: list[Any]) -> list[dict[str, Any]]:

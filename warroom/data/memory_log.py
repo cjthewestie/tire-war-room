@@ -75,17 +75,22 @@ def day_label(day: str, loop: int | None) -> str:
     return f"{day}（循環 {loop}）" if loop else day
 
 
-def scan(rows: Iterable[dict[str, Any]], loop: int | None = None
+def scan(rows: Iterable[dict[str, Any]], state: dict[str, Any] | None = None
          ) -> Iterator[tuple[tuple[str, int | None], dict[str, Any]]]:
-    """(day key, row) for each row. The key is the factory date of the row and the 一日循環 cycle it ran in (`loop`:
-    the cycle at the first row, when the scan resumes mid-file)."""
+    """(day key, row) for each row. The key is the factory date of the row, or, inside the 一日循環, the date that cycle
+    plays and its number (rows a few seconds past 24:00 before the wrap still belong to it). `state` carries the cycle
+    across calls when a scan resumes mid-file."""
+    st = state if state is not None else {}
+    st.setdefault("loop", None)
+    st.setdefault("loop_day", None)
     for r in rows:
         p = r.get("payload") or {}
+        day = _ts(r["ts"]).astimezone(F.TZ).date().isoformat()
         if r.get("kind") == "system" and p.get("msg") in ("scenario loaded", "runtime start"):
-            loop = 1 if p.get("scenario") == "day_loop" else None
+            st["loop"], st["loop_day"] = (1, day) if p.get("scenario") == "day_loop" else (None, None)
         elif r.get("kind") == "system" and r.get("actor") == "day_loop" and "loop" in p:
-            loop = int(p["loop"])
-        yield (_ts(r["ts"]).astimezone(F.TZ).date().isoformat(), loop), r
+            st["loop"], st["loop_day"] = int(p["loop"]), day
+        yield ((st["loop_day"] or day) if st["loop"] else day, st["loop"]), r
 
 
 def machine_label(mid: str | None) -> str:
@@ -221,20 +226,30 @@ def split_sentences(text: str) -> list[str]:
     return [s.strip() for s in re.findall(r"[^。！？!?\n]+[。！？!?]?", text) if s.strip()]
 
 
+_NAMED_RE = re.compile(r"\d{1,2}\s*號機|#[A-Z]-?\d{2,4}|SO-\d{3}|EV-[0-9A-Z-]+")
+
+
 def check_sentences(text: str, f: dict[str, Any]) -> list[str] | None:
-    """The model's summary when it passes: ≤ 8 sentences, every number found in the facts. None = use the code's."""
+    """The model's summary when it passes: ≤ 8 sentences, every number found in the facts, and every machine, order or
+    event it names named in the facts too (「1 號機」 in a day that never touched press 1 is made up). None = use the
+    code's sentences."""
     from warroom.agent.main_agent import ungrounded
     sents = split_sentences(text)
     if not sents or len(sents) > MAX_DAILY_SENTENCES:
         return None
-    if ungrounded("".join(sents), facts_text(f)):
+    src = facts_text(f)
+    if ungrounded("".join(sents), src):
+        return None
+    flat = src.replace(" ", "")
+    if any(n.replace(" ", "") not in flat for n in _NAMED_RE.findall("".join(sents))):
         return None
     return sents
 
 
 SUMMARY_SYSTEM = ("你是工廠戰情室的紀錄員。把使用者給的「當天事實」寫成給主管看的每日摘要：繁體中文、最多 8 句、白話、"
                   "不用條列、不用 Markdown。只能用事實裡出現的數字和編號，不可以加推測、不可以改數字。先說處理了幾件、"
-                  "結果如何，再講重要的事件（哪台機、判斷是否被推翻、主管核准哪一版、結果），最後說還沒結的與訂單出貨。")
+                  "結果如何，再講重要的事件（哪台機、判斷是否被推翻、主管核准哪一版、結果），最後說還沒結的與訂單出貨。"
+                  "事實裡沒寫的機台、核准、結果、出貨一律不要寫；某一項沒有就不要提。")
 
 
 # ====================================================================================== files

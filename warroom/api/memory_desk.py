@@ -32,7 +32,7 @@ class MemoryDesk:
         self.obs = ML.ObservationStore(base / "observations.sqlite")
         self.index = ML.MemoryIndex(getattr(rt.c, "kb", None))
         self._offset = 0                    # audit file bytes already turned into observations
-        self._loop: int | None = None       # the 一日循環 cycle at that point of the file
+        self._scan: dict[str, Any] = {}       # the 一日循環 cycle at that point of the file (memory_log.scan state)
         self._day: str | None = None        # the factory date the desk last saw (date boundary)
         self._tasks: set[asyncio.Task] = set()
         self._index_at = 0.0
@@ -46,7 +46,7 @@ class MemoryDesk:
             return [r for r in ML.read_rows(None, self.rt.audit) if int(r["seq"]) > last]
         size = self.audit_path.stat().st_size
         if size < self._offset:
-            self._offset, self._loop = 0, None
+            self._offset, self._scan = 0, {}
         with self.audit_path.open("rb") as fh:
             fh.seek(self._offset)
             data = fh.read()
@@ -67,21 +67,20 @@ class MemoryDesk:
             return 0
         last = self.obs.last_seq()
         items = []
-        loop = self._loop
-        for (day, lp), r in ML.scan(rows, loop):
-            loop = lp
+        for (day, lp), r in ML.scan(rows, self._scan):
             if int(r["seq"]) <= last:
                 continue
             o = ML.observe(r)
             if o is not None:
                 items.append((ML.day_name(day, lp), o))
-        self._loop = loop
         return self.obs.add(items)
 
     def today_key(self) -> tuple[str, int | None]:
         now = self.rt.clock.now().astimezone(ML.F.TZ)
         info = self.rt.day_loop_info() if hasattr(self.rt, "day_loop_info") else None
-        return now.date().isoformat(), (info or {}).get("loop") or None
+        if info:                                    # the 一日循環: the date it plays and the cycle number
+            return str(info.get("day") or now.date().isoformat()), info.get("loop") or None
+        return now.date().isoformat(), None
 
     def today(self) -> list[dict[str, Any]]:
         self.sync()
