@@ -1824,6 +1824,24 @@ class StateMachine:
                                   {"cure_formula_args_from_plant": step.id, "from": step.args, "to": args,
                                    "press": press}, event_id=ev.id)
             return step.model_copy(update={"args": args})
+        if step.tool is ToolName.SOLVE_SCHEDULE and is_press:
+            # a real model sometimes leaves the event press out of cure_overrides_h (2 of 3 runs of page 11): the
+            # schedule then keeps the recipe cure, the gate refuses set_cure_time and the card shrinks to 「通知維修」
+            # with 「排程未變更」. This round's formula result for the press fills it, like the formula inputs above
+            # (not for a press the solve takes out, nor when another solve of the plan already carries it).
+            mid = ev.machine_id
+            f = self._evidence(run)["cure_formula_by_press"].get(mid)
+            over = step.args.get("cure_overrides_h")
+            if f and mid not in (step.args.get("unavailable_presses") or []) \
+                    and not (isinstance(over, dict) and mid in over) \
+                    and not any(sr.step.tool is ToolName.SOLVE_SCHEDULE and sr.step.id != step.id
+                                and mid in (sr.step.args.get("cure_overrides_h") or {}) for sr in ev.steps):
+                over = {**(over if isinstance(over, dict) else {}), mid: f[-1]}
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"cure_overrides_from_formula": {mid: {"from": None, "to": f[-1]}},
+                                   "step_id": step.id, "reason": "solve had no cure override for the event press"},
+                                  event_id=ev.id)
+                step = step.model_copy(update={"args": {**step.args, "cure_overrides_h": over}})
         if step.tool is ToolName.SOLVE_SCHEDULE and isinstance(step.args.get("cure_overrides_h"), dict):
             by_press = self._evidence(run)["cure_formula_by_press"]
             over = dict(step.args["cure_overrides_h"])
