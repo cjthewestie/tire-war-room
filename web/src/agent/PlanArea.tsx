@@ -129,7 +129,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 Agent Nemo</button>
-          <span className="apv-hint">{ev.state === 'safe_stop' ? '已安全停止，請到現場處理' : closed ? `${ended(ev).pill}；Agent Nemo 異常報告在對話區` : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{ev.state === 'safe_stop' ? '已安全停止，請到現場處理' : closed ? `${ended(ev).pill}${ev.source === 'supervisor' || ev.source === 'plant' ? '' : '；Agent Nemo 異常報告在對話區'}` : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )

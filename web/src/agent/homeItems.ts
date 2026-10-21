@@ -42,8 +42,10 @@ function named(head: string, title: string, machine?: string): string {
   if (own) t = t.slice(own.length).trim()
   return t ? `${head}${machine ? '・' : '：'}${t}` : head
 }
-/** How a closed event ended, in the supervisor's words: 已恢復正常 only when a reading confirmed it. */
+/** How a closed event ended, in the supervisor's words: 已恢復正常 only when a reading confirmed it; a supervisor task or
+ *  plant event has no reading to recover, so it is 已完成. */
 export function ended(ev: Event): { pill: string; tone: HomeItem['tone'] } {
+  if (ev.source === 'supervisor' || ev.source === 'plant') return { pill: '已完成', tone: 'ok' }
   const out = ev.outcome ?? ''
   if (/停用/.test(out)) return { pill: '已停用該機', tone: 'done' }
   if (/未驗證|未以讀值/.test(out)) return { pill: '已處置，未用讀值確認', tone: 'done' }
