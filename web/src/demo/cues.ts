@@ -1,70 +1,126 @@
-// Shared by the 3D factory (factory3d/useGuidedDemo.ts) and the war room (demo/useDemo.ts): one cue list, so both
-// screens show the same beat (GET/POST /api/demo/state carries the current cue between them).
-// The 6-minute guided demo (CJ, 2026-10-22: 「我的3d 工廠要有一個demo鍵 是一個六分鐘的demo流程…大概三分鐘的時候要換到
-// Pitch階段提醒我該Pitch嚕」). Pure timeline: the cues in order, when each one shows, and why (a real event, or its time
-// fallback). FactoryApp feeds it the elapsed demo time and the live signals; nothing here touches React or three.js,
-// so e2e/demo-unit.mjs can drive it with fake clocks.
+// Shared by the 3D factory (factory3d/useGuidedDemo.ts) and the war room (demo/useDemo.ts): one cue list and one pure
+// timeline, so both screens show the same beat (GET/POST /api/demo/state carries the current cue between them).
+// CJ, 2026-10-22: 「我的3d 工廠要有一個demo鍵 是一個六分鐘的demo流程…大概三分鐘的時候要換到Pitch階段提醒我該Pitch嚕」,
+// 「走動按鍵關鍵處可以讓我按按鍵再繼續」, 「固定視角的意思是幫我安排連貫的視角」.
+//
+// How a cue runs (advance()): it ENTERS (on a live signal, a delay, or right after the previous one), the camera flies
+// there and it HOLDS. A hold ends one of three ways:
+//   continue  a presenter checkpoint: 「按 A 繼續」 (A / Space / N). Once the shot has arrived (and its `until` signal is
+//             in) the sim is paused while CJ talks (simPaused()), and resumed on continue.
+//   approval  waits for the real approval (the sim keeps running); continue is refused (the R2 rule the demo shows).
+// Between cues, a cue that enters on a live event (the incident, its card, the crew finishing) waits for it; continue
+// cannot fake it, only its timeout can.
+//   auto      ends on its own after `min` seconds.
+// The story's 3:00 is a soft target: past it the card says 「該換 Pitch 了」; from 3:30 the robot beat moves on to the
+// pitch by itself, and a continue anywhere in the story goes straight to the pitch.
+// Nothing here touches React or three.js, so e2e/demo-unit.mjs drives it with fake clocks and fake signals.
 
-/** The scenario the demo plays: 「一早訂單湧入」 (branch cj/morning-rush-scenario). One constant, so retiming is one edit. */
+/** The scenario the demo plays: 「一早訂單湧入」 (PR #107). One constant, so retiming is one edit. */
 export const DEMO_SCENARIO = 'morning_rush'
-/** Until morning_rush lands on the server: the plant runs normally, then the 7 號機溫降 scenario loads before its cue. */
+/** Until morning_rush lands on the server: the plant runs normally, then the 7 號機溫降 scenario loads. */
 export const FALLBACK_LOADS: DemoLoad[] = [
   { at: 0, scenario: 'normal', speed: 10 },
-  { at: 62, scenario: 'press7_temp_drop', speed: 10 },
+  { at: 40, scenario: 'press7_temp_drop', speed: 10 },
 ]
-/** Demo speed for morning_rush (faster than its 30× default: the sim also waits while the model plans, so at 30× the 7 號機 card came at ~2:30 real). */
-export const DEMO_SPEED = 40
+/** morning_rush's own demo speed (PR #107, measured live: orders 0:01–0:14, 急單 card 0:28, 7 號機 0:77 at 30×). The
+ *  checkpoints pause the sim while CJ talks, so the speed only sets how long the plant runs between them. */
+export const DEMO_SPEED = 30
 export const MAIN_LOADS: DemoLoad[] = [{ at: 0, scenario: DEMO_SCENARIO, speed: DEMO_SPEED }]
 
-export const DEMO_TOTAL = 360
-export const PITCH_AT = 180
-export const WARN_AT = 300
+/** The story's soft target (「故事目標 3:00」), the automatic pitch, and the deck's length (CJ's slides: 180 s). */
+export const STORY_TARGET = 180
+export const AUTO_PITCH = 210
+export const PITCH_LEN = 180
+/** Kept for the war room's 「故事目標」 and older callers. */
+export const PITCH_AT = STORY_TARGET
+export const DEMO_TOTAL = STORY_TARGET + PITCH_LEN
+/** The camera's fly-in (1.5–2.5 s) plus a beat to settle, before a checkpoint is ready. */
+export const ARRIVE = 2.5
 
 export interface DemoLoad { at: number; scenario: string; speed: number }
-/** Live facts a cue can wait for. */
-export type Signal = 'orders' | 'event' | 'approval' | 'worker' | 'closed'
+/** Live facts a cue can wait for (demo/signals.ts). */
+export type Signal =
+  | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'worker' | 'workerDone' | 'closed'
 export type Signals = Partial<Record<Signal, boolean>>
-/** Where the director points the overview camera. */
-export type Shot = { kind: 'overview' } | { kind: 'incident'; close?: boolean } | { kind: 'whiteboard' }
+/** What the camera frames (factory3d/demoCamera.ts). */
+export type Shot =
+  | { kind: 'establish' } | { kind: 'overview' } | { kind: 'incident'; close?: boolean } | { kind: 'robot' } | { kind: 'whiteboard' }
 export type CueLink = 'console' | 'phone' | 'agent'
+export type Wait = 'continue' | 'approval' | 'auto'
 
 export interface Cue {
   id: string
-  /** planned time (s from the start) */
+  /** planned time (s from the start), for the bar's 「下一步」 and the planned-vs-actual table */
   at: number
   title: string
   body: string
-  /** advance as soon as this is true (not before `minAt`); else at `at + wait` */
-  on?: Signal
-  minAt?: number
-  wait?: number
+  /** when it starts once the previous cue is done: on a signal (or `timeout` s later anyway), or `after` s later;
+   *  none = right away */
+  enter?: { on?: Signal; timeout?: number; after?: number }
+  hold: {
+    wait: Wait
+    /** seconds after entering before the hold can end (the camera's arrival, a 3 s look at the worker, the robot's
+     *  little show); default ARRIVE */
+    min?: number
+    /** the checkpoint is ready only once this signal is in (or `untilTimeout` s after entering) */
+    until?: Signal
+    untilTimeout?: number
+    /** wait 'approval': the signal that ends it; `card`: if that card never showed after 25 s, continue may pass */
+    approval?: Signal
+    card?: Signal
+    /** a continue hold that ends by itself after this many seconds */
+    autoAfter?: number
+    /** pause the sim while the checkpoint waits (default: yes for continue) */
+    pauseSim?: boolean
+  }
   links?: CueLink[]
   shot: Shot
   /** full-screen card with a chime (the pitch switch, the end) */
   big?: boolean
 }
 
-// Timed against two real runs on :8170 (Nemotron 3.5 Lightning, morning_rush at 40×, 2026-10-22): the 7 號機 event at
-// 1:25 / 1:43, its approval card 1:42 / 2:15, crew on it 1:49 / 2:22, closed 1:51 / 2:25 — the sim waits while the model
-// plans, so the beats move by half a minute between runs. Hence the story cues follow the signals (each up ≥ 10 s, see
-// MIN_DWELL), `at + wait` is only the fallback, and the signals are latched (latch()): a card the presenter already
-// approved still moves the 手機 cue on.
 export const CUES: Cue[] = [
-  { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有急單、也有趕不上的單。', shot: { kind: 'overview' } },
-  { id: 'console', at: 30, title: '👉 去看主控台', body: '訂單、AI 預先擬好的計劃：開工計劃、急單重排，趕不上的單已先擬好方案。在主控台核准。', links: ['console'], shot: { kind: 'overview' } },
-  { id: 'event', at: 100, on: 'event', minAt: 50, wait: 15, title: '⚠ 事件：7 號機溫降', body: '偵測器先發現溫度往下掉，才喚醒 AI。巡檢車正開過去。', shot: { kind: 'incident' } },
-  { id: 'phone', at: 130, on: 'approval', minAt: 60, wait: 15, title: '📱 手機響了：去核准', body: 'AI 的計劃要主管核准（R2）。拿起手機看方案、按核准。', links: ['phone'], shot: { kind: 'incident', close: true } },
-  { id: 'worker', at: 150, on: 'worker', minAt: 70, wait: 8, title: '👷 看員工到現場解決', body: '核准後維修人員走到 7 號機處理，圈圈轉綠就是好了。', shot: { kind: 'incident', close: true } },
-  { id: 'agent', at: 165, on: 'closed', minAt: 80, wait: 6, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼換假設，全部記在稽核裡。', links: ['agent'], shot: { kind: 'overview' } },
-  { id: 'pitch', at: PITCH_AT, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。←／→ 換頁，點白板全螢幕。', big: true, shot: { kind: 'whiteboard' } },
-  { id: 'warn', at: WARN_AT, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。', shot: { kind: 'whiteboard' } },
-  { id: 'end', at: DEMO_TOTAL, title: '結束', body: '謝謝！', big: true, shot: { kind: 'whiteboard' } },
+  { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有一般單、有交期很趕的單，還有急單。',
+    hold: { wait: 'continue', min: 12 }, shot: { kind: 'establish' } },
+  { id: 'rush', at: 20, title: '📋 先核准急單', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
+    hold: { wait: 'approval', approval: 'rushApproved', card: 'rushCard' }, shot: { kind: 'overview' } },
+  { id: 'console', at: 40, title: '👉 主控台：趕不上的單已先擬好方案', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],
+    hold: { wait: 'continue', until: 'preplan', untilTimeout: 25 }, shot: { kind: 'overview' } },
+  { id: 'event', at: 75, enter: { on: 'event', timeout: 60 }, title: '⚠ 事件：7 號機溫降', body: '偵測器（不是 AI）先從讀值發現溫度往下掉，才喚醒 AI 規劃。巡檢車也開過去了。',
+    hold: { wait: 'continue' }, shot: { kind: 'incident' } },
+  { id: 'phone', at: 95, enter: { on: 'approval', timeout: 40 }, title: '📱 拿起手機，核准', body: 'AI 的修正計劃要主管核准（R2 以上一定要人）。手機看方案、按核准。', links: ['phone'],
+    hold: { wait: 'approval', approval: 'approved' }, shot: { kind: 'incident', close: true } },
+  { id: 'worker', at: 115, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機處理完，程式驗證讀值回來了：圈圈轉綠。',
+    hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
+  { id: 'agent', at: 130, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼這樣做，全部記在稽核鏈上。', links: ['agent'],
+    hold: { wait: 'continue' }, shot: { kind: 'overview' } },
+  { id: 'robot', at: 155, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
+    hold: { wait: 'continue', min: 8 }, shot: { kind: 'robot' } },
+  { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
+    hold: { wait: 'continue', autoAfter: 8 }, shot: { kind: 'whiteboard' } },
+  { id: 'warn', at: STORY_TARGET + 120, enter: { after: 120 }, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。',
+    hold: { wait: 'auto', min: 0 }, shot: { kind: 'whiteboard' } },
+  { id: 'end', at: DEMO_TOTAL, enter: { after: 60 }, title: '結束', body: '謝謝！', big: true,
+    hold: { wait: 'continue', pauseSim: false }, shot: { kind: 'whiteboard' } },
 ]
+export const PITCH_INDEX = CUES.findIndex((c) => c.id === 'pitch')
+export const ROBOT_INDEX = CUES.findIndex((c) => c.id === 'robot')
+/** The presenter checkpoints ①–⑧ (CJ: 「關鍵處可以讓我按按鍵再繼續」), for the badge 「④ / 8」 (the 急單 approval is
+ *  an extra stop between ① and ②). */
+export const CHECKPOINTS = ['start', 'console', 'event', 'phone', 'worker', 'agent', 'robot', 'pitch']
 
-export type Reason = 'time' | 'event' | 'skip'
-export interface Fired { id: string; t: number; reason: Reason }
-export interface Timeline { index: number; fired: Fired[] }
-export const startTimeline = (): Timeline => ({ index: 0, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] })
+export type Reason = 'time' | 'event' | 'continue' | 'auto' | 'skip'
+export interface Fired { id: string; t: number; reason: Reason; /** when its hold ended, and how */ out?: number; outBy?: Reason }
+export interface Timeline {
+  index: number
+  enteredAt: number
+  released: boolean
+  releasedAt: number
+  /** demo second the deck started (the pitch checkpoint passed; null = not yet) */
+  pitchAt: number | null
+  fired: Fired[]
+}
+export const startTimeline = (): Timeline => ({ index: 0, enteredAt: 0, released: false, releasedAt: 0, pitchAt: null, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] })
 
 /** Signals stay true once seen (the approval card is gone once approved; the cue should still follow it). */
 export function latch(seen: Signals, now: Signals): Signals {
@@ -73,54 +129,104 @@ export function latch(seen: Signals, now: Signals): Signals {
   return out
 }
 
-/** A cue stays up at least this long before an event can replace it. */
-const MIN_DWELL = 10
+function enter(tl: Timeline, i: number, t: number, reason: Reason): Timeline {
+  return {
+    ...tl, index: i, enteredAt: t, released: false, releasedAt: t,
+    fired: [...tl.fired, { id: CUES[i].id, t, reason }],
+  }
+}
+function release(tl: Timeline, t: number, by: Reason): Timeline {
+  const fired = tl.fired.slice()
+  fired[fired.length - 1] = { ...fired[fired.length - 1], out: t, outBy: by }
+  return { ...tl, released: true, releasedAt: t, fired, pitchAt: tl.pitchAt ?? (tl.index === PITCH_INDEX ? t : null) }
+}
 
-/** When the cue after `tl` fires on its own, given the current time and signals; null = not yet. */
-function due(tl: Timeline, t: number, sig: Signals): Reason | null {
-  const next = CUES[tl.index + 1]
-  if (!next) return null
-  const prevAt = tl.fired[tl.fired.length - 1]?.t ?? 0
-  if (next.on && sig[next.on] && t >= (next.minAt ?? 0) && t >= prevAt + MIN_DWELL) return 'event'
-  // the clock fallback also leaves the current cue up for MIN_DWELL (an approval at 2:45 fired 👷 and, 250 ms later, the
-  // overdue 🧠 Agent cue); the big cues (the pitch switch, the end) keep their time
-  if (t >= next.at + (next.on ? next.wait ?? 0 : 0) && (next.big || t >= prevAt + MIN_DWELL)) return 'time'
+/** Is the current checkpoint ready (camera arrived, its `until` in)? */
+export function ready(tl: Timeline, t: number, sig: Signals): boolean {
+  const h = CUES[tl.index].hold
+  const e = t - tl.enteredAt
+  return e >= (h.min ?? ARRIVE) && (!h.until || !!sig[h.until] || e >= (h.untilTimeout ?? Infinity))
+}
+
+/** May continue end this hold now? (false at an approval checkpoint until the approval, with one exception: the card
+ *  it waits for never showed — a model that failed — after 25 s.) */
+export function canContinue(tl: Timeline, t: number, sig: Signals): boolean {
+  if (tl.released) return true
+  const h = CUES[tl.index].hold
+  if (h.wait !== 'approval') return true
+  return !!(h.card && !sig[h.card] && t - tl.enteredAt >= 25)
+}
+
+export interface Step { tl: Timeline; refused?: boolean }
+
+/** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on). */
+export function advance(tl: Timeline, t: number, sig: Signals, cont = false): Step {
+  // the soft target: past 3:30 the robot beat (⑦) hands over to the pitch by itself, and from any other beat a
+  // continue goes straight to the pitch (the story is cut short, not skipped: the approval still never moves on alone)
+  if (tl.index < PITCH_INDEX && t >= AUTO_PITCH) {
+    if (tl.index >= ROBOT_INDEX) return { tl: enter(tl, PITCH_INDEX, t, 'time') }
+    if (cont) return { tl: enter(tl, PITCH_INDEX, t, 'continue') }
+  }
+  const cur = CUES[tl.index]
+  if (!tl.released) {
+    const h = cur.hold, e = t - tl.enteredAt
+    if (h.wait === 'approval') {
+      if (e >= (h.min ?? ARRIVE) && h.approval && sig[h.approval]) return { tl: release(tl, t, 'event') }
+      if (cont) return canContinue(tl, t, sig) ? { tl: release(tl, t, 'continue') } : { tl, refused: true }
+      return { tl }
+    }
+    if (cont) return { tl: release(tl, t, 'continue') }
+    if (h.wait === 'auto' && ready(tl, t, sig)) return { tl: release(tl, t, 'auto') }
+    if (h.autoAfter != null && e >= h.autoAfter) return { tl: release(tl, t, 'auto') }
+    return { tl }
+  }
+  const i = tl.index + 1
+  const next = CUES[i]
+  if (!next) return { tl }
+  const en = next.enter
+  const since = t - tl.releasedAt
+  // waiting for a live event (the incident, its card, the crew finishing): continue cannot fake it, only the timeout can
+  if (cont) return en?.on ? { tl, refused: true } : { tl: enter(tl, i, t, 'skip') }
+  if (!en) return { tl: enter(tl, i, t, tl.fired[tl.fired.length - 1].outBy === 'continue' ? 'continue' : 'auto') }
+  if (en.on && sig[en.on]) return { tl: enter(tl, i, t, 'event') }
+  if (en.after != null && since >= en.after) return { tl: enter(tl, i, t, 'time') }
+  if (en.timeout != null && since >= en.timeout) return { tl: enter(tl, i, t, 'time') }
+  return { tl }
+}
+
+/** What the beat is waiting for (posted to /api/demo/state): CJ's continue, the real approval, the next live event,
+ *  or nothing (the camera is still flying in / an automatic beat). */
+export function waiting(tl: Timeline, t: number, sig: Signals): 'continue' | 'approval' | 'event' | null {
+  if (tl.released) return CUES[tl.index + 1] ? 'event' : null
+  const h = CUES[tl.index].hold
+  if (h.wait === 'approval') return canContinue(tl, t, sig) && h.card && !sig[h.card] ? 'continue' : 'approval'
+  if (h.wait === 'continue') return ready(tl, t, sig) ? 'continue' : null
   return null
 }
 
-/** Advance as far as the time and signals allow (one cue per step, so each shows at least a moment). */
-export function step(tl: Timeline, t: number, sig: Signals): Timeline {
-  const r = due(tl, t, sig)
-  if (!r) return tl
-  const i = tl.index + 1
-  return { index: i, fired: [...tl.fired, { id: CUES[i].id, t, reason: r }] }
-}
-
-/** N (下一步): show the next cue now. Skipping past the pitch cue jumps the clock to it (see skipTime). */
-export function skip(tl: Timeline, t: number): Timeline {
-  const i = tl.index + 1
-  if (!CUES[i]) return tl
-  return { index: i, fired: [...tl.fired, { id: CUES[i].id, t, reason: 'skip' }] }
-}
-
-/** Skipping into the pitch phase (or beyond) moves the demo clock to that cue, so the 3:00 countdown stays true. */
-export function skipTime(tl: Timeline, t: number): number {
-  const c = CUES[tl.index]
-  return c && c.at >= PITCH_AT ? Math.max(t, c.at) : t
+/** Should the sim be paused now? Only while CJ talks at a ready continue checkpoint (never at the approval: the
+ *  approval and the repair need the plant running). */
+export function simPaused(tl: Timeline, t: number, sig: Signals): boolean {
+  if (tl.released) return false
+  const h = CUES[tl.index].hold
+  return h.wait === 'continue' && h.pauseSim !== false && ready(tl, t, sig)
 }
 
 export const current = (tl: Timeline) => CUES[tl.index]
 export const upcoming = (tl: Timeline): Cue | null => CUES[tl.index + 1] ?? null
-export const inPitch = (t: number) => t >= PITCH_AT
+export const inPitch = (tl: Timeline) => tl.index >= PITCH_INDEX
 export const done = (tl: Timeline) => tl.index === CUES.length - 1
+/** Past the story's soft target and still telling the story: 「該換 Pitch 了」. */
+export const overTarget = (tl: Timeline, t: number) => tl.index < PITCH_INDEX && t >= STORY_TARGET
+/** Seconds left in the pitch (the whole deck until it starts; null in the story). */
+export const pitchLeft = (tl: Timeline, t: number) => (tl.index < PITCH_INDEX ? null : tl.pitchAt == null ? PITCH_LEN : PITCH_LEN - (t - tl.pitchAt))
 
-/** Pausable demo clock in real seconds. */
+/** Pausable demo clock in real seconds (the presenter's pause; checkpoints don't stop it). */
 export interface DemoClock { base: number; since: number | null }
 export const clockStart = (now: number): DemoClock => ({ base: 0, since: now })
 export const clockRead = (c: DemoClock, now: number) => c.base + (c.since == null ? 0 : (now - c.since) / 1000)
 export const clockPause = (c: DemoClock, now: number): DemoClock => ({ base: clockRead(c, now), since: null })
 export const clockResume = (c: DemoClock, now: number): DemoClock => (c.since == null ? { base: c.base, since: now } : c)
-export const clockSet = (c: DemoClock, t: number, now: number): DemoClock => ({ base: t, since: c.since == null ? null : now })
 
 /** m:ss */
 export const mss = (s: number) => `${Math.floor(Math.max(0, s) / 60)}:${String(Math.floor(Math.max(0, s) % 60)).padStart(2, '0')}`

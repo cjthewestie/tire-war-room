@@ -1,24 +1,18 @@
-// The 「▶ Demo（6 分鐘）」 button's guided run (CJ, 2026-10-22): loads the morning_rush scenario at demo speed, then walks
-// the presenter through the story with big cue cards (主控台 → 事件 → 手機核准 → 員工到場 → Agent 頁面), flies the camera,
-// and at 3:00 switches to the pitch on the whiteboard with a 6:00 countdown. The timeline itself is demoCues.ts; this
-// file feeds it the clock and the live signals, runs the scenario loads and draws the cards and the control bar.
-// Keys (FactoryApp; no clash with the 3D keys: D strafes and P raises the phone, so the demo uses G / N / B):
-// G start / restart, N next cue, B pause / resume, ← / → (or PageUp / PageDown) change slides in the pitch.
-// The cards and the bar are GuidedDemo.tsx.
+// The 「▶ Demo（6 分鐘）」 run in the 3D factory (CJ, 2026-10-22: 「demo按鍵按下去就只能按照流程跑幫我固定視角」,
+// 「固定視角的意思是幫我安排連貫的視角」, 「走動按鍵關鍵處可以讓我按按鍵再繼續」). The timeline and the sim pausing are
+// the shared driver (demo/driver.ts, the same one the war room uses); this hook adds the 3D's part: the one-take camera
+// (demoCamera.ts) on each beat's shot, the robot's little show at the robot beat, the chime, the pitch slides, the
+// exit confirm. While it runs, the camera is locked: only continue / pause / exit / slides (and the phone) work.
+// Keys (FactoryApp, and the same actions on the Xbox pad, gamepad.ts): G start · Space / N continue · B pause ·
+// Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ScenarioName } from '../contracts'
-import { SCENARIOS } from '../mock/engine'
-import { primaryEvent, type WarRoomState } from '../store'
+import { DemoRun, type LogRow } from '../demo/driver'
+import { AUTO_PITCH, CHECKPOINTS, CUES, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
+import type { WarRoomState } from '../store'
 import type { Transport } from '../transport'
-import { PLACED_BY_ID, WHITEBOARD } from './layout'
-import { director } from './pose'
+import { demoCam } from './demoCamera'
 import { robot } from './patrol'
-import {
-  CUES, DEMO_TOTAL, FALLBACK_LOADS, MAIN_LOADS, clockPause, clockRead, clockResume, clockSet, clockStart,
-  current, inPitch, latch, mss, skip, skipTime, startTimeline, step, upcoming, type DemoClock, type DemoLoad, type Shot, type Signals, type Timeline,
-} from './demoCues'
-
-const OVERVIEW = { x: 1.6, z: 0.4 }
+import { director } from './pose'
 
 let ac: AudioContext | null = null
 function chime(loud = false) {
@@ -39,186 +33,135 @@ function chime(loud = false) {
   } catch { /* no audio */ }
 }
 
-/** Point the overview camera for a cue. */
-function aim(shot: Shot, machine: string | null) {
-  director.on = true
-  if (shot.kind === 'whiteboard') {
-    Object.assign(director, { x: WHITEBOARD.x, y: WHITEBOARD.y, z: WHITEBOARD.z, yaw: WHITEBOARD.yaw, pitch: 0.2, dist: 3.9 })
-    return
-  }
-  const p = shot.kind === 'incident' && machine ? PLACED_BY_ID[machine] : null
-  const close = shot.kind === 'incident' && !!shot.close
-  if (!p) { Object.assign(director, { x: OVERVIEW.x, y: 0.55, z: OVERVIEW.z, yaw: 0.35, pitch: 0.82, dist: 25 }); return }
-  // from the aisle side of the machine (presses: from the north), a little off-axis
-  const north = p.line === 'CURE' || p.line === 'D' || p.line === 'BOND'
-  Object.assign(director, { x: p.x, y: 0.5, z: p.z + (north ? -0.9 : 0.9), yaw: (north ? Math.PI : 0) - 0.45, pitch: close ? 0.62 : 0.78, dist: close ? 6.5 : 10 })
-}
+interface Snap { tl: DemoRun['tl']; t: number; sig: DemoRun['latched']; eventId: string | null; fallback: boolean; log: LogRow[] }
+const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.latched, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
 
-/** The live facts the cues wait for. `seen` remembers the incident the demo is following. */
-function signals(state: WarRoomState, seen: { id: string | null; machine: string | null }): Signals {
-  // machine incidents only: 開工 / 急單 plant events (machine PLANT) and their cards belong to the 主控台 beat
-  const events = (state.snapshot?.events ?? []).filter((e) => !!PLACED_BY_ID[e.machine_id])
-  const open = events.filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
-  const ev = primaryEvent(open)
-  if (ev && !seen.id) { seen.id = ev.id; seen.machine = ev.machine_id }
-  const followed = seen.id ? events.find((e) => e.id === seen.id) ?? null : null
-  const workers = state.world?.people.workers ?? []
-  const onTask = !!seen.machine && workers.some((w) => w.machine_id === seen.machine && (w.state === '前往中' || w.state === '執行中'))
-  return {
-    orders: (state.world?.orders.new_today ?? 0) > 0,
-    event: !!ev,
-    approval: !!seen.id && state.pending.some((a) => a.event_id === seen.id),
-    worker: onTask || (!!followed && (followed.state === 'execute' || followed.state === 'verify')),
-    closed: !!seen.id && (!followed || followed.state === 'closed'),
-  }
-}
-
-export interface DemoLogRow { id: string; title: string; planned: number; t: number; reason: string; wall: string }
-
-export function useGuidedDemo({ state, transport, onBegin, onEnd }: {
+export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
   state: WarRoomState; transport: Transport | null
   /** the demo starts: leave first person, close panels */
   onBegin: () => void
   onEnd: () => void
+  nSlides: number
 }) {
+  const run = useRef<DemoRun | null>(null)
   const [running, setRunning] = useState(false)
-  const [tl, setTl] = useState<Timeline>(startTimeline)
-  const [clock, setClock] = useState<DemoClock>({ base: 0, since: null })
-  const [t, setT] = useState(0)
+  /** what the overlay shows, copied out of the driver every tick */
+  const [snap, setSnap] = useState<Snap | null>(null)
   const [slide, setSlide] = useState(0)
   const [slideView, setSlideView] = useState(false)
-  const [plan, setPlan] = useState<{ loads: DemoLoad[]; fallback: boolean } | null>(null)
   const [bigUntil, setBigUntil] = useState(0)
   const [note, setNote] = useState<string | null>(null)
-  const [incidentEventId, setIncidentEventId] = useState<string | null>(null)
-  const loaded = useRef(new Set<number>())
-  const armedAt = useRef(Infinity)
-  const seen = useRef<{ id: string | null; machine: string | null }>({ id: null, machine: null })
-  const log = useRef<DemoLogRow[]>([])
-  /** demo second at which each signal was first seen (for retiming the cues against the real run) */
-  const firstSeen = useRef<Record<string, number>>({})
-  const latched = useRef<Signals>({})
+  const [confirmExit, setConfirmExit] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const lastRefused = useRef(0)
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
 
-  const load = useCallback(async (l: DemoLoad) => {
-    if (!transport) return
-    armedAt.current = Infinity
-    seen.current = { id: null, machine: null }
-    latched.current = {}
-    await transport.control({ action: 'scenario', scenario: l.scenario as ScenarioName, speed: l.speed, preroll: true })
-    await transport.control({ action: 'play' })
-    armedAt.current = performance.now() + 1500   // the new plant's snapshot replaces the old one's events
-  }, [transport])
-
-  const begin = useCallback(async () => {
-    if (!transport) return
-    onBegin()
-    chime()
-    loaded.current = new Set([0])
-    log.current = []
-    firstSeen.current = {}
-    setTl(startTimeline()); setSlide(0); setSlideView(false); setT(0); setBigUntil(0)
-    const now = performance.now()
-    setClock(clockStart(now))
-    setRunning(true)
-    aim(CUES[0].shot, null)
-    log.current.push({ id: CUES[0].id, title: CUES[0].title, planned: 0, t: 0, reason: 'time', wall: new Date().toISOString() })
-    // morning_rush if the server has it, else the 7 號機 fallback (normal → press7_temp_drop at 1:02)
-    const known = transport.mode === 'mock' ? SCENARIOS.some((s) => s.name === MAIN_LOADS[0].scenario) : true
-    try {
-      if (!known) throw new Error('not in this build')
-      await load(MAIN_LOADS[0])
-      setPlan({ loads: MAIN_LOADS, fallback: false })
-    } catch (e) {
-      console.warn('[demo] morning_rush unavailable, falling back', e)
-      setNote('「一早訂單湧入」情境還沒上線，改用 7 號機溫降')
-      setPlan({ loads: FALLBACK_LOADS, fallback: true })
-      try { await load(FALLBACK_LOADS[0]) } catch (e2) { console.warn(e2); setNote('情境載入沒有成功') }
-    }
-  }, [transport, load, onBegin])
-
   const stop = useCallback(() => {
-    setRunning(false); setSlideView(false)
+    run.current = null
+    setSnap(null)
+    setRunning(false); setSlideView(false); setConfirmExit(false); setPaused(false)
     director.on = false
     onEnd()
   }, [onEnd])
 
-  const paused = running && clock.since == null
+  const begin = useCallback(async () => {
+    if (!transport) return
+    if (run.current) await run.current.exit()
+    onBegin()
+    chime()
+    const r = new DemoRun(transport, '3d')
+    run.current = r
+    demoCam.reset()
+    demoCam.reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    director.on = true
+    setSlide(0); setSlideView(false); setBigUntil(0); setConfirmExit(false); setPaused(false); setNote(null)
+    setRunning(true)
+    setSnap(snapOf(r))
+    const n = await r.start(performance.now())
+    if (n) setNote(n)
+  }, [transport, onBegin])
+
+  /** A / Space / N. At the approval checkpoint it is refused: the approval has to happen on the phone. */
+  const cont = useCallback(async () => {
+    const r = run.current
+    if (!r || paused) return
+    if (confirmExit) { setConfirmExit(false); return }
+    const res = await r.continue()
+    if (res === 'approval') setNote('要先核准（手機或核准卡），才能往下')
+  }, [paused, confirmExit])
+
   const togglePause = useCallback(() => {
-    if (!running) return
-    const now = performance.now()
-    if (clock.since == null) {
-      setClock(clockResume(clock, now))
-      if (!inPitch(clockRead(clock, now))) void transport?.control({ action: 'play' }).catch(() => {})
-    } else {
-      setClock(clockPause(clock, now))
-      if (!inPitch(clockRead(clock, now))) void transport?.control({ action: 'pause' }).catch(() => {})
-    }
-  }, [running, clock, transport])
+    const r = run.current
+    if (!r) return
+    r.pause(performance.now(), !paused)
+    setPaused(!paused)
+  }, [paused])
 
-  const next = useCallback(() => {
-    if (!running) return
-    const now = performance.now()
-    const tt = clockRead(clock, now)
-    const n = skip(tl, tt)
-    if (n === tl) return
-    const t2 = skipTime(n, tt)
-    if (t2 !== tt) setClock(clockSet(clock, t2, now))
-    setTl(n)
-  }, [running, clock, tl])
+  const exit = useCallback(async () => {
+    const r = run.current
+    if (r) await r.exit()
+    stop()
+  }, [stop])
 
-  // the tick: clock, scenario loads, signals → timeline
+  // the tick: the shared driver, then the 3D's part of a new cue
   useEffect(() => {
     if (!running) return
     const id = setInterval(() => {
-      const now = performance.now()
-      const tt = Math.min(clockRead(clock, now), DEMO_TOTAL + 0.5)
-      setT(tt)
-      if (plan) plan.loads.forEach((l, i) => {
-        if (i > 0 && tt >= l.at && !loaded.current.has(i)) { loaded.current.add(i); void load(l).catch((e) => console.warn(e)) }
-      })
-      const live = now >= armedAt.current ? signals(stateRef.current, seen.current) : {}
-      for (const [k, v] of Object.entries(live)) if (v && firstSeen.current[k] == null) firstSeen.current[k] = Math.round(tt * 10) / 10
-      latched.current = latch(latched.current, live)
-      const sig = latched.current
-      setTl((cur) => step(cur, tt, sig))
+      const r = run.current
+      if (!r) return
+      const out = r.tick(performance.now(), stateRef.current)
+      if (out === 'stopped') { stop(); return }
+      const c = current(r.tl)
+      demoCam.setShot(c.shot, r.seen.machine ?? robot.target)
+      if (out === 'cue') {
+        console.info(`[demo] ${r.t.toFixed(1)} ${c.id} (${r.tl.fired[r.tl.fired.length - 1].reason})`)
+        if (c.big) { chime(true); setBigUntil(performance.now() + 4000) } else chime()
+        if (c.id === 'robot') robot.playReq = true
+        if (c.id === 'pitch') setSlide(0)
+      }
+      if (r.refusedAt > lastRefused.current) {
+        lastRefused.current = r.refusedAt
+        const w = waiting(r.tl, r.t, r.latched)
+        setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : '等工廠下一件事發生，不能跳過')
+      }
+      const d = stateRef.current.demo
+      if (d?.running && d.paused !== paused) setPaused(d.paused)
+      setSnap(snapOf(r))
     }, 250)
     return () => clearInterval(id)
-  }, [running, clock, plan, load])
-
-  // a new cue: camera, chime, log
-  const cue = current(tl)
-  const lastCue = useRef<string>('')
-  useEffect(() => {
-    if (!running || cue.id === lastCue.current) return
-    lastCue.current = cue.id
-    const f = tl.fired[tl.fired.length - 1]
-    if (cue.id !== 'start') log.current.push({ id: cue.id, title: cue.title, planned: cue.at, t: Math.round(f.t * 10) / 10, reason: f.reason, wall: new Date().toISOString() })
-    console.info(`[demo] ${mss(f.t)} ${cue.id} (${f.reason}) ${cue.title}`)
-    aim(cue.shot, seen.current.machine ?? robot.target)
-    setIncidentEventId(seen.current.id)
-    if (cue.big) { chime(true); setBigUntil(performance.now() + 4000) } else if (cue.id !== 'start') chime()
-  }, [running, cue, tl.fired])
-  // follow the incident machine once it is known (the event cue may fire before the camera knew where)
-  useEffect(() => {
-    if (running && cue.shot.kind === 'incident') aim(cue.shot, seen.current.machine ?? robot.target)
-  }, [running, cue, t])
+  }, [running, stop, paused])
   useEffect(() => () => { director.on = false }, [])
-  useEffect(() => { if (!running) lastCue.current = '' }, [running])
+
+  const tl = snap?.tl
+  const t = snap?.t ?? 0
+  const cue = tl ? current(tl) : CUES[0]
+  const sig = snap?.sig ?? {}
+  const w = tl ? waiting(tl, t, sig) : null
+  const isReady = !!tl && !tl.released && ready(tl, t, sig)
+  const changeSlide = useCallback((d: number) => setSlide((i) => Math.max(0, Math.min(nSlides - 1, i + d))), [nSlides])
 
   // test hook (headless e2e only)
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
-    const w = window as unknown as Record<string, unknown>
-    w.__demo3d = () => ({ running, t, cue: cue.id, paused, slide, slideView, fallback: plan?.fallback ?? null, log: log.current, signals: firstSeen.current, seen: seen.current, director: { ...director } })
-    return () => { delete w.__demo3d }
-  }, [running, t, cue.id, paused, slide, slideView, plan])
+    const w2 = window as unknown as Record<string, unknown>
+    w2.__demo3d = () => {
+      const x = run.current
+      return x ? {
+        running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released, waiting: waiting(x.tl, x.t, x.latched),
+        simHeld: x.simHeld, paused, slide, slideView, fallback: x.fallback, log: x.log, signals: x.firstSeen, seen: { id: x.seen.id, machine: x.seen.machine },
+        camMaxStep: demoCam.maxStep, flying: demoCam.flying, robotPlayed: [...robot.played],
+      } : { running: false, director: director.on }
+    }
+    return () => { delete w2.__demo3d }
+  }, [paused, slide, slideView])
 
   return {
-    running, t, cue, next: upcoming(tl), paused, slide, setSlide, slideView, setSlideView, bigUntil, note, setNote,
-    begin, stop, togglePause, skip: next, fallback: plan?.fallback ?? false, incidentEventId,
+    running, t, cue, next: tl ? upcoming(tl) : null, waiting: w, ready: isReady, released: !!tl?.released,
+    paused, slide, setSlide, changeSlide, slideView, setSlideView, bigUntil, note, setNote, confirmExit, setConfirmExit,
+    begin, stop, exit, cont, togglePause, fallback: snap?.fallback ?? false, incidentEventId: snap?.eventId ?? null,
+    overTarget: !!tl && overTarget(tl, t), pitchLeft: tl ? pitchLeft(tl, t) : null, autoPitchIn: AUTO_PITCH - t, storyTarget: STORY_TARGET,
+    checkpoint: CHECKPOINTS.indexOf(cue.id), checkpoints: CHECKPOINTS.length, log: snap?.log ?? ([] as LogRow[]),
   }
 }
 export type GuidedDemo = ReturnType<typeof useGuidedDemo>
-

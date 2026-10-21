@@ -9,13 +9,14 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { box, cyl, mesh, rbox } from './kit'
 import { PLACED_BY_ID } from './layout'
-import { EAST_X, LOOP, STOPS, WEST_X, robot, route, standPoint } from './patrol'
+import { EAST_X, LOOP, PLACED_IDS, STOPS, WEST_X, robot, route, showStep, standPoint } from './patrol'
 
 const SPEED = 0.62
 const INSPECT_S = 3.4
 
 function build() {
   const root = new THREE.Group()
+  root.rotation.order = 'YXZ'   // heading first, then the bow tips the nose
   const Y = '#f2c14e', CREAM = '#f3ead8', DARK = '#4d535b', STEEL = '#a9b2ba'
   // blob shadow
   const blob = new THREE.Mesh(new THREE.CircleGeometry(0.36, 20), new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.18, depthWrite: false }))
@@ -94,6 +95,9 @@ type Rig = ReturnType<typeof build>
 const FOLD: [number, number] = [-0.5, 2.3]
 const RAISE: [number, number] = [0.05, 0.25]
 const POINT: [number, number] = [0.55, 1.15]
+/** the robot beat: arm up high (waving), and folded forward (the bow) */
+const WAVE: [number, number] = [-0.15, 0.35]
+const BOW: [number, number] = [0.9, 1.6]
 const lerp = (a: number, b: number, u: number) => a + (b - a) * u
 const ease = (u: number) => u * u * (3 - 2 * u)
 const wrapA = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
@@ -113,6 +117,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
   const s = useRef({
     path: [] as [number, number][], loopI: 1, stopDone: new Set<number>(), inspect: -1, inspectFor: '' as string,
     arm: [...FOLD] as [number, number], yaw: Math.PI / 2, light: 0, target: null as string | null,
+    show: -1, showFor: '' as string, bow: 0,
   })
   const target = incident && PLACED_BY_ID[incident] ? incident : null
 
@@ -136,7 +141,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     robot.target = target
   }, [target])
 
-  useFrame(({ clock }, dtRaw) => {
+  useFrame(({ clock, camera }, dtRaw) => {
     const dt = Math.min(dtRaw, 0.2)   // real time even at a low frame rate (the projector laptop, headless e2e)
     const t = clock.elapsedTime
     const st = s.current
@@ -144,8 +149,26 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     let faceYaw: number | null = null
     let moving = false
 
+    // 0. the demo's robot beat: stop where it is and play the show, then carry on
+    if (robot.playReq) {
+      robot.playReq = false
+      st.show = 0
+      st.inspect = -1
+      robot.played = []
+      st.showFor = nearestMachine(robot.x, robot.z)
+    }
+    let showing: ReturnType<typeof showStep> = null
+    if (st.show >= 0) {
+      st.show += dt
+      showing = showStep(st.show)
+      if (showing && robot.played[robot.played.length - 1] !== showing) robot.played.push(showing)
+      robot.playing = showing
+      if (!showing) { st.show = -1; robot.playing = null }
+    }
     // 1. where to drive: an explicit path (divert / return) first, else the loop
-    if (st.inspect >= 0) {
+    if (showing) {
+      faceYaw = showing === 'scan' ? yawTo(st.showFor) : Math.atan2(camera.position.x - robot.x, camera.position.z - robot.z)
+    } else if (st.inspect >= 0) {
       st.inspect += dt / INSPECT_S
       if (st.inspect >= 1) st.inspect = -1
     } else if (st.path.length) {
@@ -165,8 +188,8 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
         else { st.loopI = (st.loopI + 1) % LOOP.length; if (st.loopI === 1) st.stopDone.clear() }
       }
     }
-    if (st.inspect >= 0) faceYaw = yawTo(st.inspectFor)
-    if (robot.mode === 'parked' && st.target) faceYaw = yawTo(st.target)
+    if (!showing && st.inspect >= 0) faceYaw = yawTo(st.inspectFor)
+    if (!showing && robot.mode === 'parked' && st.target) faceYaw = yawTo(st.target)
     function drive([gx, gz]: [number, number], d: number): boolean {
       const dx = gx - robot.x, dz = gz - robot.z, len = Math.hypot(dx, dz)
       if (len < 0.01) { robot.x = gx; robot.z = gz; return false }
@@ -185,9 +208,13 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     // 2. the arm: fold while driving, inspect motion at a stop, point and sweep while parked at an incident
     let goalArm: [number, number] = FOLD
     let light = 0
-    if (st.inspect >= 0) { const p = inspectPose(st.inspect); goalArm = p.a; light = p.light }
+    if (showing === 'wave') goalArm = WAVE
+    else if (showing === 'scan') { goalArm = POINT; light = 1 }
+    else if (showing === 'bow') goalArm = BOW
+    else if (showing === 'turn') goalArm = RAISE
+    else if (st.inspect >= 0) { const p = inspectPose(st.inspect); goalArm = p.a; light = p.light }
     else if (robot.mode === 'parked') { goalArm = POINT; light = 1 }
-    const k = st.inspect >= 0 ? 1 : Math.min(1, dt * 3)
+    const k = st.inspect >= 0 && !showing ? 1 : Math.min(1, dt * (showing ? 7 : 3))
     st.arm[0] += (goalArm[0] - st.arm[0]) * k
     st.arm[1] += (goalArm[1] - st.arm[1]) * k
     st.light += (light - st.light) * Math.min(1, dt * 6)
@@ -196,8 +223,11 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     r.root.rotation.y = st.yaw
     r.shoulder.rotation.x = st.arm[0]
     r.elbow.rotation.x = st.arm[1]
-    r.turret.rotation.y = parked ? Math.sin(t * 1.3) * 0.28 : st.inspect >= 0 ? Math.sin(st.inspect * Math.PI * 2) * 0.15 : 0
-    r.wrist.rotation.z = st.light > 0.05 ? Math.sin(t * 2.6) * 0.18 : 0
+    r.turret.rotation.y = showing === 'wave' ? Math.sin(t * 7) * 0.5 : parked && !showing ? Math.sin(t * 1.3) * 0.28 : st.inspect >= 0 ? Math.sin(st.inspect * Math.PI * 2) * 0.15 : 0
+    r.wrist.rotation.z = showing === 'wave' ? Math.sin(t * 9) * 0.6 : st.light > 0.05 ? Math.sin(t * 2.6) * 0.18 : 0
+    // the bow: the whole vehicle dips its nose, twice, like a nod
+    st.bow += ((showing === 'bow' ? Math.max(0, Math.sin((st.show - 5.2) * Math.PI * 1.45)) * 0.16 : 0) - st.bow) * Math.min(1, dt * 10)
+    r.root.rotation.x = st.bow
     const grip = parked || st.inspect >= 0 ? 0.045 : 0.03
     r.fingerL.position.x = -grip; r.fingerR.position.x = grip
     r.coneMat.opacity = st.light * (0.22 + 0.1 * Math.sin(t * 9))
@@ -214,12 +244,17 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
   useEffect(() => {
     if (!import.meta.env.DEV && !new URLSearchParams(location.search).has('test')) return
     const w = window as unknown as Record<string, unknown>
-    w.__robot3d = () => ({ ...robot, arm: [...s.current.arm], light: s.current.light, inspecting: s.current.inspect >= 0 })
+    w.__robot3d = () => ({ ...robot, played: [...robot.played], arm: [...s.current.arm], light: s.current.light, inspecting: s.current.inspect >= 0 })
     return () => { delete w.__robot3d }
   }, [])
   return <primitive object={rig.root} />
 }
 
+function nearestMachine(x: number, z: number): string {
+  let best = PLACED_IDS[0], bd = Infinity
+  for (const id of PLACED_IDS) { const p = PLACED_BY_ID[id]; const d = Math.hypot(p.x - x, p.z - z); if (d < bd) { bd = d; best = id } }
+  return best
+}
 function between(v: number, a: number, b: number) { return (v - a) * (v - b) <= 1e-6 }
 function yawTo(id: string): number | null {
   const p = PLACED_BY_ID[id]

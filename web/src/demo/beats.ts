@@ -28,6 +28,10 @@ export const BEATS: Record<string, Beat> = {
     tab: 'agent', focus: null, caption: '訂單湧進來',
     anchors: ['[data-testid="home-overview"]', '[data-testid="approval-list"]', '[data-testid="status-strip"]'],
   },
+  rush: {
+    tab: 'agent', focus: null, caption: '先核准急單',
+    anchors: ['[data-testid="approval-list"]', '[data-testid="home-overview"]', '[data-testid="status-strip"]'],
+  },
   console: {
     tab: 'agent', focus: 'order', caption: '計劃已經先擬好，只等核准或討論',
     anchors: ['[data-testid="home-item-{id}"]', '[data-testid="approval-list"]', '[data-testid="plan-area"]'],

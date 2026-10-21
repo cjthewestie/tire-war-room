@@ -12,9 +12,9 @@ export const CAM_LIMITS = { pitchMin: 0.38, pitchMax: 1.2, distMin: 4.5, distMax
 /** Before start: the whole building from far out, slowly circling its centre. */
 export const OVERVIEW_DIST = 36
 
-/** The guided demo's camera (DemoDirector): while `on`, the overview camera flies to look at (x, z) from yaw / pitch /
- *  dist instead of following the lead, slower than the usual follow so a cue reads as a camera move. */
-export const director = { on: false, x: 0, y: 0.55, z: 0, yaw: 0, pitch: 0.85, dist: 20 }
+/** The guided demo (useGuidedDemo.ts): while `on`, demoCamera.ts drives the camera (Player.tsx skips its own), and
+ *  every free camera input — mouse, wheel, WASD, gamepad sticks — is ignored (CJ: 「demo按鍵按下去就只能按照流程跑」). */
+export const director = { on: false }
 
 /** Which camera and which space: first person is the default view; the factory hall the default space. */
 export const view = { mode: 'first' as 'first' | 'third', scene: 'factory' as SceneId }

@@ -1,9 +1,11 @@
-// The pitch deck on the 3D whiteboard. CJ drops his slides in web/public/pitch/ (01.png, 02.png, …) and lists them in
-// web/public/pitch/slides.json: { "slides": ["01.png", "02.png"] } (see web/public/pitch/README.md). Until then, or
-// if the manifest is missing or empty, three placeholder slides are drawn here.
+// The pitch deck on the 3D whiteboard. CJ's slides live in web/public/pitch/ (01.png, 02.png, …), listed in
+// web/public/pitch/slides.json: { "slides": [{ "file": "01.png", "title": "封面", "seconds": 15 }, …] } — plain file
+// names ("01.png") work too (see web/public/pitch/README.md). `seconds` paces the pitch: the card shows each slide's
+// share of the 3 minutes. If the manifest is missing or empty, three placeholder slides are drawn here.
 import { useEffect, useState } from 'react'
 
-export interface Deck { slides: string[]; placeholder: boolean }
+export interface Deck { slides: string[]; titles: (string | null)[]; seconds: (number | null)[]; placeholder: boolean }
+type Entry = string | { file?: unknown; title?: unknown; seconds?: unknown }
 
 const W = 1600, H = 900
 const FONT = '"Noto Sans TC", "PingFang TC", "Heiti TC", sans-serif'
@@ -43,16 +45,32 @@ export function placeholderSlides(): string[] {
 }
 
 /** The deck: the manifest's slides (as URLs under /pitch/), or the placeholders. */
+/** Parse a manifest: { slides: [...] } or a bare array; each entry a file name or { file, title, seconds }. */
+export function parseDeck(m: unknown): Deck | null {
+  const list: Entry[] = Array.isArray(m) ? m : Array.isArray((m as { slides?: unknown } | null)?.slides) ? (m as { slides: Entry[] }).slides : []
+  const rows = list.map((e) => (typeof e === 'string' ? { file: e, title: null, seconds: null } : {
+    file: typeof e?.file === 'string' ? e.file : '',
+    title: typeof e?.title === 'string' ? e.title : null,
+    seconds: typeof e?.seconds === 'number' && e.seconds > 0 ? e.seconds : null,
+  })).filter((r) => r.file.length > 0)
+  if (!rows.length) return null
+  return {
+    slides: rows.map((r) => (/^(https?:|data:|\/)/.test(r.file) ? r.file : `/pitch/${r.file}`)),
+    titles: rows.map((r) => r.title), seconds: rows.map((r) => r.seconds), placeholder: false,
+  }
+}
+
+/** The deck: the manifest's slides (as URLs under /pitch/), or the placeholders. */
 export function useDeck(): Deck {
-  const [deck, setDeck] = useState<Deck>(() => ({ slides: placeholderSlides(), placeholder: true }))
+  const [deck, setDeck] = useState<Deck>(() => {
+    const slides = placeholderSlides()
+    return { slides, titles: slides.map(() => null), seconds: slides.map(() => null), placeholder: true }
+  })
   useEffect(() => {
     let live = true
     fetch('/pitch/slides.json', { cache: 'no-cache' })
       .then((r) => (r.ok ? r.json() : null))
-      .then((m: { slides?: unknown } | null) => {
-        const list = Array.isArray(m?.slides) ? m.slides.filter((s): s is string => typeof s === 'string' && s.length > 0) : []
-        if (live && list.length) setDeck({ slides: list.map((s) => (/^(https?:|data:|\/)/.test(s) ? s : `/pitch/${s}`)), placeholder: false })
-      })
+      .then((m: unknown) => { const d = parseDeck(m); if (live && d) setDeck(d) })
       .catch(() => { /* no manifest: placeholders */ })
     return () => { live = false }
   }, [])
