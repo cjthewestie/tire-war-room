@@ -112,6 +112,7 @@ const NV_GREEN = '#76b900'
 const FIX_MARK = 0.22 / 0.09
 const RUSH = 3.5
 const CHIP_Y = 1.62
+const CHIP_LOW = 1.5      // this close to the machine the chip is at the feet
 
 /** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
  *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
@@ -274,10 +275,13 @@ function RepairChip({ id, where, walkers }: { id: string; where: string; walkers
     if (el.style.display !== (on ? '' : 'none')) el.style.display = on ? '' : 'none'
     if (!wk || !on) return
     const there = wk.phase === 'at'
+    // drops to the feet on the last steps too: walking in under the tag it crossed it for a moment
+    const low = there || Math.hypot(wk.target[0] - wk.f.root.position.x, wk.target[1] - wk.f.root.position.z) < CHIP_LOW
     at.current.position.copy(wk.f.root.position)
-    at.current.position.y = there ? -CHIP_Y : 0
+    at.current.position.y = low ? -CHIP_Y : 0
+    if (el.classList.contains('below') !== low) el.classList.toggle('below', low)
     const text = there ? '維修中' : `維修人員前往 ${where}`
-    if (el.textContent !== text) { el.textContent = text; el.classList.toggle('below', there) }
+    if (el.textContent !== text) el.textContent = text
   })
   return (
     <group ref={at}>

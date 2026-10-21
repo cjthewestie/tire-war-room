@@ -45,15 +45,17 @@ export function useSuccessMoments(world: WorldSnapshot | null, events?: Event[])
     if (!events) return
     const done = events.filter((e) => recoveryPhase(e) === 'recovered')
     if (back.current === null) { back.current = new Set(done.map(backKey)); return }
-    // a scenario reload clears the events: forget those, so the same event recovering again (the demo replayed) shows again
-    const ids = new Set(events.map(backKey))
-    for (const k of back.current) if (!ids.has(k)) back.current.delete(k)
+    // only events still recovered count as seen: a scenario loaded again opens the same event id again, and when it
+    // recovers again it shows again
+    const still = new Set(done.map(backKey))
+    for (const k of back.current) if (!still.has(k)) back.current.delete(k)
     const fresh = done.filter((e) => !back.current!.has(backKey(e)))
     if (!fresh.length) return
     for (const e of fresh) back.current.add(backKey(e))
     const now = Date.now()
     setAll((xs) => [...xs, ...fresh.map((e, i) => ({
-      key: backKey(e), kind: 'recovered' as const, text: machineLabel(e.machine_id), orderIds: [], qty: null, onTime: null, at: now + i,
+      // a key per recovery: FactoryApp hides a key it has shown, and a replayed scenario recovers the same event id
+      key: `${backKey(e)}@${now + i}`, kind: 'recovered' as const, text: machineLabel(e.machine_id), orderIds: [], qty: null, onTime: null, at: now + i,
     }))].slice(-20))
   }, [events])
   return { latest: all.length ? all[all.length - 1] : null, all }
