@@ -26,15 +26,22 @@ import { useBriefCtx } from '../useBriefing'
 import { AiStatusLine } from '../AiStatusLine'
 import { OptionGuideNote } from '../OptionGuideNote'
 import { RepairNotice } from './RepairNotice'
+import { CUES } from '../demo/cues'
+import { isMachine } from '../demo/signals'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
+const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
 
 export function Phone() {
   const { state, transport, connected } = useWarRoom()
   // the most urgent card first: R3 before R2, then the newest
   const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))
   const [pick, setPick] = useState<string | null>(null)
-  const top = pending.find((p) => p.id === pick) ?? pending[0]
+  // the guided demo's approval beat is about the machine incident: its card first, whatever else is waiting
+  const demoCard = state.demo?.running && state.demo.cue_id === 'phone'
+    ? pending.filter((p) => isMachine(state.snapshot?.events.find((e) => e.id === p.event_id)?.machine_id)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]
+    : undefined
+  const top = pending.find((p) => p.id === pick) ?? demoCard ?? pending[0]
   // kept here, not in the card: the card is replaced by its new version once the agent has replanned
   const [sent, setSent] = useState<string | null>(null)
   const net = state.snapshot?.header.network ?? 'online'
@@ -74,6 +81,7 @@ export function Phone() {
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
   const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines), ...resolveAlerts(cases, events)], connected && !lanDown)
   const bctx = useBriefCtx()
+  const demo = state.demo
   const idle = pending.length === 0
   const idleBrief = useMemo(() => (idle ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [idle, ev, bctx])
   return (
@@ -85,6 +93,18 @@ export function Phone() {
           <span className={`ph-conn ${connected && !lanDown ? 'ok' : 'bad'}`}>{lanDown ? 'LAN 中斷' : connected ? (transport?.mode === 'mock' ? '模擬' : '廠內 LAN') : '連線中'}</span>
           <ThemeToggle className="ph-tog" />
         </div>
+        {/* the guided demo (shared with the war room and the 3D factory): the sound needs one tap first, then the
+            approval beat says 現在核准 in big letters; 繼續 here moves every screen on */}
+        {demo?.running && (
+          <div className="ph-demo" data-testid="phone-demo">
+            <span>🎬 Demo・{demo.cue_id === 'phone' ? '核准時間' : CUE_TITLE[demo.cue_id ?? ''] ?? demo.cue_id}</span>
+            {transport?.demo && demo.cue_id !== 'phone' && <button onClick={() => void transport.demo!({ action: 'continue' }).catch(() => {})} data-testid="phone-demo-continue">繼續 ▶</button>}
+          </div>
+        )}
+        {demo?.running && !alerts.armed && (
+          <button className="ph-arm ph-demo-arm" data-testid="phone-demo-arm" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>🔔 點一下啟用提示音</button>
+        )}
+        {demoCard && top?.id === demoCard.id && <div className="ph-demo-now" role="status" data-testid="phone-demo-now">現在核准 ↓</div>}
         {!top && notices.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・{reports.length ? '異常報告已產生' : '維修完成'}</b>{noticeLine}</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>

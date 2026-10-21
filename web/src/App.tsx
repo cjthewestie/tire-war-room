@@ -18,6 +18,9 @@ import { openFolds } from './media'
 import { useWarRoom, WarRoomProvider } from './useWarRoom'
 import { readConsoleEvent } from './agent/consoleHash'
 import { embedSearch } from './transport'
+import { DemoOverlay } from './demo/DemoOverlay'
+import { anchorsFor, focusEvent } from './demo/beats'
+import { DemoCtx, useDemo } from './demo/useDemo'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
@@ -76,11 +79,27 @@ function Dashboard() {
   }
   const openConsole = (eventId?: string) => { setConsoleEvent(eventId ?? null); go('console', eventId ? `?event=${encodeURIComponent(eventId)}` : '') }
   const [demoOpen, setDemoOpen] = useState(false)
+  // the guided demo (CJ, 2026-10-22: 「戰情室也要幫我弄一個demo模式」): each beat opens its page and selects its event;
+  // the presenter can still click around, and the next beat re-asserts the page
+  const demo = useDemo()
+  const beat = demo.beat
+  const focusEv = beat ? focusEvent(beat.focus, state.snapshot?.events) : null
+  const focusId = focusEv?.id ?? null
+  useEffect(() => {
+    if (!beat) return
+    setDemoOpen(false); setMoreOpen(false); setMachine(null)
+    if (beat.tab === 'console') openConsole(focusId ?? undefined)
+    else go(beat.tab)
+    if (beat.tab === 'agent' && focusId) setAgentEvent(focusId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demo.demo?.cue_id, demo.running, focusId])
   const [moreOpen, setMoreOpen] = useState(false)   // phones: 狀態機 and 後台 live under 「更多」 (issue #52)
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const pendingN = state.pending.length
   return (
-    <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
+    <DemoCtx.Provider value={demo}>
+    <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''} ${demo.running ? 'demo-on' : ''}`}>
+      {demo.running && <DemoOverlay d={demo} anchors={beat ? anchorsFor(beat, focusEv) : []} caption={beat?.caption ?? ''} />}
       <Header tab={tab} onTab={go} />
       <PendingApprovalAlert variant={tab === 'agent' ? 'compact' : 'bar'} onGo={goApprove} stickyBelow=".topbar" />
       <div className="demo-sheet" role="region" aria-label="展示控制">
@@ -146,6 +165,7 @@ function Dashboard() {
         </>
       )}
     </div>
+    </DemoCtx.Provider>
   )
 }
 

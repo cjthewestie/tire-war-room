@@ -7,6 +7,7 @@ import {
   type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
+import { DEMO_API, type DemoCommand, type DemoState } from './demo/state'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
 import { shiftInstances } from './mock/schedule'
@@ -84,6 +85,8 @@ export interface Transport {
   fireEvent?(kind: string): Promise<SimEventFired>
   /** Live only (#72): 現場處置完成 in the 3D factory, remove the injected faults on one machine (POST /api/sim/clear). */
   clearFault?(machineId: string): Promise<void>
+  /** Live only: the guided demo's shared cue (POST /api/demo/state); every screen follows the WS "demo" push. */
+  demo?(c: DemoCommand): Promise<DemoState>
 }
 
 // ---------------- live ----------------
@@ -192,6 +195,9 @@ export class LiveTransport implements Transport {
     // to nobody, and the previous scenario's version stayed on screen), then WS "schedule" messages
     const pullSchedule = () => getJSON<ScheduleVersion>(API.schedule)
       .then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
+    // the guided demo: a screen opened (or reconnected) mid-demo joins the current cue
+    const pullDemo = () => getJSON<DemoState>(DEMO_API)
+      .then((d) => onMsg({ type: 'demo', ts: new Date().toISOString(), data: d })).catch(() => {})
     let soon: ReturnType<typeof setTimeout> | undefined
     const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
     // issue #54: the main agent's subagents (status follows every state change; the server also pushes WS "subagents")
@@ -202,7 +208,7 @@ export class LiveTransport implements Transport {
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
-      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents() }
+      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents(); pullDemo() }
       ws.onclose = () => {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))
@@ -261,6 +267,7 @@ export class LiveTransport implements Transport {
   audit() { return getJSON<AuditEntry[]>(`${API.audit}?limit=200`) }
   eventAudit(eventId: string) { return getJSON<AuditEntry[]>(`${API.audit}?event_id=${encodeURIComponent(eventId)}&limit=5000`) }
   async setNetwork(n: Network) { await postJSON('/api/sim/network', { network: n }) }
+  demo(c: DemoCommand) { return postJSON<DemoState>(DEMO_API, c) }
 }
 
 // ---------------- mock ----------------

@@ -44,7 +44,7 @@ export type AuditKind =
   | "rollback" | "notify" | "system" | "task" | "safety_release"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
-  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents"
+  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents" | "demo"
 
 export const MACHINE_IDS = [
   "A-MIX", "A-OPEN", "A-BIGOPEN", "A-SMALLOPEN", "A-CAL", "A-COOL", "A-WIND",
@@ -798,6 +798,7 @@ export type WsMessage =
   | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null; /** 情境疊加: scenarios overlaid since the last load */ overlays?: ScenarioName[] } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
   | { type: "subagents"; ts: ISODate; data: SubagentsView }
+  | { type: "demo"; ts: ISODate; data: import("./demo/state").DemoState }
 
 // ---------------- REST ----------------
 export const API = {
