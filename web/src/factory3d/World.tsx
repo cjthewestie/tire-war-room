@@ -708,6 +708,9 @@ export const DRAWN_LIGHT: Record<string, Light> = {}
 export function World({ state, focusId, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
+  // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
+  const now = Date.parse(state.clock?.factory_time ?? state.world?.factory_time ?? '') || 0
+  const speed = state.clock?.speed ?? 1
   const R = ROOMS
   return (
     <group visible={active}>
@@ -721,7 +724,7 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       <Roof b={BUILDING} y={2.5} wallTop={1.85} lamps={HALL_LAMPS} />
       <Machines />
       {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
-        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, state.world ? Date.parse(state.world.factory_time) : 0).label : null} />)}
+        work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed).label : null} />)}
       {active && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
@@ -741,7 +744,7 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       {state.world && <WorldPeople world={state.world} />}
       {state.world?.goods && <GoodsRings goods={state.world.goods} />}
       {active && state.world && <MaterialStock materials={state.world.materials} events={state.snapshot?.events ?? []} />}
-      <MachineRings tiles={tiles} world={state.world} />
+      <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />
       <Ambient />

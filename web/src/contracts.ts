@@ -360,6 +360,17 @@ export interface Event {
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
+  // fast repair (Kyle 10-21): when every repair task (檢修／停用檢修／放慢投料／暫停投料) finished and the fault was cleared,
+  // and the supervisor's 覆核 after an event closed on a repair (「請主管覆核」 → 「主管覆核」)
+  repaired_at?: ISODate | null
+  review?: EventReview | null
+}
+
+export interface EventReview {
+  status: "pending" | "done"
+  requested_at: ISODate
+  done_at: ISODate | null
+  by: string | null
 }
 
 // issue #10: 下新任務 (POST /api/command) and 討論這個計劃 (POST /api/events/{id}/discuss)
@@ -595,6 +606,7 @@ export interface HealthStatus {
   factory_time: ISODate
   uptime_s: number
   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
+  repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes (0 = real durations)
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
@@ -723,6 +735,7 @@ export const API = {
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
+  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核 after a repair; 409 = no pending review)
   ws: "/ws",
 } as const
 

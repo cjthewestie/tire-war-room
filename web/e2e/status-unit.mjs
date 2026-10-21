@@ -34,7 +34,7 @@ const line = (p) => [p.what, p.who, p.phase, p.eta].filter(Boolean).join('｜')
   const s = fx.p11_end
   const ev = evOf(s, 'CURE-07')
   const p = aiStatusParts(ev, stateOf(s), null)
-  check('p.11 round 2 closed, 停用檢修 running → 現場檢修中（0/1）', p.phase === '現場檢修中（0/1）', line(p))
+  check('p.11 round 2 closed, 停用檢修 running → 專人維修中（0/1）', p.phase === '專人維修中（0/1）', line(p))
   check('… keeps the repair ETA (停用檢修 03:03)', /03:03 完成/.test(p.eta), p.eta)
   check('… what = the detection, not 「7 號機停用，重排中」', p.what === '7 號 128 → 122°C，預測穩定在 122±1°C', p.what)
   const fixed = aiStatusParts(ev, stateOf(s, (t) => (t.kind === '停用檢修' ? { ...t, status: '完成', done_at: '2026-10-03T03:03:04+08:00' } : t)), null)
@@ -46,7 +46,7 @@ const line = (p) => [p.what, p.who, p.phase, p.eta].filter(Boolean).join('｜')
 {
   const s = fx.c3_closed
   const mill = aiStatusParts(evOf(s, 'B-OPEN'), stateOf(s), null)
-  check('concurrent_3 B 線開煉機 closed, 檢修 running → 現場檢修中（1/2）', mill.phase === '現場檢修中（1/2）', line(mill))
+  check('concurrent_3 B 線開煉機 closed, 檢修 running → 專人維修中（1/2）', mill.phase === '專人維修中（1/2）', line(mill))
   check('… ETA from the 檢修 task (10:34)', /10:34 完成/.test(mill.eta), mill.eta)
   const press = aiStatusParts(evOf(s, 'CURE-03'), stateOf(s), null)
   check('concurrent_3 3 號 verified (H1 成立) → 已修復', press.phase === '已修復' && !press.eta, line(press))
