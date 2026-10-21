@@ -1,11 +1,14 @@
 // 公版 AI 處理狀態 (Kyle 10-21: 「這得要是一個公版」): one sentence for every anomaly, the same on the phone, the 3D
 // factory and the field SOP drawer —
-//   AI 偵測到：<異常>｜建議交由 <agent>（<NemoClaw 沙箱>）修正｜<階段>｜預計 <時間> 完成（約 N 分鐘）
-// Read-only: the agent is the main agent's subagent for this event (GET /api/subagents), the runtime label comes from
-// /api/health agent_runtime (WARROOM_AGENT_RUNTIME, only set when the app really runs inside OpenShell), the time is
-// the repair estimate of #73 (verification window from approval, or the last field task's ETA if later).
-// Fast repair (Kyle 10-21 flow): 專人維修中（n/m）→ 維修完成・溫度回升中 (Event.repaired_at, the readings ramp back) →
-// 已恢復正常・報告已產生 (closed, Event.review pending = the incident report unread) → 已恢復正常・主管已讀報告.
+//   偵測到：<異常>｜Agent Nemo 建議派人維修（<NemoClaw 沙箱>）｜<階段>｜核准後約 N 秒維修完成
+// Read-only: the runtime label comes from /api/health agent_runtime (WARROOM_AGENT_RUNTIME, only set when the app really
+// runs inside OpenShell), the time is the repair estimate of #73 (verification window from approval, or the last field
+// task's ETA if later), or the wall seconds of a fast repair (/api/health repair_fast_s).
+// Detection is a Python rule (warroom/detect), not AI: 「偵測到」, never 「AI 偵測到」. The repair task is made before the
+// approval but held 待派 (warroom/sim/work.py): 「建議派人維修」 before, 「已派人維修」 after.
+// Fast repair (Kyle 10-21 flow): 維修中（n/m）→ 維修完成・溫度回升中 (Event.repaired_at, the readings ramp back) →
+// 7 號硫化機已恢復正常（128°C）｜Agent Nemo 異常報告已產生 (closed, Event.review pending = the incident report unread) →
+// …｜主管已讀報告.
 import type { Channel, Event, Expectation, WorkTask } from './contracts'
 import { machineLabel } from './factory'
 import { fmtHM, fmtMD, ms } from './format'
@@ -119,53 +122,83 @@ export function repairStage(ev: Event, items: WorkTask[]): RepairStage | null {
   return items.some((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind) && t.status !== '完成') ? 'repairing' : null
 }
 
-/** What the AI detected: the detector's own text (the event's anomaly), not the latest alert title, which a later round
- *  rewrites into its action (p.11 round 2: 「7 號機停用，重排中」); the same text on every screen for the whole event.
- *  A supervisor command or plant event has no detection: its alert title as before. */
-function firstDetection(ev: Event): string {
-  if (ev.source === 'supervisor' || ev.source === 'plant') return ev.alert_card?.title ?? ev.anomaly.message
-  return ev.anomaly.message || ev.alert_card?.title || machineLabel(ev.machine_id)
+/** What was detected: the same text on every screen for the whole event (not the latest alert title, which a later round
+ *  rewrites into its action, p.11 round 2: 「7 號機停用，重排中」). A press's temperature is put together from the
+ *  anomaly's own fields, 「7 號硫化機溫度 128 → 122°C」 (no forecast); other machines keep the detector's sentence up to its
+ *  first clause (「B 線開煉機 膠溫 96°C 持續上升（+4.5°C/分）」). A supervisor command or plant event has no detection: its
+ *  alert title as before. */
+function detection(ev: Event): string {
+  if (ev.source === 'supervisor' || ev.source === 'plant') return plain(ev.alert_card?.title ?? ev.anomaly.message)
+  const a = ev.anomaly
+  if (a.machine_id.startsWith('CURE-') && a.channel === 'temp_c' && (a.kind === 'temp_drop' || a.kind === 'overheat') && a.baseline > 0) {
+    return `${machineLabel(a.machine_id)}${CH_LABEL.temp_c} ${Math.round(a.baseline)} → ${Math.round(a.value)}°C`
+  }
+  return plain(a.message || ev.alert_card?.title || machineLabel(ev.machine_id)).split(/[，；]/)[0].replace(/^異常[：:]\s*/, '')
 }
 
-/** 「專人維修中（1/2）」: the repair tasks done out of all of them. */
-const repairPhase = (repair: WorkTask[], open: WorkTask[]) => `專人維修中（${repair.length - open.length}/${repair.length}）`
+/** The field work of these repair tasks in the supervisor's words: 檢修／停用檢修 = 維修, 放慢投料, 暫停投料
+ *  (B 線開煉機: 維修、放慢投料). */
+function repairWork(tasks: WorkTask[]): string[] {
+  return [...new Set(tasks.map((t) => (t.kind === '放慢投料' || t.kind === '暫停投料' ? t.kind : '維修')))]
+}
 
-/** A closed event is 「已修復」 only when a reading verified it: a repair task still running, a machine taken out
- *  (p.11 round 2: 「未驗證：已停用該機…」) or another unverified close says what really happened. A close after a repair
- *  comes with its incident report (Event.review: pending = unread, done = the supervisor read it; nothing waits for it). */
-function closedPhase(ev: Event, repair: WorkTask[], repairOpen: WorkTask[]): string {
+/** 「維修中（1/2）」: the repair tasks done out of all of them, named by the work still open (維修 first). */
+function repairPhase(repair: WorkTask[], open: WorkTask[]): string {
+  const work = repairWork(open)
+  return `${work.includes('維修') ? '維修' : work[0]}中（${repair.length - open.length}/${repair.length}）`
+}
+
+/** A closed event is 已恢復正常 only when a reading verified it: a repair task still running, a machine taken out
+ *  (p.11 round 2: 「未驗證：已停用該機…」) or another unverified close says what really happened; null = verified. */
+function unverifiedClose(ev: Event, repair: WorkTask[], repairOpen: WorkTask[]): string | null {
   if (repairOpen.length) return repairPhase(repair, repairOpen)
-  if (ev.review?.status === 'pending') return '已恢復正常・報告已產生'
-  if (ev.review?.status === 'done') return '已恢復正常・主管已讀報告'
   if (/停用/.test(ev.outcome ?? '')) return '已停用該機，排程已調整'
-  if (/未驗證/.test(ev.outcome ?? '')) return '已處置，未以讀值驗證'
-  return '已修復'
+  if (/未驗證/.test(ev.outcome ?? '')) return '已處置，未用讀值確認'
+  return null
+}
+
+/** 「7 號硫化機已恢復正常（128°C）」: after a fast repair the readings ramped back to the machine's normal value (the
+ *  anomaly's baseline); a close verified some other way leaves the value out (H1 「溫度會穩定」 holds at 123°C, not 128). */
+function recoveredText(ev: Event): string {
+  const x = expectationOf(ev)
+  const normal = ev.recovered_at ? normalOf(ev, x) : null
+  return `${machineLabel(ev.machine_id)}已恢復正常${x && normal != null ? `（${readingText(x.channel, normal)}）` : ''}`
 }
 
 const BEFORE_APPROVAL = new Set(['detected', 'classify', 'plan', 'simulate', 'gate', 'replan', 'await_approval'])
 
-/** `fastS`: REPAIR_FAST_S from /api/health. A fast repair runs on the wall clock, so while the crew works its ETA is the
- *  wall seconds left (「預計約 8 秒後完成」), not factory time (at 10× a 12-second repair read 「約 2 分鐘」). */
+/** `fastS`: REPAIR_FAST_S from /api/health. A fast repair runs on the wall clock, so its ETA is wall seconds
+ *  (「約 8 秒後維修完成」), not factory time (at 10× a 12-second repair read 「約 2 分鐘」); before the approval it is the
+ *  whole repair (「核准後約 12 秒維修完成」), not the verification window (「約 30 分鐘」, then 「約 2 秒」 once approved).
+ *  `lead` is the line's first, bold part: 「偵測到：<what>」, or 「<機台>已恢復正常（128°C）」 once a reading verified the
+ *  close; `who` is empty while no repair is planned yet. */
 export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null, fastS: number | null = null) {
-  const what = plain(firstDetection(ev)).replace(/^異常[：:]\s*/, '')
-  // Kyle 10-21: the single agent is called Agent Nemo on screen; no typed sub-agent in brackets (CJ 2026-10-21: 「現在先不要派發」)
-  const agent = 'Agent Nemo'
-  const who = `${BEFORE_APPROVAL.has(ev.state) ? '建議交由' : '交由'} ${agent}${runtime ? `（${runtime}）` : ''} 修正`
+  const what = detection(ev)
   const est = repairEstimate(ev, state)
   const done = est.tasks.length - est.open.length
   // any round's repair task counts: the machine is not fixed while maintenance is still on it
   const repair = (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id && REPAIR_KINDS.has(t.kind))
   const repairOpen = repair.filter((t) => t.status !== '完成')
+  const before = BEFORE_APPROVAL.has(ev.state)
+  const plantEvent = ev.source === 'supervisor' || ev.source === 'plant'
+  // closed and verified by a reading (a supervisor or plant event has nothing to verify: 已處理完)
+  const unverified = ev.state === 'closed' && !plantEvent ? unverifiedClose(ev, repair, repairOpen) : null
+  const verified = ev.state === 'closed' && !plantEvent && unverified == null
   // after the repair, until the event closes: the readings ramp back to normal (a few wall seconds)
   const recovering = ev.state !== 'closed' && ev.state !== 'safe_stop' && !!ev.repaired_at
+  const lead = verified ? recoveredText(ev) : plantEvent ? what : `偵測到：${what}`
+  // Kyle 10-21: the single agent is called Agent Nemo on screen; no typed sub-agent in brackets (CJ 2026-10-21: 「現在先不要派發」)
+  const work = repairWork(repair)
+  const who = !verified && work.length ? `Agent Nemo ${before ? '建議' : '已'}派人${work.join('、')}` : ''
   const phase =
-    ev.state === 'closed' ? closedPhase(ev, repair, repairOpen)
+    ev.state === 'closed' ? (plantEvent ? '已處理完' : unverified
+      ?? (ev.review?.status === 'pending' ? 'Agent Nemo 異常報告已產生' : ev.review?.status === 'done' ? '主管已讀報告' : ''))
       : ev.state === 'safe_stop' ? '已安全停止'
         : recovering ? (ev.recovered_at ? '已恢復正常' : `維修完成・${recoverWord(est.x)}`)
-        : ev.state === 'await_approval' ? '等主管核准'
+        : ev.state === 'await_approval' ? '待核准'
           : ev.state === 'execute' || ev.state === 'verify'
-            ? (repairOpen.length ? repairPhase(repair, repairOpen) : est.open.length ? `現場修正中（${done}/${est.tasks.length}）` : '確認是否恢復')
-            : ev.state === 'detected' || ev.state === 'classify' ? 'AI 分析中' : 'AI 擬定修正方案'
+            ? (repairOpen.length ? repairPhase(repair, repairOpen) : est.open.length ? `現場工作中（${done}/${est.tasks.length}）` : '確認讀值中')
+            : ev.state === 'detected' || ev.state === 'classify' ? 'Agent Nemo 分析中' : 'Agent Nemo 擬方案中'
   // once closed, and while the crew repairs the machine, the ETA is the repair tasks' own (a fast repair takes seconds,
   // not the verification window)
   const repairing = ev.state === 'closed' || ((ev.state === 'execute' || ev.state === 'verify') && repairOpen.length > 0)
@@ -174,11 +207,23 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null,
   let eta = ''
   if (fastS && fastS > 0 && ev.state !== 'closed' && !recovering && repairing && repairOpen.length) {
     const left = Math.max(...repairOpen.map((t) => (1 - Math.min(1, Math.max(0, t.progress ?? 0))) * fastS))
-    eta = `預計約 ${Math.max(1, Math.round(left))} 秒後完成`
+    eta = `約 ${Math.max(1, Math.round(left))} 秒後維修完成`
+  } else if (fastS && fastS > 0 && before && repairOpen.length) {
+    eta = `核准後約 ${Math.max(1, Math.round(fastS))} 秒維修完成`
   } else if (doneBy) {
     const s = est.now ? (doneBy - ms(est.now)) / 1000 : null
     const left = s == null ? '' : s <= 0 ? '即將完成' : s < 60 ? `約 ${Math.max(1, Math.round(s))} 秒` : `約 ${Math.round(s / 60)} 分鐘`
-    eta = `預計 ${fmtMD(doneBy)} ${fmtHM(doneBy)} 完成${left ? `（${left}）` : ''}`
+    // 時:分 in factory time; the date only when it is another day
+    const day = est.now && fmtMD(doneBy) === fmtMD(est.now) ? '' : `${fmtMD(doneBy)} `
+    eta = `預計 ${day}${fmtHM(doneBy)} 完成${left ? `（${left}）` : ''}`
   }
-  return { what, who, phase, eta }
+  // the runtime label (NemoClaw 沙箱) ends the part that names Agent Nemo
+  const tag = runtime ? `（${runtime}）` : ''
+  return {
+    what,
+    who: who && `${who}${tag}`,
+    phase: tag && !who && phase.startsWith('Agent Nemo') ? `${phase}${tag}` : phase,
+    eta,
+    lead,
+  }
 }

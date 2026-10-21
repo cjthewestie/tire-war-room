@@ -12,9 +12,9 @@ export function AiStatusLine({ ev, className }: { ev: Event | null; className?: 
   const p = aiStatusParts(ev, state, health?.agent_runtime ?? null, health?.repair_fast_s ?? null)
   return (
     <p className={`ai-status ${className ?? ''}`} data-testid="ai-status">
-      <b>AI 偵測到：{p.what}</b>
-      <span>{p.who}</span>
-      <span>{p.phase}</span>
+      <b>{p.lead}</b>
+      {p.who && <span>{p.who}</span>}
+      {p.phase && <span>{p.phase}</span>}
       {p.eta && <span>{p.eta}</span>}
     </p>
   )

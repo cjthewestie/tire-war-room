@@ -1,6 +1,6 @@
-// Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 專人維修 →
-// 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 專人維修中 / 維修完成・溫度回降中 / 已恢復正常・報告已產生 /
-// 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
+// Unit checks (no server, no browser) for the fast-repair front end (Kyle 10-21 flow: 觸發異常 → 主管核准 → 派人維修 →
+// 維修完成通知 → 回溫 → 綠燈 → 異常報告): the AI status line's 核准後約 N 秒維修完成 / 維修中 / 維修完成・溫度回降中 /
+// 已恢復正常｜Agent Nemo 異常報告已產生 / 主管已讀報告, the 3D ring of a repair task and its 回溫中 / 已恢復, the phone's 維修完成 and 報告已產生 notices, the Agent
 // page's task, 已恢復正常 and 報告 rows, and the report's 維修完成 / 恢復正常 / 主管已讀 lines. Built on
 // fixtures/status-cases.json (concurrent_3, B 線開煉機 overheat: ≤118°C) with the Event.repaired_at / recovered_at / review
 // fields of the shared contract patched in.
@@ -32,7 +32,7 @@ const stateOf = (events, tasks, now = s.now) => ({
   clock: { factory_time: now, speed: 10 }, snapshot: { header: { factory_time: now }, events, machines: [] },
   world: { factory_time: now, tasks: { items: tasks } }, subagents: null, pending: [], resolved: [],
 })
-const line = (p) => [p.what, p.who, p.phase, p.eta].filter(Boolean).join('｜')
+const line = (p) => [p.lead, p.who, p.phase, p.eta].filter(Boolean).join('｜')
 // a fast repair: 檢修 assigned at once, 30 factory seconds to go (3 wall s at 10×)
 const now = T(s.now)
 const repair = {
@@ -43,12 +43,20 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
 
 // ---------------------------------------------------------------- AI status line
 {
+  const held = { ...repair, status: '待派', assigned_at: null, started_at: null, progress: 0 }
+  const wait = { ...base, state: 'await_approval', closed_at: null, outcome: null }
+  const a = aiStatusParts(wait, stateOf([wait], [held]), null, 12)
+  check('card waiting, 檢修 held 待派 → 偵測到…｜Agent Nemo 建議派人維修｜待核准｜核准後約 12 秒維修完成 (REPAIR_FAST_S, not the verification window)',
+    a.lead.startsWith('偵測到：B 線開煉機 膠溫') && a.who === 'Agent Nemo 建議派人維修' && a.phase === '待核准' && a.eta === '核准後約 12 秒維修完成', line(a))
+  check('… the detection stops at its first clause (no forecast, no 水流 clause)', !/[，；]|預測/.test(a.what), a.what)
+  check('… NemoClaw 沙箱 at the end of the Agent Nemo part when the runtime is set',
+    aiStatusParts(wait, stateOf([wait], [held]), 'NemoClaw 沙箱', 12).who === 'Agent Nemo 建議派人維修（NemoClaw 沙箱）')
   const ev = { ...base, state: 'verify', closed_at: null, outcome: null }
   const p = aiStatusParts(ev, stateOf([ev], [repair, slow]), null)
-  check('verify + 檢修 running → 專人維修中（1/2）', p.phase === '專人維修中（1/2）', line(p))
+  check('verify + 檢修 running → Agent Nemo 已派人維修、放慢投料｜維修中（1/2）', p.who === 'Agent Nemo 已派人維修、放慢投料' && p.phase === '維修中（1/2）', line(p))
   check('… ETA from the repair task (30 s), not the 20-minute window', /約 30 秒/.test(p.eta), p.eta)
   const fast = aiStatusParts(ev, stateOf([ev], [repair, slow]), null, 12)
-  check('… with REPAIR_FAST_S (wall clock): 預計約 10 秒後完成 (20 % of 12 s done)', fast.eta === '預計約 10 秒後完成', fast.eta)
+  check('… with REPAIR_FAST_S (wall clock): 約 10 秒後維修完成 (20 % of 12 s done)', fast.eta === '約 10 秒後維修完成', fast.eta)
   const done = { ...repair, status: '完成', done_at: iso(now), progress: 1 }
   const warm = { ...base, state: 'verify', closed_at: null, outcome: null, repaired_at: iso(now), recovered_at: null, review: null }
   const w = aiStatusParts(warm, stateOf([warm], [done, slow]), null)
@@ -57,9 +65,10 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('… a temperature drop (≥121°C) → 維修完成・溫度回升中', aiStatusParts(cold, stateOf([cold], [done, slow]), null).phase === '維修完成・溫度回升中')
   const closed = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'pending', requested_at: iso(now + 4000), done_at: null, by: null } }
   const q = aiStatusParts(closed, stateOf([closed], [done, slow]), null)
-  check('closed + report unread → 已恢復正常・報告已產生, no ETA', q.phase === '已恢復正常・報告已產生' && !q.eta, line(q))
+  check('closed + report unread → B 線開煉機已恢復正常（94°C）｜Agent Nemo 異常報告已產生, no detection, no ETA',
+    q.lead === 'B 線開煉機已恢復正常（94°C）' && !q.who && q.phase === 'Agent Nemo 異常報告已產生' && !q.eta, line(q))
   const r = aiStatusParts({ ...closed, review: { ...closed.review, status: 'done', done_at: iso(now + 5000), by: 'supervisor' } }, stateOf([closed], [done, slow]), null)
-  check('report read → 已恢復正常・主管已讀報告', r.phase === '已恢復正常・主管已讀報告', line(r))
+  check('report read → …已恢復正常（94°C）｜主管已讀報告', r.lead === q.lead && r.phase === '主管已讀報告', line(r))
 }
 
 // ---------------------------------------------------------------- 3D ring

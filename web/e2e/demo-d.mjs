@@ -1,7 +1,7 @@
 // Group D demo walk, headless (phone, approval card, AI status line, 3D field panel, 狀態機 forecast):
 //  p.11 (press7_temp_drop): round 1 approved B over the API; on the round-2 card 「7 號機停用」 the phone's 修復預估 shows
 //  SOP-CP-01 and no round-1 tasks / 預計完成, 「怎麼選」 names the remedy; 產線監控's folded card picks A without 展開 and
-//  核准（A） sends option A; after close the status line says 專人維修中 while 停用檢修 runs and the 3D panel on 7 號
+//  核准（A） sends option A; after close the status line says 維修中 while 停用檢修 runs and the 3D panel on 7 號
 //  shows the 停用檢修 task, not a checklist. concurrent_3: the phone's idle card lists one status line per open event and
 //  狀態機 shows 「約 N 分後達上限 120°C」 for B 線開煉機 instead of the 229.7°C extrapolation.
 // Run against a live server: PORT=8010 ./start.sh & node web/e2e/demo-d.mjs http://localhost:8010
@@ -59,7 +59,7 @@ const guide = await text(phone, '[data-testid=option-guide]')
 check('round-2 怎麼選: 解除異常靠 = 7 號機停用交維修', /解除異常靠：7 號機停用交維修，其他模次改由別台/.test(guide ?? ''), (guide ?? '').split('\n')[1])
 check('round-2 怎麼選: why B', /系統建議 B：排程求解器挑的方案；交期相同，想降低風險可改選 A/.test(guide ?? ''))
 const ai2 = await text(phone, '[data-testid=ai-status]')
-check('round-2 status line: what = the detection, not 「7 號機停用，重排中」', /AI 偵測到：7 號 128 → 122°C/.test(ai2 ?? ''), (ai2 ?? '').replace(/\n/g, '｜'))
+check('round-2 status line: what = the detection, not 「7 號機停用，重排中」', /偵測到：7 號硫化機溫度 128 → 122°C/.test(ai2 ?? '') && !/AI 偵測到/.test(ai2 ?? ''), (ai2 ?? '').replace(/\n/g, '｜'))
 await phone.screenshot({ path: `${OUT}/demo-d-phone-390-round2.png`, fullPage: true })
 
 const dash = await browser.newPage({ viewport: { width: 1440, height: 900 } })
@@ -80,9 +80,9 @@ check('p.11 event closed', !!closed, closed?.outcome)
 await ctl({ action: 'pause' })
 await phone.reload()
 // the task board (GET /api/world) lands a moment after the page: wait for it before reading the phase
-const idle = (await until(async () => { const t = await text(phone, '.ph-card.idle [data-testid=ai-status]'); return t && /專人維修中/.test(t) ? t : null }, 20000))
+const idle = (await until(async () => { const t = await text(phone, '.ph-card.idle [data-testid=ai-status]'); return t && /維修中/.test(t) ? t : null }, 20000))
   ?? await text(phone, '.ph-card.idle [data-testid=ai-status]')
-check('closed + 停用檢修 running → 專人維修中, not 已修復', /專人維修中（0\/1）/.test(idle ?? '') && !/已修復/.test(idle ?? ''), (idle ?? '').replace(/\n/g, '｜'))
+check('closed + 停用檢修 running → 維修中, not 已恢復正常', /維修中（0\/1）/.test(idle ?? '') && !/已恢復正常|已修復/.test(idle ?? ''), (idle ?? '').replace(/\n/g, '｜'))
 const hist = await phone.$$eval('.ph-card.idle .ph-hist', (els) => els.map((e) => e.innerText))
 check('history: no two identical lines', new Set(hist.map((h) => h.replace(/^\S+・/, ''))).size === hist.length, hist.join(' / '))
 await phone.screenshot({ path: `${OUT}/demo-d-phone-390-closed.png`, fullPage: true })
