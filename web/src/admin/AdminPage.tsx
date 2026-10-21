@@ -21,7 +21,7 @@ import './admin.css'
 
 type Page = 'status' | 'audit' | 'params' | 'rag' | 'plant' | 'memory' | 'runs'
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'status', label: '系統健康' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'rag', label: 'RAG 知識庫' }, { id: 'plant', label: '工廠指示 PLANT.md' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
+  { id: 'status', label: '狀態' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
 interface Doc { file: string; sop_id: string; title: string; chunks: number; bytes: number; modified: string; sections: string[]; error: string | null }
@@ -97,9 +97,9 @@ function RagPage() {
       {r && (
         <>
           <div className="admin-cards">
-            <Card title="SOP 文件" tone="muted"><b>{r.docs.length} 份・{r.folder_chunks} 段</b><span>warroom/kb/{r.folder}/</span></Card>
-            <Card title="團隊資料集" tone="muted"><b>{r.team.length} 份・{r.team.reduce((a, t) => a + t.chunks, 0)} 段</b><span>data/team_dataset/sop_chunks.jsonl（唯讀）</span></Card>
-            <Card title="Qdrant 索引" tone={stale ? 'warn' : 'ok'}>
+            <Card title="SOP 文件" tone="muted"><b>{r.docs.length} 份・{r.folder_chunks} 段</b><span>可上傳、可刪除</span></Card>
+            <Card title="團隊資料集" tone="muted"><b>{r.team.length} 份・{r.team.reduce((a, t) => a + t.chunks, 0)} 段</b><span>唯讀</span></Card>
+            <Card title="搜尋索引" tone={stale ? 'warn' : 'ok'}>
               <b>{r.indexed_chunks} 段已索引{stale ? '・資料夾有變動' : ''}</b>
               <span>{Object.keys(r.qdrant).length ? Object.entries(r.qdrant).map(([c, n]) => `${c} ${n} 筆`).join('・') : r.kb_mode === 'vector' ? '—' : '目前是字詞搜尋，沒有向量索引'}</span>
             </Card>
@@ -347,7 +347,7 @@ function PlantPage() {
   return (
     <section className="admin-body" data-testid="plant-page">
       <Err err={err} />
-      <p className="note">兩層提示詞：角色、9 個工具、JSON 規則、安全規則寫在程式裡（commander.py、ask.py、discuss.py），這裡改不到。這頁只管第二層「工廠補充說明」：本廠的班別、機台習慣、用語，接在核心提示詞後面，最多 {p?.max_chars ?? 1500} 字。它<b>不能</b>新增工具、改狀態、風險等級或核准規則（程式的動作把關不讀這段）。</p>
+      <p className="note">這裡只寫本廠的班別、機台習慣與用語，最多 {p?.max_chars ?? 1500} 字，Agent Nemo 會一起讀。它<b>改不到</b>工具、安全與核准規則（那些寫在程式裡）。</p>
       {msg && <p className="note">{msg}</p>}
       {p && (
         <>
@@ -371,7 +371,7 @@ function PlantPage() {
           <h3 className="sub">版本紀錄</h3>
           <div className="admin-table-wrap">
             <table className="admin-table" data-testid="plant-history">
-              <thead><tr><th>動作</th><th>版本 sha256</th><th>誰</th><th>時間</th><th>字數</th><th aria-label="回復" /></tr></thead>
+              <thead><tr><th>動作</th><th>版本</th><th>誰</th><th>時間</th><th>字數</th><th aria-label="回復" /></tr></thead>
               <tbody>{p.history.map((h, i) => (
                 <tr key={i}>
                   <td>{ACTION[h.action] ?? h.action}</td><td><code>{short(h.sha256)}</code>{h.sha256 === p.active.sha256 && i === p.history.findIndex((x) => x.sha256 === p.active.sha256) && <em className="tag">生效中</em>}</td>

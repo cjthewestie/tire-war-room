@@ -44,6 +44,7 @@ class TaskLog:
         self._runs: dict[str, dict[str, Any]] = {}
         self._order: list[str] = []
         self._latest: dict[str, str] = {}
+        self._seq = 0
         self._cards: dict[str, int] = {}  # approval request id -> card version
 
     # ---------------------------------------------------------------- reading
@@ -80,6 +81,7 @@ class TaskLog:
     def _take(self, e: dict[str, Any]) -> None:
         p = e.get("payload") or {}
         kind, actor, eid = e.get("kind"), e.get("actor"), e.get("event_id")
+        self._seq = int(e.get("seq") or 0)
         if kind == "system" and p.get("msg") == "scenario loaded":
             self._gen += 1
             self._scenario, self._loop = p.get("scenario"), None
@@ -97,12 +99,14 @@ class TaskLog:
         last = self._latest.get(eid)
         key = last if last and (last.endswith(f"@{self._gen}") or self._runs[last]["closed_at"] is None) else f"{eid}@{self._gen}"
         r = self._runs.get(key)
+        if r is not None:
+            r["last_seq"] = self._seq
         if r is None:
             self._latest[eid] = key
             r = self._runs[key] = {"id": eid, "opened_at": e["ts"], "closed_at": None, "machine_id": None, "order_id": None,
                                    "title": None, "final": "處理中", "state": "detected", "approvals": [], "outcome": None,
                                    "scenario": self._scenario, "loop": self._loop, "rounds": 1, "source": "event",
-                                   "report": f"/report?event={eid}"}
+                                   "report": f"/report?event={eid}", "last_seq": self._seq}
             self._order.append(key)
         if kind == "anomaly":
             r["title"] = r["title"] or p.get("message")
@@ -153,7 +157,9 @@ class TaskLog:
         for r in self.rows():
             by_date.setdefault(r["date"], []).append(r)
         out = []
-        for date in sorted(by_date, reverse=True):
+        # the most recently active date first: scenarios run on different factory dates (10/03, 10/21), so 「今天」 is
+        # where the latest work happened, not the largest date string
+        for date in sorted(by_date, key=lambda d: max(x["last_seq"] for x in by_date[d]), reverse=True):
             groups: list[dict[str, Any]] = []
             for r in by_date[date]:
                 g = groups[-1] if groups and (groups[-1]["loop"], groups[-1]["scenario"]) == (r["loop"], r["scenario"]) else None

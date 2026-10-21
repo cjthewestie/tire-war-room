@@ -4,7 +4,7 @@ import type { OrdersToday } from './components/ordersToday'
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
-  type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+  type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
@@ -63,9 +63,15 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
-  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
-   *  approvals. 409 when the event has no pending review. */
+  /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no unread report. */
   review?(eventId: string, note?: string): Promise<Event>
+  /** Live only: resolution paths (warroom/api/resolve.py), supervisor session like approvals. */
+  safetyDispatch?(caseId: string): Promise<SafetyCase>
+  safetyRelease?(caseId: string, body: SafetyRelease): Promise<SafetyCase>
+  stopReplan?(eventId: string): Promise<Event>
+  stopHandoff?(eventId: string): Promise<Event>
+  stopClose?(eventId: string, note?: string): Promise<Event>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
@@ -221,6 +227,11 @@ export class LiveTransport implements Transport {
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
+  safetyDispatch(caseId: string) { return postJSON<SafetyCase>(apiPath(API.safetyDispatch, { case_id: caseId }), {}) }
+  safetyRelease(caseId: string, body: SafetyRelease) { return postJSON<SafetyCase>(apiPath(API.safetyRelease, { case_id: caseId }), body) }
+  stopReplan(eventId: string) { return postJSON<Event>(apiPath(API.stopReplan, { event_id: eventId }), {}) }
+  stopHandoff(eventId: string) { return postJSON<Event>(apiPath(API.stopHandoff, { event_id: eventId }), {}) }
+  stopClose(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.stopClose, { event_id: eventId }), note ? { note } : {}) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {

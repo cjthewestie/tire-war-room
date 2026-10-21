@@ -135,6 +135,9 @@ try {
   await p3.screenshot({ path: `${OUT}/world-390-viewport.png` })
 
   // team dataset: page 11 plays the dataset's EV-2 night, where 貼合組 S11 is on sick leave
+  // (issue #102: people and the sources footnote sit in 「更多全廠資訊」, closed by default — open it first)
+  const openMore = (pg) => pg.evaluate(() => document.querySelectorAll('[data-testid=plant-more]').forEach((d) => { d.open = true }))
+  await openMore(p3)
   check('sources footnote names the team dataset', (await p3.locator('[data-testid=world-sources]').innerText()).includes('團隊資料集'))
   await api('/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })
   const w11 = await api('/api/world')
@@ -143,6 +146,7 @@ try {
   await page.bringToFront()
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid=plant-panels]', { timeout: 15000 })
+  await openMore(page)
   const ppl = await until(async () => { const t = await page.locator('.w-people').innerText(); return t.includes('S11') ? t : null }, 10000)
   check('dashboard shows S11 病假 on the p.11 night', !!ppl && ppl.includes('病假'), (ppl ?? '').split('\n').filter((l) => l.includes('S11')).join(' '))
   check('incident history from the dataset', (await page.locator('[data-testid=incidents] li').count()) === 3)

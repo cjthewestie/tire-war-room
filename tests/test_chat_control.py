@@ -110,3 +110,44 @@ async def test_api_interrupt_from_chat_needs_the_yes_and_is_audited(tmp_path, mo
         rows = [e for e in p.rt.audit.tail(0, 1_000_000) if e.actor.endswith("via Agent Nemo") and e.event_id == eid]
         assert [r.payload["confirmed"] for r in rows] == [False, True] and rows[0].kind is AuditKind.SYSTEM
         assert not p.rt.approvals.get(p.rt.state_machine.get(eid).approvals[0]).decision if p.rt.state_machine.get(eid).approvals else True
+
+
+
+async def test_a_control_request_the_model_did_not_turn_into_a_tool_is_asked_by_code():
+    """Real run 10-22: 「中斷 3 號機那件」 got a text-written read_sensors call and no question."""
+    ctl = FakeControl(known=("EV-3",))
+    ctl.resolve = lambda ref: ("EV-3", "3 號硫化機那件") if "3" in ref else None
+    m = Model(("say", "我先查一下 3 號機。"))
+    out = await _say(MainAgent(_settings(), client=m), "中斷 3 號機那件", ctl)
+    assert out["reply"] == CONFIRM_Q.format(verb="中斷", label="3 號硫化機那件", eid="EV-3") and not ctl.ran
+
+
+async def test_asking_to_approve_never_proposes_a_plan():
+    from warroom.agent.main_agent import APPROVE_REPLY
+    f = Floor()
+    m = Model(("tool", "propose_plan", {"task": "核准 10 號機"}), ("say", "已擬計劃送你核准。"))
+    out = await MainAgent(_settings(), client=m).turn("幫我核准 10 號機的計劃", context={"abnormal": []}, waiting_plan=None,
+                                                      run_tool=f.run_tool, propose=f.propose, discuss=None, control=FakeControl())
+    assert not f.proposed and out["event_id"] is None and out["reply"] == APPROVE_REPLY
+    rules = await MainAgent(None).turn("幫我核准 10 號機的計劃", context={"abnormal": []}, waiting_plan=None,
+                                       run_tool=f.run_tool, propose=f.propose, discuss=None)
+    assert not f.proposed and rules["reply"] == APPROVE_REPLY
+
+
+async def test_an_xml_written_read_call_is_run():
+    m = Model(("say", '<function=read_sensors>；<parameter=machine_ids>；["CURE-03"]；</parameter>；</function>'),
+              ("say", "3 號機 122.3°C。"))
+    f = Floor()
+    out = await MainAgent(_settings(), client=m).turn("3 號機現在怎樣", context={"abnormal": []}, waiting_plan=None,
+                                                      run_tool=f.run_tool, propose=f.propose, discuss=None)
+    assert f.tools and f.tools[0] == ("read_sensors", {"machine_ids": ["CURE-03"]}) and out["reply"] == "3 號機 122.3°C。"
+
+
+
+async def test_an_action_that_cannot_run_on_that_task_says_so_before_asking():
+    ctl = FakeControl()
+    ctl.blocked = lambda action, eid: "這件在等你核准，沒有「直接重新規劃」的現成做法。" if action == "replan_task" else None
+    m = Model(("tool", "replan_task", {"event_id": "EV-7"}), ("say", "好。"))
+    agent = MainAgent(_settings(), client=m)
+    out = await _say(agent, "7 號機那件重新規劃", ctl)
+    assert out["reply"].startswith("這件在等你核准") and "pending" not in agent.notes and not ctl.asked

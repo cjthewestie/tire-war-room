@@ -40,7 +40,7 @@ export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" 
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
-  | "rollback" | "notify" | "system" | "task"
+  | "rollback" | "notify" | "system" | "task" | "safety_release"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
   | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents"
@@ -178,6 +178,40 @@ export interface SafetyAction {
   message: string
   latency_ms: number
 }
+
+/** A Safety Core stop / hold / alarm and its way back (warroom/api/resolve.py; CJ 2026-10-22 「安全核心要設計可以被解決」):
+ *  ① 派現場檢查 → ② reading back in range for `safe_needed` samples → ③ the supervisor's release (human only). */
+export type SafetyDecision = "resume" | "qc_pass" | "scrap"
+export interface SafetyCase {
+  id: string
+  machine_id: string
+  rule_id: string
+  rule_ids: string[]
+  actions: string[]
+  action: SafetyActionKind
+  message: string
+  value: number
+  threshold: number
+  ts: ISODate
+  latency_ms: number
+  status: "open" | "resolved"
+  event_id: string | null
+  sop_ids: string[]
+  task_ids: string[]
+  tasks_done: number
+  dispatched_at: ISODate | null
+  reading: number | null
+  safe_samples: number
+  safe_needed: number
+  reading_ok: boolean
+  decisions: SafetyDecision[]
+  resolved_at: ISODate | null
+  resolved_by: string | null
+  resolution: SafetyDecision | null
+  reason: string | null
+  field_confirmed: boolean
+}
+export interface SafetyRelease { decision: SafetyDecision; reason?: string; field_confirmed?: boolean }
 
 // 問戰情室: the supervisor's read-only question (POST /api/ask)
 export interface AskStepResult {
@@ -360,15 +394,37 @@ export interface Event {
   prior_rounds?: StepRound[]   // earlier rounds' steps, oldest first (page 7 decomposition after a replan)
   closed_at: ISODate | null
   outcome: string | null
+  ai_report?: EventAiReport | null   // Agent Nemo 異常報告 (warroom/agent/reporter.py), set when the event closes
   // issue #10
   source?: "detector" | "supervisor" | "plant"  // plant = issue #17 plant event (machine_id "PLANT")
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
-  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; then
-  // 「請主管覆核」 (review pending) once the event closed, done after POST /api/events/{id}/review
+  // fast repair (Kyle 10-21 flow: 核准 → 維修 → 維修完成 → 回溫 → 綠燈 → 異常報告): repaired_at = every repair task
+  // (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; the readings then ramp back to nominal over
+  // recover_fast_s wall seconds (machine WARNING, 「回溫中」); recovered_at = back to normal (VERIFY confirms, the event
+  // closes, the machine RUNNING). review = the incident report: pending (「報告待讀」, not a gate: nothing waits for it)
+  // at close, done (「主管已讀報告」) after POST /api/events/{id}/review
   repaired_at?: ISODate | null
+  recovered_at?: ISODate | null
   review?: EventReview | null
+  // SAFE_STOP → resolution (CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」)
+  stop_reason?: string | null
+  stop_reason_text?: string | null
+  follow_up?: StopFollowUp | null
+  previous?: PreviousRun | null
+}
+export interface PreviousRun { event_id: string; reason: string; reason_text: string }
+export interface StopFollowUp {
+  status: "replanned" | "manual" | "closed"
+  by: string
+  at: ISODate
+  new_event_id: string | null
+  task_ids: string[]
+  sop_ids: string[]
+  closed_at: ISODate | null
+  closed_by: string | null
+  note: string | null
 }
 export interface EventReview {
   status: "pending" | "done"
@@ -570,6 +626,7 @@ export interface DashboardSnapshot {
   events: Event[]
   pending_approvals: ApprovalRequest[]
   safety_actions: SafetyAction[]
+  safety_cases?: SafetyCase[]   // open ones + the last few resolved (warroom/api/resolve.py)
 }
 
 export interface MachineDetail {
@@ -636,6 +693,7 @@ export interface HealthStatus {
   uptime_s: number
   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
   repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
+  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after the repair
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
@@ -765,7 +823,13 @@ export const API = {
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
-  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
+  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
+  safetyCases: "/api/safety/cases", // GET SafetyCase[]
+  safetyDispatch: "/api/safety/{case_id}/dispatch", // POST -> SafetyCase (① 派現場檢查)
+  safetyRelease: "/api/safety/{case_id}/release", // POST SafetyRelease -> SafetyCase (③ 確認恢復運轉; human only)
+  stopReplan: "/api/events/{event_id}/replan", // POST -> the NEW Event (SAFE_STOP: 請 AI 重新規劃)
+  stopHandoff: "/api/events/{event_id}/handoff", // POST -> Event (SAFE_STOP: 交給現場處理)
+  stopClose: "/api/events/{event_id}/close", // POST {note?} -> Event (SAFE_STOP: 確認結案)
   ws: "/ws",
 } as const
 
@@ -793,4 +857,10 @@ export interface SubagentsView { items: Subagent[]; queue: { slots: number; runn
 export interface MainReply {
   id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
+}
+
+/** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
+ *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
+export interface EventAiReport {
+  text: string; summary: string; by: "model" | "rules"; drafted_ms: number | null; at: ISODate; late_ms: number | null
 }
