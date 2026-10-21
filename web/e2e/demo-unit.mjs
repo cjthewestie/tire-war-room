@@ -19,6 +19,7 @@ const P = await vite.ssrLoadModule('/src/factory3d/patrol.ts')
 const A = await vite.ssrLoadModule('/src/factory3d/alarm.ts')
 const S = await vite.ssrLoadModule('/src/factory3d/pitchSlides.ts')
 const SG = await vite.ssrLoadModule('/src/demo/signals.ts')
+const DR = await vite.ssrLoadModule('/src/demo/driver.ts')
 await vite.close()
 
 const ids = D.CUES.map((c) => c.id)
@@ -147,6 +148,44 @@ function story(times) {
   check('停用檢修 on the way: not workerDone', !e.workerDone)
   const f = SG.signals(st({ ev: ev('closed', [{ status: 'rejected' }]), repaired: true, resolved: [ok('AP-EV-7-1'), ok('AP-EV-7-2')], tasks: [{ event_id: 'EV-7', status: '完成' }, { event_id: 'EV-7', status: '完成' }] }), seen)
   check('tile repaired (「檢修完成・待恢復運轉」): workerDone, though 7 號機 is still 停用', f.workerDone)
+}
+
+// the driver against a fake /api/demo/state (warroom/api/demo.py's rules): continue pressed on any screen moves the
+// story one step; a burst of continues (or a pointer run past the end) never leaves the driver stuck
+{
+  const srv = { running: false, cue_index: 0, cues: [], rev: 0, paused: false, waiting_for: null }
+  const io = { mode: 'live', control: async () => {}, demo: async (c) => {
+    if (c.action === 'start') Object.assign(srv, { running: true, cue_index: 0, cues: c.cues })
+    else if (c.action === 'continue') { if (srv.cue_index + 1 >= srv.cues.length) throw new Error('409 already at the last cue'); srv.cue_index++ }
+    else if (c.action === 'cue') Object.assign(srv, { cue_index: c.cue_index, waiting_for: c.waiting_for })
+    srv.rev++
+    return { ...srv }
+  } }
+  globalThis.performance ??= { now: () => Date.now() }
+  globalThis.fetch = async () => ({ json: async () => [{ name: 'morning_rush' }] })
+  const run = new DR.DemoRun(io, '3d')
+  let now = 0
+  await run.start(now)
+  let resolved = []
+  const state = () => ({ demo: { ...srv }, snapshot: { events: [], machines: [] }, pending: [], resolved, world: null })
+  const tickN = async (n, dt = 250) => { for (let i = 0; i < n; i++) { now += dt; run.tick(now, state()); await new Promise((r) => setTimeout(r, 0)) } }
+  await tickN(60)   // ① ready after 12 s
+  check('driver: ① waits for continue', D.CUES[run.tl.index].id === 'start' && D.waiting(run.tl, run.t, run.latched) === 'continue')
+  await run.continue(); await tickN(4)
+  check('driver: one continue (server) → 先核准急單', D.CUES[run.tl.index].id === 'rush', D.CUES[run.tl.index].id)
+  check('driver: the server pointer follows the driver', srv.cue_index === run.tl.index)
+  for (let i = 0; i < 6; i++) await io.demo({ action: 'continue' }).catch(() => {})   // a burst from another screen
+  await tickN(8)
+  check('driver: a burst of continues does not skip the rush approval', D.CUES[run.tl.index].id === 'rush' && srv.cue_index === run.tl.index, `${D.CUES[run.tl.index].id} / server ${srv.cue_index}`)
+  resolved = [{ id: 'AP-EV-X-RUSH-1', event_id: 'EV-X-RUSH', status: 'approved' }]
+  await tickN(4)
+  check('driver: the real approval → ②', D.CUES[run.tl.index].id === 'console')
+  await tickN(110)   // ② ready after its 25 s fallback
+  for (let i = 0; i < 5; i++) await io.demo({ action: 'continue' }).catch(() => {})
+  await tickN(8)
+  const after = run.tl.index
+  await run.continue(); await tickN(8)
+  check('driver: after a burst, the next continue still works (no stuck pointer)', run.tl.index !== after || run.tl.released, `${D.CUES[after].id} → ${D.CUES[run.tl.index].id}`)
 }
 
 // deck manifest

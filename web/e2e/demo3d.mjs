@@ -200,7 +200,7 @@ if (!FULL) {
   console.log('      signals first seen (demo s):', JSON.stringify(d.signals))
   console.log('      robot show:', JSON.stringify(d.robotPlayed))
   writeFileSync(resolve(OUT, 'demo-full-log.json'), JSON.stringify({ base: BASE, fallback: d.fallback, seen: d.seen, signals: d.signals, robot: d.robotPlayed, rows }, null, 2))
-  check('full: every cue fired', rows.length === 11, rows.map((r) => r.cue).join(','))
+  check('full: every cue fired', rows.length === 13, rows.map((r) => r.cue).join(','))
   check('full: robot show played turn → wave → scan → bow', (d.robotPlayed ?? []).join(',') === 'turn,wave,scan,bow', JSON.stringify(d.robotPlayed))
   const w = rows.find((r) => r.cue === 'worker')
   check('full: worker beat entered on the real completion', w?.inBy === 'event', JSON.stringify(w))
