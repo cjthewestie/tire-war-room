@@ -5,7 +5,11 @@
 //  approved over the API; after close the status line says 維修中 while 停用檢修 runs and the 3D panel on 7 號
 //  shows the 停用檢修 task, not a checklist. concurrent_3: the phone's idle card lists one line per open event and
 //  狀態機 shows 「約 N 分後達上限 120°C」 for B 線開煉機 instead of the 229.7°C extrapolation.
-// Run against a live server: PORT=8010 ./start.sh & node web/e2e/demo-d.mjs http://localhost:8010
+// Round 2 only happens when the round-1 fix does not hold: with fast repair (REPAIR_FAST_S > 0, the demo setting) round 1
+// closes the event, so the round-2 part runs on a second server started with REPAIR_FAST_S=0 (or on the first one when
+// that is already REPAIR_FAST_S=0). Round 1 and concurrent_3 run on the first server.
+// Run against a live server: PORT=8010 ./start.sh & REPAIR_FAST_S=0 PORT=8011 ./start.sh &
+//   node web/e2e/demo-d.mjs http://localhost:8010 http://localhost:8011
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
@@ -21,6 +25,8 @@ function loadPlaywright() {
 }
 const { chromium } = loadPlaywright()
 const BASE = process.argv[2] ?? 'http://localhost:8000'
+const SLOW = process.argv[3] ?? BASE        // the round-2 part: a server with REPAIR_FAST_S=0
+let HOST = BASE                             // the server api() / ctl() talk to
 const OUT = resolve(dirname(fileURLToPath(import.meta.url)), 'screenshots')
 mkdirSync(OUT, { recursive: true })
 let failed = 0
@@ -32,7 +38,7 @@ async function until(fn, ms, step = 500) {
   return null
 }
 const api = async (path, body) => {
-  const r = await fetch(BASE + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
+  const r = await fetch(HOST + path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {})
   return r.json()
 }
 const ctl = (b) => api('/api/sim/control', b)
@@ -57,56 +63,74 @@ check('p.11 round-1 card', !!r1, r1?.title)
   await p1.close()
 }
 await api(`/api/approvals/${r1.id}/decision`, { request_id: r1.id, decision: 'approve', option_id: 'B', via: 'dashboard' })
-const r2 = await pendingCard(2)
-check('p.11 round-2 card', !!r2, r2?.title)
-await ctl({ action: 'pause' })        // the card waits while the screens are read
 
+// ---------------------------------------------------------------- p.11 round 2 (REPAIR_FAST_S=0)
+HOST = SLOW
+const slowFast = (await api('/api/health')).repair_fast_s ?? 0
+check('round-2 server runs without fast repair (REPAIR_FAST_S=0)', !(slowFast > 0), `${SLOW} repair_fast_s=${slowFast}; pass a REPAIR_FAST_S=0 server as the 2nd argument`)
 const phone = await browser.newPage({ viewport: { width: 390, height: 844 } })
-await phone.goto(`${BASE}/phone`)
-await until(() => phone.$('[data-testid=phone-eta-sop]'), 30000)
-const eta = await text(phone, '[data-testid=phone-eta]')
-check('round-2 修復預估: SOP-CP-01 硫化中斷處置', /SOP-CP-01/.test(eta ?? ''), (eta ?? '').split('\n').find((l) => /SOP-/.test(l)))
-check('round-2 修復預估: no round-1 tasks, no 預計完成', !(await phone.$('[data-testid=phone-eta-tasks]')) && !(await phone.$('[data-testid=phone-eta-done]')))
-const ai2 = await text(phone, '[data-testid=ai-status]')
-check('round-2 status line: what = the detection, not 「7 號機停用，重排中」', /偵測到：7 號硫化機溫度 128 → 122°C/.test(ai2 ?? '') && !/AI 偵測到/.test(ai2 ?? ''), (ai2 ?? '').replace(/\n/g, '｜'))
-await phone.screenshot({ path: `${OUT}/demo-d-phone-390-round2.png`, fullPage: true })
+if (!(slowFast > 0)) {
+  let r1s = r1
+  if (SLOW !== BASE) {
+    await ctl({ action: 'scenario', scenario: 'press7_temp_drop', speed: 20, preroll: true })
+    r1s = await pendingCard(1)
+    check('p.11 round-1 card (round-2 server)', !!r1s, r1s?.title)
+    await api(`/api/approvals/${r1s.id}/decision`, { request_id: r1s.id, decision: 'approve', option_id: 'B', via: 'dashboard' })
+  }
+  const r2 = await pendingCard(2)
+  check('p.11 round-2 card', !!r2, r2?.title)
+  await ctl({ action: 'pause' })        // the card waits while the screens are read
 
-// issue #102: 產線監控 shows the round-2 approval as one line with a button to 主控台 (the card lives there); A over the API
-const dash = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-await dash.goto(`${BASE}/#monitor`)
-await until(() => dash.$('[data-testid=monitor-pending]'), 30000)
-const line = await text(dash, '[data-testid=monitor-pending]')
-check('產線監控: round-2 approval is one line on 7 號 with 到主控台核准', /7 號硫化機/.test(line ?? '') && /到主控台核准/.test(line ?? ''), (line ?? '').replace(/\n/g, '｜'))
-check('產線監控: no approval card there', !(await dash.$('.monitor-wrap [data-testid=approval-visual]')))
-await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440.png` })
-await api(`/api/approvals/${r2.id}/decision`, { request_id: r2.id, decision: 'approve', option_id: 'A', via: 'dashboard' })
-const decided = await until(async () => (await api('/api/approvals')).find((a) => a.id === r2.id && a.status !== 'pending'), 15000)
-check('round 2: option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
-await ctl({ action: 'play' })
-const closed = await until(async () => (await api('/api/events')).find((e) => e.machine_id === 'CURE-07' && e.state === 'closed'), 60000, 1000)
-check('p.11 event closed', !!closed, closed?.outcome)
-await ctl({ action: 'pause' })
-await phone.reload()
-// the task board (GET /api/world) lands a moment after the page: wait for it before reading the phase
-const idle = (await until(async () => { const t = await text(phone, '.ph-card.idle [data-testid=phone-line]'); return t && /維修中/.test(t) ? t : null }, 20000))
-  ?? await text(phone, '.ph-card.idle [data-testid=phone-line]')
-check('closed + 停用檢修 running → 維修中, not 已恢復正常', /維修中/.test(idle ?? '') && !/已修復|已恢復正常/.test(idle ?? ''), (idle ?? '').replace(/\n/g, '｜'))
-const hist = await phone.$$eval('.ph-card.idle .ph-hist', (els) => els.map((e) => e.innerText))
-check('history: no two identical lines', new Set(hist.map((h) => h.replace(/^\S+\s/, ''))).size === hist.length, hist.join(' / '))
-await phone.screenshot({ path: `${OUT}/demo-d-phone-390-closed.png`, fullPage: true })
+  await phone.goto(`${HOST}/phone`)
+  await until(() => phone.$('[data-testid=phone-eta-sop]'), 30000)
+  // 修復預估 sits in the card's folded 看依據 (d/ui-phone): open it before reading, as phone-eta.mjs does
+  await phone.$eval('.ph-approval details.ph-why', (el) => { el.open = true }).catch(() => {})
+  const eta = await text(phone, '[data-testid=phone-eta]')
+  check('round-2 修復預估: SOP-CP-01 硫化中斷處置', /SOP-CP-01/.test(eta ?? ''), (eta ?? '').split('\n').find((l) => /SOP-/.test(l)))
+  check('round-2 修復預估: no round-1 tasks, no 預計完成', !(await phone.$('[data-testid=phone-eta-tasks]')) && !(await phone.$('[data-testid=phone-eta-done]')))
+  const ai2 = await text(phone, '[data-testid=ai-status]')
+  check('round-2 status line: what = the detection, not 「7 號機停用，重排中」', /偵測到：7 號硫化機溫度 128 → 122°C/.test(ai2 ?? '') && !/AI 偵測到/.test(ai2 ?? ''), (ai2 ?? '').replace(/\n/g, '｜'))
+  await phone.screenshot({ path: `${OUT}/demo-d-phone-390-round2.png`, fullPage: true })
 
-const f3 = await browser.newPage({ viewport: { width: 1440, height: 900 } })
-await f3.goto(`${BASE}/factory?demo=1&test=1`)
-await f3.click('[data-testid=f3-start]', { force: true, timeout: 60000 })
-await until(() => f3.evaluate(() => !!window.__factory3d), 30000)
-await f3.evaluate(() => { document.exitPointerLock?.(); window.__factory3d.standAt('CURE-07') })
-await until(() => f3.$('[data-testid=f3-prompt]'), 20000)
-await f3.keyboard.press('KeyF')
-const out = await until(() => text(f3, '[data-testid=field-sop-out]'), 20000)
-check('3D 7 號 (停用): 停用檢修 status, no checklist', /停用檢修/.test(out ?? '') && !(await f3.$('[data-testid=field-sop-step-0]')), out)
-await f3.screenshot({ path: `${OUT}/demo-d-factory-1440-out.png` })
-await f3.close()
-await ctl({ action: 'play' })
+  // issue #102: 產線監控 shows the round-2 approval as one line with a button to 主控台 (the card lives there); A over the API
+  const dash = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  await dash.goto(`${HOST}/#monitor`)
+  await until(() => dash.$('[data-testid=monitor-pending]'), 30000)
+  const line = await text(dash, '[data-testid=monitor-pending]')
+  check('產線監控: round-2 approval is one line on 7 號 with 到主控台核准', /7 號硫化機/.test(line ?? '') && /到主控台核准/.test(line ?? ''), (line ?? '').replace(/\n/g, '｜'))
+  check('產線監控: no approval card there', !(await dash.$('.monitor-wrap [data-testid=approval-visual]')))
+  await dash.screenshot({ path: `${OUT}/demo-d-monitor-1440.png` })
+  await api(`/api/approvals/${r2.id}/decision`, { request_id: r2.id, decision: 'approve', option_id: 'A', via: 'dashboard' })
+  const decided = await until(async () => (await api('/api/approvals')).find((a) => a.id === r2.id && a.status !== 'pending'), 15000)
+  check('round 2: option A on the same request', decided?.decision?.option_id === 'A', `${decided?.id} ${decided?.status} ${decided?.decision?.option_id}`)
+  await ctl({ action: 'play' })
+  const closed = await until(async () => (await api('/api/events')).find((e) => e.machine_id === 'CURE-07' && e.state === 'closed'), 60000, 1000)
+  check('p.11 event closed', !!closed, closed?.outcome)
+  await ctl({ action: 'pause' })
+  await phone.reload()
+  // the task board (GET /api/world) lands a moment after the page: wait for it before reading the phase
+  const idle = (await until(async () => { const t = await text(phone, '.ph-card.idle [data-testid=phone-line]'); return t && /維修中/.test(t) ? t : null }, 20000))
+    ?? await text(phone, '.ph-card.idle [data-testid=phone-line]')
+  check('closed + 停用檢修 running → 維修中, not 已恢復正常', /維修中/.test(idle ?? '') && !/已修復|已恢復正常/.test(idle ?? ''), (idle ?? '').replace(/\n/g, '｜'))
+  const hist = await phone.$$eval('.ph-card.idle .ph-hist', (els) => els.map((e) => e.innerText))
+  check('history: no two identical lines', new Set(hist.map((h) => h.replace(/^\S+\s/, ''))).size === hist.length, hist.join(' / '))
+  await phone.screenshot({ path: `${OUT}/demo-d-phone-390-closed.png`, fullPage: true })
+
+  const f3 = await browser.newPage({ viewport: { width: 1440, height: 900 } })
+  await f3.goto(`${HOST}/factory?demo=1&test=1`)
+  await f3.click('[data-testid=f3-start]', { force: true, timeout: 60000 })
+  await until(() => f3.evaluate(() => !!window.__factory3d), 30000)
+  await f3.evaluate(() => { document.exitPointerLock?.(); window.__factory3d.standAt('CURE-07') })
+  await until(() => f3.$('[data-testid=f3-prompt]'), 20000)
+  await f3.keyboard.press('KeyF')
+  const out = await until(() => text(f3, '[data-testid=field-sop-out]'), 20000)
+  check('3D 7 號 (停用): 停用檢修 status, no checklist', /停用檢修/.test(out ?? '') && !(await f3.$('[data-testid=field-sop-step-0]')), out)
+  await f3.screenshot({ path: `${OUT}/demo-d-factory-1440-out.png` })
+  await f3.close()
+  await ctl({ action: 'play' })
+
+}
+HOST = BASE
 
 // ---------------------------------------------------------------- concurrent_3
 await ctl({ action: 'scenario', scenario: 'concurrent_3', speed: 10, preroll: true })
@@ -123,7 +147,7 @@ await until(async () => {
   return seen.size >= 3 && open.length >= 2 && !(await api('/api/approvals?status=pending')).length
 }, 180000, 1000)
 await ctl({ action: 'pause' })
-await phone.reload()
+await phone.goto(`${BASE}/phone`)
 await until(() => phone.$('.ph-card.idle [data-testid=phone-line]'), 20000)
 const lines = await phone.$$eval('.ph-card.idle [data-testid=phone-line]', (els) => els.map((e) => e.innerText.split('\n')[0]))
 check('phone idle card: one line per open event', lines.length >= 2, lines.join(' / '))
