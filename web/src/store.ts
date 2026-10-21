@@ -1,6 +1,6 @@
 // Client state: one reducer fed by WsMessages (from the live /ws or from the mock engine).
 import type {
-  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, WorldDelta, WorldSnapshot, WsMessage,
+  ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, SubagentsView, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
 
 export interface ClockState {
@@ -22,11 +22,13 @@ export interface WarRoomState {
   lastMessageAt: number
   /** The whole plant around the machines (orders, materials, dock, people, energy, quality, maintenance). Live only. */
   world: WorldSnapshot | null
+  /** issue #54: the main agent's subagents and the model queue (WS "subagents", GET /api/subagents). Live only. */
+  subagents: SubagentsView | null
 }
 
 export const initialState: WarRoomState = {
   snapshot: null, pending: [], resolved: [], clock: null, schedule: null, scheduleRev: 0,
-  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null,
+  audit: [], visited: {}, lastAlert: null, lastMessageAt: 0, world: null, subagents: null,
 }
 
 /** Apply a WS "world" message: a full one replaces, a delta overwrites only the sections it carries.
@@ -114,6 +116,8 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
         clock: msg.data,
         snapshot: s.snapshot ? { ...s.snapshot, header: { ...s.snapshot.header, factory_time: msg.data.factory_time } } : s.snapshot,
       }
+    case 'subagents':
+      return { ...base, subagents: msg.data }
     case 'world':
       return { ...base, world: mergeWorld(s.world, msg.data) }
     case 'anomaly':

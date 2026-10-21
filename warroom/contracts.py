@@ -482,6 +482,9 @@ class Anomaly(_M):
     message: str                       # "7 號 128 → 122°C，預測穩定在 122±1°C"
     related_machines: list[str] = Field(default_factory=list)
     detection_latency_s: float | None = None   # fault start -> anomaly (sim knows fault start)
+    # issue #54: the detector's pre-classification before any LLM: which rule fired, the signals and thresholds,
+    # the validation the readings passed, the forecast model (warroom/detect/detector.py _make)
+    preclass: dict[str, Any] | None = None
 
 
 # =====================================================================================
@@ -1066,6 +1069,7 @@ class WsType(StrEnum):
     AUDIT = "audit"                     # data: AuditEntry
     CLOCK = "clock"                     # data: {"factory_time": iso, "speed": float, "paused": bool}
     WORLD = "world"                     # data: {"full": bool, "rev": int, "factory_time": iso, <changed WorldSnapshot sections>}
+    SUBAGENTS = "subagents"             # issue #54: {"items": subagent rows, "queue": model queue} (warroom/agent/orchestrator.py)
 
 
 class WsMessage(_M):

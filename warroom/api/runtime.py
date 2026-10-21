@@ -121,6 +121,9 @@ class ComponentBuilder:
         self.capacity = self._capacity()
         self.orders_db = self._orders_db()
         self.reopened_store = False
+        # issue #54: one local model, one priority queue (safety > machine > orders/materials > staffing > questions)
+        from warroom.agent.orchestrator import ModelQueue
+        self.model_queue = ModelQueue(audit=self.audit, clock=self.clock)
 
     def _t(self, name: str, real: Callable[[], Any], fallback: Callable[[], Any]) -> Any:
         if not self.use_real:
@@ -263,8 +266,9 @@ class ComponentBuilder:
             extra = {"store": store, "sleep": sleep, "approval_timeout_s": self.s.approval_timeout_s}
             params = inspect.signature(StateMachine).parameters
             extra = {k: v for k, v in extra.items() if k in params and v is not None}
-            return StateMachine(self.commander, tools, gate, approvals, self.audit, sim=sim, bus=bus, clock=clock,
-                                **extra)
+            from warroom.agent.orchestrator import QueuedCommander
+            return StateMachine(QueuedCommander(self.commander, self.model_queue), tools, gate, approvals, self.audit,
+                                sim=sim, bus=bus, clock=clock, **extra)
         sm = self._t("state_machine", sm_real,
                      lambda: FB.MinimalStateMachine(audit=self.audit, bus=bus, clock=clock))
 
@@ -492,6 +496,8 @@ class Runtime:
                                                               fresh_store=not want_resume)
         from warroom.api.ingest import IngestPipeline
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
+        self._orch: Any = None
+        self._orch_c: Any = None
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -502,6 +508,7 @@ class Runtime:
         self.safety_log: list[SafetyAction] = []
         self.anomalies: list[Anomaly] = []
         self._tasks: dict[str, asyncio.Task] = {}
+        _ = self.orch                          # issue #54: hook the main agent onto the state machine now
         self._loop_task: asyncio.Task | None = None
         self._baseline: dict[str, dict[str, float]] = {}
         self._last_machines_pub = 0.0
@@ -950,6 +957,20 @@ class Runtime:
                                "at": now.isoformat()}, t.event_id)
         board.add_listener(on_task)
 
+    @property
+    def orch(self) -> Any:
+        """Issue #54: the main agent (orchestrator) over the current state machine (rebuilt with the components)."""
+        if self._orch is None or self._orch_c is not self.c:
+            from warroom.agent.orchestrator import Dispatcher, Orchestrator
+            q = getattr(self.builder, "model_queue", None)
+            self._orch = Orchestrator(self.c.state_machine, self.audit, approvals=self.c.approvals, bus=self.c.bus,
+                                      clock=self.clock, queue=q, tasks=lambda: self._tasks,
+                                      board=lambda: getattr(getattr(self.sim, "world", None), "tasks", None),
+                                      dispatcher=Dispatcher(self.settings))
+            self._orch.queue.on_change = self._orch.publish
+            self._orch_c = self.c
+        return self._orch
+
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
         """Issue #10: open a supervisor-command event now and run it as a tracked task (cancelled on a
         scenario load like any event)."""
@@ -1076,6 +1097,7 @@ class Runtime:
                     raise
                 self.scenario = new_scenario
                 self.c = comps
+                _ = self.orch                      # the main agent hooks the new state machine at once
                 self.ingest.reset()
                 self.safety_log.clear()
                 self.anomalies.clear()

@@ -300,6 +300,10 @@ class StateMachine:
         self._plant_inputs: dict[str, Any] = {}  # issue #17: plant event id -> its PlantInput
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._ids = itertools.count(1)
+        # issue #54: the main agent (orchestrator) hooks a run's start and end; a supervisor interrupt sets the reason
+        self.on_open: Callable[[Event], None] | None = None
+        self.on_end: Callable[[Event], None] | None = None
+        self._interrupt: dict[str, str] = {}
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
         try:
             self._commander_streams = "on_alert" in inspect.signature(commander.plan).parameters
@@ -343,11 +347,12 @@ class StateMachine:
     async def _drive(self, ev: Event, body: Callable[[_Run], Awaitable[None]]) -> Event:
         run = _Run(ev=ev, prev_schedule_version=self._active_version())
         self._runs[ev.id] = run
+        self._hook(self.on_open, ev)
         try:
             await body(run)
         except asyncio.CancelledError:
             if ev.state not in TERMINAL_STATES:
-                self._safe_stop(run, "事件處理被取消")
+                self._safe_stop(run, self._interrupt.get(ev.id, "事件處理被取消"))
             raise
         except Exception as e:  # noqa: BLE001 - never leave an event half-open
             self.audit.append(AuditKind.SYSTEM, "state_machine",
@@ -359,8 +364,30 @@ class StateMachine:
             self._runs.pop(ev.id, None)
             if self._open.get(ev.machine_id) == ev.id:
                 del self._open[ev.machine_id]
+            self._hook(self.on_end, ev)
             self._trim()
         return ev
+
+    def _hook(self, fn: Callable[[Event], None] | None, ev: Event) -> None:
+        if fn is not None:
+            try:
+                fn(ev)
+            except Exception as e:  # noqa: BLE001 - the main agent's bookkeeping never breaks a run
+                self.audit.append(AuditKind.SYSTEM, "state_machine", {"hook_error": f"{type(e).__name__}: {e}"[:300]},
+                                  event_id=ev.id)
+
+    def mark_interrupt(self, event_id: str, reason: str = "主管中斷") -> None:
+        """Issue #54: the supervisor interrupts this run; the cancellation then safe-stops it with this reason."""
+        self._interrupt[event_id] = reason
+
+    def stop_run(self, event_id: str, reason: str = "主管中斷") -> None:
+        """Issue #54: end a run that has no task to cancel (SAFE_STOP keeps the schedule in force)."""
+        ev = self._events[event_id]
+        if ev.state in TERMINAL_STATES:
+            return
+        run = self._runs.get(event_id) or _Run(ev=ev, prev_schedule_version=self._active_version())
+        self._safe_stop(run, reason)
+        self._hook(self.on_end, ev)
 
     # ------------------------------------------------------------------ issue #10: supervisor commands
     def open_command(self, text: str, actor: str = "supervisor") -> Event:

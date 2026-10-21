@@ -19,7 +19,7 @@ from warroom.contracts import AuditEntry, AuditKind
 
 TERMINAL = ("closed", "safe_stop")
 _MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
-TYPE_LABEL = {"event": "機台異常", "command": "主管任務", "plant": "工廠事件", "ask": "問戰情室"}
+TYPE_LABEL = {"event": "機台異常", "command": "主管任務", "plant": "工廠事件", "ask": "問戰情室", "main": "主 agent 對話"}
 
 
 def _day(ts: datetime) -> str:
@@ -42,7 +42,7 @@ def group_key(entries: list[AuditEntry]) -> list[str]:
 
 def _run(eid: str) -> dict[str, Any]:
     m = _MACHINE_RE.search(eid)
-    return {"id": eid, "type": "ask" if eid.startswith("ASK-") else "event", "machine_id": m.group(1) if m else None,
+    return {"id": eid, "type": "ask" if eid.startswith("ASK-") else "main" if eid.startswith("MAIN-") else "event", "machine_id": m.group(1) if m else None,
             "opened_at": None, "closed_at": None, "path": [], "rounds": 1, "outcome": "open", "approvals": [],
             "pending_approvals": 0, "title": None, "duration_min": None}
 

@@ -90,6 +90,12 @@ log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
 
 
+class MainMessage(BaseModel):
+    """Issue #54: a message to the 主 agent (it classifies it itself)."""
+    text: str = Field(min_length=1, max_length=300)
+    event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
+
+
 class RollbackBody(BaseModel):
     version: int | None = None
     confirm: bool = False      # the supervisor saw the preview (versions, diff) and confirmed: the R2/R3 approval
@@ -602,6 +608,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
         _safe(r.sync_warning_light, False)
+        _safe(lambda: r.orch.on_decided(out), None)        # issue #54: 核准並派發 -> the main agent dispatches execution
         return out
 
     # ------------------------------------------------------------------ schedule
@@ -736,6 +743,48 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=503, detail="SOP knowledge base unavailable")
         return await asyncio.to_thread(kb.search, q, k)
 
+    # ------------------------------------------------------------------ issue #54: 主 agent and its subagents
+    @app.get("/api/subagents")
+    async def subagents() -> dict[str, Any]:
+        """The main agent's subagents (one per state-machine run) with status and progress, and the model queue."""
+        o = rt().orch
+        return {"items": o.subagents(), "queue": o.queue.view()}
+
+    @app.post("/api/subagents/{event_id}/interrupt")
+    async def interrupt_subagent(event_id: str, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """Stop a subagent safely (no new tool call, waiting cards superseded, open worker tasks cancelled,
+        schedule kept, SAFE_STOP 「主管中斷」). Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        try:
+            return await r.orch.interrupt(event_id, session.actor)
+        except KeyError:
+            raise _404(event_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/preclass")
+    async def preclass() -> dict[str, Any]:
+        """The detector's pre-classification before any LLM: per anomaly the rule, signals and thresholds, the
+        validation it passed, the forecast and where the main agent routes it; plus readings rejected as bad data."""
+        from warroom.agent.orchestrator import PRIORITY_LABEL, TYPES, route
+        r = rt()
+        evs = {e.anomaly.id: e for e in r.events()}
+        items = []
+        for a in reversed(r.anomalies):
+            t, p = route(a.kind.value, a.severity)
+            ev = evs.get(a.id)
+            items.append({**a.model_dump(mode="json"), "route": {"type": t, "type_label": TYPES[t], "priority": p,
+                                                                  "priority_label": PRIORITY_LABEL[p]},
+                          "event_id": ev.id if ev else None, "event_state": ev.state.value if ev else None})
+        h = r.snapshot().header
+        det = r.c.detector
+        log_ = list(getattr(det, "bad_data_log", []))[-30:]
+        bad = [{"ts": ts.isoformat(), "machine_id": mid, "channel": getattr(ch, "value", str(ch)),
+                "quality": getattr(q, "value", str(q))} for ts, mid, ch, q in reversed(log_)]
+        return {"items": items, "bad_data": [b.model_dump(mode="json") for b in (h.bad_data or [])], "bad_log": bad}
+
     # ------------------------------------------------------------------ 每日事件紀錄 (issue #37): read-only, from the audit log
     def _daylog():
         from warroom.api import daylog
@@ -792,8 +841,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕提問")
         if r.c.tools is None:
             raise HTTPException(status_code=503, detail="tools unavailable (degraded mode)")
-        return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
-                                       now=r.clock.now(), actor=session.actor)
+        from warroom.agent.orchestrator import PRIORITY
+        async with r.orch.queue.slot(PRIORITY["question"], "ask", None, "問戰情室"):   # questions wait last (issue #54)
+            return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
+                                           now=r.clock.now(), actor=session.actor)
 
     # ------------------------------------------------------------------ issue #10: 下新任務 / 討論這個計劃
     def _ask_agent(r: Runtime):
@@ -829,11 +880,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
             return CommandReply(event_id="", accepted=False, reply=chat)
-        ev = r.start_command(body.text.strip(), session.actor)
+        # issue #54: the main agent picks ONE subagent (model in its queue slot, or keyword rules), then starts it
+        from warroom.agent.orchestrator import TYPES
+        ev, d = await r.orch.dispatch_command(body.text.strip(), session.actor, r.start_command)
         from warroom.agent.talk import physical_request
         refusal = physical_request(body.text)
+        how = "模型判斷" if d["by"] == "model" else "關鍵字規則" + ("（模型失敗改用規則）" if d.get("fell_back") else "")
         return CommandReply(event_id=ev.id, accepted=refusal is None,
-                            reply=refusal or f"收到，已開任務事件 {ev.id}，AI 指揮官規劃中；需要核准的動作會送出核准卡。")
+                            reply=refusal or f"主 agent 已請子 agent 規劃：{TYPES[d['type']]}（{how}：{d['reason']}）。"
+                                             "計劃好了會送到計劃區給你核准；核准後派發執行，完成後在這裡回報。")
 
     @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
     async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
@@ -853,6 +908,60 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                      context=r.ask_context(), now=r.clock.now())
         _safe(r.sync_warning_light, False)
         return out
+
+    # ------------------------------------------------------------------ issue #54: one input, one 主 agent
+    def _main_agent(r: Runtime):
+        if "main" not in holder:
+            from warroom.agent.main_agent import MainAgent
+            holder["main"] = MainAgent(r.settings)
+        return holder["main"]
+
+    @app.post("/api/main/message")
+    async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """The supervisor talks to the 主 agent: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
+        chat, read (knowledge base, sensors, orders), dispatch a subagent to draft a plan, or discuss the selected
+        waiting plan. It has no write tool; a dispatched plan still needs 核准並派發. Same session rule as approvals."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        text = body.text.strip()
+        sm = r.state_machine
+        waiting = None
+        if body.event_id:
+            card = getattr(sm, "waiting_card", lambda _e: None)(body.event_id)
+            waiting = card.title if card is not None else None
+        from warroom.agent.ask import AskAgent
+        from warroom.agent.main_agent import DISPATCHES
+        from warroom.agent.orchestrator import ACTOR, PRIORITY
+        from warroom.contracts import ToolName, ToolResult
+
+        async def run_tool(name: str, args: dict[str, Any], call_id: str) -> ToolResult:
+            if r.c.tools is None:
+                return ToolResult(call_id=call_id, tool=ToolName(name), ok=False, error="tools unavailable")
+            eid, step = call_id.split(":")[0], call_id.split(":")[-1]
+            return await AskAgent._run(r.c.tools, r.audit, eid, int(step[1:] or 1), ToolName(name), args)
+
+        async def dispatch(t: str, task: str) -> dict[str, Any]:
+            name = next(k for k, v in DISPATCHES.items() if v == t)
+            d = {"dispatch": name, "type": t, "reason": "主 agent 對話中派發", "by": "model" if _main_agent(r).llm else "rules",
+                 "fell_back": False, "error": None, "ms": None, "model": r.settings.model}
+            ev = r.orch.start_task(task, session.actor, r.start_command, d)
+            return {"event_id": ev.id}
+
+        async def talk(t: str) -> dict[str, Any]:
+            out = await discuss(body.event_id, DiscussRequest(text=t), session)
+            return out.model_dump(mode="json")
+
+        def slot():
+            return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "主 agent 對話")
+
+        res = await _main_agent(r).turn(text, context=r.ask_context(), waiting_plan=waiting, run_tool=run_tool,
+                                        dispatch=dispatch, discuss=talk if waiting else None, slot=slot)
+        r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
+                                                  "fell_back": res["fell_back"], "error": res["error"],
+                                                  "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
+                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
+        return res
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")
