@@ -29,8 +29,8 @@ html, body, #root { height: 100%; overflow: hidden; }
 /* demo answer card: the headline answers what to do now, the line under it is Agent Nemo's action and time
    (AiStatusLine compact), then what waits on the phone, then the clock and the link chip as small print. The bar on
    the left is the story's colour: red open, amber 回溫中, green 已恢復正常 */
-.f3-hud > .f3-answer { display: grid; gap: 3px; padding: 10px 16px 9px 13px; border-left: 5px solid transparent; }
-.f3-answer > b { font-size: 18px; font-weight: 800; line-height: 1.35; }
+.f3-hud > .f3-answer { display: grid; gap: 3px; padding: 10px 16px 9px 13px; border-left: 5px solid transparent; background: var(--c-paper-solid); }   /* solid: no ghost of the signs behind it */
+.f3-answer > b { font-size: 22px; font-weight: 800; line-height: 1.3; }
 .f3-answer.bad { border-left-color: var(--c-red); } .f3-answer.bad > b { color: var(--c-red); }
 .f3-answer.warm { border-left-color: #e08a00; } .f3-answer.warm > b { color: var(--c-amber); }
 .f3-answer.ok { border-left-color: #2f9e44; } .f3-answer.ok > b { color: var(--c-green); }
@@ -67,6 +67,8 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-tag.amber { border-top-color: #e08a00; } .f3-tag.amber span { color: var(--c-amber); }
 .f3-tag.red { border-top-color: #c0352a; background: #ffe9e4; } .f3-tag.red span { color: var(--c-red); }
 .f3-tag.grey { border-top-color: #8a8f96; }
+/* demo: the reading is the proof of 回溫 on a projector */
+.f3-root.demo .f3-tag span { font-size: 20px; }
 
 /* demo: the chip over the worker Agent Nemo sent to repair (People.tsx RepairChip), anchored above the head */
 .f3-repair { transform: translate(-50%, calc(-100% - 4px)); padding: 4px 12px; border-radius: 999px; background: var(--c-paper-solid); border: 3px solid #76b900; color: var(--c-ink); white-space: nowrap; font-size: 14px; font-weight: 800; box-shadow: var(--c-shadow); }
@@ -132,8 +134,10 @@ html, body, #root { height: 100%; overflow: hidden; }
 @media (max-width: 600px) {
   .f3-thumb { display: none; } .f3-keys { display: none; }
   .f3-repair { padding: 3px 9px; font-size: 12px; }
+  .f3-answer > b { font-size: 18px; }
   /* narrow screens: the HUD stack fills the top-left, so the toast drops to the bottom, full width */
   .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
+  .f3-root.demo .f3-toast { bottom: 150px; }   /* demo: above the stick and the 手機 button, like the success chip */
 }
 @keyframes f3-rise { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 

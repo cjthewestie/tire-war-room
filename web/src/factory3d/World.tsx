@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
 import { DEMO_MODE } from '../components/DemoStrip'
-import { LINES, machineLabel } from '../factory'
+import { LINES, ML_PRESSES, machineLabel } from '../factory'
 import type { WarRoomState } from '../store'
 import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
@@ -729,14 +729,14 @@ export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: num
 const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 
 /** Demo (?demo=1): number plates on the floor in front of the curing presses, so the audience can find 「7 號」 from the
- *  overview: the two ends (1 and 11) as a ruler, plus every press with an open event. A DOM chip like the line signs,
- *  mounted a frame late like them. */
+ *  overview: the two ends (1 and 11) as a ruler, plus every press with an open event (8–11 號 say 中大胎). A DOM chip like
+ *  the line signs, mounted a frame late like them. */
 function PressNo({ p, hot, warm }: { p: Placed; hot: boolean; warm: boolean }) {
   const [ready, setReady] = useState(false)
   useEffect(() => { const r = requestAnimationFrame(() => setReady(true)); return () => cancelAnimationFrame(r) }, [])
   return ready ? (
     <Html position={[p.x, 0.05, p.z + p.d / 2 + 0.32]} center zIndexRange={[9, 5]} style={{ pointerEvents: 'none' }}>
-      <div className={`f3-sign f3-press-no${warm ? ' warm' : hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號</div>
+      <div className={`f3-sign f3-press-no${warm ? ' warm' : hot ? ' hot' : ''}`} data-testid={`press-no-${p.id}`}>{p.short} 號{ML_PRESSES.includes(p.id) ? '・中大胎' : ''}</div>
     </Html>
   ) : null
 }

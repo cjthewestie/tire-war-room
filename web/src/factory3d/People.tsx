@@ -144,6 +144,14 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
   return false
 }
 
+/** A walker that left the scene: free its own buffers, every geometry of its figure (made per figure) and its marker's
+ *  and ring's materials (the figure's materials are kit's shared cache: kept). */
+function dropWalker(wk: Walker) {
+  wk.f.root.traverse((o) => { if (o instanceof THREE.Mesh) o.geometry.dispose() })
+  ;((wk.task as THREE.Mesh).material as THREE.Material).dispose()
+  ;(wk.ring.material as THREE.Material).dispose()
+}
+
 const STANDBY: P = [10.45, 0.1]          // 員工待命區: where a task worker comes from and goes back to
 const ON_TASK = new Set(['前往中', '執行中'])
 
@@ -234,7 +242,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
     const dt = Math.min(dt0, 0.05)
     let i = 0
     for (const [id, wk] of walkers.current) {
-      if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); walkers.current.delete(id) }
+      if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); dropWalker(wk); walkers.current.delete(id) }
     }
   })
   // one chip per machine (concurrent_3's B 線開煉機 has 檢修 and 放慢投料: two workers on one path, two chips on top of

@@ -71,7 +71,7 @@ function headline(ev: Event | null, stage: RepairStage | null, waiting: boolean)
   if (ev.state === 'closed' || ev.state === 'safe_stop') return '目前沒有異常'
   if (stage === 'recovering') return `${m} 回溫中`
   if (stage === 'repairing') return `${m} 維修中`
-  const what = PROBLEM[ev.anomaly.kind] ? `${m}${PROBLEM[ev.anomaly.kind]}` : plain(ev.alert_card?.title ?? ev.anomaly.message)
+  const what = PROBLEM[ev.anomaly.kind] ? `${m} ${PROBLEM[ev.anomaly.kind]}` : plain(ev.alert_card?.title ?? ev.anomaly.message)
   return waiting ? `${what}，等你核准` : what
 }
 
@@ -311,7 +311,11 @@ export function FactoryApp() {
         }
         // 1 / 5 while paused used to load the scenario and stay paused (the plant looked frozen): loading also plays
         const sent = c.action === 'scenario' ? transport.control(c).then(() => transport.control({ action: 'play' })) : transport.control(c)
-        sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
+        // demo: the T menu's words, 「正在載入：…」 while it loads, then what started
+        const name = DEMO_MODE && c.action === 'scenario' ? label.replace(/^載入情境：/, '') : ''
+        if (name) setDemoNote({ text: `正在載入：${name}`, at: Date.now(), ms: 20_000 })
+        const done = !name ? label : c.scenario === 'normal' ? name : `已觸發：${name}`
+        sent.then(() => setDemoNote({ text: done, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${name || label}：沒有成功`, at: Date.now() }) })
         return
       }
       if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
@@ -481,13 +485,13 @@ export function FactoryApp() {
                 <li>左下搖桿移動，推到底是跑步</li>
                 <li>拖曳畫面轉視角，兩指捏合縮放</li>
                 <li>{DEMO_MODE ? '靠近機台，右下會出現操作按鈕' : '靠近機台或門，右下會出現操作按鈕'}</li>
-                <li>「手機」拿起主管手機（真的手機頁，在哪都能核准）・「第一人稱」切換視角</li>
+                <li>「手機」拿起主管手機{DEMO_MODE ? '' : '（真的手機頁，在哪都能核准）'}・「第一人稱」切換視角</li>
               </ul>
             ) : <ul>
               <li><kbd>W A S D</kbd> 移動，<kbd>Shift</kbd> 跑步，滑鼠看四周（<kbd>Q</kbd>/<kbd>E</kbd> 也能轉身）</li>
               <li>機台旁按 <kbd>F</kbd> 看即時讀數；戰情室桌前按 <kbd>F</kbd> 坐下用儀表板</li>
               {!DEMO_MODE && <li>牆上的門通往 <b>休息區</b> 和 <b>廁所</b>：走進去或按 <kbd>F</kbd></li>}
-              <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
+              <li><kbd>P</kbd> 拿起主管手機{DEMO_MODE ? '' : '（真的手機頁，在哪都能核准）'}・<kbd>V</kbd> 切換俯瞰</li>
             </ul>}
             <button className="f3-go">點擊開始</button>
           </div>

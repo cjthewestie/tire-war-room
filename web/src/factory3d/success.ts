@@ -1,7 +1,8 @@
 // Success moments (issue #36, CJ 2026-10-20 「成功出貨或者是單子完成也要顯示」): the world feed's order_completed and
 // shipment_departed events, each shown once. Events already in the feed when the page opens are not replayed.
 // Demo (?demo=1): a repaired machine back to normal (Event.recovered_at, Kyle 10-21 flow) is one too, 「7 號硫化機 已恢復正常」,
-// the positive end of the anomaly story; the same rule, a machine already recovered when the page opens is not replayed.
+// the positive end of the anomaly story; the same rule, a machine already recovered when the page opens is not replayed
+// (but a scenario loaded again and recovered again is).
 import { useEffect, useRef, useState } from 'react'
 import type { Event, WorldEvent, WorldSnapshot } from '../contracts'
 import { machineLabel } from '../factory'
@@ -44,6 +45,9 @@ export function useSuccessMoments(world: WorldSnapshot | null, events?: Event[])
     if (!events) return
     const done = events.filter((e) => recoveryPhase(e) === 'recovered')
     if (back.current === null) { back.current = new Set(done.map(backKey)); return }
+    // a scenario reload clears the events: forget those, so the same event recovering again (the demo replayed) shows again
+    const ids = new Set(events.map(backKey))
+    for (const k of back.current) if (!ids.has(k)) back.current.delete(k)
     const fresh = done.filter((e) => !back.current!.has(backKey(e)))
     if (!fresh.length) return
     for (const e of fresh) back.current.add(backKey(e))

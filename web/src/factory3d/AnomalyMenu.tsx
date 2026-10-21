@@ -9,9 +9,12 @@ import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scena
 import { useSimEvents } from '../components/useSimEvents'
 import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
+import { TOUCH_DEVICE } from './pose'
 
 const ANOMALIES: ScenarioName[] = ['press7_temp_drop', 'open_mill_overheat', 'concurrent_3']
 const label = (n: ScenarioName) => (SCENARIOS.find((s) => s.name === n)?.label ?? n).replace(/（.*?）/, '')
+/** demo: a single event's name without the engineer's note in brackets (「感測器壞資料（不叫醒 AI）」) */
+const evLabel = (s: string) => (DEMO_MODE ? s.replace(/（.*?）/, '') : s)
 
 export function AnomalyMenu({ open, onOpen, onNote }: {
   open: boolean
@@ -49,7 +52,7 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
     <div className="f3-anom" data-testid="f3-anomaly">
       <button className={`f3-anom-btn${open ? ' on' : ''}`} disabled={busy} aria-expanded={open} data-testid="f3-anomaly-btn"
         onClick={() => onOpen(!open)}>
-        ⚡ 觸發異常 <kbd>T</kbd>
+        ⚡ 觸發異常 {!(DEMO_MODE && TOUCH_DEVICE) && <kbd>T</kbd>}
       </button>
       {open && (
         <div className="f3-anom-menu" role="menu" data-testid="f3-anomaly-menu">
@@ -61,8 +64,8 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
             <p>{DEMO_MODE ? '再加一件異常' : '單一事件（照目前情境加一件）'}</p>
             {ev.catalog.map((c) => (
               <button key={c.kind} role="menuitem" disabled={busy} data-kind={c.kind}
-                onClick={() => void run(`已觸發：${c.label}`, () => ev.fire(c.kind))}>
-                {c.label}<small>{c.source === 'fault' ? '機台' : c.source === 'world' ? '原料' : '工廠'}</small>
+                onClick={() => void run(`已觸發：${evLabel(c.label)}`, () => ev.fire(c.kind))}>
+                {evLabel(c.label)}<small>{c.source === 'fault' ? '機台' : c.source === 'world' ? '原料' : '工廠'}</small>
               </button>
             ))}
           </>}
