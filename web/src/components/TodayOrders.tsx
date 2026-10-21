@@ -1,6 +1,7 @@
 // 今日訂單 (issue #95; the phone only since the 訂單 tab answers first): today's production / delivery first, then the
-// orders that are overdue, will be late, or are not scheduled yet (未排程, the server's other_risk: not a delay) --
-// kept apart and each with its due time, evidence-based finish time and reason. Everything else is one compact line (id, done count, status). Detail is a fold-out;
+// orders that are overdue, will be late, or are not scheduled yet (未排程: not a delay; from each order's own schedule
+// fields, the 訂單 tab's rule, since the server's other_risk holds only the ones with a reason such as a due date in 3
+// days) -- kept apart and each with its due time, evidence-based finish time and reason. Everything else is one compact line (id, done count, status). Detail is a fold-out;
 // the counts always come from the whole list. Same data and rules as 問戰情室 (GET /api/orders/today), so the page
 // and the chat cannot disagree. Unknown stays 待確認 / 尚無排程; nothing is shown as 0.
 import { useEffect, useState } from 'react'
@@ -18,7 +19,7 @@ function RiskRow({ b, kind }: { b: OrderBrief; kind: 'overdue' | 'late' | 'other
     <li className={`to-risk to-${kind}`} data-order={b.id} data-testid={`today-risk-${kind}`}>
       <b>{b.id}</b><span className="to-tag">{kind === 'overdue' ? '已遲交' : kind === 'late' ? '會晚交' : '未排程'}</span>
       {kind === 'other'
-        ? <span className="to-line">交期 {dueText(b)}，{b.reasons.join('；') || '還沒排進硫化排程'}</span>
+        ? <span className="to-line">交期 {dueText(b)}，{b.reasons.join('；') || (b.has_schedule ? `還有 ${b.unscheduled} 條還沒排進硫化排程` : '還沒排進硫化排程')}</span>
         : <><span className="to-line">交期 {dueText(b)}・預計完成 {etaText(b)}</span><span className="to-why">{b.reasons.join('；') || '—'}</span></>}
     </li>
   )
@@ -45,22 +46,29 @@ export function TodayOrders({ compact = false }: { compact?: boolean }) {
   const by = new Map(data.orders.map((b) => [b.id, b]))
   const get = (ids: string[]) => ids.map((i) => by.get(i)).filter((b): b is OrderBrief => !!b)
   const c = data.counts
-  const riskIds = new Set(data.at_risk.concat(data.overdue))
+  const lateIds = new Set(data.overdue.concat(data.late))
+  // 未排程: tyres left that the active schedule does not hold, with no capacity estimate (orderModel.ts 'unsched')
+  const unsched = data.orders.filter((b) => !lateIds.has(b.id) && (b.unscheduled ?? 0) > 0 && !b.schedule_estimate)
+    .sort((a, b) => ms(a.due_at ?? `${a.due}T23:59:00+08:00`) - ms(b.due_at ?? `${b.due}T23:59:00+08:00`))
+  const riskIds = new Set([...lateIds, ...unsched.map((b) => b.id)])
   const today = get(data.production.concat(data.delivery.filter((i) => !data.production.includes(i))))
   const calm = today.filter((b) => !riskIds.has(b.id))
   const LIM = compact ? 4 : 8
+  const ULIM = compact ? 3 : 6                     // 未排程 rows before 「再看」 (nearest due first)
   const shown = more ? calm : calm.slice(0, LIM)
+  const unschedShown = more ? unsched : unsched.slice(0, ULIM)
+  const extra = Math.max(0, calm.length - LIM) + Math.max(0, unsched.length - ULIM)
   return (
     <section className="panel today-orders" data-testid="today-orders" aria-label="今日訂單">
       <header className="to-h"><h2>今日訂單</h2><span className="muted small">{fmtMD(data.date)}・{data.schedule_version != null ? `第 ${data.schedule_version} 版排程` : '排程待確認'}</span></header>
       <p className="to-sum" data-testid="today-summary">
         今天生產 <b>{c.production}</b> 張、交貨 <b>{c.delivery}</b> 張
       </p>
-      {c.overdue + c.late + c.other_risk > 0 ? (
+      {riskIds.size > 0 ? (
         <ul className="to-risks" role="list" aria-label="需要注意的訂單">
           {get(data.overdue).map((b) => <RiskRow key={b.id} b={b} kind="overdue" />)}
           {get(data.late).map((b) => <RiskRow key={b.id} b={b} kind="late" />)}
-          {get(data.other_risk).map((b) => <RiskRow key={b.id} b={b} kind="other" />)}
+          {unschedShown.map((b) => <RiskRow key={b.id} b={b} kind="other" />)}
         </ul>
       ) : <p className="muted small" data-testid="today-no-risk">目前沒有會晚交或未排程的訂單。</p>}
       {c.unique_today === 0 && <p className="muted small">今天沒有生產或交貨的訂單（沒有拿其他日期的訂單代替）。</p>}
@@ -81,7 +89,7 @@ export function TodayOrders({ compact = false }: { compact?: boolean }) {
           ))}
         </ul>
       )}
-      {calm.length > LIM && <button type="button" className="to-more" onClick={() => setMore(!more)}>{more ? '收起' : `再看 ${calm.length - LIM} 張`}</button>}
+      {extra > 0 && <button type="button" className="to-more" onClick={() => setMore(!more)}>{more ? '收起' : `再看 ${extra} 張`}</button>}
     </section>
   )
 }
