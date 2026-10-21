@@ -79,7 +79,9 @@ async def test_concurrent3_round2_card_is_not_marked_stale(tmp_path):
         by = {}
         for a in f.approved:
             by.setdefault(a.approval_id, []).append(a.label)
-        r1, r2 = (by.get(f"AP-{ev.id}-{n}", []) for n in (1, 2))
+        # the re-approval after the stale confirm is v2 of the same card (AP-…-1v2, group B 10-21), formerly round 2
+        r1 = by.get(f"AP-{ev.id}-1", [])
+        r2 = by.get(f"AP-{ev.id}-1v2") or by.get(f"AP-{ev.id}-2", [])
         assert len(r1) == 1 and "未生效" in r1[0], by
         assert r2 and not any("未生效" in x for x in r2), by
         assert any(f"排程 v{active}" in x for x in r2), (active, by)

@@ -1709,6 +1709,10 @@ class Runtime:
             # cards), so the search starts at its own round: from the previous card's round, round 2's card (gated
             # step "S4" again) matched round 1, whose confirm went stale, and read 「未生效」 while its v4 was in force
             start = max(start, req.round - 1)
+            # v2 of an approved card whose confirm went stale (group B 10-21: same round, 「另一事件的排程先生效」) ran in
+            # the plan round after v1's, not in v1's own
+            if getattr(req, "supersedes", None) and req.supersedes in done_ids:
+                start = max(start, ri + 1)
             done_ids.add(req.id)
             j = next((k for k in range(start, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
             ran: list[Any] = []
