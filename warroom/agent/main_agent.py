@@ -153,6 +153,8 @@ _ABOUT_LAST_RX = re.compile(r"^(?:為什麼|為何|怎麼會|真的嗎|確定嗎
 # weather / news: data the plant does not have. Checked AFTER the model (CJ 2026-10-21: 「程式檢查就好了」): a reply that
 # does not admit it has no such data (「今天天氣是晴天」, or a plant dump instead) is replaced by an honest line
 _NO_DATA_TOPIC_RX = re.compile(r"天氣|氣溫|下雨|颱風|新聞|股價|股市|匯率|油價|比分|彩券")
+# an admission, not any 「沒有」: 「天氣預報是陰轉雨…還有沒有什麼需要我幫忙的」 passed the looser check (real run 10-21)
+_ADMITS_NO_DATA_RX = re.compile(r"沒有.{0,8}(?:資料|資訊|數據|氣象|天氣)|查不到|無法(?:取得|提供|回答|查)|沒辦法|答不了|沒接")
 NO_DATA_REPLIES = ("我這邊沒有天氣、新聞這類外部資料，這題沒辦法回答。", "這個我查不到，我只接了工廠裡的資料。",
                    "外面的資料我沒有接進來，這題答不了。")
 SMALLTALK_LINES = ("辛苦了，先喝口水喘口氣！", "撐著點，今天也快過一半了！", "累了就先放鬆一下肩膀！", "好好吃頓飯，下午才有力氣！")
@@ -822,7 +824,7 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
-            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not re.search(r"沒有|查不到|無法|沒辦法|答不了", words):
+            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not _ADMITS_NO_DATA_RX.search(words):
                 out["intent"] = "no_data"
                 words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
             if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):

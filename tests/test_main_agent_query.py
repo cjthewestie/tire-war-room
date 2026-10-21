@@ -157,7 +157,7 @@ async def test_weather_goes_to_the_model_and_a_made_up_answer_is_replaced_after_
     m = Model(("say", "我沒有天氣資料。"))
     out, f = await _turn(m, "今天天氣怎樣")
     assert out["reply"] == "我沒有天氣資料。" and len(m.calls) == 1 and not f.tools and out["by"] == "model"
-    for said in ("今天天氣是晴天。", "主管早上好。今天值班 10 人。"):
+    for said in ("今天天氣是晴天。", "主管早上好。今天值班 10 人。", "天氣預報是陰轉雨。還有沒有什麼需要我幫忙的？"):
         m = Model(("say", said))
         out, _ = await _turn(m, "今天天氣怎樣")
         assert len(m.calls) == 1 and out["intent"] == "no_data" and "晴" not in out["reply"]
