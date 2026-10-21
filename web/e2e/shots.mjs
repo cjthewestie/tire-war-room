@@ -93,7 +93,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   // 硫化機排程 (the Gantt) moved to 產線監控
   await p.click('.tabs button:has-text("產線監控")')
   await p.waitForSelector('.gantt svg')
-  check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.g-job.hot title')].some((t) => t.textContent?.includes('9 號硫化機'))))
+  check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.cs-job.moved title')].some((t) => t.textContent?.includes('9 號硫化機'))))
   // rollback (人力排程)
   await p.click('.tabs button:has-text("人力排程")')
   await p.waitForSelector('[data-testid=sched-version]')
