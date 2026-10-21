@@ -101,13 +101,17 @@ const ROLE_LOOK: Record<string, number> = { 主管: 2, 維修: 4, 品管: 5 }
 
 interface Walker {
   f: Figure; path: P[]; yaw: number; key: string; phase: 'to' | 'at' | 'back'; task: THREE.Object3D
-  ring: THREE.Mesh; progress: number; target: P; taskId: string
+  ring: THREE.Mesh; progress: number; target: P; taskId: string; rush: boolean
 }
 
 /** Demo (?demo=1): the worker Agent Nemo sent to repair a machine carries a big marker in NVIDIA green (0.22 instead of
- *  0.09, readable on a projector) and a chip 「維修人員前往 7 號硫化機」 / 「維修中」 (RepairChip). */
+ *  0.09, readable on a projector) and a chip 「維修人員前往 7 號硫化機」 / 「維修中」 (RepairChip). They hurry there
+ *  (RUSH× walking speed): standby → 7 號 is ~17 units, ~15 s at SPEED, longer than the 12-second fast repair, so the
+ *  machine came back before anyone reached it; at RUSH× they are there in ~5 s, about when the task turns 執行中. */
 const NV_GREEN = '#76b900'
 const FIX_MARK = 0.22 / 0.09
+const RUSH = 3.5
+const CHIP_Y = 1.62
 
 /** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
  *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
@@ -119,13 +123,14 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
     const [tx, tz] = wk.path[0]
     const dx = tx - r.position.x, dz = tz - r.position.z
     const d = Math.hypot(dx, dz)
-    const step = SPEED * dt
+    const fast = wk.rush && wk.phase === 'to'
+    const step = SPEED * dt * (fast ? RUSH : 1)
     if (d <= step) { r.position.set(tx, 0, tz); wk.path.shift() } else {
       r.position.x += (dx / d) * step
       r.position.z += (dz / d) * step
       r.rotation.y = Math.atan2(dx, dz)
     }
-    walkCycle(wk.f, t, 10, 0.5)
+    walkCycle(wk.f, t, fast ? 16 : 10, 0.5)
     if (!wk.path.length) {
       restPose(wk.f)
       if (wk.phase === 'back') return true
@@ -159,9 +164,12 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
     const active = new Set<string>()
     world.people.workers.forEach((w, k) => {
       const t = tasks.find((x) => x.worker_id === w.id && ON_TASK.has(x.status))
-      if (!t || !ON_TASK.has(w.state)) return
+      // demo: a repair worker sets off as soon as the task board names them; the people feed can trail it by seconds
+      // (concurrent_3: no world push while another event's plan holds the plant clock), a third of the 12-second repair
+      const early = DEMO_MODE && !!t?.machine_id && REPAIR_KINDS.has(t.kind) && !ON_TASK.has(w.state)
+      if (!t || (!ON_TASK.has(w.state) && !early)) return
       active.add(w.id)
-      const s = spot(w, k)
+      const s = spot(early ? { ...w, zone: 'line_A', machine_id: t.machine_id } : w, k)   // a line zone: spot reads the machine
       let wk = walkers.current.get(w.id)
       if (!wk) {
         const idx = ROLE_LOOK[w.role] ?? (k % 4)
@@ -176,7 +184,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
         f.root.add(ring)
         group.add(f.root)
         f.root.position.set(STANDBY[0], 0, STANDBY[1])
-        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id }
+        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id, rush: false }
         walkers.current.set(w.id, wk)
       } else if (wk.phase === 'back' || wk.taskId !== t.id || wk.target[0] !== s.p[0] || wk.target[1] !== s.p[1]) {
         // a new task (or the same one again after starting back): head for its place from where they are
@@ -188,6 +196,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       wk.yaw = s.yaw
       wk.key = `${w.state}|${t.id}`
       const fix = DEMO_MODE && REPAIR_KINDS.has(t.kind)
+      wk.rush = fix
       wk.task.visible = wk.ring.visible = true   // hidden while walking back: shown again on the next task
       wk.task.scale.setScalar(fix ? FIX_MARK : 1)
       wk.task.position.y = fix ? 1.2 : 1.05
@@ -228,7 +237,11 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       if (stepWalker(wk, clock.elapsedTime, dt, ++i, camera.quaternion)) { group.remove(wk.f.root); walkers.current.delete(id) }
     }
   })
-  const fixing = DEMO_MODE ? (world.tasks?.items ?? []).filter((t) => t.worker_id && ON_TASK.has(t.status) && REPAIR_KINDS.has(t.kind)) : []
+  // one chip per machine (concurrent_3's B 線開煉機 has 檢修 and 放慢投料: two workers on one path, two chips on top of
+  // each other); the 檢修 one keeps it
+  const fixing = DEMO_MODE ? (world.tasks?.items ?? []).filter((t) => t.worker_id && ON_TASK.has(t.status) && REPAIR_KINDS.has(t.kind))
+    .sort((a, b) => Number(!a.kind.includes('檢修')) - Number(!b.kind.includes('檢修')))
+    .filter((t, i, xs) => xs.findIndex((x) => x.machine_id === t.machine_id) === i) : []
   return <>
     <primitive object={group} />
     {fixing.map((t) => <RepairChip key={t.worker_id} id={t.worker_id!} where={machineLabel(t.machine_id ?? '')} walkers={walkers} />)}
@@ -236,7 +249,9 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
 }
 
 /** The chip over a repair worker's head: follows the figure (its walker lives in a ref, so the frame loop moves it) and
- *  reads 「維修人員前往 …」 while they walk, 「維修中」 once there; hidden until the figure exists and once it walks back. */
+ *  reads 「維修人員前往 …」 while they walk, 「維修中」 once there; hidden until the figure exists and once it walks back.
+ *  At the machine it drops to the worker's feet: over the head it sat on the machine's reading tag, which floats at the
+ *  same height right beside them. */
 function RepairChip({ id, where, walkers }: { id: string; where: string; walkers: RefObject<Map<string, Walker>> }) {
   const at = useRef<THREE.Group>(null)
   const chip = useRef<HTMLDivElement>(null)
@@ -250,13 +265,15 @@ function RepairChip({ id, where, walkers }: { id: string; where: string; walkers
     const on = !!wk && wk.phase !== 'back'
     if (el.style.display !== (on ? '' : 'none')) el.style.display = on ? '' : 'none'
     if (!wk || !on) return
+    const there = wk.phase === 'at'
     at.current.position.copy(wk.f.root.position)
-    const text = wk.phase === 'at' ? '維修中' : `維修人員前往 ${where}`
-    if (el.textContent !== text) el.textContent = text
+    at.current.position.y = there ? -CHIP_Y : 0
+    const text = there ? '維修中' : `維修人員前往 ${where}`
+    if (el.textContent !== text) { el.textContent = text; el.classList.toggle('below', there) }
   })
   return (
     <group ref={at}>
-      {ready && <Html position={[0, 1.62, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
+      {ready && <Html position={[0, CHIP_Y, 0]} zIndexRange={[12, 11]} style={{ pointerEvents: 'none' }}>
         <div ref={chip} className="f3-repair" data-testid="f3-repair-chip" style={{ display: 'none' }} />
       </Html>}
     </group>
