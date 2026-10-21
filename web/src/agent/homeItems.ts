@@ -8,7 +8,7 @@
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
-import { fmtHM, fmtMD, ms } from '../format'
+import { fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
@@ -102,12 +102,12 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
 export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
   const out: { t: number; s: string }[] = []
   const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
-  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
+  if (dm) out.push({ t: dm.t, s: `${fmtHM12(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
   const dep = world?.dock.next_departure
-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
+  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM12(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
   const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
+  if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
+  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
   return out.sort((a, b) => a.t - b.t).map((x) => x.s)
 }

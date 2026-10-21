@@ -1003,3 +1003,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .user-pop button { text-align: left; padding: 6px 8px; border-radius: 8px; border: 0; background: var(--panel-2); color: inherit; }
 .user-pop button:disabled { opacity: .6; cursor: not-allowed; }
 @media (max-width: 700px) { .user-name, .clock-sim { display: none; } }
+
+/* 核准區「接下來」：一件事一行，照時間排 (issue #100) */
+.hl-next ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 6px; }
+.hl-next li { font-size: 14px; line-height: 1.4; }

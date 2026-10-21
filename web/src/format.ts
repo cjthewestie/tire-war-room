@@ -63,3 +63,11 @@ export function fmtNum(n: number | null | undefined, digits = 1): string {
 
 /** A tool call's duration: 840 ms, 2.3 s. */
 export function fmtMs(n: number): string { return n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms` }
+
+const hm12 = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: true })
+/** "07:00 AM" (12-hour, for the 主控台 「接下來」 list) */
+export function fmtHM12(iso: string | number | null | undefined): string {
+  if (iso == null) return '—'
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '—' : hm12.format(d).replace(/\u202f/g, ' ')
+}

@@ -18,7 +18,12 @@ export function ApprovalList({ items, selected, onPick, next }: {
       {!open.length && (
         <div className="hl-empty" data-testid="home-empty">
           <p className="calm-title">全廠正常，沒有要你處理的事</p>
-          {next.length > 0 && <p className="muted">接下來：{next.slice(0, 3).join('・')}</p>}
+          {next.length > 0 && (
+            <div className="hl-next" data-testid="home-next">
+              <p className="muted">接下來：</p>
+              <ul role="list">{next.slice(0, 4).map((t) => <li key={t}>{t}</li>)}</ul>
+            </div>
+          )}
         </div>
       )}
       <div className="hl-body">
