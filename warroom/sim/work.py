@@ -342,6 +342,16 @@ class TaskBoard:
             self._emit(t, now, "cancelled")
         return [t.id for t in gone]
 
+    def withdraw_cure_extension(self, event_id: str, press_id: str, now: datetime) -> list[str]:
+        """The press was repaired: the event's not-yet-done 設定硫化時間 on it, and the 宣達 of the extended cure, were
+        computed for the cold press (+4.5 h at 122 °C) and would over-cure it now. They are dropped (#92 review)."""
+        gone = [t for t in self._tasks.values() if t.event_id == event_id and t.status != "完成" and (
+            (t.kind == "設定硫化時間" and t.machine_id == press_id) or (t.kind == "宣達" and "延長硫化" in t.title))]
+        for t in gone:
+            del self._tasks[t.id]
+            self._emit(t, now, "cancelled")
+        return [t.id for t in gone]
+
     def update(self, now: datetime) -> None:
         for t in list(self._tasks.values()):
             if self.report_mode:

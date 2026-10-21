@@ -362,9 +362,45 @@ class StateMachine:
         ev.repaired_at = at
         self._note(ev, "系統", f"[人工] 維修完成：{machine_label(machine_id)}故障排除", "human", ts=at)
         self._set_status(machine_id, MachineStatus.WARNING, "回溫中")
+        self._withdraw_cure_extension(ev, machine_id, at)
         run = self._runs.get(event_id)
         if run is not None:
             run.repaired.set()
+
+    def _withdraw_cure_extension(self, ev: Event, press: str, at: datetime) -> None:
+        """#92 review: after the repair, the round's 「設定硫化時間 28.5 h（+4.5 h）」 and its 宣達 were still carried out,
+        and +4.5 h was computed for a press stuck at 122 °C: an over-cure risk once it is warm again. Code withdraws the
+        not-yet-done ones and posts a recheck task with the formula recomputed from the reading now (no model). Audited."""
+        board = self._board()
+        mdef = MACHINE_BY_ID.get(press)
+        if board is None or mdef is None or mdef.line is not Line.CURE \
+                or not callable(getattr(board, "withdraw_cure_extension", None)):
+            return
+        gone = board.withdraw_cure_extension(ev.id, press, at)
+        if not gone:
+            return
+        st = self._machine_state(press)
+        job, reading = (st.cure_job, st.last_reading) if st is not None else (None, None)
+        recomputed: dict[str, Any] | None = None
+        title = "硫化機已回溫，請依公式重新確認硫化時數"
+        if job is not None and reading is not None and reading.temp_c is not None:
+            from warroom.contracts import CureFormulaArgs
+            from warroom.factory import ACTIVATION_ENERGY_KJ_MOL, CURE_HOURS
+            from warroom.tools.cure import arrhenius_cure
+            args = CureFormulaArgs(size=job.size, ref_temp_c=float(job.setpoint_c),
+                                   actual_temp_c=max(float(reading.temp_c), CURE_TEMP_MIN_C),
+                                   elapsed_h=float(job.cure_elapsed_h), ref_cure_h=float(CURE_HOURS[job.size]),
+                                   activation_energy_kj_mol=float(ACTIVATION_ENERGY_KJ_MOL))
+            d = arrhenius_cure(args)
+            recomputed = {"args": args.model_dump(mode="json"), "total_cure_h": d.total_cure_h, "extra_h": d.extra_h}
+            title += f"（現在 {fmt_num(reading.temp_c)}°C，公式 {fmt_num(d.total_cure_h)} h）"
+        from warroom.sim.work import _spec
+        added = board.add_specs(ev.id, [_spec("設定硫化時間", f"{machine_label(press)}：{title}", TeamId.CURING, press)], at)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"cure_extension_withdrawn": gone, "press": press, "recheck_task": [t.id for t in added],
+                           "recomputed": recomputed}, event_id=ev.id)
+        self._note(ev, "系統", f"{machine_label(press)}已修復：撤回尚未完成的延長硫化設定與宣達，改請依公式重新確認"
+                   + (f"（{fmt_num(recomputed['total_cure_h'])} h）" if recomputed else ""), "info", ts=at)
 
     def on_recovered(self, event_id: str, machine_id: str, at: datetime, reading: Any = None) -> None:
         """Fast repair: the repaired machine's readings are back to nominal (the runtime's ramp ended; it audits
