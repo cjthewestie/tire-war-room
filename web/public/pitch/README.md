@@ -1,6 +1,6 @@
 # Pitch 投影片（3D 工廠白板）
 
-3D 工廠（`/factory`）大廳東牆旁的白板會顯示這個資料夾裡的投影片。按 **▶ Demo（6 分鐘）** 後，3:00 鏡頭會飛到白板，換成 Pitch 階段。
+3D 工廠（`/factory`）戰情室裡、北面玻璃前的白板會顯示這個資料夾裡的投影片。按 **▶ Demo（6 分鐘）** 後，故事講完（Agent 頁面之後）會走到白板前，再按一次繼續就全螢幕打開投影片。
 
 ## 怎麼換成自己的投影片
 
@@ -21,7 +21,7 @@
    只寫檔名也可以：`{ "slides": ["01.png", "02.png"] }`。`seconds` 是這頁建議講多久，Pitch 時卡片會顯示「約 N 秒」。
 4. 重新整理 `/factory` 就會看到。`slides.json` 是空的（`"slides": []`）或不存在時，白板顯示 3 張預設頁（「Pitch 投影片放這裡」、專案名稱、「待 CJ 嵌入」）。
 
-目前放的是 CJ 的 7 頁決賽投影片（01–07.png，共 180 秒），來源：`CJ-multi-verse/Thinking-wiki-vault/wiki/NVDA-Agentic-Hackathon-2026/pitch-deck/export/`。
+目前放的是 CJ 的 v14 決賽投影片：8 頁（01–08.png，共 180 秒，來自 pitch-deck，PR #147）。3D 白板上每頁的標題和建議秒數直接讀 `slides.json`，程式裡沒有寫死標題。
 
 不用重新 build：伺服器直接讀 `web/public/pitch/`（FastAPI 的 `/pitch`）。`pnpm dev` 也一樣。
 
