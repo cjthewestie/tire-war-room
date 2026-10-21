@@ -9,7 +9,9 @@ compressed: the summaries and the observations can be rebuilt from it at any tim
   per machine). The plain sentences come from one model call (warroom/api/memory_desk.py) or, without one, from code.
 - Roll-up: 7 dailies of an ISO week (or a week that has ended) -> a weekly file; the weeks of a month -> a monthly file.
 - Observations (claude-mem style): every meaningful audit row becomes a typed, one-line observation (id OB-<seq>, the
-  audit seq, so a rebuild gives the same ids), stored in SQLite; the overview chat gets today's as an index.
+  audit seq, so a rebuild gives the same ids), stored in SQLite; the overview chat gets today's as an index. When the
+  audit chain failed verification and was archived as audit.jsonl.broken-N, the new chain restarts at seq 1: its
+  observations are OB-<N>.<seq> (`chain` N, read from the new chain's first row), so they never collide with the old ones.
 - MemoryIndex: summaries and observations, searchable with a no-answer gate (vector + bigram when the knowledge base's
   embedder is loaded, bigram alone otherwise).
 
@@ -43,6 +45,7 @@ TYPE_LABEL = {"order": "訂單", "event": "事件", "approve": "核准", "reject
 _FINAL_ORDER = ("結案", "安全停止", "主管中斷", "人工處理", "處理中")
 _EV_MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
 _HYP_RE = re.compile(r"假設\s*(H\d+)[：:]\s*(.+)")
+_BROKEN_RE = re.compile(r"\.broken-(\d+)$")
 _ORDER_RE = re.compile(r"#[A-Z]-?\d{2,4}|SO-\d{3}")
 
 
@@ -83,14 +86,24 @@ def scan(rows: Iterable[dict[str, Any]], state: dict[str, Any] | None = None
     st = state if state is not None else {}
     st.setdefault("loop", None)
     st.setdefault("loop_day", None)
+    st.setdefault("chain", 0)
     for r in rows:
         p = r.get("payload") or {}
+        if int(r.get("seq") or 0) == 1:
+            st["chain"] = chain_of(r)
         day = _ts(r["ts"]).astimezone(F.TZ).date().isoformat()
         if r.get("kind") == "system" and p.get("msg") in ("scenario loaded", "runtime start"):
             st["loop"], st["loop_day"] = (1, day) if p.get("scenario") == "day_loop" else (None, None)
         elif r.get("kind") == "system" and r.get("actor") == "day_loop" and "loop" in p:
             st["loop"], st["loop_day"] = int(p["loop"]), day
         yield ((st["loop_day"] or day) if st["loop"] else day, st["loop"]), r
+
+
+def chain_of(first: dict[str, Any]) -> int:
+    """The chain number of an audit file, from its seq-1 row: N when that row records the previous chain archived as
+    audit.jsonl.broken-N (warroom/agent/audit.py _archive), else 0."""
+    m = _BROKEN_RE.search(str((first.get("payload") or {}).get("archived_as") or ""))
+    return int(m.group(1)) if m else 0
 
 
 def machine_label(mid: str | None) -> str:
@@ -381,8 +394,8 @@ def render_md(level: str, doc: dict[str, Any]) -> str:
 
 
 # ====================================================================================== observations
-def observe(row: dict[str, Any]) -> dict[str, Any] | None:
-    """One audit row -> one typed observation, or None. Code only; no model call."""
+def observe(row: dict[str, Any], chain: int = 0) -> dict[str, Any] | None:
+    """One audit row -> one typed observation, or None. Code only; no model call. `chain`: see chain_of."""
     p, eid, kind, actor = row.get("payload") or {}, row.get("event_id"), row.get("kind"), row.get("actor")
     if eid and str(eid).startswith(("ASK-", "MAIN-")):
         return None
@@ -447,14 +460,18 @@ def observe(row: dict[str, Any]) -> dict[str, Any] | None:
                  "turn": p.get("turn")}
     if t is None:
         return None
-    return {"id": f"OB-{int(row['seq']):04d}", "seq": int(row["seq"]), "ts": row["ts"], "type": t,
+    seq = int(row["seq"])
+    return {"id": f"OB-{chain}.{seq:04d}" if chain else f"OB-{seq:04d}", "chain": chain, "seq": seq, "ts": row["ts"], "type": t,
             "title": _cut(" ".join(str(title).split()), 40), "machines": [mid] if mid else [],
             "orders": orders[:5], "ref": eid or (orders[0] if orders else None),
             "facts": {k: v for k, v in facts.items() if v not in (None, "", [])}}
 
 
+_COLS = "SELECT id, seq, ts, day, type, title, machines, orders, ref, facts, chain FROM obs"
+
+
 class ObservationStore:
-    """Observations in SQLite (data/runtime/observations.sqlite, gitignored). Idempotent: ids are audit seqs."""
+    """Observations in SQLite (data/runtime/observations.sqlite, gitignored). Idempotent: ids are chain + audit seq."""
 
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -464,6 +481,8 @@ class ObservationStore:
             db.execute("CREATE TABLE IF NOT EXISTS obs (id TEXT PRIMARY KEY, seq INTEGER, ts TEXT, day TEXT, "
                        "type TEXT, title TEXT, machines TEXT, orders TEXT, ref TEXT, facts TEXT)")
             db.execute("CREATE INDEX IF NOT EXISTS obs_day ON obs(day, seq)")
+            if "chain" not in {c[1] for c in db.execute("PRAGMA table_info(obs)")}:
+                db.execute("ALTER TABLE obs ADD COLUMN chain INTEGER NOT NULL DEFAULT 0")
 
     def _db(self) -> sqlite3.Connection:
         return sqlite3.connect(self.path, timeout=5)
@@ -472,15 +491,28 @@ class ObservationStore:
         with self._lock, self._db() as db:
             return int(db.execute("SELECT COALESCE(MAX(seq), 0) FROM obs").fetchone()[0])
 
+    def seen(self, keys: list[tuple[int, str, str]]) -> set[tuple[int, str, str]]:
+        """Which (audit seq, ts, title) already have an observation: the same audit row, whatever chain id it got (rows
+        observed before chains were numbered carry the plain OB-<seq> id)."""
+        seqs = sorted({k[0] for k in keys})
+        have: set[tuple[int, str, str]] = set()
+        with self._lock, self._db() as db:
+            for i in range(0, len(seqs), 500):
+                part = seqs[i:i + 500]
+                q = f"SELECT seq, ts, title FROM obs WHERE seq IN ({','.join('?' * len(part))})"
+                have |= {(int(a), str(b), str(c)) for a, b, c in db.execute(q, part)}
+        return {k for k in keys if k in have}
+
     def add(self, items: list[tuple[str, dict[str, Any]]]) -> int:
         """(day name, observation) pairs; replaces rows with the same id."""
         if not items:
             return 0
         with self._lock, self._db() as db:
-            db.executemany("INSERT OR REPLACE INTO obs VALUES (?,?,?,?,?,?,?,?,?,?)",
+            db.executemany("INSERT OR REPLACE INTO obs (id, seq, ts, day, type, title, machines, orders, ref, facts, chain) "
+                           "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                            [(o["id"], o["seq"], o["ts"], day, o["type"], o["title"], json.dumps(o["machines"]),
                              json.dumps(o["orders"], ensure_ascii=False), o["ref"],
-                             json.dumps(o["facts"], ensure_ascii=False)) for day, o in items])
+                             json.dumps(o["facts"], ensure_ascii=False), o.get("chain", 0)) for day, o in items])
         return len(items)
 
     def clear(self) -> None:
@@ -490,26 +522,27 @@ class ObservationStore:
     @staticmethod
     def _row(r: tuple) -> dict[str, Any]:
         return {"id": r[0], "seq": r[1], "ts": r[2], "day": r[3], "type": r[4], "title": r[5],
-                "machines": json.loads(r[6]), "orders": json.loads(r[7]), "ref": r[8], "facts": json.loads(r[9])}
+                "machines": json.loads(r[6]), "orders": json.loads(r[7]), "ref": r[8], "facts": json.loads(r[9]),
+                "chain": r[10]}
 
     def day(self, day: str) -> list[dict[str, Any]]:
         with self._lock, self._db() as db:
-            return [self._row(r) for r in db.execute("SELECT * FROM obs WHERE day=? ORDER BY seq", (day,))]
+            return [self._row(r) for r in db.execute(_COLS + " WHERE day=? ORDER BY chain, seq", (day,))]
 
     def get(self, ids: list[str]) -> list[dict[str, Any]]:
         if not ids:
             return []
         with self._lock, self._db() as db:
-            q = f"SELECT * FROM obs WHERE id IN ({','.join('?' * len(ids))}) ORDER BY seq"
+            q = _COLS + f" WHERE id IN ({','.join('?' * len(ids))}) ORDER BY chain, seq"
             return [self._row(r) for r in db.execute(q, ids)]
 
     def all(self) -> list[dict[str, Any]]:
         with self._lock, self._db() as db:
-            return [self._row(r) for r in db.execute("SELECT * FROM obs ORDER BY seq")]
+            return [self._row(r) for r in db.execute(_COLS + " ORDER BY chain, seq")]
 
     def days(self) -> list[str]:
         with self._lock, self._db() as db:
-            return [r[0] for r in db.execute("SELECT day FROM obs GROUP BY day ORDER BY MAX(seq)")]
+            return [r[0] for r in db.execute("SELECT day FROM obs GROUP BY day ORDER BY MAX(chain), MAX(seq)")]
 
 
 def index_line(o: dict[str, Any]) -> str:
@@ -518,7 +551,7 @@ def index_line(o: dict[str, Any]) -> str:
 
 def day_index(obs: list[dict[str, Any]], max_lines: int = INDEX_MAX_LINES, max_chars: int = INDEX_MAX_CHARS) -> str:
     """今日紀錄索引: one line per observation, newest first, grouped as 訂單 / 任務 / 其他 when long, capped."""
-    obs = sorted(obs, key=lambda o: o["seq"], reverse=True)
+    obs = sorted(obs, key=lambda o: (o.get("chain", 0), o["seq"]), reverse=True)
     if len(obs) > 12:
         groups = [("訂單", [o for o in obs if o["type"] in ("order", "ship")]),
                   ("任務", [o for o in obs if o["type"] in ("event", "approve", "reject", "task")]),

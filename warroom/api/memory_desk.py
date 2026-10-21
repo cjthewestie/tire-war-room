@@ -65,15 +65,15 @@ class MemoryDesk:
         rows = self._new_rows()
         if not rows:
             return 0
-        last = self.obs.last_seq()
         items = []
         for (day, lp), r in ML.scan(rows, self._scan):
-            if int(r["seq"]) <= last:
-                continue
-            o = ML.observe(r)
+            o = ML.observe(r, self._scan["chain"])
             if o is not None:
                 items.append((ML.day_name(day, lp), o))
-        return self.obs.add(items)
+        # skip rows already observed by (seq, ts, title), not by "seq <= the highest seq": a chain archived as broken-N starts
+        # again at seq 1, and that test dropped every row of the new chain (memory and 今日總結 stopped updating)
+        seen = self.obs.seen([(o["seq"], o["ts"], o["title"]) for _, o in items])
+        return self.obs.add([(d, o) for d, o in items if (o["seq"], o["ts"], o["title"]) not in seen])
 
     def today_key(self) -> tuple[str, int | None]:
         now = self.rt.clock.now().astimezone(ML.F.TZ)
