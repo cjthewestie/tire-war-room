@@ -286,6 +286,25 @@ class TaskBoard:
         self.update(now)                 # assign at once when someone is free
         return [self._view(t) for t in out]
 
+    def add_specs(self, event_id: str, specs: list[dict[str, Any]], now: datetime) -> list[WorkTask]:
+        """Tasks a SUPERVISOR asked for outside a plan step (安全核心 ① 派現場檢查, 安全停止 交給現場處理): fixed SOP
+        specs (`_spec`), never written by the model. With fast repair on, every one of them runs on the wall clock
+        like a repair task, so a field check does not take factory minutes on the demo screen."""
+        out = []
+        for spec in specs:
+            self._seq += 1
+            t = _Task(id=f"TK-{self._seq:04d}", event_id=event_id, approval_id=None, step_id=None, created_at=now,
+                      **spec)
+            if self.fast_s > 0:
+                total = self.fast_s * max(float(self.speed() or 1.0), 1e-6) / 60.0
+                t.fast_s, t.walk_min, t.work_min = self.fast_s, total * FAST_WALK_FRAC, total * (1 - FAST_WALK_FRAC)
+            self._tasks[t.id] = t
+            out.append(t)
+            self._emit(t, now, "created")
+        self._trim()
+        self.update(now)
+        return [self._view(t) for t in out]
+
     def cancel(self, event_id: str, step_id: str, now: datetime) -> list[str]:
         """Drop the not-yet-done tasks of a step that was revoked (the supervisor picked another option later)."""
         gone = [t for t in self._tasks.values() if t.event_id == event_id and t.step_id == step_id and t.status != "完成"]
