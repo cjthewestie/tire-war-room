@@ -152,6 +152,7 @@ _ABOUT_LAST_RX = re.compile(r"^(?:為什麼|為何|怎麼會|真的嗎|確定嗎
 _NO_DATA_TOPIC_RX = re.compile(r"天氣|氣溫|下雨|颱風|新聞|股價|股市|匯率|油價|比分|彩券")
 SMALLTALK_LINES = ("辛苦了，先喝口水喘口氣！", "撐著點，今天也快過一半了！", "累了就先放鬆一下肩膀！", "好好吃頓飯，下午才有力氣！")
 _PLANT_WORD_RX = re.compile(r"機|爐|溫度|訂單|排程|出貨|產線|硫化|天氣|\d")
+_PLANT_STAT_RX = re.compile(r"在班|上班人員|運轉|待機|出貨|機台|號機|工單|訂單|事件")
 _JOKE_TAIL_RX = re.compile(r"工廠|排程|出貨|輪胎|訂單|機台|在班")
 NO_DATA_REPLIES = ("我這邊沒有天氣、新聞這類外部資料，這題沒辦法回答。", "這個我查不到，我只接了工廠裡的資料。",
                    "外面的資料我沒有接進來，這題答不了。")
@@ -365,7 +366,7 @@ def tidy(reply: str, keep_intro: bool, limit: int = MAX_SENTENCES) -> str:
     r = re.sub(r"[\U0001F300-\U0001FAFF\u2600-\u27BF]", "", r)
     r = re.sub(r"[；;]?\s*-{3,}\s*[；;]?", "", r)
     r = re.sub(r"[（(][^（）()]*(?:我直接|這是一個|這個問題|標註)[^（）()]*[）)]", "", r)
-    r = re.sub(r"^\s*【[^】]{0,6}】\s*[；;]?\s*", "", r)
+    r = re.sub(r"^\s*(?:【[^】]{0,6}】|[（(][^）)]{0,6}[）)])\s*[；;]?\s*", "", r)
     if _NO_DATA_RX.search(r):
         r = _GENERAL_TAG_RX.sub("。", r).replace("。。", "。").strip() or r
     parts = _SENTENCE_RX.findall(r)
@@ -678,8 +679,8 @@ class MainAgent:
         if small:
             # the model writes the warm line only; code adds one plant fact and the offer (the model's own facts were
             # made up: 「1 號機正在硫化中，3 號機待機」, preview run 10-21)
-            msgs[-1]["content"] = json.dumps({**ctx, "instruction": "這是閒聊：只回一句溫暖自然的話（要笑話就講一個很短的笑話），"
-                                              "不要提工廠、數字或機台，不要問問題。"}, ensure_ascii=False, default=str)
+            msgs[-1]["content"] = json.dumps({**ctx, "instruction": "這是閒聊：針對主管這句話，只回一句溫暖自然的話（說累就體貼他、問吃什麼就推薦一樣吃的，"
+                                              "要笑話就講一個很短的笑話）；不要編天氣或新聞，不要提工廠、數字或機台，不要問問題。"}, ensure_ascii=False, default=str)
         # numbers the reply may use: the message, what rode along with it, the context, the plan and the tool results
         source = " ".join([text, *earlier, " ".join(prev) if follow and prev is not None else "",
                            json.dumps(context, ensure_ascii=False, default=str), waiting_plan or "", PROCESS_RULE])
@@ -798,14 +799,21 @@ class MainAgent:
             if small and code is None and not out["steps"]:
                 joke = bool(re.search(r"笑話", t))
                 line = tidy(reply, False, limit=4 if joke else 1)
-                if joke:                               # the joke, without the plant lines it tacked on itself
-                    line = "".join(x for x in _SENTENCE_RX.findall(line) if not _JOKE_TAIL_RX.search(x)) or line
+                if joke:                               # the joke, cut before the plant lines it tacked on itself
+                    parts = _SENTENCE_RX.findall(line)
+                    cut = next((k for k, x in enumerate(parts) if _JOKE_TAIL_RX.search(x)), len(parts))
+                    line = "".join(parts[:cut]) if cut else line
                 elif _PLANT_WORD_RX.search(line) or re.match(r"大家好", line):
                     line = self._rot(SMALLTALK_LINES)  # 「肯定是硫化爐溫度一直在波動」「今天的天氣不錯」: made up
                 line = line if line.endswith(("。", "！", "!", "～", "~")) else line.rstrip("，,、；;？?") + "！"
                 out["reply"] = self._with_fact(line, context)
                 return
-            out["reply"] = code if code is not None else tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
+            words = tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
+            if code is None and casual and not out["steps"]:
+                # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
+                # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
+                words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+            out["reply"] = code if code is not None else words
             return
         raise TimeoutError("too many tool steps")
 

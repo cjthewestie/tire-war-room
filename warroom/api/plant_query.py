@@ -66,7 +66,8 @@ def overview(r: Any) -> dict[str, Any]:
                            "abnormal": bad, "open_events": len(_open_events(r))}
     if w is not None:
         out.update(next_shipment=_hm(w.dock.next_departure), waiting_ship_tyres=w.finished_goods.waiting_ship,
-                   on_duty=w.people.on_duty, headcount=w.people.total, orders=w.orders.pipeline)
+                   on_duty=w.people.on_duty, headcount=w.people.total,
+                   orders_count_by_status=w.orders.pipeline)      # 張 (orders), not tyres or trucks
     return out
 
 
