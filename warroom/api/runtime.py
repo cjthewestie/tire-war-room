@@ -1213,6 +1213,10 @@ class Runtime:
             on_repaired = getattr(self.state_machine, "on_repaired", None)
             if fast and callable(on_repaired):
                 on_repaired(eid, mid, self.clock.now())
+            withdraw = getattr(self.state_machine, "withdraw_cure_extension", None)
+            if not fast and callable(withdraw):
+                # real durations: VERIFY reads the press as usual, but the cold-press cure extension is withdrawn too
+                withdraw(eid, mid, self.clock.now())
             if fast:
                 self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
 

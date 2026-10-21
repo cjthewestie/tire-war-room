@@ -54,3 +54,42 @@ def test_done_cure_setting_is_not_withdrawn(tmp_path):
     sm.on_repaired(ev.id, "CURE-07", plant.clock.now())     # nothing pending: no recheck task, no audit row
     assert plant.world.tasks.for_event(ev.id) == []
     assert not [e for e in audit.tail(0, 0) if "cure_extension_withdrawn" in e.payload]
+
+
+def test_real_duration_repair_posts_the_recheck_once(tmp_path):
+    """REPAIR_FAST_S = 0: Runtime._apply_repairs does not call on_repaired, but it withdraws the cure extension and
+    posts the recheck all the same; a second call (fast path or a repeat) posts nothing more."""
+    from types import SimpleNamespace
+
+    from warroom.api.runtime import Runtime
+    _clock, audit, _sim, _store, _tools, _approvals, sm = make_sm(tmp_path)
+    plant = Factory(clock=SimClock(start=T0, manual=True), scenario=ScenarioName.PRESS7_TEMP_DROP)
+    for _ in range(120):                                  # the steam fault is on (02:13:15)
+        plant.step(1.0)
+    sm.sim = plant
+    board = plant.world.tasks
+    ev = sm._open_event(page11_anomaly())
+    now = plant.clock.now()
+    base = {"event_id": ev.id, "approval_id": "AP-1", "event_kind": "temp_drop"}
+    board.dispatch(TaskRequest(step_id="S4b", tool="set_cure_time",
+                               args={"press_id": "CURE-07", "total_cure_h": 28.5, "reason": "x"}, **base), now)
+    board.dispatch(TaskRequest(step_id="S3", tool="notify_teams",
+                               args={"teams": ["curing", "maintenance", "qc"], "kind": "machine_out",
+                                     "machine_id": "CURE-07", "message": "7 號機停用"}, **base), now)
+    for t in board._tasks.values():
+        if t.kind == "停用檢修":
+            t.status = "完成"                                 # the crew finished the repair (real durations)
+    rt = SimpleNamespace(settings=SimpleNamespace(repair_fast_s=0.0), sim=plant, _repaired={"CURE-07": ev.id},
+                         _repaired_out={}, _event_obj=lambda eid: sm._events.get(eid), state_machine=sm, audit=audit,
+                         c=SimpleNamespace(detector=SimpleNamespace(reset=lambda *a, **k: None)),
+                         clock=plant.clock)
+    Runtime._apply_repairs(rt)
+
+    recheck = [t for t in board.for_event(ev.id) if "請依公式重新確認硫化時數" in t.title]
+    assert len(recheck) == 1 and "現在 " in recheck[0].title
+    assert not [t for t in board.for_event(ev.id) if t.kind == "設定硫化時間" and "28.5" in t.title]
+    assert ev.repaired_at is None                          # VERIFY keeps its real-duration path
+    sm.on_repaired(ev.id, "CURE-07", plant.clock.now())    # both paths fire: no second recheck, recheck not withdrawn
+    sm.withdraw_cure_extension(ev.id, "CURE-07", plant.clock.now())
+    assert [t.id for t in board.for_event(ev.id) if "請依公式重新確認硫化時數" in t.title] == [recheck[0].id]
+    assert len([e for e in audit.tail(0, 0) if "cure_extension_withdrawn" in e.payload]) == 1

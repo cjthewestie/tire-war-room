@@ -318,6 +318,7 @@ class StateMachine:
         self.on_open: Callable[[Event], None] | None = None
         self.on_end: Callable[[Event], None] | None = None
         self._interrupt: dict[str, str] = {}
+        self._cure_rechecked: set[tuple[str, str]] = set()   # (event, press) whose cure extension was withdrawn
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
         # 「接記憶」: machine_id, event id -> that machine's notes and past events (warroom/data/machine_memory.py), set by
         # the Runtime; None = no memory. Read-only; it goes in the per-event context, never in the system prompt.
@@ -362,15 +363,20 @@ class StateMachine:
         ev.repaired_at = at
         self._note(ev, "系統", f"[人工] 維修完成：{machine_label(machine_id)}故障排除", "human", ts=at)
         self._set_status(machine_id, MachineStatus.WARNING, "回溫中")
-        self._withdraw_cure_extension(ev, machine_id, at)
+        self.withdraw_cure_extension(event_id, machine_id, at)
         run = self._runs.get(event_id)
         if run is not None:
             run.repaired.set()
 
-    def _withdraw_cure_extension(self, ev: Event, press: str, at: datetime) -> None:
+    def withdraw_cure_extension(self, event_id: str, press: str, at: datetime) -> None:
         """#92 review: after the repair, the round's 「設定硫化時間 28.5 h（+4.5 h）」 and its 宣達 were still carried out,
         and +4.5 h was computed for a press stuck at 122 °C: an over-cure risk once it is warm again. Code withdraws the
-        not-yet-done ones and posts a recheck task with the formula recomputed from the reading now (no model). Audited."""
+        not-yet-done ones and posts a recheck task with the formula recomputed from the reading now (no model). Audited.
+        Called by on_repaired (fast repair) and by the runtime when a repair finishes at real durations; once per event
+        and press, so the recheck never posts twice."""
+        ev = self._events.get(event_id)
+        if ev is None or (event_id, press) in self._cure_rechecked:
+            return
         board = self._board()
         mdef = MACHINE_BY_ID.get(press)
         if board is None or mdef is None or mdef.line is not Line.CURE \
@@ -379,6 +385,7 @@ class StateMachine:
         gone = board.withdraw_cure_extension(ev.id, press, at)
         if not gone:
             return
+        self._cure_rechecked.add((event_id, press))
         st = self._machine_state(press)
         job, reading = (st.cure_job, st.last_reading) if st is not None else (None, None)
         recomputed: dict[str, Any] | None = None
