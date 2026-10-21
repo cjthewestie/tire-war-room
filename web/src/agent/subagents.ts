@@ -28,12 +28,17 @@ export function endedText(ev: Event): string | null {
   return null
 }
 
-/** 規劃中 / 待核准 / 執行中 / 維修中（k/n）/ 已恢復正常（現場工作 k/n）/ 完成 / 已停止 — <原因一句話>. With the event and the
- *  world's tasks it tells the repair still running from a machine back to normal while other field work goes on. */
+/** The field work still open on an open mill is slowing or pausing the feed, not a repair (veteran glossary). */
+const DOING_NOW: Record<string, string> = { 放慢投料: '放慢投料中', 暫停投料: '暫停投料中' }
+
+/** 規劃中 / 待核准 / 執行中 / 維修中（k/n）/ 放慢投料中（k/n）/ 已恢復正常（現場工作 k/n）/ 完成 / 已停止 — <原因一句話>. With
+ *  the event and the world's tasks it tells the repair still running from a machine back to normal while other field
+ *  work goes on. */
 export function plainStatus(sa: Subagent, ev?: Event | null, tasks: WorkTask[] = []): string {
   const repair = tasks.filter((t) => t.event_id === sa.id && REPAIR_KINDS.has(t.kind))
   const open = repair.filter((t) => t.status !== '完成')
-  const repairing = open.length ? `維修中（${repair.length - open.length}/${repair.length}）` : null
+  const doing = open.every((t) => t.kind === open[0]?.kind) ? DOING_NOW[open[0]?.kind ?? ''] : undefined
+  const repairing = open.length ? `${doing ?? '維修中'}（${repair.length - open.length}/${repair.length}）` : null
   const ended = ev ? endedText(ev) : null
   switch (sa.status) {
     case 'waiting_approval': return '待核准'
