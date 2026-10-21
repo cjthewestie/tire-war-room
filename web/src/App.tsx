@@ -25,9 +25,9 @@ const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default:
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
 /** 展示列 (the strip on desktop, the 展示控制 tab on phones) is the presenter's, not the supervisor's: only with ?demo=1 or
- *  ?scenarios=all, and inside the 3D factory, whose desk screen is where the presenter loads a scenario (its iframe
- *  inherits the factory page's own query, ?test=1 in e2e). */
-const SHOW_DEMO = DEMO_MODE || ALL_SCENARIOS || EMBEDDED
+ *  ?scenarios=all. The 3D factory's iframes inherit the factory page's own query (embedSearch), so the desk screen has
+ *  it when the factory was opened with ?demo=1. */
+const SHOW_DEMO = DEMO_MODE || ALL_SCENARIOS
 
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`

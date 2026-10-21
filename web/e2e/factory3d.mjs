@@ -49,7 +49,8 @@ try {
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'scenario', scenario: 'normal' } })
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'speed', speed: 1 } })
   await page.request.post(`${BASE}/api/sim/control`, { data: { action: 'reset' } })
-  await page.goto(`${BASE}/factory?test=1`, { waitUntil: 'domcontentloaded' })
+  // ?demo=1: the desk screen's 展示列 (loaded below) shows only with it, the iframe inheriting the factory's query
+  await page.goto(`${BASE}/factory?demo=1&test=1`, { waitUntil: 'domcontentloaded' })
   const canvas = await page.waitForSelector('.f3-canvas canvas', { timeout: 15000 })
   await sleep(1000)
   const box = await canvas.boundingBox()
