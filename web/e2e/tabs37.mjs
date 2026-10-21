@@ -32,8 +32,7 @@ check('no 對話台 anywhere in the tabs', (await p.locator('.tabs').innerText()
 // (c) ticker: fixed counts left, scrolling items right
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tk-track"] .tk-i')
-const fixed = await p.locator('[data-testid="tk-fixed"]').innerText()
-check('ticker: fixed 正常 / 異常 / 待核准', fixed.includes('正常') && fixed.includes('異常') && fixed.includes('待核准'), fixed.replace(/\n/g, ' '))
+check('ticker: full-width row, no fixed 正常 / 異常 / 待核准 bar (#100)', (await p.locator('[data-testid="tk-fixed"]').count()) === 0 && (await p.locator('[data-testid="status-strip"]').count()) === 1)
 const ticks = await p.locator('[data-testid="tk-track"] > .tk-i').allInnerTexts()
 check('ticker: per-line, press and plant items', ticks.some((t) => /A 線/.test(t)) && ticks.some((t) => /號硫化機/.test(t)) && ticks.length >= 12, `${ticks.length}: ${ticks.slice(0, 4).join(' | ')}`)
 check('ticker scrolls (animation running)', await p.evaluate(() => getComputedStyle(document.querySelector('[data-testid="tk-track"]')).animationName === 'tk-scroll'))
@@ -243,7 +242,7 @@ for (const theme of ['light', 'dark']) {
     const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
     const bg = (el) => { for (let e = el; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.5) return c } return [255, 255, 255] }
     let w = { ratio: 99, text: '' }
-    for (const el of document.querySelectorAll('.tk-i:not(.tk-dup .tk-i), .tk-fixed .as-item')) {
+    for (const el of document.querySelectorAll('.tk-i:not(.tk-dup .tk-i)')) {
       const a = lum(rgb(getComputedStyle(el).color)), bb = lum(bg(el))
       const ratio = (Math.max(a, bb) + 0.05) / (Math.min(a, bb) + 0.05)
       if (ratio < w.ratio) w = { ratio: Math.round(ratio * 100) / 100, text: el.textContent.slice(0, 24) }

@@ -3,7 +3,7 @@
 // each edge (×n when taken more than once), the replan loop (SIMULATE → … → VERIFY → REPLAN → SIMULATE) marked
 // 「第 n 輪」, and the failure counter against MAX_CONSECUTIVE_FAILURES. Clicking a state filters the transcript.
 import type { Event, EventState } from '../contracts'
-import { fmtHMS } from '../format'
+import { fmtHM, fmtHMS } from '../format'
 import { STATE_LABEL } from '../components/common'
 import { ALLOWED_TRANSITIONS, MAX_CONSECUTIVE_FAILURES, STATES, STATE_CODE, type Hop } from './stateGraph'
 
@@ -60,7 +60,7 @@ export function StateDiagram({ ev, path, pick, onPick }: { ev: Event; path: Hop[
                 <path d={d} markerEnd={`url(#${hops ? 'sm-arr-on' : 'sm-arr'})`} />
                 {hops && (
                   <text x={lx} y={ly} textAnchor="middle" className="sm-t">
-                    {fmtHMS(hops[hops.length - 1].ts).slice(0, 5)}{hops.length > 1 ? ` ×${hops.length}` : ''}
+                    {fmtHM(hops[hops.length - 1].ts)}{hops.length > 1 ? ` ×${hops.length}` : ''}
                     {k === 'replan>simulate' ? `・第 ${hops.length + 1} 輪` : ''}
                     <title>{hops.map((h) => fmtHMS(h.ts)).join('、')}</title>
                   </text>

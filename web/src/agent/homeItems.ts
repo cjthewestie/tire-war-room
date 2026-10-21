@@ -8,7 +8,7 @@
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
-import { fmtHM, fmtMD, ms } from '../format'
+import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
@@ -26,6 +26,8 @@ export interface HomeItem {
   req: ApprovalRequest | null
   ts: number
   progress?: number         // ④: share of the event's worker tasks done (0–1)
+  /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
+  machine?: string; desc?: string
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -45,7 +47,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
     if (req) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
+      out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
     } else if (ev.state === 'safe_stop') {
       out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
@@ -104,12 +106,13 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
 export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
   const out: { t: number; s: string }[] = []
   const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
-  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
+  if (dm) out.push({ t: dm.t, s: `${fmtHM12(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
   const dep = world?.dock.next_departure
-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
+  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM12(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
   const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
+  if (po) out.push({ t: ms(po.eta), s: `${fmtHM12(po.eta)} ${po.name}到貨` })
   const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
-  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
+  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
+  const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
+  return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
 }
