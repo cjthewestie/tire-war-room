@@ -4,7 +4,7 @@ Model, shared by both solvers (built in `_prepare`):
 - Time in minutes from `req.now`. Every job is one tire on one press.
 - Frozen jobs (in progress, mold_in <= now, or listed in frozen_job_ids) keep press and mold-in.
   `cure_overrides_h[press]` replaces the cure time of the in-progress job on that press
-  (page 11 S1: CURE-07 28 h -> 36.5 h). Their de-mold waits for the next staffed slot.
+  (page 11 S1: CURE-07 24 h -> 28.5 h). Their de-mold waits for the next staffed slot.
 - Free jobs come from `previous` (the active schedule); when it has none, they are generated
   from the orders, earliest due first, up to what the presses can cure in the horizon.
 - Hard (page 6 principles 1, 2): M/L only on factory.ML_PRESSES, S only on SMALL_ONLY_PRESSES;
@@ -324,7 +324,7 @@ def _clip_blackouts(ctx: _Ctx) -> None:
 
 def _guard_slow_presses(ctx: _Ctx, unavailable: set[str]) -> None:
     """A cure override that LENGTHENS the in-progress tire means the press is assumed to run below
-    recipe temperature (page 11 H1: CURE-07 holds 122 °C, S1: 28 h -> 36.5 h). While that holds,
+    recipe temperature (page 11 H1: CURE-07 holds 122 °C, S1: 24 h -> 28.5 h). While that holds,
     no tire planned on another press is moved onto it — the plan must not load the suspect press
     (page 11 moves only #A-311 off it). Tires already planned there keep their slot and recipe
     cure: they assume the steam is restored before they go in, and the schedule says so; if H1

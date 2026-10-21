@@ -88,10 +88,10 @@ CJ, 2026-10-20: 「突發狀況(人力調度或機器故障或插單) 早上訂�
 | What | Value | Page |
 |---|---|---|
 | Machines / lines / processes | 28 / 4 + bond + cure / 26 | p.2, p.3 |
-| Curing presses | 11, one tire each; 7 small-only, 4 shared M/L (we fix M/L = CURE-07..10) | p.3, p.11 |
+| Curing presses | 11, one tire each; 7 small-only (CURE-01..07), 4 shared M/L (CURE-08..11, the team dataset's layout; #20) | p.3, p.11 |
 | Cure time | S 24 h / M 28 h / L 34 h at 120–130 °C, 20 kgf/cm² | p.3 |
 | Safety core | 煉膠 ≥120 °C stop; 已加硫 ≥110 °C stop; press <120 °C → cure hold | p.5, p.2, p.11 |
-| Arrhenius | Ea 85 kJ/mol (assumed); M 128 °C, 10 h done, drops to 122 °C → 36.5 h total (+8.5 h) | p.11 |
+| Arrhenius | Ea 85 kJ/mol (assumed); S 128 °C, 14.4 h of 24 h done, drops to 122 °C → 28.5 h total (+4.5 h) | p.11 |
 | Back-prop from T | bond T−40m/1h/1h30; A feed T−1h40/2h30/3h30; side/bead 6/8/10 | p.6 |
 | Shifts (optimised premise) | curing 6–15 & 14–23; 胎體/胎面膠 night 20–05 also de-mold/mold-in | p.6 |
 | Weekly per press S/M/L | 現況 6/5/3; 只延長班表 6/5.9/4.5; AI 出模時刻 7/6/4.9 | p.6 |
@@ -104,7 +104,7 @@ CJ, 2026-10-20: 「突發狀況(人力調度或機器故障或插單) 早上訂�
 
 ## Demo scenarios
 
-- `press7_temp_drop` (p.11): 02:14:00 CURE-07 128→122 °C predicted 122±1 → wake; 02:14:01 safety: still ≥120, no stop; H1 steam pressure low; S1 cure 36.5 h, S2 #A-311 due in 3 days, night short 1; S3 #A-311 → CURE-09, take 1 from line 2; 02:16:40 approve; 02:31:00 verify 119.5 °C → H1 rejected, safety core already acted; H2 leak / sensor drift, compare CURE-06/08 (same header H2), SOP 「硫化中斷處置」 → CURE-07 out of service; 02:31:30 supervisor rejects cross-team move, picks night overtime.
+- `press7_temp_drop` (p.11): 02:14:00 CURE-07 128→122 °C predicted 122±1 → wake; 02:14:01 safety: still ≥120, no stop; H1 steam pressure low; S1 cure 28.5 h (+4.5 h), S2 #A-311 due in 3 days, night short 1; S3 #A-311 → CURE-06, take 1 from line 2; 02:16:40 approve; 02:31:00 verify 119.5 °C → H1 rejected, safety core already acted; H2 leak / sensor drift, compare CURE-06/08 (same header H2), SOP 「硫化中斷處置」 → CURE-07 out of service; 02:31:30 supervisor rejects cross-team move, picks night overtime.
 - `open_mill_overheat` (p.2): A-BIGOPEN 112 °C rising, water flow low, cause cooling insufficient; ✓ auto notify maintenance (R1); ☐ approve slow raw feed (R3); schedule impact none, 大胎 #07 still 17:00 into press.
 
 - Team dataset replay (`WARROOM_REPLAY` / `--replay team_ev1|team_ev2|team_both`): `warroom/sim/team_replay.py` plays `data/team_dataset/sensor_readings.csv.gz` (EV-1 A03 → A-BIGOPEN, EV-2 V07 → CURE-07, ids via `warroom/data/team_ids.py`) through `ReplaySource` in the NORMAL scenario, time-shifted to the sim clock. Team SOP chunks are indexed in the KB's `<collection>_team` collection and come back from `sop_search` as `team_hits`; past incidents load into the read-only `warroom.data.team_dataset.IncidentStore` (no agent tool yet).

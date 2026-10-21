@@ -132,3 +132,9 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-anom-menu small { color: var(--c-ink-dim); font-size: 11px; }
 .f3-anom-row { display: flex; gap: 6px; margin-top: 4px; }
 .f3-anom-row button { flex: 1; justify-content: center; }
+/* raw-material plate above the loading-area pallet (issue #48): same chip as a machine tag, one row per low material */
+.f3-stock { gap: 1px; }
+.f3-stock b { font-size: 14px; }
+.f3-stock.green { border-top-color: #3fcf5a; }
+.f3-stock.amber { border-top-color: #f5a623; } .f3-stock.amber b { color: var(--c-amber); }
+.f3-stock.red { border-top-color: #ff3b30; background: #ffe9e4; } .f3-stock.red b { color: var(--c-red); }

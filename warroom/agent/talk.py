@@ -215,7 +215,7 @@ TEAM_WORDS: list[tuple[str, TeamId]] = [
     ("維修", TeamId.MAINTENANCE), ("保養", TeamId.MAINTENANCE), ("品管", TeamId.QC), ("品保", TeamId.QC),
     ("硫化", TeamId.CURING), ("胎體", TeamId.BODY), ("胎面", TeamId.BODY), ("胎側", TeamId.SIDE),
     ("鋼絲", TeamId.BEAD_NYLON), ("尼龍", TeamId.BEAD_NYLON), ("大開煉", TeamId.BIGOPEN), ("貼合", TeamId.BOND),
-    ("主管", TeamId.SUPERVISOR),
+    ("修邊", TeamId.TRIM), ("整修", TeamId.TRIM), ("主管", TeamId.SUPERVISOR),
 ]
 
 

@@ -30,7 +30,7 @@ def test_28_machines_and_lines():
     counts = {ln: sum(1 for m in F.MACHINES if m.line is ln) for ln in C.Line}
     assert counts == {C.Line.A: 7, C.Line.B: 4, C.Line.C: 4, C.Line.D: 1, C.Line.BOND: 1, C.Line.CURE: 11}
     assert len(F.SMALL_ONLY_PRESSES) == 7 and len(F.ML_PRESSES) == 4
-    assert "CURE-07" in F.ML_PRESSES and "CURE-09" in F.ML_PRESSES       # page 11
+    assert F.ML_PRESSES == ("CURE-08", "CURE-09", "CURE-10", "CURE-11")  # dataset V08–V11; press 7 is small-only
     assert F.presses_on_header("H2") == ["CURE-06", "CURE-07", "CURE-08"]  # page 11 same pipe
     assert len(F.PROCESSES) == 26
 
