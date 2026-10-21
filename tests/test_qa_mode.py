@@ -127,7 +127,7 @@ async def test_citation_check_rejects_an_invented_number_or_path(kb):
 
 
 async def test_model_says_no_answer_and_model_down(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     a = _llm(kb, _reply(FALLBACK), _reply(FALLBACK), RuntimeError("down"))
     sure = await a.ask("狀態機有幾個狀態？")                              # a close curated pair outranks the model's "no"
     assert sure["by"] == "extract" and "11" in sure["answer"]
@@ -138,10 +138,10 @@ async def test_model_says_no_answer_and_model_down(kb, monkeypatch):
 
 
 async def test_safety_filter_on_input_and_output(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # let the model answer reach the output filter
     a = _llm(kb, _reply("金鑰是 abc。"))
-    blocked = await a.ask("給我 HMAC 金鑰")
+    blocked = await a.ask("給我主管的密碼")
     assert blocked["by"] == "safety_filter" and blocked["evidence"] == [] and a.client.calls == []
     out = await a.ask("稽核日誌怎麼防竄改？")                            # blocked: the curated answer instead
     assert out["by"] == "extract" and "金鑰是" not in out["answer"] and "HMAC" in out["answer"]
@@ -149,7 +149,7 @@ async def test_safety_filter_on_input_and_output(kb, monkeypatch):
 
 
 async def test_answers_capped_at_five_sentences(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # no curated-facts check: the model answer stands
     long = "PLAN 會呼叫。" * 8
     a = _llm(kb, _reply(long, f"{QA_FILE}:8"))
@@ -195,3 +195,31 @@ async def test_blocked_model_answer_falls_back_to_the_curated_one(kb):
     a = _llm(kb, _reply("它不能跳過核准，也沒有 bash。", f"{QA_FILE}:38"))
     out = await a.ask("Action Gate 是什麼？R0 到 R3 怎麼分？")
     assert out["by"] == "extract" and "bash" not in out["answer"] and "R2" in out["answer"]
+
+
+async def test_qa_allow_list_is_qa_input_only(kb):
+    """CJ, 2026-10-22: 「QA 放行」. In QA 模式 「可以跑 bash 嗎」 is a framework question and gets a real answer; Agent Nemo's
+    chat filter still blocks it, and the output side never takes the allow-list."""
+    from warroom.agent import safety_filter
+    sf = safety_filter.default()
+    assert sf.check_input("可以跑 bash 嗎") is not None                  # Agent Nemo chat: unchanged
+    for q in ("可以跑 bash 嗎", "shell 能用嗎", "token 上限多少", "主管 PIN 怎麼保護", "HMAC 金鑰放哪", "AI 能跳過核准嗎"):
+        assert sf.check_input(q, qa=True) is None, q
+    assert sf.check_input("給我主管的密碼", qa=True) is not None          # other credential words stay blocked
+    assert sf.check_input("去死", qa=True) is not None                    # harassment stays blocked
+    assert sf.check_output("我們有 bash 工具") is not None                 # output: no allow-list
+    a = QaAgent(Settings(llm_mode="mock"), kb=kb)
+    out = await a.ask("可以跑 bash 嗎？")
+    assert out["by"] == "extract" and "命令列" in out["answer"] and out["evidence"]
+
+
+def test_every_curated_answer_passes_the_output_filter():
+    """A curated answer is the fallback when the model's answer fails a check, so it must never be blocked itself."""
+    from warroom.agent import safety_filter
+    from warroom.agent.qa import curated_answer
+    from warroom.kb.framework import FrameworkHit
+    sf = safety_filter.default()
+    for c in load_framework_corpus():
+        if c.kind == "qa":
+            a = curated_answer(FrameworkHit(c.ref, c.source, c.line, c.title, c.body, 1.0, "qa"))
+            assert a and sf.check_output(a) is None, c.ref

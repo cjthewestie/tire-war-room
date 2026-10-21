@@ -4,6 +4,10 @@
 // viewer (GET /api/qa/doc) or on the live page that shows it. 大字模式 is for the projector.
 import { useEffect, useRef, useState } from 'react'
 import { apiGet, supervisorPost } from '../transport'
+import { ProofButton, ProofIndex, ProofResultView } from './QaProofs'
+import { useProofs } from './useProofs'
+import { QaWalk } from './QaWalk'
+import { proofsFor } from './qaDemo'
 import './qa.css'
 
 interface Evidence { ref: string; path: string; line: number | null; title: string; kind: string; live: { href: string; label: string } | null }
@@ -22,7 +26,7 @@ const QA_CHIPS: { label: string; q: string }[] = [
   { label: '跟 OpenClaw 差在哪', q: '跟 OpenClaw、Hermes、Claude Code 這類 agent 差在哪？' },
   { label: '安全核心是什麼', q: '安全核心是什麼？' },
   { label: '模型多大跑在哪', q: '用的是什麼模型？模型多大、跑在哪裡？' },
-  { label: '為什麼工具要模組化', q: '為什麼工具要模組化、做成固定的白名單？' },
+  { label: 'AI 能做／做不到什麼', q: '指揮官（AI）可以做哪些事？做不到什麼？' },
   { label: 'context 怎麼控制', q: 'context 太長怎麼控制？' },
   { label: '怎麼確認 AI 計劃有效', q: '怎麼確認 AI 的計劃有效、是對的？' },
   { label: '怎麼導入新工廠', q: '換一間新工廠要怎麼導入？' },
@@ -105,7 +109,13 @@ export function QaPage() {
     }
   }
 
+  const proofs = useProofs()
+  const [sec, setSec] = useState<'ask' | 'proofs' | 'walk'>(() => (/#qa\/(proofs|walk)/.exec(location.hash)?.[1] as 'proofs' | 'walk') ?? 'ask')
+  const pick = (s: 'ask' | 'proofs' | 'walk') => { setSec(s); history.replaceState(null, '', `${location.search}#qa${s === 'ask' ? '' : `/${s}`}`) }
+  const [autoWalk, setAutoWalk] = useState<string | null>(null)
+  const walkNow = (kind: string) => { setAutoWalk(kind); pick('walk') }
   const [cur, ...past] = answers
+  const curProofs = cur ? proofsFor(cur.question).map((id) => proofs.reg?.proofs.find((p) => p.id === id)).filter((p) => p != null) : []
   return (
     <section className={`qa-page ${big ? 'qa-big' : ''}`} data-testid="qa-page" aria-label="QA 模式">
       <div className="qa-head">
@@ -116,6 +126,14 @@ export function QaPage() {
         <button className={`qa-big-btn ${big ? 'on' : ''}`} aria-pressed={big} onClick={toggleBig} data-testid="qa-big-toggle">大字模式</button>
       </div>
 
+      <div className="qa-tabs" role="tablist" aria-label="QA 模式">
+        <button role="tab" aria-selected={sec === 'ask'} className={sec === 'ask' ? 'on' : ''} onClick={() => pick('ask')} data-testid="qa-tab-ask">問答</button>
+        <button role="tab" aria-selected={sec === 'proofs'} className={sec === 'proofs' ? 'on' : ''} onClick={() => pick('proofs')} data-testid="qa-tab-proofs">評審疑問 → 展示</button>
+        <button role="tab" aria-selected={sec === 'walk'} className={sec === 'walk' ? 'on' : ''} onClick={() => pick('walk')} data-testid="qa-tab-walk">看一次怎麼運作</button>
+      </div>
+      {sec === 'proofs' && <ProofIndex api={proofs} onWalk={walkNow} />}
+      {sec === 'walk' && <QaWalk autostart={autoWalk} onStarted={() => setAutoWalk(null)} />}
+      {sec === 'ask' && <>
       <form className="qa-ask" onSubmit={(e) => { e.preventDefault(); void ask(q) }}>
         <label htmlFor="qa-q" className="sr-only">評審的問題</label>
         <textarea id="qa-q" ref={input} value={q} rows={2} maxLength={300} placeholder="輸入評審的問題，例如：AI 會不會亂改產線？"
@@ -137,6 +155,13 @@ export function QaPage() {
           <p className="qa-q">問：{cur.question}</p>
           <p className="qa-a">{cur.answer}</p>
           <p className="qa-meta">{BY_LABEL[cur.by] ?? cur.by}・{(cur.ms / 1000).toFixed(1)} 秒</p>
+          {curProofs.length > 0 && (
+            <div className="qa-card-proofs" data-testid="qa-card-proofs">
+              {curProofs.map((p) => <ProofButton key={p.id} p={p} api={proofs} />)}
+              {curProofs.map((p) => proofs.results[p.id] && <ProofResultView key={`r-${p.id}`} r={proofs.results[p.id]} onWalk={walkNow} />)}
+              {proofs.err && <p className="qa-err">{proofs.err}</p>}
+            </div>
+          )}
           {cur.evidence.length > 0 && (
             <div className="qa-ev" data-testid="qa-evidence">
               <h3>證據</h3>
@@ -159,6 +184,7 @@ export function QaPage() {
           <ul>{past.map((a) => <li key={a.id}><button onClick={() => setAnswers((xs) => [a, ...xs.filter((x) => x.id !== a.id)])}>{a.question}</button></li>)}</ul>
         </details>
       )}
+      </>}
       {view && <DocViewer ev={view} onClose={() => setView(null)} />}
     </section>
   )

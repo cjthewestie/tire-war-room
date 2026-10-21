@@ -28,7 +28,7 @@ A: 寫入只在 EXECUTE 狀態發生。WRITE_TOOLS 只有三個：confirm_schedu
 ## Q: Agent 有哪些工具？可以執行任意指令或寫 PLC 嗎？
 A: 固定 9 個工具（ToolName 白名單）：6 個讀取／計算（read_sensors、predict_anomaly、cure_formula、solve_schedule、sop_search、query_orders_shifts）加 3 個寫入。Registry 只接受 ToolName 裡的名字，沒有命令列（終端機指令）工具，也沒有任何致動器或對 PLC 下寫入的工具。OpenShell 政策也不開 Modbus 502 / OPC UA 4840。
 證據: `warroom/contracts.py:181`, `warroom/tools/registry.py:58`, `warroom/agent/gate.py:13`, `deploy/openshell/warroom-policy.yaml:28`
-關鍵詞: 9 個工具, ToolName, allow-list, 白名單, 命令列, 終端機, 任意指令, PLC, 致動器, actuator, Modbus
+關鍵詞: 9 個工具, ToolName, allow-list, 白名單, 命令列, 終端機, 任意指令, bash, shell, 跑指令, 可以跑 bash 嗎, 能不能跑 shell, PLC, 致動器, actuator, Modbus
 
 ## Q: Agent Nemo 對話是怎麼運作的？會不會無限迴圈？
 A: Agent Nemo 是一個有上限的 tool-calling 迴圈：每輪最多 MAX_STEPS = 6 次會用工具的模型呼叫（第 7 次只能出文字），每步最多 MAX_CALLS_PER_STEP = 4 個工具呼叫，整輪 BUDGET_S = 60 秒。另外 query_plant 每輪最多 2 個主題、sop_search 最多 2 次。它的工具都是唯讀，要動現場只能 propose_plan 開一個事件走正常核准流程。
@@ -61,8 +61,8 @@ A: 目標是讀值到動作 < 0.2 秒。Mac 上量到 28 台機台一輪的決�
 關鍵詞: 延遲, latency, 0.2 秒, 反應時間, p99, 安全核心速度, 確認取樣, confirm_samples
 
 ## Q: 安全核心停機後，AI 可以把機台開回來嗎？
-A: 不行。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。（未驗證：程式裡沒有找到一個明確的「只有人能解除」的解除按鈕；目前看到的是維修任務完成後由 runtime 清除故障。）
-證據: `warroom/agent/state_machine.py:37`, `warroom/agent/state_machine.py:843`, `warroom/api/runtime.py:1062`
+A: 不行。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫，agent 沒有這個工具；跟 Agent Nemo 說「解除停機」它會直接拒絕。
+證據: `warroom/agent/state_machine.py:37`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1187`, `warroom/agent/main_agent.py:110`, `warroom/agent/main_agent.py:111`
 關鍵詞: 解除停機, release, 人工復歸, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
 
 ## Q: 什麼情況會進 SAFE_STOP？會不會把排程退回去？
@@ -96,8 +96,8 @@ A: App 跑在 OpenShell 沙箱（NemoClaw 的底層），Landlock 是硬性要�
 關鍵詞: OpenShell, NemoClaw, 沙箱, sandbox, Landlock, 網路政策, network policy, 隔離, 權限, 隔離, 怎麼隔離, 容器, 權限控管, 檔案系統
 
 ## Q: 用的是什麼模型？跑在哪裡？
-A: Nemotron 3.5 Lightning 30B-A3B NVFP4，目標部署在 DGX Spark 上用 vLLM（含 DSpark 推測解碼和 prefix cache），全離線。要誠實說明：手邊沒有 DGX Spark，所有模型數字都是 Mac M4 Max 用 Ollama 跑同一模型量的，Spark 路徑有寫好和單元測試但沒在 GB10 硬體上跑過。
-證據: `README.md:19`, `warroom/config.py:6`, `docs/ARCHITECTURE.md:126`, `README.md:186`, `README.md:206`
+A: Nemotron 3.5 Lightning 30B-A3B NVFP4（總參數 30B、每次推論只啟用約 3B），部署在 DGX Spark 上用 vLLM，全離線。2026-10-21 在大會的 DGX Spark 實測：單流解碼 126.4 tokens/s，第一張告警卡 p90 2.11 秒（目標 2.0 秒，差一點），32k 熱快取首字 1.63 秒，3 件同時最慢一件 6.54 秒（這兩項沒過目標）。Mac 上開發用 Ollama 跑同一個模型。
+證據: `README.md:19`, `warroom/config.py:6`, `docs/ARCHITECTURE.md:126`, `bench/results/spark-lightning-20261021/README.md:31`, `bench/results/spark-lightning-20261021/README.md:32`, `bench/results/spark-lightning-20261021/README.md:34`, `bench/results/spark-lightning-20261021/README.md:36`
 關鍵詞: 模型, Nemotron, NVFP4, 30B-A3B, DGX Spark, vLLM, Ollama, 地端, on-prem, 硬體, 模型多大, 參數量, 跑在哪, 3B 活躍參數
 
 ## Q: 怎麼確保 LLM 輸出是合法的 JSON？
@@ -121,7 +121,7 @@ A: 幾層：工具結果包在 DATA 分隔符裡，system prompt 說裡面只是
 關鍵詞: prompt injection, 注入攻擊, 越獄, jailbreak, DATA 分隔符, 資安, 惡意指令, SOP 注入
 
 ## Q: 敏感詞和機密外洩怎麼擋？
-A: safety_filter 在模型前後都用程式擋：輸入符合類別（帳密、繞過、個資、自傷、武器、騷擾）就不送模型，直接回固定句；輸出含封鎖詞或像機密的字串（環境變數裡的機密值、主管驗證碼、稽核簽章用的機密、IP、路徑、長 hex）就換成安全句。清單在 config/safety/blocked_terms.yaml，改了會自動重載，每次命中都遮罩後寫稽核。它和工廠的 Safety Core 是兩回事。
+A: safety_filter 在模型前後都用程式擋：輸入符合類別（帳密、繞過、個資、自傷、暴力、騷擾）就不送模型，直接回固定句；輸出含封鎖詞或像機密的字串（環境變數裡的機密值、主管驗證碼、稽核簽章用的機密、IP、路徑、長 hex）就換成安全句。清單在 config/safety/blocked_terms.yaml，改了會自動重載，每次命中都遮罩後寫稽核。它和工廠的 Safety Core 是兩回事。
 證據: `warroom/agent/safety_filter.py:1`, `warroom/agent/safety_filter.py:5`, `config/safety/blocked_terms.yaml:18`
 關鍵詞: 敏感詞, safety filter, blocked_terms, 機密, 金鑰外洩, secret leak, 內容過濾, guardrail
 
@@ -179,6 +179,11 @@ A: 可以。模型走本地 OpenAI 相容端點（Spark 上 vLLM、Mac 上 Ollam
 A: 不會。AI 只產出計畫，寫入只在 EXECUTE 狀態、只有三個寫入工具（confirm_schedule、set_cure_time、notify_teams），而且都要過確定性的 Action Gate；R2、R3 的變更一定要主管核准。系統裡沒有任何致動器或對 PLC 下寫入的工具，安全核心是獨立的程式規則，LLM 呼叫不到也解除不了它的停機。
 證據: `warroom/contracts.py:197`, `warroom/contracts.py:206`, `warroom/agent/gate.py:1`, `warroom/agent/gate.py:13`, `warroom/contracts.py:225`, `warroom/safety/core.py:1`, `warroom/agent/state_machine.py:37`
 關鍵詞: 亂改產線, 亂改, 失控, 自己下指令, 控制機台, 自主, autonomous, 改產線, 安全性, 誤動作
+
+## Q: 指揮官（AI）可以做哪些事？做不到什麼？
+A: 指揮官從不自己執行，它只寫計劃；狀態機在 Gate 把關、主管核准後才去執行。整個系統只有三個寫入工具：confirm_schedule 確認排程、set_cure_time 設硫化時間建議值、notify_teams 通知各組，而且 set_cure_time 只是記在工單上的建議值，不是寫 PLC。它做不到：跟供應商叫料、改客戶交期、直接控制機台或 PLC、解除安全核心停機（只有主管能按確認復機）、找人或加人；遇到這些，計劃只能通知相關的人，或建議主管去做。這是刻意的：寫入少，每一個都能被管住；要加新能力（例如自動叫料），就做成一個新的工具模組，配上自己的風險等級和 Gate 規則，我們的說法是「工具模組化：限縮才能完全掌控」（團隊說法，出自簡報）。目前的缺口：原料缺料只會更新庫存，還不會自動開事件（#38 已關閉）。
+證據: `warroom/agent/state_machine.py:9`, `warroom/agent/state_machine.py:10`, `warroom/contracts.py:197`, `warroom/tools/impl.py:314`, `warroom/tools/specs.py:73`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1694`
+關鍵詞: 指揮官, commander, 能做什麼, 做不到, 叫料, 採購, 改交期, 交期, 寫入, 三種寫入, 只有三個寫入, 權限, 限縮, 掌控, 工具模組, 新能力, 自動叫料, 缺料
 
 ## Q: 主管到底核准什麼？
 A: 主管核准 R2 和 R3 的寫入：R2 是排程、硫化時間建議、加班、派工；R3 是放慢或暫停投料、跨組調人、機台停用。主管可以核准、修改或駁回，決定會寫稽核並回到等待中的事件；也可以用文字討論計畫，每個事件最多因討論重排 MAX_DISCUSS_REPLANS = 3 次。R0 讀取和 R1 模板通知自動執行。
