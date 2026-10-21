@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from warroom import factory as F
+from warroom.agent.convo import AskMemory
 from warroom.api import fallbacks as FB
 from warroom.bus import InProcessBus
 from warroom.clock import SimClock
@@ -530,6 +531,9 @@ class Runtime:
         self.compute_hold_max_s = 120.0          # never freeze the plant longer than this per tick
         self._switching = False                  # a scenario load is swapping components: no ticks
         self._switch_lock: asyncio.Lock | None = None
+        # issue #95: 問戰情室 conversations (order / event ids only). In this process; cleared with every scenario
+        # load / reset and day-loop wrap, so a new scenario never answers about the old one's orders or events.
+        self.ask_memory = AskMemory()
         self._holds: dict[str, dict[str, Any]] = {}
         self._oob_seen: dict[str, datetime] = {}
         self._safety_unrecorded: list[SafetyAction] = []   # applied, but audit/attach failed: retried
@@ -1191,6 +1195,7 @@ class Runtime:
                     raise
                 self.scenario = new_scenario
                 self.overlays = []
+                self._clear_ask_memory("scenario loaded")
                 self.c = comps
                 _ = self.orch                      # the main agent hooks the new state machine at once
                 self.ingest.reset()
@@ -1228,6 +1233,7 @@ class Runtime:
         cycles, orders, goods, people, trucks) to its start-of-day snapshot, and the detector, validation and
         baselines start fresh so the seam raises nothing. The audit log keeps going, with a marker."""
         ended = self.clock.now()
+        self._clear_ask_memory("day loop wrapped")
         await self._cancel_events()
         self._wake_sleepers(cancel=True)
         store = self.c.store
@@ -1481,6 +1487,22 @@ class Runtime:
             return list(self.state_machine.events())
         except Exception:  # noqa: BLE001
             return []
+
+    def _clear_ask_memory(self, why: str) -> None:
+        """Forget every 問戰情室 conversation (issue #95); the audit log says how many and why."""
+        try:
+            n = self.ask_memory.reset()
+            if n:
+                self.audit.append(AuditKind.SYSTEM, "system", {"msg": "ask memory cleared", "why": why,
+                                                               "conversations": n, "generation": self.ask_memory.generation})
+        except Exception:  # noqa: BLE001 - forgetting must never block a scenario switch
+            log.exception("ask memory not cleared")
+
+    def orders_today(self) -> dict[str, Any]:
+        """Today's orders from the one rule set (warroom/tools/orders_today.py): the dashboard's order list, the
+        ACTIVE schedule and the tyres in a press now. Read only; behind GET /api/orders/today and 問戰情室."""
+        from warroom.tools import orders_today
+        return orders_today.collect(self.sim, self.c.store, self.clock.now())
 
     def ask_context(self) -> dict[str, Any]:
         """What the 問戰情室 planner sees: factory time, abnormal machines, open events."""

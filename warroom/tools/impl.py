@@ -223,6 +223,13 @@ def query_orders_shifts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
                             "due_within_3d": (now.date() + timedelta(days=3)).isoformat()}
         except Exception:  # noqa: BLE001 - the world is a view; the tool answers without it
             pass
+    # issue #95: today's orders from ONE rule set (warroom/tools/orders_today.py), over the dashboard's order list
+    # (seed + world), the ACTIVE schedule and the tyres in a press now; the sim-only `orders` above is kept as is
+    try:
+        from warroom.tools import orders_today
+        out["orders_today"] = orders_today.collect(sim, ctx.store, now)
+    except Exception as e:  # noqa: BLE001 - say so instead of leaving the agent to guess
+        out["orders_today_error"] = f"{type(e).__name__}: {e}"[:200]
     return out
 
 

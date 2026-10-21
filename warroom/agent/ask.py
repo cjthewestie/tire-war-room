@@ -23,7 +23,8 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom import factory as F
-from warroom.agent import plant
+from warroom.agent import order_ask, plant
+from warroom.agent.convo import AskMemory, ConvContext
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
 from warroom.agent.state_machine import _brief
@@ -51,7 +52,7 @@ _CATALOGUE = """\
 - read_sensors {machine_ids: [id], minutes: float=30} 讀感測器：現值、30 分最低、趨勢
 - predict_anomaly {machine_id, channel='temp_c', horizon_min=30} 時序預測：未來的穩定值與區間
 - cure_formula {size:'S'|'M'|'L', actual_temp_c, elapsed_h} Arrhenius 硫化時間（需要尺寸、實際溫度、已硫化時數）
-- query_orders_shifts {order_ids?, press_ids?} 訂單交期、班表、人力缺口、指定硫化機的下一模
+- query_orders_shifts {order_ids?, press_ids?} 訂單交期、班表、人力缺口、指定硫化機的下一模；也回傳今日訂單（今日生產、今日交貨、遲交風險）
 - sop_search {query, k=3} SOP 知識庫"""
 
 _MACHINES = "；".join(
@@ -217,13 +218,21 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
             bits.append("人力缺口：" + ("、".join(gaps) if gaps else "無"))
             jobs = data.get("next_jobs") or []
             if jobs:
-                bits.append("下一模：" + "、".join(
+                bits.append("下一模（共 %d 筆，列前 3）：" % len(jobs) + "、".join(
                     f"{machine_label(j['press_id'], short=True)} {j['order_id']} {str(j['mold_in'])[5:16].replace('T', ' ')} 入模"
                     for j in jobs[:3]))
-            orders = sorted(data.get("orders") or [], key=lambda o: str(o.get("due")))
-            if orders:
-                o = orders[0]
-                bits.append(f"最近交期 {o['id']}（{o['size']}，{o.get('done', 0)}/{o['qty']}，{o['due']}）")
+            today = data.get("orders_today")
+            if today:      # issue #95: the whole order list's counts (one rule set), not the one nearest-due order
+                c = today["counts"]
+                bits.append(f"今日訂單：生產 {c['production']} 張、交貨 {c['delivery']} 張；已遲交 {c['overdue']} 張、"
+                            f"預估會遲交 {c['late']} 張、其他風險 {c['other_risk']} 張（共 {c['total']} 張）")
+                if today["overdue"] or today["late"]:
+                    bits.append("遲交相關：" + "、".join((today["overdue"] + today["late"])[:6]))
+            else:
+                orders = sorted(data.get("orders") or [], key=lambda o: str(o.get("due")))
+                if orders:
+                    o = orders[0]
+                    bits.append(f"最近交期 {o['id']}（{o['size']}，{o.get('done', 0)}/{o['qty']}，{o['due']}）")
             return "；".join(bits)
         if tool is ToolName.SOP_SEARCH:
             hits = data.get("hits") or []
@@ -329,7 +338,54 @@ class AskAgent:
                          factory_time=now, total_ms=round((time.perf_counter() - t0) * 1000, 1))
 
     async def ask(self, question: str, *, tools: Any, audit: AuditLog, context: dict[str, Any],
-                  now: Any, actor: str = "supervisor") -> AskAnswer:
+                  now: Any, actor: str = "supervisor", conversation_id: str | None = None,
+                  memory: AskMemory | None = None) -> AskAnswer:
+        """One question. `conversation_id` + `memory` give it a conversation: a follow-up (「那張單呢？」) is resolved
+        against the order / event ids the conversation just talked about; without them every question stands alone."""
+        ans = await self._ask(question, tools=tools, audit=audit, context=context, now=now, actor=actor,
+                              conversation_id=conversation_id, memory=memory)
+        return ans.model_copy(update={"conversation_id": conversation_id}) if conversation_id else ans
+
+    async def _order_question(self, question: str, intent: Any, conv: ConvContext, *, tools: Any, audit: AuditLog,
+                              now: Any, actor: str, conversation_id: str | None, memory: AskMemory | None,
+                              ask_id: str, t0: float) -> AskAnswer:
+        """issue #95: an order question. Code picks the order, calls the read tool again (the answer is never reused
+        from an earlier turn), and writes the answer from its result; the model is not involved."""
+        res = order_ask.resolve(intent, conv)
+        audit.append(AuditKind.SYSTEM, "ask", {
+            "msg": "order question", "kind": intent.kind, "named": list(intent.ids), "pointed": intent.pointed,
+            "resolved_via": res.via, "resolved": res.ids, "needs": res.needs,
+            "memory": conv.as_dict(), "memory_generation": memory.generation if memory is not None else None},
+            event_id=ask_id)
+        ms = lambda: round((time.perf_counter() - t0) * 1000, 1)        # noqa: E731
+        if memory is not None and intent.events:
+            memory.remember(actor, conversation_id, events=list(intent.events))
+        if res.needs:                                    # nothing is guessed: the user says which order
+            text = order_ask.need_text(res)
+            audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": text, "intent": f"orders:{res.needs}",
+                                                   "tool_calls": 0}, event_id=ask_id)
+            return AskAnswer(id=ask_id, question=question, answer=text, mode=self.mode, factory_time=now,
+                             intent="needs_choice" if res.needs == "choice" else "needs_order",
+                             choices=res.choices, total_ms=ms())
+        args: dict[str, Any] = {"order_ids": res.ids} if res.ids else {}
+        result = await self._run(tools, audit, ask_id, 1, ToolName.QUERY_ORDERS_SHIFTS, args)
+        data = result.data.get("orders_today") if result.ok else None
+        if not data:
+            why = result.error or result.data.get("orders_today_error") or "沒有回傳今日訂單"
+            text = f"查不到資料：今日訂單查詢沒有成功（{why}）。我沒有用舊的數字代替。"
+            step = AskStepResult(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args=args, ok=False, error=str(why), summary="")
+        else:
+            text, shown, focus = order_ask.compose(intent, data, res.ids)
+            step = AskStepResult(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args=args, ok=True, summary=text)
+            if memory is not None and (shown or intent.kind not in order_ask.SINGLE):
+                memory.remember(actor, conversation_id, orders=shown, focus=focus, date_scope=data.get("date"))
+        audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": text, "intent": f"orders:{intent.kind}",
+                                               "tool_calls": 1}, event_id=ask_id)
+        return AskAnswer(id=ask_id, question=question, answer=text, steps=[step], mode=self.mode, factory_time=now,
+                         total_ms=ms())
+
+    async def _ask(self, question: str, *, tools: Any, audit: AuditLog, context: dict[str, Any],
+                   now: Any, actor: str, conversation_id: str | None, memory: AskMemory | None) -> AskAnswer:
         t0 = time.perf_counter()
         ask_id = f"ASK-{next(self._ids):04d}"
         audit.append(AuditKind.SYSTEM, actor, {"msg": "ask", "question": question}, event_id=ask_id)
@@ -340,6 +396,11 @@ class AskAgent:
                                                    "tool_calls": 0}, event_id=ask_id)
             return AskAnswer(id=ask_id, question=question, answer=chat, mode=self.mode, factory_time=now,
                              intent="chitchat", total_ms=round((time.perf_counter() - t0) * 1000, 1))
+        conv = memory.get(actor, conversation_id) if memory is not None else ConvContext()
+        intent = order_ask.classify(question, has_machine=bool(machines_in(question)), memory=conv)
+        if intent is not None:
+            return await self._order_question(question, intent, conv, tools=tools, audit=audit, now=now, actor=actor,
+                                              conversation_id=conversation_id, memory=memory, ask_id=ask_id, t0=t0)
         cold = False
 
         # 1. PLAN

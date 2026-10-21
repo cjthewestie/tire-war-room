@@ -7,6 +7,7 @@ import { SIZE_LABEL } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { OrderCard } from './OrderCard'
+import { TodayOrders } from './TodayOrders'
 import { successOf, type Success } from '../agent/tickerItems'
 import { RISK_TEXT, byRisk, orderView, warningsFor, type OrderSuccess, type OrderView } from './orderModel'
 
@@ -52,6 +53,7 @@ export function OrdersTab() {
   const dueSoon = views.filter((v) => v.o.status !== '已出貨' && v.due - now < 3 * DAY)
   return (
     <div className="orders-tab" data-testid="orders-tab">
+      <TodayOrders />
       <section className="kpis" aria-label="訂單重點">
         <div className="kpi"><span className="kpi-l">全部訂單</span><span className="kpi-v">{views.length}<small> 張</small></span>
           <span className="kpi-s">進行中 {count('open')}・已完成 {count('done')}・已出貨 {count('shipped')}</span></div>

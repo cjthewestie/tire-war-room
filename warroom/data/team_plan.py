@@ -40,6 +40,10 @@ class PlanState:
     orders: list[tuple[Order, date]] = field(default_factory=list)       # (order with dataset due, ...)
     running: dict[str, PlanUnit] = field(default_factory=dict)           # press -> tyre curing at `at`
     queues: dict[str, list[str]] = field(default_factory=dict)           # press -> next order ids
+    # order id -> the due date AND time of day exactly as the dataset states it (orders.csv `due`, tire_unit.csv
+    # `rush_due`). Order.due keeps only the date; this keeps the hour so lateness is never judged on a guessed time.
+    # An order whose due the dataset does not state (a rush tyre with no rush_due) has no entry here.
+    due_at: dict[str, datetime] = field(default_factory=dict)
 
 
 def plan_state(at: datetime, root=None) -> PlanState:
@@ -68,11 +72,14 @@ def plan_state(at: datetime, root=None) -> PlanState:
         o = Order(id=oid, size=SIZE[r["size"]], qty=qty, done=min(qty, done.get(oid, 0)),
                   due=_ts(r["due"]).date(), customer=r["customer"], mold_id=f"MD-{oid}")
         st.orders.append((o, o.due))
+        st.due_at[oid] = _ts(r["due"])
     for alias, r in aliased.items():
         base = next(o for o, _ in st.orders if o.id == r["order_id"])
         o = Order(id=alias, size=SIZE[r["size"]], qty=1, done=min(1, done.get(alias, 0)),
                   due=_ts(r["rush_due"] or r["finish"]).date(), customer=base.customer, mold_id=alias, priority=2)
         st.orders.append((o, o.due))
+        if r["rush_due"]:              # only a due the dataset really states; `finish` is a completion, not a due
+            st.due_at[alias] = _ts(r["rush_due"])
     # presses ----------------------------------------------------------------------------------------------
     for u in sorted(units, key=lambda u: u.cure_start):
         if u.cure_start <= at < u.cure_end:

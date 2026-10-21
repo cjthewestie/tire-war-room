@@ -735,6 +735,13 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     async def orders() -> list[Order]:
         return rt().sim.orders()
 
+    @app.get("/api/orders/today")
+    async def orders_today() -> dict[str, Any]:
+        """Today's orders (issue #95), risk first: in production today, due today, progress, machine, eta, why.
+        Computed by warroom/tools/orders_today.py from the dashboard's order list, the ACTIVE schedule and the tyres
+        in a press now; the same result 問戰情室 answers from. Read only."""
+        return await asyncio.to_thread(rt().orders_today)
+
     @app.get("/api/shifts", response_model=list[Shift])
     async def shifts() -> list[Shift]:
         """Shifts with the active schedule's approved staffing changes applied; `required` is set
@@ -866,7 +873,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         from warroom.agent.orchestrator import PRIORITY
         async with r.orch.queue.slot(PRIORITY["question"], "ask", None, "問戰情室"):   # questions wait last (issue #54)
             return await _ask_agent(r).ask(body.question, tools=r.c.tools, audit=r.audit, context=r.ask_context(),
-                                           now=r.clock.now(), actor=session.actor)
+                                           now=r.clock.now(), actor=session.actor,
+                                           conversation_id=body.conversation_id, memory=r.ask_memory)
 
     # ------------------------------------------------------------------ issue #10: 下新任務 / 討論這個計劃
     def _ask_agent(r: Runtime):
