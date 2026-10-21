@@ -508,7 +508,8 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-ver { background: var(--c-4a3a10, #4a3a10); color: var(--c-f5d27a, #f5d27a); }
 .ph-changed { margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgb(var(--warn-rgb, 245 184 61) / .12); font-size: 14px; line-height: 1.5; }
 .ph-changed b { color: var(--c-f5b83d, #f5b83d); }
-.ph-title { font-size: 23px; line-height: 1.3; margin: 6px 0 12px; text-wrap: balance; }
+.ph-title { font-size: 23px; line-height: 1.3; margin: 6px 0 12px; }
+.ph-chunk { display: inline-block; }   /* a long title breaks between its phrases, not inside 維修完成 */
 .ph-approval .ph-meta, .ph-approval .ph-title { margin: 0; }
 .ph-card.idle > .ph-none:first-child { margin-top: 0; }
 .ph-card.idle .ph-title { margin: 4px 0 8px; }

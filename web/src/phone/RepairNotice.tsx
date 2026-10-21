@@ -62,7 +62,7 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
   const to = x ? (normal != null ? readingText(x.channel, normal) : targetText(x)) : ''
   return (
     <div className="ph-card ph-review" data-testid="phone-repaired" data-event={ev.id}>
-      <h2 className="ph-title" data-testid="phone-repaired-title">{name}維修完成，{recoverWord(x, now, normal)}</h2>
+      <h2 className="ph-title" data-testid="phone-repaired-title"><span className="ph-chunk">{name}維修完成，</span><span className="ph-chunk">{recoverWord(x, now, normal)}</span></h2>
       {x && now != null && (
         <p className="ph-big" aria-label={`${CH_LABEL[x.channel]} ${readingText(x.channel, now)}，正常值 ${to}`}>{readingText(x.channel, now)} → {to}</p>
       )}

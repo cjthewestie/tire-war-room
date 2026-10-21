@@ -50,10 +50,12 @@ export function Phone() {
   const readReports = events.filter((e) => e.review?.status === 'done' || read[rkey(e)])
     .map((e) => (e.review?.status === 'done' ? e : read[rkey(e)]))
   // 「02:15 已核准 7 號硫化機（方案 B）」, 「02:18 已讀 7 號硫化機報告」; a card the server carried over (decision.via 'auto')
-  // repeats the supervisor's own decision
+  // repeats the supervisor's own decision, and a card approved again after a recompute (3 件同時異常) says the same as
+  // the first: the newest of identical lines only
+  const decisions = state.resolved.filter((r) => r.decision?.via !== 'auto').map((r) => ({ at: r.decision?.decided_at ?? r.created_at, key: r.id,
+    text: `${DEC_LABEL[r.status] ?? r.status} ${nameOf(r)}${r.options.length > 1 && r.decision?.option_id ? `（方案 ${r.decision.option_id}）` : ''}` }))
   const history = [
-    ...state.resolved.filter((r) => r.decision?.via !== 'auto').slice(0, 3).map((r) => ({ at: r.decision?.decided_at ?? r.created_at, key: r.id,
-      text: `${DEC_LABEL[r.status] ?? r.status} ${nameOf(r)}${r.options.length > 1 && r.decision?.option_id ? `（方案 ${r.decision.option_id}）` : ''}` })),
+    ...decisions.filter((h, i) => decisions.findIndex((x) => x.text === h.text) === i).slice(0, 3),
     ...readReports.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, text: `已讀 ${machineLabel(e.machine_id)}報告`, tid: 'phone-report-done' })),
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
@@ -154,7 +156,10 @@ export function Phone() {
 function OneLine({ l }: { l: LiveLine }) {
   const done = l.phase === '維修中' ? '維修完成' : '完成'
   return <>
-    <h2 className="ph-title" data-testid="phone-line">{l.name}{/^[A-Z]/.test(l.phase) ? '：' : ''}{l.phase}{l.secs ? `，${l.secs}後${done}` : ''}</h2>
+    <h2 className="ph-title" data-testid="phone-line">
+      <span className="ph-chunk">{l.name}{/^[A-Z]/.test(l.phase) ? '：' : ''}{l.phase}{l.secs ? '，' : ''}</span>
+      {l.secs && <span className="ph-chunk">{l.secs}後{done}</span>}
+    </h2>
     {l.who && <p className="ph-lead">{l.who}</p>}
   </>
 }
