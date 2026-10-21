@@ -52,7 +52,7 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
         <span className="hl-t">{i.title}</span>
       </span>
       <span className="hl-s">{i.sub}</span>
-      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? `Agent Nemo（${sub.type_label}）・執行中` : `Agent Nemo（${sub.type_label}）・${SUB_STATUS[sub.status]}`}</span>}
+      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
       {rp === null && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />Agent Nemo 規劃中…好了會自動切到核准卡</span>}
       {rp?.state === 'ready' && <span className="hl-hint">Agent Nemo 的計劃已送出，見 ③ 的待核准卡</span>}

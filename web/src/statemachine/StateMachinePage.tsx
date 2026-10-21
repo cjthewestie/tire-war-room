@@ -316,7 +316,7 @@ function PreClassPanel() {
               <span className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</span><b>{machineLabel(a.machine_id)}</b>
               <span className="tag">{a.preclass?.label ?? a.kind}</span>
               <span className={`tag ${a.severity === 'critical' ? 'rush' : ''}`}>{a.severity === 'critical' ? '嚴重' : a.severity === 'warn' ? '注意' : '資訊'}</span>
-              <span className="pre-route" data-testid="preclass-route">→ Agent Nemo 派給 <b>{a.route.type_label}</b>（優先 {a.route.priority_label}）</span>
+              <span className="pre-route" data-testid="preclass-route">→ 交給 Agent Nemo（優先 <b>{a.route.priority_label}</b>）</span>
               {a.event_id ? <a className="panel-link" href={`#console?event=${encodeURIComponent(a.event_id)}`}>{a.event_state ? STATE_LABEL[a.event_state as EventState] : ''} →</a> : <span className="muted small">併入既有事件</span>}
             </div>
             <div className="pre-grid">

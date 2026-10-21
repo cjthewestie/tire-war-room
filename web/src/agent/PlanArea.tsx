@@ -136,10 +136,10 @@ function ReplanStatus({ r }: { r: Replan | undefined }) {
   if (r.state === 'failed') return <p className="apv-next err" data-testid="replan-status">Agent Nemo 沒有開始規劃：{r.error}</p>
   if (r.state === 'closed') return <p className="apv-next" data-testid="replan-status">Agent Nemo 規劃完，沒有需要核准的變更：{plain(r.outcome ?? '已結案')}</p>
   if (r.state === 'ready') return <p className="apv-next" data-testid="replan-status">Agent Nemo 的計劃好了：核准卡已自動選取</p>
-  return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />Agent Nemo 規劃中…（訂單處理{r.eventId ? `・${r.eventId}` : ''}）好了會自動切到核准卡</p>
+  return <p className="apv-next live" role="status" aria-live="polite" data-testid="replan-status"><i className="spin" />Agent Nemo 規劃中…{r.eventId ? `（${r.eventId}）` : ''}好了會自動切到核准卡</p>
 }
 
-/** The 主 agent asks the order subagent to draft a plan for an at-risk order (POST /api/command → dispatch). */
+/** Agent Nemo drafts a plan for an at-risk order (POST /api/command → one supervisor-command event). */
 async function startPlan(transport: { command?: (t: string) => Promise<{ event_id: string; reply: string }> }, orderId: string) {
   if (!transport.command) return
   setReplan(orderId, { state: 'sending', eventId: null, error: null, since: Date.now() })
