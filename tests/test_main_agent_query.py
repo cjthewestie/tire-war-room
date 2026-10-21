@@ -388,3 +388,17 @@ async def test_query_plant_numbers_that_do_not_match_give_an_honest_line_not_raw
     m = Model(("tool", QUERY, {"topic": "orders_history"}), ("say", "有 7 張遲交。"), ("say", "還是 7 張遲交。"))
     out, _ = await _turn(m, "之前有哪些訂單遲交", Reader({"late": []}))
     assert out["reply"] == NUMBERS_OFF and "completed_or_shipped" not in out["reply"]
+
+
+
+async def test_query_plant_is_capped_at_two_topics_per_turn():
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
+              ("tool", QUERY, {"topic": "overview"}), ("say", "之前沒有遲交的訂單。"))
+    reader = Reader({"late": []})
+    out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
+    assert reader.topics == ["orders_history", "orders"] and "已經查了兩項" in _tool_texts(m)[-1]
+    assert out["reply"] == "之前沒有遲交的訂單。" and "先只查最相關的一個 topic" in SYSTEM
+
+
+def _tool_texts(m):
+    return [x["content"] for c in m.calls for x in c["messages"] if x.get("role") == "tool"]
