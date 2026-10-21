@@ -179,7 +179,7 @@ async def test_mock_mode_never_calls_a_model():
     assert d["by"] == "rules"
 
 
-async def test_report_calls_wait_last_in_the_queue_and_never_take_its_last_slot():
+async def test_report_calls_wait_last_in_the_queue_and_take_one_slot_at_a_time():
     rows = []
     audit = SimpleNamespace(append=lambda kind, actor, payload, event_id=None: rows.append(payload))
     q = ModelQueue(slots=3, audit=audit)
@@ -188,7 +188,7 @@ async def test_report_calls_wait_last_in_the_queue_and_never_take_its_last_slot(
     rep = IncidentReporter(_settings(), client=llm, queue=q, server_kind="vllm")
     jobs = [asyncio.create_task(rep.draft(_event(), _facts())) for _ in range(3)]
     await asyncio.sleep(0.1)
-    assert len(q.view()["running"]) == 2                     # 3 slots: 2 reports at most, 1 always free for planning
+    assert len(q.view()["running"]) == 1                     # one report at a time: 2 of 3 slots stay for planning
     async with q.slot(PRIORITY["machine"], "commander", "EV-X", "機台處理"):
         pass                                                 # a machine plan gets a slot at once
     out = await asyncio.gather(*jobs)

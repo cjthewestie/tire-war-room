@@ -276,9 +276,10 @@ class IncidentReporter:
         return self.client
 
     def _slots(self) -> asyncio.Semaphore:
-        """Reports never take the queue's last slot: with 3 slots at most 2 reports run, 1 stays for planning."""
+        """One report at a time: with 3 anomalies at once (concurrent_3) the other slots stay for planning and
+        re-planning (review 10-21); a later report waits and its late seconds show on the report."""
         if self._limit is None:
-            self._limit = asyncio.Semaphore(max(1, int(getattr(self.queue, "slots", 1)) - 1))
+            self._limit = asyncio.Semaphore(1)
         return self._limit
 
     async def _ask(self, facts: dict[str, Any]) -> str:
