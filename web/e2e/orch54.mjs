@@ -2,6 +2,8 @@
 //   PORT=8104 LLM_MODE=mock uv run python -m warroom.api   then   node web/e2e/orch54.mjs http://localhost:8104 [outDir]
 // 主控台: a 下新任務 → 主 agent dispatches a subagent → approval → 主 agent reports back. Agent page: 主 agent → subagent
 // tree with status and progress, the model queue, 中斷 on a running subagent. 狀態機: the detector's pre-classification.
+// CJ 10-21 (12298d7): one agent, Agent Nemo, does the tool calling; no subagent dispatch and no 主控台 switcher, so
+// 主控台 checks the one Agent Nemo conversation and a ② plan up to its approval (no 派發 / 回報 / 切換 any more).
 // Screenshots at 1440 and 390, light and dark, go to outDir (default docs/screenshots/issue-54).
 import { createRequire } from 'node:module'
 import { homedir } from 'node:os'
@@ -31,7 +33,7 @@ const llm = (await api('/api/health')).j?.llm_mode === 'llm'
 await api('/api/sim/control', { action: 'scenario', scenario: 'normal' })
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="chat-input"]')
-check('主控台 conversation is the 主 agent (switcher starts on 主 agent)', (await p.locator('[data-testid="agent-switch"] option').first().innerText()).trim() === '主 agent' && await p.locator('[data-testid="agent-switch"]').inputValue() === 'main')
+check('主控台 conversation is Agent Nemo\'s (no subagent switcher)', await p.locator('[data-testid="agent-switch"]').count() === 0 && await p.locator('[aria-label="Agent Nemo 對話"]').count() === 1)
 
 // 1a. one input, one 主 agent: 「妳是誰」 gets the identity reply with zero tool calls
 check('no mode switch on 主控台', await p.locator('[data-testid="mode-command"], [data-testid="mode-ask"], [data-testid="mode-discuss"]').count() === 0)
@@ -40,8 +42,8 @@ await p.locator('[data-testid="chat-input"]').fill('妳是誰')
 await p.locator('[data-testid="chat-input"]').press('Enter')
 const tr = p.locator('[data-testid="transcript"]')
 const lastAgent = () => tr.locator('[data-testid="sc-agent"]').last().innerText().catch(() => '')
-const idOk = await until(async () => /主 agent/.test(await lastAgent()) && !(await lastAgent()).includes('思考中'), 60)
-check('「妳是誰」 → 主 agent identity reply (plain bubble)', idOk, (await lastAgent()).replace(/\n/g, ' ').slice(0, 90))
+const idOk = await until(async () => /我是 Agent Nemo/.test(await lastAgent()) && !(await lastAgent()).includes('思考中'), 60)
+check('「妳是誰」 → Agent Nemo identity reply (plain bubble)', idOk, (await lastAgent()).replace(/\n/g, ' ').slice(0, 90))
 check('plain chat: no tags or labels on the bubble', !/(規則判讀|Nemotron 選派|子 agent・|主 agent・)/.test(await tr.innerText()))
 check('…with zero tool calls', ((await api('/api/audit?kind=tool_call&limit=5000')).j ?? []).length === tools0)
 check('never 「我不確定要查什麼」', !(await tr.innerText()).includes('我不確定要查什麼'))
@@ -52,47 +54,26 @@ await p.locator('[data-testid="chat-input"]').press('Enter')
 check('gibberish → 「這句我看不懂」, no subagent', await until(async () => (await lastAgent()).includes('看不懂'), 30) &&
   ((await api('/api/subagents')).j?.items ?? []).length === subsBefore, (await lastAgent()).slice(0, 60))
 
-// 1b. a delivery-risk item: the 主 agent drafts the plan by itself → 核准 → executes → reports back
-const risk = p.locator('[data-testid^="home-item-order:"]').first()
-await risk.click()
-check('opening a ② item: 主 agent 規劃中… (no 請 AI 重排 button)', await until(async () => (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') || (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0, 20) &&
-  await p.locator('[data-testid="plan-replan"]').count() === 0)
-let cardUp = false
-for (let i = 0; i < 40 && !cardUp; i++) {
-  cardUp = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
-  if (!cardUp) { await step(30); await p.waitForTimeout(llm ? 1500 : 400) }
-}
-check('the plan arrives and is selected: 主 agent 的計劃 + 核准', cardUp && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1 &&
-  (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').innerText()).includes('核准'))
-const disp = String(((await api('/api/audit?kind=system&limit=5000')).j ?? []).filter((e) => e.actor === 'main_agent' && e.payload.orch === 'dispatch' && e.payload.phase === 'plan' && e.payload.type === 'order').map((e) => `${e.payload.text} ${e.payload.by}`).pop() ?? '')
-check('主 agent asked the 訂單處理 subagent to plan it (audit)', disp.includes('已請子 agent 規劃：訂單處理') && /(model|rules)$/.test(disp), disp.slice(0, 120))
-await p.screenshot({ path: `${OUT}/home-plan-1440.png` })
+// 1b. a delivery-risk item: Agent Nemo drafts the plan by itself → its card is selected → 核准
 const subs = async () => (await api('/api/subagents')).j
-const me = (await subs()).items.find((x) => x.type === 'order' && x.source === 'supervisor')
-await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').click()
-await p.locator('[data-testid="agent-switch"]').selectOption('main')      // opening the item followed its subagent; back to the 主 agent
-check('核准 → 主 agent dispatches the subagent to execute', await until(async () => (await tr.locator('[data-testid="sc-agent"]', { hasText: '派發子 agent 執行' }).count()) >= 1, 40),
-  (await tr.locator('[data-testid="sc-agent"]').last().innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 100))
-await p.screenshot({ path: `${OUT}/home-dispatched-1440.png` })
-for (let i = 0; i < 60; i++) {
-  if (await tr.locator('[data-testid="sc-agent"]', { hasText: '訂單處理子 agent' }).count()) break
-  await step(60); await p.waitForTimeout(llm ? 1000 : 300)
+const hasRisk = await p.waitForSelector('[data-testid^="home-item-order:"]', { timeout: 15000 }).then(() => true, () => false)
+check('② the normal scenario lists a 交期預警 item', hasRisk, hasRisk ? '' : `none (schedule warnings: ${JSON.stringify((await api('/api/schedule')).j?.schedule?.warnings ?? [])})`)
+if (hasRisk) {
+  await p.locator('[data-testid^="home-item-order:"]').first().click()
+  check('opening a ② item: Agent Nemo 規劃中… (no 請 AI 重排 button)', await until(async () => (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('Agent Nemo') || (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0, 20) &&
+    await p.locator('[data-testid="plan-replan"]').count() === 0)
+  let cardUp = false
+  for (let i = 0; i < 40 && !cardUp; i++) {
+    cardUp = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
+    if (!cardUp) { await step(30); await p.waitForTimeout(llm ? 1500 : 400) }
+  }
+  check('the plan arrives and is selected: Agent Nemo 的計劃 + 核准', cardUp && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1 &&
+    (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').innerText()).includes('核准'))
+  await p.screenshot({ path: `${OUT}/home-plan-1440.png` })
+  const before = ((await api('/api/approvals?status=pending')).j ?? []).length
+  await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').click()
+  check('核准 decides that card (GET /api/approvals)', await until(async () => ((await api('/api/approvals?status=pending')).j ?? []).length < before, 20))
 }
-const rep = await tr.locator('[data-testid="sc-agent"]', { hasText: '訂單處理子 agent' }).last().innerText().catch(() => '')
-check('主 agent reports back in 主控台 when the subagent ends', rep.includes('訂單處理子 agent'), rep.replace(/\n/g, ' ').slice(0, 160))
-check('GET /api/subagents lists it under 主 agent', !!me && me.parent === 'main', me ? `${me.id}` : '')
-await p.screenshot({ path: `${OUT}/home-report-1440.png` })
-// the header switcher: follow one subagent's progress in the same panel, then back to the 主 agent
-const sw = p.locator('[data-testid="agent-switch"]')
-check('switcher: 主 agent first, then subagents as 「<what>：<status>」', (await sw.locator('option').first().innerText()) === '主 agent' && await sw.locator('option').count() >= 1)
-await p.click('.con-h.sw .seg button:has-text("全部")')
-await sw.selectOption(me.id)
-// the subagent list refreshes every 4 s, so the status may still read 等你核准 for a moment after the approval
-check('selecting a subagent shows its progress inline (status, tools)', await until(async () => (await p.locator('[data-testid="sub-progress"]').count()) === 1 &&
-  /(完成|等現場完成|執行中)/.test(await p.locator('[data-testid="sub-progress"] .sp-status').innerText()), 20), await p.locator('[data-testid="sub-progress"] .sp-status').innerText().catch(() => ''))
-await p.screenshot({ path: `${OUT}/home-switch-sub-1440.png` })
-await sw.selectOption('main')
-check('back to the 主 agent conversation', await p.locator('[data-testid="sc-agent"]').count() >= 2)
 
 // 2. Agent page: tree, progress, model queue, 中斷 on a second task
 await api('/api/command', { text: '夜班缺一人，請調人並重排' })
@@ -139,7 +120,7 @@ await p.goto(`${BASE}/#sm`, { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="sm-preclass"]')
 check('事件預分類 lists the anomaly before the LLM', await until(async () => (await p.locator('[data-testid="preclass-item"]').count()) >= 1, 20))
 const pre = await p.locator('[data-testid="preclass-item"]').first().innerText().catch(() => '')
-check('…with rule, validation, forecast and the routing decision', /規則/.test(pre) && /驗證/.test(pre) && /預測/.test(pre) && pre.includes('機台處理'), pre.replace(/\n/g, ' ').slice(0, 160))
+check('…with rule, validation, forecast and the routing decision', /規則/.test(pre) && /驗證/.test(pre) && /預測/.test(pre) && pre.includes('→ 交給 Agent Nemo（優先'), pre.replace(/\n/g, ' ').slice(0, 160))
 await p.screenshot({ path: `${OUT}/sm-preclass-1440.png`, fullPage: true })
 await api('/api/sim/control', { action: 'scenario', scenario: 'bad_data' })
 for (let i = 0; i < 4; i++) await step(60)
