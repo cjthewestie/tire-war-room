@@ -37,7 +37,7 @@ try {
   // the console is the main page (CJ, 2026-10-20): `/` opens it, it is the first tab, with the plant strip on top
   const firstTab = await d.locator('.tabs [role=tab]').first().innerText().catch(() => '')
   check('/ opens the 主控台 and it is the first tab', firstTab.includes('主控台') && (await d.locator('[data-testid=tab-agent]').getAttribute('aria-selected')) === 'true', firstTab)
-  check('ticker on the console: fixed 正常 / 異常 / 待核准 counts', /正常\s*\d+[\s\S]*異常\s*\d+[\s\S]*待核准\s*\d+/.test(await d.locator('[data-testid=status-strip]').innerText().catch(() => '')))
+  check('ticker on the console is one full-width row (the count bar is gone, #100)', (await d.locator('[data-testid=status-strip]').count()) === 1 && (await d.locator('[data-testid=tk-fixed]').count()) === 0)
   const r = [(await api(d, '/api/sim/control', { action: 'scenario', scenario: 'press7_temp_drop' })).status,
     (await api(d, '/api/sim/control', { action: 'speed', speed: 30 })).status, (await api(d, '/api/sim/control', { action: 'play' })).status]
   check('press-7 scenario started', r.every((s) => s === 200), r.join(','))
@@ -49,7 +49,7 @@ try {
   check('v1 is version 1 and sends #A-311 to press 9', v1?.version === 1 && (v1?.actions ?? []).some((a) => a.includes('#A-311 改 9 號')), (v1?.actions ?? [])[0])
 
   // ---------------- (a) discuss the waiting plan
-  check('input defaults to 討論這個計劃 while a plan waits', (await d.locator('[data-testid=mode-discuss]').getAttribute('aria-checked')) === 'true')
+  check('input defaults to 討論這個計劃 while a plan waits', (await d.locator('form.askbar[data-mode=discuss]').count()) === 1)
   await d.locator('[data-testid=chat-input]').fill('9 號機今晚要保養')
   await d.locator('[data-testid=chat-input]').press('Enter')
   const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').innerText().catch(() => '')) === 'v2')
@@ -109,9 +109,8 @@ try {
   check('v2 approved from the card', approved)
 
   // ---------------- (b) a new task in plain Chinese
-  await d.locator('[data-testid=mode-command]').click()
-  await d.locator('[data-testid=chat-input]').fill('通知維修組明早檢查 3 號機')
-  await d.locator('[data-testid=chat-input]').press('Enter')
+  // issue #100: the 下新任務 entry is gone from the chat bar; the backend route stays, so the task goes through the API
+  await d.evaluate(() => fetch('/api/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: '通知維修組明早檢查 3 號機' }) }).then((r) => r.ok))
   let cmd = null
   await until(d, async () => {
     const evs = (await api(d, '/api/events')).json ?? []

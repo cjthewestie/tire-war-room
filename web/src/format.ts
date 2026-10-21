@@ -38,6 +38,8 @@ export function fmtMD(iso: string | number | null | undefined): string {
 export function fmtWeekday(iso: string | number): string {
   return wd.format(new Date(iso))
 }
+/** "六" (no 週): 「2026/10/21（三）10:20 PM」 */
+export const fmtWeekdayShort = (iso: string | number): string => fmtWeekday(iso).replace(/^週/, '')
 
 /** Factory-local hour of day (0–24, fractional) for an epoch ms. */
 export function hourOfDay(t: number): number {

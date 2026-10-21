@@ -89,7 +89,7 @@ try {
   // 討論 puts the caret in the docked conversation in 討論這個計劃 mode
   await apv.locator('[data-testid=visual-discuss]').click()
   await d.waitForTimeout(300)
-  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.locator('[data-testid=mode-discuss]').getAttribute('aria-checked')) === 'true' && (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
+  check('討論 focuses the chat input in 討論這個計劃 mode', (await d.locator('form.askbar[data-mode=discuss]').count()) === 1 && (await d.evaluate(() => document.activeElement?.getAttribute('data-testid'))) === 'chat-input')
   check('no duplicate element ids', (await d.evaluate(() => { const ids = [...document.querySelectorAll('[id]')].map((e) => e.id); return ids.length === new Set(ids).size })))
   await d.screenshot({ path: `${OUT}/console-agent-1440.png` })
 

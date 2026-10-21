@@ -38,7 +38,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   const { items } = useTranscript(ev)
   const [all, setAll] = useState(false)
   const [focus, setFocus] = useState<BarFocus | null>(null)
-  const chat = (mode?: BarMode, text?: string) => { setAll(false); setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
+  const chat = (mode?: BarMode, text?: string, send?: boolean) => { setAll(false); setFocus((f) => ({ mode, text, send, n: (f?.n ?? 0) + 1 })) }
   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
   const replans = useReplans()
   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
@@ -60,16 +60,18 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
       <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
-      <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} />
+      <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)} />
     </div>
     </>
   )
 }
 
-function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAll, focus, onFull }: {
+const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
+
+function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAll, focus, onFull, onGuide }: {
   ev: Event | null; events: Event[]; onPick: (id: string) => void; items: Item[]
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
-  all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null; onFull?: (eventId?: string) => void
+  all: boolean; setAll: (v: boolean) => void; focus: BarFocus | null; onFull?: (eventId?: string) => void; onGuide: (text: string) => void
 }) {
   const { state } = useWarRoom()
   const brief = useEventBriefing(ev)
@@ -118,7 +120,17 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
         {!allView && ev && steps > 0 && (
           <p className="con-steps small"><a href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-analysis">查看分析過程</a></p>
         )}
-        {!allView && !talk.length && <p className="muted con-empty">{ev ? '這件事還沒有對話。下方可以討論計劃、下新任務或提問。' : '目前沒有事件。下方可直接提問。'}</p>}
+        {!allView && !talk.length && (ev
+          ? <p className="muted con-empty">這件事還沒有對話。下方可以討論計劃或提問。</p>
+          : (
+            <div className="con-guide" data-testid="con-guide">
+              <h3>我是戰情室 Agent</h3>
+              <p className="muted small">只查不改。我可以幫你：</p>
+              <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
+              <p className="muted small">試試這些問題：</p>
+              {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" onClick={() => onGuide(q)}>{q}</button>)}
+            </div>
+          ))}
         {(allView ? talk.filter((it) => it.k === 'ask' || (it.k === 'chat' && it.pending)) : talk).map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
         {!allView && ev && brief && (
           <div className="con-brief" data-testid="con-brief" ref={briefBox}>

@@ -9,9 +9,7 @@ import { useWarRoom } from '../useWarRoom'
 import { newConversationId } from '../components/ordersToday'
 import type { ChatItem, LocalItem } from './transcript'
 
-const ASK_EXAMPLES = ['今天有哪些訂單？', '哪些訂單有遲交風險？', '7 號機現在怎樣？']
-
-export interface BarFocus { mode?: BarMode; text?: string; n: number }
+export interface BarFocus { mode?: BarMode; text?: string; n: number; /** send `text` at once (the guide questions in an empty chat) instead of only filling the box */ send?: boolean }
 
 let askSeq = 0
 
@@ -24,7 +22,7 @@ const MODES: { id: BarMode; label: string; hint: string }[] = [
 const EXAMPLES: Record<BarMode, string[]> = {
   discuss: ['9 號機今晚要保養', '不要跨組調人', '為什麼用 9 號機？'],
   command: ['通知維修組明早檢查 3 號機', '9 號機明天要保養，重排'],
-  ask: ASK_EXAMPLES,
+  ask: [],     // the questions to try live in the empty chat (AgentTab 對話引導)
 }
 const PLACEHOLDER: Record<BarMode, string> = {
   discuss: '跟 AI 討論等待核准的計劃，例如：9 號機今晚要保養（Enter 送出）',
@@ -48,7 +46,7 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
   if (focus && focus.n !== seen) {
     setSeen(focus.n)
     if (focus.mode) setPicked(focus.mode)
-    if (focus.text) setQ(focus.text)
+    if (focus.text && !focus.send) setQ(focus.text)
   }
   useEffect(() => { if (focus?.n) setTimeout(() => input.current?.focus(), 60) }, [focus?.n])
   const mode: BarMode = picked === 'discuss' && !waiting ? 'ask' : picked ?? (waiting ? 'discuss' : 'ask')
@@ -101,6 +99,9 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
       setAsks((xs) => xs.map((x) => (x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: `送出失敗：${String(e)}` } : x)))
     } finally { setBusy(null) }
   }
+  // a guide question in the empty chat: ask it right away
+  useEffect(() => { if (focus?.send && focus.text) void send(focus.text) },  // eslint-disable-next-line react-hooks/exhaustive-deps
+    [focus?.n])
   return (
     <form className="askbar" onSubmit={(e) => { e.preventDefault(); void send(q) }} data-mode={mode}>
       <div className="askbar-modes">

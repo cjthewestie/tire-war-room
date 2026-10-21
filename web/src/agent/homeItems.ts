@@ -26,6 +26,8 @@ export interface HomeItem {
   req: ApprovalRequest | null
   ts: number
   progress?: number         // ④: share of the event's worker tasks done (0–1)
+  /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
+  machine?: string; desc?: string
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
@@ -43,7 +45,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
     if (req) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
+      out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
     } else if (ev.state === 'safe_stop') {
       out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })

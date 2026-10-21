@@ -22,6 +22,12 @@
 .con-filters small { font-size: 11px; color: var(--ink-faint); }
 .con-body { flex: 1; overflow-y: auto; padding: 12px 16px 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; scrollbar-width: thin; }
 .con-empty { padding: 30px 4px; }
+.con-guide { display: grid; gap: 8px; padding: 6px 2px; }
+.con-guide h3 { margin: 0; font-size: 15px; }
+.con-guide p { margin: 0; }
+.con-guide ul { margin: 0; padding-left: 18px; color: var(--ink-dim); font-size: 13.5px; display: grid; gap: 2px; }
+.con-guide-q { text-align: left; background: var(--panel-2); color: var(--ink); border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; font: inherit; font-size: 14px; }
+.con-guide-q:hover { border-color: var(--ink-faint); }
 .con-jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: 118px; z-index: 2; background: var(--panel-3); color: var(--ink); border: 1px solid var(--ink-faint); border-radius: 999px; padding: 5px 14px; font-size: 13px; box-shadow: 0 6px 18px rgb(var(--shade-rgb, 0 0 0) / .45); }
 .con-live { display: flex; align-items: center; gap: 8px; color: var(--info); font-size: 13.5px; padding: 8px 2px 0; }
 .con-live.wait { color: var(--warn); }
@@ -336,6 +342,9 @@
 .home { --home-h: max(560px, calc(100vh - 236px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
 .home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
 .home > .plan-area { grid-area: plan; height: var(--home-h); }
+/* 今日工廠概況 grows with its content (no clipped last section at 1440); the side columns stay sticky */
+.home > .home-ov { height: auto; min-height: var(--home-h); overflow: visible; }
+.home > .home-ov .po-body { overflow: visible; }
 .home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
 .con-view button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-ev { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
@@ -353,7 +362,15 @@
 .hl-k { margin: 0; padding: 8px 14px 2px; font-size: 12px; font-weight: 600; color: var(--ink-faint); letter-spacing: .04em; }
 .hl-item { display: grid; gap: 2px; width: 100%; text-align: left; background: none; border: 0; padding: 6px 14px 8px; color: var(--ink); }
 .hl-item:hover { background: var(--panel-2); }
-.hl-item.on { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--accent); }
+.hl-item.on { background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--ink-faint); }   /* neutral selection, no green frame */
+.hl-item.has-req { border-left: 4px solid var(--warn); }
+.hl-item.has-req.r-R3 { border-left-color: var(--alarm); }
+.hl-risk { font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
+.hl-risk.r-R3 { background: var(--alarm-soft); color: var(--alarm); }
+.hl-risk.r-R2 { background: var(--warn-soft); color: var(--warn); }
+.hl-pill-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hl-item.has-req .hl-desc { display: block; }
+.hl-none { margin: 0; font-size: 14px; color: var(--ink-dim); }
 .hl-top { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .hl-pill { align-self: flex-start; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; white-space: nowrap; background: var(--panel-3); color: var(--ink-dim); }
 .hl-pill.tone-wait, .hl-pill.tone-risk { background: var(--warn-soft); color: var(--warn); }
@@ -365,7 +382,6 @@
 .hl-fyi > summary { padding: 8px 14px; cursor: pointer; font-size: 13px; color: var(--ink-dim); }
 .hl-fyi .hl-item { opacity: .85; }
 .hl-empty { padding: 20px 14px; }
-.hl-empty .calm-title { font-size: 19px; }
 
 /* 計劃 (center column): the board, delivery impact, who does what; 核准 / 討論 pinned at the bottom */
 .plan-area { min-width: 0; overflow-y: auto; scrollbar-width: thin; border-radius: var(--radius); }
@@ -431,8 +447,6 @@
 .ov-prog .ov-pn { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ov-prog .ov-pn b { font-size: 15px; }
 .ov-prog .ov-pr { font-size: 12.5px; white-space: nowrap; min-width: 9.5em; text-align: right; }
-.ov-line { margin: 0; display: grid; gap: 4px; font-size: 14px; }
-.ov-line.has-bad span:last-child { color: var(--ink); }
 .ov-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
 .ov-list > li { display: grid; grid-template-columns: 4.2em minmax(0, 1fr); gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
 .ov-list > li:last-child { border-bottom: 0; }
@@ -451,12 +465,31 @@ a.ov-row:hover { background: var(--panel-2); }
 .ov-tag.t-ok, .ov-tag.t-back { background: var(--accent-soft); color: var(--accent); }
 .ov-tag.t-stop, .ov-tag.t-no { background: var(--alarm-soft); color: var(--alarm); }
 .ov-tag.t-decide { background: var(--panel-3); color: var(--info); }
+.ov-sim { display: inline-flex; flex-direction: column; align-items: flex-end; line-height: 1.2; }
+.ov-sim small { font-size: 11px; color: var(--ink-faint); }
+.ov-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.ov-kpi { display: grid; gap: 2px; align-content: start; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel-2); }
+.ov-kpi .k-l { font-size: 12px; color: var(--ink-dim); }
+.ov-kpi .k-v { font-size: 13px; color: var(--ink-dim); white-space: nowrap; }
+.ov-kpi .k-v b { font-size: 22px; font-weight: 700; color: var(--ink); line-height: 1.3; }
+.ov-kpi .k-s { font-size: 12px; color: var(--ink-dim); overflow-wrap: anywhere; }
+.ov-kpi.bad { background: var(--alarm-soft); border-color: var(--alarm); }
+.ov-kpi.bad .k-v b, .ov-kpi.bad .k-s { color: var(--alarm); }
+.ov-next > li { grid-template-columns: 6.2em 3.4em minmax(0, 1fr); align-items: center; }
+.ov-cat { justify-self: start; font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 6px; background: var(--panel-3); color: var(--ink-dim); white-space: nowrap; }
+.ov-cat.cat-硫化 { background: var(--accent-soft); color: var(--accent); }
+.ov-cat.cat-出貨 { background: var(--info-soft, var(--panel-3)); color: var(--info); }
+.ov-cat.cat-物流, .ov-cat.cat-保養 { background: var(--warn-soft); color: var(--warn); }
+.ov-cat.cat-換模 { background: var(--alarm-soft); color: var(--alarm); }
+.ov-view { font-size: 12px; font-weight: 600; color: var(--accent); white-space: nowrap; }
 @media (max-width: 759px) {
   .home > .home-ov .po-body { overflow: visible; }
   .ov-prog li { grid-template-columns: 3.5em minmax(0, 1fr) auto; }
   .ov-prog .ov-pr { grid-column: 2 / -1; text-align: left; min-width: 0; }
   .ov-row { grid-template-columns: 3.6em minmax(0, 1fr); }
   .ov-row .ov-tags { grid-column: 2; justify-content: flex-start; }
+  .ov-kpis { grid-template-columns: 1fr; }
+  .ov-next > li { grid-template-columns: 5.6em 3.2em minmax(0, 1fr); }
   .rs-link { margin-left: 0; }
 }
 
@@ -538,12 +571,7 @@ a.ov-row:hover { background: var(--panel-2); }
 .apv-next.live { color: var(--info); display: flex; gap: 6px; align-items: center; }
 
 /* ---------- 主控台 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」) ---------- */
-.tk { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: stretch; margin: 0 0 12px; }
-.tk-fixed { display: flex; align-items: center; gap: 4px 14px; padding: 8px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; color: var(--ink-dim); font: inherit; font-size: 13.5px; white-space: nowrap; }
-.tk-fixed:hover { border-color: var(--ink-faint); }
-.tk-fixed b { color: var(--ink); font-size: 15px; }
-.tk-fixed .as-item.bad, .tk-fixed .as-item.bad b { color: var(--alarm); }
-.tk-fixed .as-item.warn, .tk-fixed .as-item.warn b { color: var(--warn); }
+.tk { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-items: stretch; margin: 0 0 12px; }
 .tk-run { display: flex; align-items: center; min-width: 0; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .tk-pinned { display: flex; gap: 4px; padding: 0 6px; flex: none; max-width: 55%; overflow-x: auto; scrollbar-width: none; border-right: 1px solid var(--border); }
 .tk-view { flex: 1; min-width: 0; overflow: hidden; -webkit-mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); mask-image: linear-gradient(90deg, transparent, #000 24px, #000 calc(100% - 24px), transparent); }
@@ -571,9 +599,7 @@ a.ov-row:hover { background: var(--panel-2); }
   .tk-toast { animation: none; }
 }
 @media (max-width: 899px) {
-  .tk { grid-template-columns: minmax(0, 1fr) auto; }
-  .tk-fixed { justify-content: space-between; }
-  .tk-run { grid-column: 1 / -1; grid-row: 2; flex-wrap: wrap; }
+  .tk-run { flex-wrap: wrap; }
   .tk-pinned { max-width: none; width: 100%; border-right: 0; border-bottom: 1px solid var(--border); }
   .tk-view { flex: 1 1 100%; }
   .tk-toast { left: 16px; right: 16px; text-align: center; }

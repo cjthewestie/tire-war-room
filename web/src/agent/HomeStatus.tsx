@@ -1,6 +1,7 @@
-// 主控台 status line as a 產線監控 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」). Left, fixed: 正常 / 異常 /
-// 待核准 counts (they never move; click → 產線監控). Right: a scrolling ticker of live plant items (tickerItems.ts);
-// alarm / warning items are pinned first in their colour and also scroll. Hover or keyboard focus pauses it; an item
+// 主控台 status line as a 產線監控 ticker (CJ, 2026-10-20: 「幫我設計成產線監控的跑馬燈好了」). One full-width row (issue #100:
+// the 正常 / 異常 / 待核准 count bar is gone; the counts are the KPI cards in 今日工廠概況): a scrolling ticker of live
+// plant items (tickerItems.ts); alarm / warning items are pinned first in their colour and also scroll (on a phone
+// the pinned ones take the first line, so 異常 / 警告 come first). Hover or keyboard focus pauses it; an item
 // opens 產線監控 on its machine or line. prefers-reduced-motion: no scrolling, the items wrap as a static row.
 // A new order completion / shipment shows a short success toast. data-testid=status-strip is kept for the e2e checks.
 import { useEffect, useMemo, useState } from 'react'
@@ -9,7 +10,6 @@ import { ms } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { successOf, successText, tickerItems, type Success, type TickItem } from './tickerItems'
 
-const NET_SHORT: Record<string, string> = { online: '網路正常', weak: '弱網', wan_down: 'WAN 中斷', lan_down: 'LAN 中斷・現場操作' }
 const H = 3_600_000
 
 export function HomeStatus({ onMonitor, onFocus }: { onMonitor?: () => void; onFocus?: (machine?: string, line?: Line) => void }) {
@@ -23,18 +23,9 @@ export function HomeStatus({ onMonitor, onFocus }: { onMonitor?: () => void; onF
   const items = useMemo(() => tickerItems(state.snapshot, state.schedule, state.world, shifts, minute * 60_000),
     [state.snapshot, state.schedule, state.world, shifts, minute])
   const pinned = items.filter((i) => i.tone === 'bad' || i.tone === 'warn')
-  const pend = state.pending.length
-  const net = h?.network ?? 'online'
-  const abn = h?.abnormal_count ?? 0
   const open = (i: TickItem) => (onFocus ? onFocus(i.machine, i.line) : onMonitor?.())
   return (
     <div className="tk" data-testid="status-strip" aria-label="產線監控跑馬燈">
-      <button type="button" className="tk-fixed" onClick={onMonitor} title="打開產線監控" data-testid="tk-fixed">
-        <span className="as-item ok"><i className="dot ok" />正常 <b>{h?.normal_count ?? '–'}</b></span>
-        <span className={`as-item ${abn > 0 ? 'bad' : ''}`}><i className={`dot ${abn > 0 ? 'bad' : 'idle'}`} />異常 <b>{abn}</b></span>
-        <span className={`as-item ${pend ? 'warn' : ''}`}>待核准 <b>{pend}</b></span>
-        {net !== 'online' && <span className="as-item bad">{NET_SHORT[net] ?? net}</span>}
-      </button>
       <div className="tk-run" role="region" aria-label="即時產線動態（滑鼠移上去暫停）">
         {pinned.length > 0 && (
           <div className="tk-pinned" data-testid="tk-pinned">
