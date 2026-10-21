@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import type { ApprovalRequest, BadDataMark, DashboardSnapshot, Event, FocusPanel, MachineTile, OrderProgress, SemiFinishedProgress, TimelineItem } from '../contracts'
-import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, SIZE_LABEL, machineLabel } from '../factory'
+import { LINES, LINE_SHORT, MACHINE_META, ML_PRESSES, ML_RANGE, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtMD, fmtNum } from '../format'
 import { closedTitle, hypLabel, hypName, plain } from '../plain'
 import { isAbnormal, primaryEvent } from '../store'
@@ -118,13 +118,12 @@ function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalReque
   const bad = s.machines.filter((m) => isAbnormal(m.status))
   const ev = primaryEvent(s.events)
   const open = !!ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
-  const round = pending.reduce((r, a) => Math.max(r, a.round), 0)
   return (
     <section className="kpis" aria-label="全廠重點">
       <div className="kpi">
         <span className="kpi-l">機台運轉</span>
         <span className="kpi-v" data-testid="kpi-normal">{h.normal_count}<small> / {total} 台</small></span>
-        <span className="kpi-s">事件偵測常駐監看，不經 AI</span>
+        <span className="kpi-s">全天自動監看</span>
       </div>
       <div className={`kpi ${h.abnormal_count > 0 ? 'is-alarm' : ''}`}>
         <span className="kpi-l">需要注意</span>
@@ -134,10 +133,10 @@ function KpiStrip({ s, pending }: { s: DashboardSnapshot; pending: ApprovalReque
       <div className={`kpi ${pending.length ? 'is-warn' : ''}`}>
         <span className="kpi-l">等主管核准</span>
         <span className="kpi-v">{pending.length}<small> 件</small></span>
-        <span className="kpi-s">{pending.length ? `第 ${round} 輪・已推到主管手機` : '沒有待核准事項'}</span>
+        <span className="kpi-s">{pending.length ? '已推到主管手機' : '沒有待核准事項'}</span>
       </div>
       <div className={`kpi ${open ? 'is-live' : ''}`}>
-        <span className="kpi-l">AI 指揮官</span>
+        <span className="kpi-l">Agent Nemo</span>
         <span className="kpi-v kpi-word">{open ? STATE_LABEL[ev.state] : '待命'}</span>
         <span className="kpi-s">{open ? `${plain(ev.machine_id)}${ev.replans ? `・重新規劃 ${ev.replans} 次` : '・處理中'}` : ev ? `上一事件：${machineLabel(ev.machine_id)}已結案` : '有異常才喚醒'}</span>
       </div>
@@ -176,7 +175,7 @@ function OrdersPanel({ orders, onOrders }: { orders: OrderProgress[]; onOrders?:
       ))}
       {w && (
         <details className="orders-more" data-testid="orders-more">
-          <summary>訂單明細（流程、生產中的單、今日新單與庫存）</summary>
+          <summary>訂單明細</summary>
           <ol className="pipe" data-testid="order-pipeline" aria-label="訂單流程">
             {ORDER_STAGES.map((st) => <li key={st} className={w.orders.pipeline[st] ? 'has' : ''}><b>{w.orders.pipeline[st] ?? 0}</b><span>{st}</span></li>)}
           </ol>
@@ -225,7 +224,7 @@ function FocusPanelView({ focus, pending }: { focus: FocusPanel | null; pending:
       <Panel num="③" title="目前事件" className="focus calm">
         <div className="calm-body">
           <p className="calm-title">全廠正常</p>
-          <p className="muted">事件偵測常駐監看 28 台機台（不經 AI、全天候）。發現異常 1 分鐘內喚醒 AI 指揮官。</p>
+          <p className="muted">28 台機台全天自動監看，有異常 1 分鐘內交給 Agent Nemo。</p>
           {(state.snapshot?.header.bad_data_total ?? 0) > 0 && (
             <p className="note dq-note" data-testid="bad-data-note">驗證層攔下 {state.snapshot?.header.bad_data_total} 筆壞資料（近 30 分）：{(state.snapshot?.header.bad_data ?? []).map((b) => `${machineLabel(b.machine_id)} ${b.count} 筆・${QUALITY_LABEL[b.last_quality] ?? b.last_quality}`).join('；')}。壞資料不進預測、不喚醒 AI。</p>
           )}
@@ -297,8 +296,8 @@ function FocusTimeline({ items }: { items: TimelineItem[] }) {
 /** Page 7 "dynamic adjustment": each hypothesis the commander made, what it expected, and what code verified. */
 function JudgmentTrail({ ev }: { ev: Event }) {
   return (
-    <section className="judge" aria-label="AI 指揮官的判斷">
-      <h4 className="sub">AI 指揮官的判斷</h4>
+    <section className="judge" aria-label="Agent Nemo 的判斷">
+      <h4 className="sub">Agent Nemo 的判斷</h4>
       <ol className="judge-list">
         {ev.hypotheses.map((h, i) => {
           const label = hypLabel(h.status, ev)
@@ -334,7 +333,7 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
   return (
     <Panel num="④" title="機台狀態" className="machines" fold="phone"
       summary={off.length ? <span className="late">需要注意：{off.map((m) => machineLabel(m.machine_id)).join('、')}</span> : `${machines.length} 台・全部正常`}>
-      <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・7–10 號可做中大胎</small></p>
+      <p className="mach-k"><span>硫化機</span><small className="muted">瓶頸製程・{ML_RANGE} 號可做中大胎</small></p>
       <div className="presses" data-line="CURE">
         {presses.map((m) => (
           <button key={m.machine_id} className={`mdot press st-${m.status}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}

@@ -1,0 +1,76 @@
+/* 人力排程 only (.sp), after HY's simpler 主控台 (2026-10-21): bigger titles, one quiet help line, numbers first,
+   calm shift rows where only a short shift is coloured. Kept out of index.css so it never collides with the 主控台 work. */
+.sp { gap: 16px; }
+.sp .panel { padding: 20px 22px; }
+.sp .panel-h { margin-bottom: 14px; }
+.sp .panel-h h2 { font-size: 18px; font-weight: 700; color: var(--ink); letter-spacing: 0; }
+.sp .panel.fold:not([open]) > summary { margin-bottom: 0; }
+.sp .sched-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+.sp .today { margin-bottom: 0; }
+.sp .muted.small, .sp .small { font-size: 13px; }
+
+/* 硫化機排程: version chips and the rollback button at a readable size; the help is one line until opened */
+.sp .ver { font-size: 14px; padding: 4px 10px; border-radius: 999px; }
+.sp .ver small { font-size: 12.5px; }
+.sp .versions .btn-ghost { font-size: 14px; padding: 5px 12px; border-radius: 999px; }
+.sp .sched-help { background: none; padding: 0; margin: -6px 0 12px; }
+.sp .sched-help summary { font-weight: 500; color: var(--ink-dim); font-size: 14px; }
+.sp .sched-help[open] { background: var(--panel-2); border-radius: 10px; padding: 10px 14px; margin-top: 0; }
+.sp .sched-help ul { line-height: 1.75; }
+.sp .g-tick-t, .sp .g-now-t { font-size: 12px; }
+.sp .g-press { font-size: 13.5px; }
+.sp .legend { font-size: 13.5px; gap: 6px 18px; margin-top: 10px; }
+
+/* 今天的人力: three numbers, then the shift rows */
+.sp-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.sp-stats > div { background: var(--panel-2); border-radius: 10px; padding: 12px 14px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 4px; min-width: 0; }
+.sp-k { flex-basis: 100%; font-size: 13.5px; color: var(--ink-dim); }
+.sp-stats b { font-size: 30px; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.sp-stats small { font-size: 14px; color: var(--ink-dim); }
+.sp-stats em { flex-basis: 100%; font-style: normal; font-size: 13.5px; color: var(--ink-dim); margin-top: 2px; }
+.sp-stats .is-short { background: var(--alarm-soft); }
+.sp-stats .is-short b, .sp-stats .is-short em { color: var(--alarm); }
+.sp-stats .is-short em { font-weight: 700; }
+.sp-risks { border-left: 3px solid var(--warn); padding: 2px 0 2px 12px; margin: 0 0 16px; }
+.sp-risks ul { margin: 2px 0 0; padding-left: 1.1em; font-size: 14.5px; line-height: 1.7; }
+.sp .shift-load { font-size: 14.5px; }
+.sp .sl-row { grid-template-columns: 116px 52px 104px minmax(0, 1fr); column-gap: 12px; min-height: 36px; }
+.sp .sl-head { font-size: 13px; min-height: 28px; }
+.sp .sl-time { font-size: 13.5px; }
+.sp .sl-time small { display: none; }
+.sp .sl-bar { height: 6px; border-radius: 3px; }
+.sp .sl-fill { background: rgb(var(--accent-rgb, 118 185 0) / .45); }
+.sp .sl-short { background: var(--alarm); }
+.sp .sl-row.is-short { background: var(--alarm-soft); border-radius: 6px; }
+.sp .sl-row.is-short .sl-team, .sp .sl-row.is-short .sl-n { color: var(--alarm); }
+.sp .sl-n em { font-style: normal; margin-left: 6px; }
+
+/* 接下來入模 (its own panel now, so no gap above it) */
+.sp .sched-next { margin-top: 0; }
+.sp .sched-next table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
+.sp .sched-next th { font-size: 13px; color: var(--ink-dim); font-weight: 500; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.sp .sched-next td { padding: 9px 8px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sp .sched-next tr:last-child td { border-bottom: 0; }
+
+/* 交期縮短: the two lead-time numbers lead, the weekly table follows, the conditions fold away */
+.sp .cap { gap: 16px 40px; align-items: flex-start; }
+.sp .cap-big { gap: 32px; }
+.sp .cap-big b { font-size: 30px; font-variant-numeric: tabular-nums; }
+.sp .cap caption { text-align: left; padding-bottom: 4px; }
+.sp .cap-why { margin-top: 12px; }
+.sp .cap-why summary { cursor: pointer; color: var(--ink-dim); font-size: 14px; }
+.sp .cap-why p { margin: 6px 0 0; line-height: 1.7; }
+
+@media (max-width: 900px) {
+  .sp .sched-row { grid-template-columns: 1fr; }
+  .sp .sched-next { overflow-x: auto; }
+}
+@media (max-width: 560px) {
+  .sp .panel { padding: 16px; }
+  .sp-stats { gap: 8px; }
+  .sp-stats > div { padding: 10px; }
+  .sp-stats b { font-size: 24px; }
+  .sp .sl-row { grid-template-columns: 92px 40px minmax(0, 1fr); }
+  .sp .sl-row > .sl-time { display: none; }
+  .sp .sl-head > span:nth-child(3) { display: none; }
+}
