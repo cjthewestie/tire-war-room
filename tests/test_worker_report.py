@@ -271,7 +271,7 @@ async def test_event_closes_only_after_the_done_report_and_verify(tmp_path, monk
                         task = next((t for t in ts if t.kind == "檢修"), None)
                 await asyncio.sleep(0.1)
             assert task is not None, [(e.id, e.state) for e in rt.events()]
-            await asyncio.sleep(3.0)                                    # ~1 factory hour at 20x: nothing moves
+            await asyncio.sleep(3.0)                                    # 1 factory minute at 20x: nothing moves
             assert rt.sim.world.tasks.get(task.id).status == "前往中"
             ev = rt.state_machine.get(ev.id)
             assert ev.state not in (EventState.CLOSED, EventState.SAFE_STOP), ev.outcome
@@ -289,6 +289,8 @@ async def test_event_closes_only_after_the_done_report_and_verify(tmp_path, monk
             assert rt.state_machine.get(ev.id).repaired_at is None      # 檢修 still open: the fault is still there
             r = await local.post(f"/api/tasks/{task.id}/done", json={**body, "photo": _url("image/jpeg", JPEG)})
             assert r.status_code == 200, r.text
+            if not fast_s:
+                rt.set_speed(120.0)                 # real durations: the mill cools down on its own after the fix
             t1 = time.monotonic()
             while time.monotonic() - t1 < 30 and rt.state_machine.get(ev.id).state not in (EventState.CLOSED,
                                                                                          EventState.SAFE_STOP):
