@@ -1,0 +1,42 @@
+/* Resolution paths (components/Resolve.tsx): the Safety Core banner/card and the SAFE_STOP follow-up buttons. */
+.rs-banner { display: grid; gap: 10px; margin: 0 0 var(--gap, 12px); }
+.rs-card { border: 2px solid var(--alarm); background: var(--alarm-soft, rgb(255 93 82 / .12)); border-radius: 12px; padding: 12px 14px; color: var(--ink); }
+.rs-card.rs-done { border-color: var(--border, var(--panel-3)); background: var(--panel-2); }
+.rs-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.rs-title { font-size: 17px; color: var(--alarm); }
+.rs-done .rs-title { color: var(--ink-dim); }
+.rs-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 6px 0 8px; font-size: 13.5px; color: var(--ink-dim); }
+.rs-meta code { font-size: 12.5px; color: var(--ink); }
+.rs-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rs-steps > li { display: grid; grid-template-columns: 26px 1fr auto; gap: 8px; align-items: center; padding: 8px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--panel-3); }
+.rs-steps > li.ok { border-color: var(--accent); }
+.rs-steps > li.ok .rs-n { color: var(--accent); }
+.rs-steps > li.run .rs-n { color: var(--warn); }
+.rs-n { font-size: 18px; font-weight: 700; color: var(--ink-faint); text-align: center; }
+.rs-body { display: grid; gap: 2px; min-width: 0; }
+.rs-sub { font-size: 13px; color: var(--ink-dim); }
+.rs-tasks { margin: 4px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-dim); }
+.rs-acts { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.rs-btn { background: transparent; color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px 14px; min-height: 40px; font-weight: 700; font-size: 14px; cursor: pointer; }
+.rs-btn.go { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.rs-btn.danger { color: var(--alarm); border-color: var(--alarm); }
+.rs-btn:disabled { opacity: .45; cursor: not-allowed; }
+.rs-confirm { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13.5px; }
+.rs-reason { flex: 1 1 160px; min-width: 0; background: var(--bg); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 6px; padding: 4px 8px; font: inherit; font-size: 13.5px; }
+.rs-pill { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 99px; background: var(--warn-soft, rgb(255 180 60 / .15)); color: var(--warn); }
+.rs-pill.ok { background: var(--accent-soft, rgb(80 200 120 / .15)); color: var(--accent); }
+.rs-err { margin: 8px 0 0; color: var(--alarm); font-size: 13.5px; font-weight: 600; }
+.rs-foot { margin: 8px 0 0; font-size: 12px; color: var(--ink-faint); }
+.rs-stop { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--alarm); border-radius: 10px; background: var(--alarm-soft, rgb(255 93 82 / .1)); margin-top: 8px; }
+.rs-stop .rs-acts { justify-content: flex-start; }
+.rs-why { margin: 0; font-size: 15px; }
+.rs-why span { color: var(--alarm); font-weight: 700; }
+.rs-compact .rs-steps > li { grid-template-columns: 22px 1fr; }
+.rs-compact .rs-steps > li > .rs-acts, .rs-compact .rs-steps > li > .rs-btn { grid-column: 1 / -1; justify-content: stretch; }
+.rs-compact .rs-btn { flex: 1 1 auto; min-height: 44px; }
+.rs-compact .rs-title { font-size: 15.5px; }
+@media (max-width: 720px) {
+  .rs-steps > li { grid-template-columns: 22px 1fr; }
+  .rs-steps > li > .rs-acts, .rs-steps > li > .rs-btn { grid-column: 1 / -1; }
+  .rs-btn { flex: 1 1 auto; }
+}

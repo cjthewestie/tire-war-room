@@ -14,7 +14,9 @@ import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { reviewAlerts, useApprovalAlerts } from './alert'
+import { resolveAlerts, reviewAlerts, useApprovalAlerts } from './alert'
+import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
+import { openCases } from '../resolveText'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
 import { BriefingView, BriefSections, BriefTop, Txt } from '../components/BriefingView'
@@ -60,7 +62,11 @@ export function Phone() {
     ) })),
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
-  const alerts = useApprovalAlerts([...pending, ...reviewAlerts(reviews)], connected && !lanDown)
+  // CJ 2026-10-22: a Safety Core stop and a SAFE_STOP each get a card with the way back (components/Resolve.tsx)
+  const cases = openCases(state.snapshot?.safety_cases)
+  const stops = events.filter((e) => e.state === 'safe_stop' && (!e.follow_up || e.follow_up.status === 'manual'))
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
+  const alerts = useApprovalAlerts([...pending, ...reviewAlerts(reviews), ...resolveAlerts(cases, events)], connected && !lanDown)
   const bctx = useBriefCtx()
   const idleBrief = useMemo(() => (pending.length === 0 ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [pending.length, ev, bctx])
   return (
@@ -85,6 +91,14 @@ export function Phone() {
         {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
+        {cases.map((c) => <div key={c.id} className="ph-card ph-safety" data-testid="phone-safety"><SafetyCaseCard c={c} compact disabled={lanDown || !transport} /></div>)}
+        {stops.map((e) => (
+          <div key={e.id} className="ph-card ph-stop" data-testid="phone-stop" data-event={e.id}>
+            <div className="ph-top"><span className="ph-risk">安全停止</span><span className="muted small">{e.closed_at ? `${fmtHMS(e.closed_at)} 停止` : ''}</span></div>
+            <h2 className="ph-title">{e.source === 'supervisor' ? '主管指令' : machineLabel(e.machine_id)}：{plain(e.alert_card?.title ?? e.command ?? e.anomaly.message)}</h2>
+            <StopFollowUp ev={e} compact disabled={lanDown || !transport} />
+          </div>
+        ))}
         {reviews.map((e) => <ReviewCard key={rkey(e)} ev={e} disabled={lanDown || !transport}
           onDone={(x) => setReviewed((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
         {pending.length === 0 ? (

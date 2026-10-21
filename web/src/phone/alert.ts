@@ -4,7 +4,8 @@
 // and flushed as one alert when the phone reconnects.
 // Fast repair (Kyle 10-21): an event waiting for the supervisor's 覆核 (Event.review pending) rings the same way.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Event } from '../contracts'
+import type { Event, SafetyCase } from '../contracts'
+import { caseTitle } from '../resolveText'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 
@@ -25,6 +26,15 @@ export function reviewAlerts(events: Event[] | undefined): AlertItem[] {
   return (events ?? []).filter((e) => e.review?.status === 'pending').map((e) => ({
     id: `review:${e.id}:${e.review!.requested_at}`, title: `${machineLabel(e.machine_id)}維修完成`, reason: plain(e.outcome) || '請主管覆核', review: true,
   }))
+}
+
+/** Open Safety Core cases and unresolved SAFE_STOPs ring like a new approval (CJ 2026-10-22: they need the supervisor). */
+export function resolveAlerts(cases: SafetyCase[] | undefined, events: Event[] | undefined): AlertItem[] {
+  return [
+    ...(cases ?? []).filter((c) => c.status === 'open').map((c) => ({ id: `safety:${c.id}`, title: caseTitle(c), reason: plain(c.message), risk: 'R3' })),
+    ...(events ?? []).filter((e) => e.state === 'safe_stop' && !e.follow_up).map((e) => ({
+      id: `stop:${e.id}`, title: `安全停止：${machineLabel(e.machine_id)}`, reason: e.stop_reason_text ?? plain(e.outcome), risk: 'R3' })),
+  ]
 }
 
 /** 「待核准」, 「待覆核」 or both, for the tab title and the multi-item alert. */

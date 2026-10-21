@@ -11,6 +11,7 @@ import { machineLabel } from '../factory'
 import { plain } from '../plain'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { TaskList } from '../components/TaskList'
+import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
 import { currentRoundTools, planNodes } from './approvalView'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalVisual, PlanFlow } from './ApprovalVisual'
@@ -42,6 +43,14 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     } else void startPlan(transport, autoOrder)
   }, [autoOrder, transport, prior])
   if (!sel) return null
+  const sc = sel.caseId ? (state.snapshot?.safety_cases ?? []).find((c) => c.id === sel.caseId) : undefined
+  if (sc) {
+    return (
+      <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
+        <div className="po-body"><SafetyCaseCard c={sc} /></div>
+      </section>
+    )
+  }
   if (sel.req && ev) {
     return (
       <section className="plan-area" aria-label="計劃" data-testid="plan-area">
@@ -94,6 +103,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
           <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
           <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}</h3>
           {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}
+          {ev.state === 'safe_stop' && <StopFollowUp ev={ev} />}
           {nodes.length > 0 && (
             <div className="apv-b">
               <h4 className="apv-bh">計劃板<small>{ok}/{steps.length} 步完成</small></h4>
@@ -118,7 +128,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{ev.state === 'safe_stop' ? '安全停止：用上面的按鈕走向解決' : closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )
