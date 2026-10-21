@@ -62,3 +62,16 @@
   .sm-col { flex: none; max-width: none; min-height: 0; }
   .sm-col.empty { display: none; }
 }
+/* 事件預分類 (issue #54) */
+.pre-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.pre { border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 10px; padding: 8px 12px; }
+.pre.sev-critical { border-left-color: var(--alarm); }
+.pre-h { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 13.5px; }
+.pre-h .tag { margin: 0; }
+.pre-route { color: var(--line-c); }
+.pre-grid { display: grid; grid-template-columns: 1.3fr 1fr 1.2fr 1fr; gap: 10px; margin-top: 6px; font-size: 13px; }
+.pre-grid h4 { margin: 0 0 2px; font-size: 12px; color: var(--ink-faint); font-weight: 600; }
+.pre-grid ul { margin: 0; padding-left: 16px; }
+.pre-grid p { margin: 0; }
+.pre-bad { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 899px) { .pre-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } }

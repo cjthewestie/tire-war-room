@@ -4,30 +4,14 @@
 // - 預計完成: the approval time (or now, before approval) + that window, or the latest field-task ETA if later
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
-import type { ApprovalRequest, Channel, Event, Expectation, WorkTask } from '../contracts'
+import type { ApprovalRequest, Event, Expectation, WorkTask } from '../contracts'
+import { CH_LABEL, expectationOf, repairEstimate, targetText } from '../aiStatus'
 import { fmtHM, fmtMD, ms } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
 
-const CH: Record<Channel, { label: string; unit: string }> = {
-  temp_c: { label: '溫度', unit: '°C' },
-  pressure_kgf_cm2: { label: '壓力', unit: ' kgf/cm²' },
-  water_flow_lpm: { label: '水流', unit: ' L/min' },
-  steam_kgf_cm2: { label: '蒸汽壓', unit: ' kgf/cm²' },
-}
-
-/** The expectation the event will be verified against: the plan's hypothesis first, else any open one. */
-export function expectationOf(ev: Event | null): Expectation | null {
-  if (!ev) return null
-  return ev.plan?.hypothesis.expectation
-    ?? ev.hypotheses.find((h) => h.status !== 'rejected' && h.expectation)?.expectation
-    ?? null
-}
-
 export function expectationText(x: Expectation): string {
-  const c = CH[x.channel]
-  const target = x.op === 'between' ? `${x.value}–${x.value_hi}${c.unit}` : `${x.op === '>=' ? '≥' : '≤'}${x.value}${c.unit}`
-  return `${x.within_min} 分內${c.label}回到 ${target}`
+  return `${x.within_min} 分內${CH_LABEL[x.channel]}回到 ${targetText(x)}`
 }
 
 export interface RepairWindow {
@@ -39,7 +23,7 @@ export interface RepairWindow {
   doneBy: number | null
 }
 
-/** The 修復預估 numbers as plain data (the card below and the briefing both use it): the verification window
+/** The 修復預估 numbers as plain data for the briefing (the card below uses aiStatus.repairEstimate): the verification window
  *  from the approval (or now, before approval), or the latest open field-task ETA when that is later. */
 export function repairWindow(ev: Event | null, now: string | null, allTasks: WorkTask[], resolved: ApprovalRequest[]): RepairWindow {
   const x = expectationOf(ev)
@@ -64,12 +48,12 @@ export function RepairEta({ ev }: { ev: Event | null }) {
     let alive = true
     loadSopSteps(machine, ev).then((s) => { if (alive) setSop(s) }, () => alive && setSop(null))
     return () => { alive = false }
-    // the SOP depends on which event this is, not on every refresh of it
+    // the SOP depends on which event and round this is (round 2 of p.11 → SOP-CP-01), not on every refresh of it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ev?.id, machine])
+  }, [ev?.id, ev?.replans, machine])
   if (!ev) return null
-  const now = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? null
-  const { x, tasks, lastEta, decided, doneBy } = repairWindow(ev, now, state.world?.tasks.items ?? [], state.resolved)
+  // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
+  const { x, tasks, lastEta, decided, doneBy } = repairEstimate(ev, state)
   if (!x && !tasks.length && !sop?.steps.length) return null
   return (
     <div className="ph-eta" data-testid="phone-eta">

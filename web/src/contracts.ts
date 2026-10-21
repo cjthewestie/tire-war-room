@@ -43,7 +43,7 @@ export type AuditKind =
   | "rollback" | "notify" | "system" | "task"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
-  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world"
+  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents"
 
 export const MACHINE_IDS = [
   "A-MIX", "A-OPEN", "A-BIGOPEN", "A-SMALLOPEN", "A-CAL", "A-COOL", "A-WIND",
@@ -163,6 +163,8 @@ export interface Anomaly {
   message: string
   related_machines: string[]
   detection_latency_s: number | null
+  /** issue #54: the detector's pre-classification before any LLM (warroom/detect/detector.py) */
+  preclass?: PreClass | null
 }
 
 export interface SafetyAction {
@@ -363,6 +365,16 @@ export interface Event {
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
+  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; then
+  // 「請主管覆核」 (review pending) once the event closed, done after POST /api/events/{id}/review
+  repaired_at?: ISODate | null
+  review?: EventReview | null
+}
+export interface EventReview {
+  status: "pending" | "done"
+  requested_at: ISODate
+  done_at: ISODate | null
+  by: string | null
 }
 
 // issue #10: 下新任務 (POST /api/command) and 討論這個計劃 (POST /api/events/{id}/discuss)
@@ -622,6 +634,8 @@ export interface HealthStatus {
   sim_running: boolean
   factory_time: ISODate
   uptime_s: number
+  agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
+  repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
@@ -722,6 +736,7 @@ export type WsMessage =
   | { type: "audit"; ts: ISODate; data: AuditEntry }
   | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null; /** 情境疊加: scenarios overlaid since the last load */ overlays?: ScenarioName[] } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
+  | { type: "subagents"; ts: ISODate; data: SubagentsView }
 
 // ---------------- REST ----------------
 export const API = {
@@ -750,9 +765,32 @@ export const API = {
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
+  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
   ws: "/ws",
 } as const
 
 export function apiPath(template: string, params: Record<string, string> = {}): string {
   return template.replace(/\{(\w+)\}/g, (_, k: string) => encodeURIComponent(params[k] ?? ""))
+}
+
+// ---------------- issue #54: 主 agent (orchestrator) and its subagents (warroom/agent/orchestrator.py) ----------------
+export interface PreClass {
+  rule: string; label: string; checks: string[]; kind: string; channel: string; value: number; baseline: number; sigma: number
+  severity: string; validation: Record<string, string>; limit: number | null
+  forecast: { model: string; predicted: number; band: [number, number]; horizon_min: number; trend_per_min: number } | null
+}
+export type SubagentStatus = "queued" | "running" | "waiting_model" | "waiting_approval" | "waiting_tasks" | "done" | "failed" | "interrupted"
+export interface Subagent {
+  id: string; type: string; type_label: string; parent: "main"; priority: number; priority_label: string
+  status: SubagentStatus; state: EventState; round: number; replans: number; tools_called: number
+  tasks_done: number; tasks_total: number; title: string; machine_id: string; source: string
+  via: "code" | "model" | "rules"; reason: string; started: ISODate; updated: ISODate; interrupted: boolean; outcome: string | null
+}
+export interface QueueTicket { who: string; event_id: string | null; label: string; priority: number; priority_label: string; since: string; state: "running" | "waiting" }
+export interface SubagentsView { items: Subagent[]; queue: { slots: number; running: QueueTicket[]; waiting: QueueTicket[] } }
+
+/** POST /api/main/message: one 主 agent turn (issue #54, warroom/agent/main_agent.py). */
+export interface MainReply {
+  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+  event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
 }

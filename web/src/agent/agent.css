@@ -62,6 +62,14 @@
 .r-note.verify { color: var(--line-c); }
 .r-note.warn { color: var(--warn); }
 .r-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin: 8px 4px 0 5px; flex: none; }
+/* worker tasks and the repair / 覆核 rows (fast repair) */
+.r-task { color: var(--ink-dim); font-size: 13.5px; }
+.r-task .ticon { color: var(--line-b); }
+.r-task.repair b, .r-task.tp-done .ticon { color: var(--accent); }
+.r-review { background: var(--accent-soft); color: var(--c-d6efb0, #d6efb0); }
+.r-review .ticon { color: var(--accent); }
+.r-review.rv-requested { background: var(--warn-soft); color: var(--c-f7dfae, #f7dfae); }
+.r-review.rv-requested .ticon { color: var(--warn); }
 
 /* 思考 block */
 .r-think { border: 1px solid var(--c-2a3c55, #2a3c55); background: linear-gradient(180deg, rgb(var(--info-rgb, 93 178 245) / .07), transparent 80%), var(--panel-2); border-radius: 10px; padding: 10px 12px; margin: 4px 0; }
@@ -623,3 +631,94 @@ a.ov-row:hover { background: var(--panel-2); }
 .con-brief .br { font-size: 14px; }
 .con-brief .br-head { font-size: 15px; }
 .br-link { color: var(--accent); font-size: 13.5px; width: fit-content; }
+
+/* ---------- issue #54: 主 agent rows and subagent tags ---------- */
+.r-chat.agent.main { border-left: 3px solid var(--line-c); }
+.r-chat.agent.main header b { color: var(--line-c); }
+.r-chat.agent.k-interrupt { border-left-color: var(--alarm); }
+.hl-agent { display: inline-block; margin-top: 4px; font-size: 11.5px; padding: 0 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
+.hl-agent.s-waiting_approval, .hl-agent.s-waiting_model, .hl-agent.s-queued { background: var(--warn-soft); color: var(--warn); }
+.hl-agent.s-running, .hl-agent.s-waiting_tasks { background: var(--c-2a3c55, #2a3c55); color: var(--info); }
+.hl-agent.s-done { background: var(--accent-soft); color: var(--accent); }
+.hl-agent.s-failed, .hl-agent.s-interrupted { background: var(--alarm-soft); color: var(--alarm); }
+
+/* ---------- Agent page: 主 agent → 子 agent tree, model queue, interrupt (issue #54) ---------- */
+.mq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; margin-bottom: var(--gap); }
+.mq-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.mq-t { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; padding: 3px 10px; border-radius: 999px; background: var(--panel-2); border: 1px solid var(--panel-3); }
+.mq-t.run { border-color: var(--info); color: var(--info); }
+.mq-t small { color: var(--ink-faint); font-size: 11px; }
+.tree-root h2 { display: flex; align-items: center; gap: 8px; color: var(--line-c); font-size: 16px; }
+.tree-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--line-c); display: inline-block; }
+.trace-list.tree { border-left: 2px solid var(--panel-3); margin-left: 4px; padding-left: 8px; }
+.trace-list.tree li { position: relative; }
+.trace-list.tree li::before { content: ""; position: absolute; left: -10px; top: 20px; width: 8px; border-top: 2px solid var(--panel-3); }
+.sub-pill { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+.sub-pill.t-live { background: var(--c-2a3c55, #2a3c55); color: var(--info); }
+.sub-pill.t-wait { background: var(--warn-soft); color: var(--warn); }
+.sub-pill.t-done { background: var(--accent-soft); color: var(--accent); }
+.sub-pill.t-bad { background: var(--alarm-soft); color: var(--alarm); }
+.sub-bar { flex-basis: 100%; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; display: block; }
+.sub-bar i { display: block; height: 100%; background: var(--accent); }
+.sub-head { border: 1px solid var(--border); border-left: 3px solid var(--line-c); border-radius: 10px; padding: 8px 12px; }
+.sub-head-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.tree-from { color: var(--line-c); font-weight: 700; font-size: 13px; }
+.sub-stop { margin-left: auto; }
+.sub-tasks .sub { margin: 8px 0 4px; font-size: 13.5px; }
+
+/* ---------- plain 主 agent conversation + switcher (issue #54, CJ: 「單純一點好嗎」) ---------- */
+.con-h.sw { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.sw-pick { flex: 1 1 100%; min-width: 0; max-width: 100%; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 6px 8px; font: inherit; font-size: 14px; font-weight: 700; }
+.sw-top { flex: 1 1 100%; display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.sw-title { margin: 0; font-size: 15px; font-weight: 700; }
+.con-h.sw .con-full { margin-left: auto; }
+.sc { gap: 10px; }
+.sc-row { display: flex; flex-direction: column; align-items: flex-start; max-width: 92%; }
+.sc-row.me { align-self: flex-end; align-items: flex-end; }
+.sc-b { background: var(--panel-2); border-radius: 14px 14px 14px 4px; padding: 8px 12px; font-size: 14.5px; line-height: 1.55; white-space: pre-wrap; }
+.sc-row.me .sc-b { background: var(--accent-soft); border-radius: 14px 14px 4px 14px; }
+.sc-b.pending { color: var(--ink-dim); display: inline-flex; gap: 6px; align-items: center; }
+.sc-tools { background: none; border: 0; padding: 2px 4px; font-size: 12px; color: var(--ink-faint); text-align: left; cursor: pointer; }
+.sc-tools:hover { color: var(--ink-dim); text-decoration: underline; }
+.sc-tool-list { margin: 2px 0 0; padding-left: 16px; font-size: 12px; color: var(--ink-dim); }
+.sc-tool-list li.bad { color: var(--alarm); }
+.sc-fb { margin: 2px 4px 0; font-size: 12px; color: var(--warn); }
+.sp { gap: 8px; }
+.sp-status { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin: 0; }
+.sp-status b { font-size: 16px; }
+.sp-stop { margin-left: auto; }
+.sp-tools { list-style: none; margin: 0; padding: 0; font-size: 13px; display: flex; flex-direction: column; gap: 3px; }
+.sp-tools li.failed { color: var(--alarm); }
+.tree-root { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 8px; width: 100%; background: none; border: 1px solid transparent; border-radius: 10px; padding: 6px 8px; text-align: left; color: var(--ink); }
+.tree-root:hover { background: var(--panel-2); }
+.tree-root.on { border-color: var(--accent); background: var(--panel-2); }
+.tree-title { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; font-size: 15px; }
+.tree-row { font-size: 13.5px; line-height: 1.4; }
+.main-thread { min-height: 60vh; }
+.main-thread .con-body { padding: 0; }
+.sp-talk { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-3); padding-top: 8px; margin-top: 4px; }
+
+/* 處理報告 at the end of the 處理歷程 (ReportBlock, fast repair) */
+.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: 80px; }
+.r-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.r-report header .ticon { color: var(--accent); }
+.r-report header b { font-size: 15px; }
+.r-report header small { color: var(--ink-faint); }
+.r-report header a { margin-left: auto; color: var(--accent); font-weight: 700; text-decoration: none; border: 1px solid currentColor; border-radius: 8px; padding: 4px 10px; }
+.r-report h4 { margin: 8px 0; font-size: 15px; }
+.r-report-head { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 4px 16px; margin: 0 0 8px; }
+.r-report-head div { display: flex; gap: 8px; min-width: 0; }
+.r-report-head dt { color: var(--ink-faint); flex: none; }
+.r-report-head dd { margin: 0; min-width: 0; }
+.r-report-head .t-ok, .r-report li.t-ok b { color: var(--accent); }
+.r-report-head .t-warn, .r-report li.t-warn b { color: var(--warn); }
+.r-report-head .t-bad, .r-report li.t-bad b { color: var(--alarm); }
+.r-report details { border-top: 1px solid var(--border); padding: 6px 0 2px; }
+.r-report summary { cursor: pointer; font-weight: 700; }
+.r-report summary small { margin-left: 6px; color: var(--ink-faint); font-weight: 400; }
+.r-report ul { margin: 4px 0; padding-left: 0; list-style: none; display: grid; gap: 3px; }
+.r-report li { display: flex; gap: 8px; color: var(--ink-dim); }
+.r-report li time { margin: 0; padding: 0; flex: none; }
+.r-report li b { flex: none; color: var(--ink); }
+.r-report-foot { margin: 8px 0 0; display: flex; align-items: center; gap: 8px; }
+.trace-h-r { display: flex; align-items: center; gap: 8px; flex: none; }

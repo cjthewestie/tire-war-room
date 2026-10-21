@@ -65,6 +65,7 @@ FLOW_ONLY_HOLD_S = 45.0
 PRESSURE_LOW_FRAC = 0.8
 PRESSURE_HOLD_S = 20.0
 REARM_NORMAL_S = 300.0
+RECOVER_MAX_S = 1800.0          # after a repair: at most 30 min to come back before watching again
 MAX_FIT_S = 600.0
 TAUS = np.geomspace(3.0, 3600.0, 48)
 
@@ -184,6 +185,7 @@ def fit_series(ts: np.ndarray, vs: np.ndarray) -> Fit:
 class _Chan:
     buf: deque = field(default_factory=deque)          # (t, v) validated
     baseline: float | None = None
+    normal: float | None = None                        # the first baseline: the machine before any fault
     init: list = field(default_factory=list)
     diffs: deque = field(default_factory=lambda: deque(maxlen=60))
     sigma: float = 0.05
@@ -208,6 +210,8 @@ class _Track:
     pressure_low_since: float | None = None
     emitted: bool = False
     normal_since: float | None = None
+    recovering: bool = False                 # repaired: on its way back to normal, nothing to report
+    recover_since: float | None = None
 
 
 class StreamDetector:
@@ -352,9 +356,9 @@ class StreamDetector:
         if c.baseline is None:
             c.init.append(v)
             if len(c.init) >= BASELINE_INIT_N:
-                c.baseline = float(np.median(c.init))
+                c.baseline = c.normal = float(np.median(c.init))
             return
-        frozen = ch is Channel.TEMP and tr.onset_t is not None
+        frozen = (ch is Channel.TEMP and tr.onset_t is not None) or tr.recovering
         frozen = frozen or (ch is Channel.WATER_FLOW and tr.flow_low_since is not None)
         frozen = frozen or (ch is Channel.PRESSURE and tr.pressure_low_since is not None)
         if tr.emitted:
@@ -441,6 +445,12 @@ class StreamDetector:
             return None
         v = temp.last_valid[1]
         dev = v - temp.baseline
+        if tr.recovering:
+            # repaired: the way back to normal is not an anomaly; watch again once it is back (or after 30 min)
+            tr.recover_since = tr.recover_since or t
+            if abs(dev) < max(1.0, 5.0 * temp.sigma) or t - tr.recover_since >= RECOVER_MAX_S:
+                tr.recovering, tr.recover_since = False, None
+            return None
         onset_thr = max(1.0, 5.0 * temp.sigma)
         dev_thr = PRESS_DEV_C if is_press else OTHER_DEV_C
         # --- onset / alarm bookkeeping
@@ -475,7 +485,11 @@ class StreamDetector:
                 return None
             if held and (t - tr.onset_t >= PRESS_CONFIRM_S or beyond):
                 kind = AnomalyKind.TEMP_DROP if dev < 0 else AnomalyKind.OVERHEAT
-                return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+                return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                    "rule": "press_deviation_held", "label": "硫化機溫度偏離基準並持續",
+                    "checks": [f"偏離 {dev:+.1f}°C（門檻 ±{dev_thr}°C）", f"持續 {t - tr.alarm_since:.0f} 秒（門檻 {ALARM_HOLD_S:.0f} 秒）",
+                               f"確認 {t - tr.onset_t:.0f} 秒（門檻 {PRESS_CONFIRM_S:.0f} 秒）" if not beyond else
+                               f"已超出 {CURE_TEMP_MIN_C:.0f}–{CURE_TEMP_MAX_C:.0f}°C"]})
             # slow drift (e.g. a leak): a significant trend heading out of 120–130 within 30 min
             if tr.onset_t is not None and t - tr.onset_t >= PRESS_TREND_MIN_AGE_S and \
                     self._significant_trend(tr, t, tr.onset_sign, PRESS_TREND_MIN_C_PER_MIN):
@@ -483,9 +497,13 @@ class StreamDetector:
                 if res is not None:
                     falling = tr.onset_sign < 0
                     lim = CURE_TEMP_MIN_C if falling else CURE_TEMP_MAX_C
-                    if self._crossing_s(res[1], t, lim, not falling, 1800.0) is not None:
+                    cross = self._crossing_s(res[1], t, lim, not falling, 1800.0)
+                    if cross is not None:
                         kind = AnomalyKind.TEMP_DROP if falling else AnomalyKind.OVERHEAT
-                        return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+                        return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                            "rule": "press_slow_drift", "label": "硫化機緩慢漂移，預測 30 分內出界",
+                            "checks": [f"斜率 {res[1].slope_per_min(t):+.2f}°C/分（門檻 {PRESS_TREND_MIN_C_PER_MIN}°C/分）",
+                                       f"預測約 {cross / 60:.0f} 分後越過 {lim:.0f}°C"]})
             return None
         # compound / other machines
         rising_trend = tr.onset_t is not None and tr.onset_sign > 0 and t - tr.onset_t >= 5.0 and \
@@ -495,20 +513,27 @@ class StreamDetector:
             crosses = limit is not None and res is not None and \
                 self._crossing_s(res[1], t, limit, True, 1800.0) is not None
             if tr.flow_low_since is not None or crosses:
-                return self._make(tr, ts, t, AnomalyKind.OVERHEAT, Channel.TEMP, v, temp.baseline)
+                return self._make(tr, ts, t, AnomalyKind.OVERHEAT, Channel.TEMP, v, temp.baseline, rule={
+                    "rule": "compound_rising", "label": "膠溫持續上升（冷卻水偏低或預測達上限）",
+                    "checks": [f"上升趨勢 ≥ {TREND_MIN_C_PER_MIN}°C/分",
+                               "冷卻水流低於基準 70%" if tr.flow_low_since is not None else f"預測 30 分內達 {limit:.0f}°C 上限"]})
         if held:
             kind = AnomalyKind.OVERHEAT if dev > 0 else AnomalyKind.TEMP_DROP
-            return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline)
+            return self._make(tr, ts, t, kind, Channel.TEMP, v, temp.baseline, rule={
+                "rule": "deviation_held", "label": "溫度偏離基準並持續",
+                "checks": [f"偏離 {dev:+.1f}°C（門檻 ±{dev_thr}°C）", f"持續 {t - tr.alarm_since:.0f} 秒（門檻 {ALARM_HOLD_S:.0f} 秒）"]})
         if tr.flow_low_since is not None and t - tr.flow_low_since >= FLOW_ONLY_HOLD_S:
             return self._make(tr, ts, t, AnomalyKind.WATER_FLOW_LOW, Channel.WATER_FLOW, flow.last_valid[1],
-                              flow.baseline)
+                              flow.baseline, rule={"rule": "flow_low", "label": "冷卻水流偏低並持續",
+                                                   "checks": [f"低於基準 {FLOW_LOW_FRAC:.0%}", f"持續 ≥ {FLOW_ONLY_HOLD_S:.0f} 秒"]})
         if tr.pressure_low_since is not None and t - tr.pressure_low_since >= PRESSURE_HOLD_S:
             return self._make(tr, ts, t, AnomalyKind.PRESSURE_LOW, Channel.PRESSURE, pres.last_valid[1],
-                              pres.baseline)
+                              pres.baseline, rule={"rule": "pressure_low", "label": "壓力偏低並持續",
+                                                   "checks": [f"低於基準 {PRESSURE_LOW_FRAC:.0%}", f"持續 ≥ {PRESSURE_HOLD_S:.0f} 秒"]})
         return None
 
     def _make(self, tr: _Track, ts: datetime, t: float, kind: AnomalyKind, ch: Channel, value: float,
-              baseline: float) -> Anomaly:
+              baseline: float, rule: dict | None = None) -> Anomaly:
         d = MACHINE_BY_ID[tr.mid]
         is_press = d.kind is MachineKind.CURING_PRESS
         horizon = 1800.0
@@ -553,9 +578,24 @@ class StreamDetector:
                 latency = round((ts - fs).total_seconds(), 1)
         tr.emitted = True
         tr.normal_since = None
+        # issue #54: the pre-classification the dashboard shows before any LLM runs
+        chan = tr.chans[ch]
+        validation = {"range": "通過", "jump": "通過", "stale": "通過",
+                      "quality": self.last_quality.get(tr.mid, DataQuality.OK).value}
+        if is_press and tr.expected_temp is not None and ch is Channel.TEMP:
+            validation["steam_model"] = f"蒸汽推算 {tr.expected_temp:.1f}°C，差 {abs(value - tr.expected_temp):.1f}°C（容許 {REDUNDANT_TOL_C}°C）"
+        if related:
+            validation["neighbours"] = f"同蒸汽管線 {len(related)} 台比對"
+        preclass = {**(rule or {"rule": kind.value, "label": kind.value, "checks": []}),
+                    "kind": kind.value, "channel": ch.value, "value": round(value, 2), "baseline": round(baseline, 2),
+                    "sigma": round(chan.sigma, 3), "severity": severity.value, "validation": validation,
+                    "forecast": None if pred is None else {"model": fit.model, "predicted": pred.predicted_value,
+                                                           "band": [pred.band_lo, pred.band_hi], "horizon_min": round(horizon / 60),
+                                                           "trend_per_min": pred.trend_per_min},
+                    "limit": limit}
         return Anomaly(id=f"AN-{ts:%Y%m%d-%H%M%S}-{tr.mid}", ts=ts, machine_id=tr.mid, kind=kind, channel=ch,
                        value=round(value, 2), baseline=round(baseline, 2), prediction=pred, severity=severity,
-                       message=msg, related_machines=related, detection_latency_s=latency)
+                       message=msg, related_machines=related, detection_latency_s=latency, preclass=preclass)
 
     # ------------------------------------------------------------------ public ingest
     def ingest(self, readings: list[SensorReading]) -> list[Anomaly]:
@@ -620,9 +660,11 @@ class StreamDetector:
             result.append(a)
         return result
 
-    def reset(self, machine_id: str | None = None) -> None:
+    def reset(self, machine_id: str | None = None, *, repaired: bool = False) -> None:
         """Close the episode. With a machine id the baseline restarts from the last 30 s of
-        valid data (the new normal); with None every track starts fresh."""
+        valid data (the new normal); with None every track starts fresh. repaired=True (the fault was
+        fixed): the baseline goes back to the machine's normal, so the way back is not a new 驟降 / 驟升
+        (Kyle 10-21: 回報處置完成 → 「A 線大開煉機溫度驟降」)."""
         if machine_id is None:
             self._tracks.clear()
             self.plan_watcher.reset()
@@ -631,10 +673,13 @@ class StreamDetector:
         if tr is None:
             return
         for c in tr.chans.values():
-            if c.buf:
+            if repaired and c.normal is not None:
+                c.baseline = c.normal
+            elif c.buf:
                 t_now = c.buf[-1][0]
                 recent = [v for t, v in c.buf if t >= t_now - 30.0]
                 c.baseline = float(np.median(recent)) if recent else c.baseline
         tr.onset_t, tr.onset_sign, tr.alarm_since, tr.calm_since = None, 0, None, None
         tr.flow_low_since = tr.pressure_low_since = None
         tr.emitted, tr.normal_since = False, None
+        tr.recovering, tr.recover_since = repaired, None

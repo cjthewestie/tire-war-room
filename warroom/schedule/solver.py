@@ -30,8 +30,9 @@ Model, shared by both solvers (built in `_prepare`):
   jobs of the untouched press pool keep their previous slot if still valid; moving work onto a
   press that shares the affected press's steam header (page 11: 6 and 8 share 7's pipe) costs
   extra, so #A-311 goes to CURE-09 rather than CURE-08. A press whose cure the request LENGTHENS
-  (page 11 H1: runs at 122 °C) takes no tire planned on another press (hard; only #A-311 moves,
-  off it), and pulling an op into a short-staffed shift the previous plan did not already have
+  (page 11 H1: runs at 122 °C) takes no tire planned on another press (hard), and the tire its
+  longer cure pushes out of its slot (page 11: #A-311) costs PEN_SLOW_KEEP to stay there: it moves
+  off the press whose steam is low (only #A-311 moves), and pulling an op into a short-staffed shift the previous plan did not already have
   there costs PEN_SHORT_NEW, so a repair does not take over a shortage that is not its own.
 - Identical tires of one order are interchangeable: ids are re-matched to the previous plan
   after solving so `moves` lists real moves, not id swaps.
@@ -45,7 +46,9 @@ Model, shared by both solvers (built in `_prepare`):
 - deliveries_met means no order ends later than in the previous plan (交期不受影響); every
   late order is still listed in late_orders, pre-existing ones also as a warning. It covers
   only the tires in this plan, not tires of open orders beyond the horizon.
-CP-SAT is primary (15-min grid; stops at the time limit or after STALL_S without improvement);
+CP-SAT is primary (15-min grid; deterministic: fixed workers and seed, interleaved search, stops at
+DET_TIME of deterministic time, so the same request gives the same plan under any machine load;
+time_limit_s is only a wall-clock safety cap);
 HeuristicScheduler is the page-7 backup solver; FallbackScheduler switches on
 timeout/error/infeasible and sets fell_back=True.
 """
@@ -97,9 +100,17 @@ PEN_SHORT_NEW = 72 * 60 * W_DEMOLD     # repair: an op a short shift did not alr
 PEN_SIZE_HOME = 48 * 60 * W_DEMOLD  # principle 4 中大胎固定機台: M on an L press or L on an M press (rush orders exempt)
 PEN_DISTURB = 4 * 60 * W_DEMOLD      # repair: changing a tire on a press the event did not touch at all
 PEN_SAME_HEADER = 12 * 60 * W_DEMOLD  # moving work onto the affected press's steam pipe (page 11: 6, 8 share 7's pipe)
+PEN_SLOW_KEEP = 24 * 60 * W_DEMOLD    # repair: the tire a lengthened cure pushes out of its slot stays on that press
 EXTRA_DAYS = 4          # jobs may finish this many days past the horizon
 REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
-STALL_S = 1.5           # or when the best plan has not improved for this long (weak bounds)
+# Deterministic budget (CP-SAT deterministic-time units). The old stop (no improvement for 1.5 s of WALL time)
+# returned whichever incumbent the machine load happened to reach: the page-11 round-1 card was 「無機台異動」 in
+# one run and #A-311 → 6 號 in the next, round 2 differed run to run, and concurrent_3 once kept the greedy hint
+# with #A-311 129 h late. The interleaved search (fixed workers + seed) is reproducible and stops at the first
+# batch boundary past this budget: 0.5 sits between the hint batch (~0.35) and the next (~1.8-2.6), so it
+# includes the first improving batch of every demo solve. On the page-11 solves it ends 1-2 s after the old stall
+# stop did (Mac at load ~20: round 1 2.9 -> 4.7 s, round 2 5.0 -> 6.2 s); the start-up seed solves got faster.
+DET_TIME = 0.5
 GRID_MIN = 15           # mold-in times on a 15-min wall-clock grid (both solvers)
 MIN_HORIZON_DAYS = 1    # a degenerate horizon is clamped (and CP-SAT is skipped for it)
 MAX_HORIZON_DAYS = 28
@@ -142,6 +153,7 @@ class _Ctx:
     affected: set[str] = field(default_factory=set)  # presses the request re-cured or took out
     blackouts: dict[str, list[tuple[int, int]]] = field(default_factory=dict)  # press -> [a, b) minutes, no tire
     slow: set[str] = field(default_factory=set)      # presses assumed to run below recipe temp (cure extended)
+    displaced: set[str] = field(default_factory=set)  # free jobs on a slow press whose slot the longer cure overruns
     warnings: list[str] = field(default_factory=list)
     orders: dict[str, Order] = field(default_factory=dict)
     now_m: int = 0                  # req.now in minutes from the grid origin t0
@@ -340,6 +352,14 @@ def _guard_slow_presses(ctx: _Ctx, unavailable: set[str]) -> None:
     for j in ctx.free:
         if j.orig_press is not None:
             j.eligible = [q for q in j.eligible if q not in ctx.slow or q == j.orig_press]
+    # the tire whose slot the longer cure overruns (page 11: #A-311 at 00:00, 7 de-molds 16:22 + 8 h mold change)
+    # would go in while the steam is still low: it moves off rather than wait on that press (PEN_SLOW_KEEP)
+    for p in ctx.slow:
+        fz = max((j for j in ctx.frozen if j.press == p), key=lambda j: j.mold_in)
+        for j in ctx.free:
+            if j.orig_press == p and j.orig_mold_in is not None and j.orig_mold_in < fz.mold_in + fz.cure_min + (
+                    MOLD_GAP_MIN if _mold_key(j) != _mold_key(fz) else 0):
+                ctx.displaced.add(j.id)
     for p in sorted(ctx.slow):
         if any(j.orig_press == p for j in ctx.free):
             ctx.warnings.append(f"{p} 硫化延長中：不移入其他機台的模次；已排在 {p} 的後續模次以標準硫化時間排"
@@ -799,6 +819,8 @@ def greedy_assign(ctx: _Ctx) -> dict[str, tuple[str, int]]:
             cost = W_DEMOLD * (1 + max(0, j.priority)) * (t + j.cure_min)
             if j.orig_press is not None and p != j.orig_press:
                 cost += PEN_MOVE + (PEN_SAME_HEADER if p in ctx.suspect else 0)
+            if p in ctx.slow and j.id in ctx.displaced:
+                cost += PEN_SLOW_KEEP
             if mold.get(p) is not None and mold[p] != _mold_key(j):
                 cost += PEN_MOLD_CHANGE
             cost += _size_home_pen(ctx, j, p)
@@ -896,9 +918,9 @@ class CpSatScheduler:
     de-mold/mold-in inside staffed windows, one op per crew at a time. Soft: lateness, mold
     changes, press moves, short-staffed ops, early de-mold. Page 6 principles 1–5."""
 
-    def __init__(self, num_workers: int = 8, stall_s: float | None = STALL_S):
+    def __init__(self, num_workers: int = 8, det_time: float = DET_TIME):
         self.num_workers = num_workers
-        self.stall_s = stall_s
+        self.det_time = det_time
 
     def solve(self, req: SolveRequest) -> SolveResult:
         t_start = _time.perf_counter()
@@ -973,6 +995,8 @@ class CpSatScheduler:
                     press_iv[p].append(m.NewOptionalFixedSizeIntervalVar(mi, j.cure_min, x, f"iv_{j.id}_{p}"))
                     if j.orig_press is not None and p != j.orig_press:
                         obj.append((PEN_MOVE + (PEN_SAME_HEADER if p in ctx.suspect else 0)) * x)
+                    if p in ctx.slow and j.id in ctx.displaced:
+                        obj.append(PEN_SLOW_KEEP * x)
                     pm = ctx.press_mold.get(p)
                     if pm is not None and pm != _mold_key(j):
                         obj.append(PEN_MOLD_CHANGE * x)
@@ -1033,12 +1057,16 @@ class CpSatScheduler:
                 m.AddNoOverlap(op_iv)
             m.Minimize(sum(obj))
             solver = cp_model.CpSolver()
-            solver.parameters.max_time_in_seconds = max(0.001, float(req.time_limit_s))
+            solver.parameters.max_time_in_seconds = max(0.001, float(req.time_limit_s))   # wall-clock safety cap
+            solver.parameters.max_deterministic_time = self.det_time   # the real stop: same plan under any load
             solver.parameters.num_workers = self.num_workers
             solver.parameters.random_seed = 7
             solver.parameters.interleave_search = True   # reproducible plans for the same input
+            # the 'fixed' worker counts far less deterministic time than the wall time it takes (8 s for 0.17 on
+            # the page-11 round-2 solve), so it stretched every interleaved batch; the others find the plans
+            solver.parameters.ignore_subsolvers.append("fixed")
             solver.parameters.relative_gap_limit = REL_GAP
-            st = _solve_with_stall_stop(cp_model, solver, m, self.stall_s)
+            st = solver.Solve(m)
             if st in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 assign = {}
                 for j in ctx.free:
@@ -1119,43 +1147,6 @@ def _bad_request(req: SolveRequest) -> str | None:
     return None
 
 
-def _solve_with_stall_stop(cp_model, solver, model, stall_s: float | None):
-    """Solve; stop early once the incumbent has not improved for `stall_s` seconds. CP-SAT finds
-    its final plan in ~1 s on the demo but cannot prove optimality quickly (staffed-window
-    domains give a weak bound), so waiting for the full time limit buys nothing."""
-    if not stall_s:
-        return solver.Solve(model)
-    import threading
-
-    class _CB(cp_model.CpSolverSolutionCallback):
-        def __init__(self):
-            super().__init__()
-            self.best = None
-            self.last = _time.perf_counter()
-
-        def on_solution_callback(self):
-            v = self.ObjectiveValue()
-            if self.best is None or v < self.best - 1e-6:
-                self.best, self.last = v, _time.perf_counter()
-
-    cb = _CB()
-    done = threading.Event()
-
-    def watch():
-        while not done.wait(0.05):
-            if cb.best is not None and _time.perf_counter() - cb.last > stall_s:
-                solver.StopSearch()
-                return
-
-    th = threading.Thread(target=watch, daemon=True)
-    th.start()
-    try:
-        return solver.Solve(model, cb)
-    finally:
-        done.set()
-        th.join(timeout=1)
-
-
 def _merge(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
     out: list[list[int]] = []
     for a, b in sorted(ranges):
@@ -1182,7 +1173,11 @@ class FallbackScheduler:
         if res.schedule is not None and res.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE):
             return res
         back = self.backup.solve(req)
-        note = f"主求解器 {res.solver.value} {res.status.value}，改用備援 {back.solver.value}"
+        # plain words for the 預警 list and 人力排程 (the old 「主求解器 cp-sat timeout，改用備援 heuristic」 read as code)
+        why = {SolveStatus.TIMEOUT: "在時限內沒排出結果", SolveStatus.INFEASIBLE: "找不到符合所有條件的排法"}.get(
+            res.status, "這次無法求解")
+        note = (f"排程求解器{why}，已改用備援排法"
+                + ("（仍可行，交期已檢查）" if back.feasible else "（備援排法也排不出可行排程）"))
         sched = back.schedule
         if sched is not None:
             sched = sched.model_copy(update={"warnings": [note, *sched.warnings]})

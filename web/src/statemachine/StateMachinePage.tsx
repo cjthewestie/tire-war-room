@@ -4,8 +4,8 @@
 //              waiting on), live; then 事件偵測 (per line: machines watched, last reading; recent anomalies not yet events).
 //   每日紀錄 — every event / task / question of a factory day (or demo loop) from GET /api/daylog, with a summary and CSV.
 import { useEffect, useMemo, useState } from 'react'
-import type { Anomaly, Event, EventState, Line, MachineState } from '../contracts'
-import { LINES, LINE_SHORT, machineLabel } from '../factory'
+import type { Anomaly, CompoundStage, Event, EventState, Line, MachineState } from '../contracts'
+import { COMPOUND_STOP_C, CURATIVE_STOP_C, LINES, LINE_SHORT, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD, ms } from '../format'
 import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
@@ -19,7 +19,7 @@ import './statemachine.css'
 type View = 'live' | 'day'
 const CHANNEL: Record<string, string> = { temp_c: '溫度', pressure_kgf_cm2: '壓力', water_flow_lpm: '水流', steam_kgf_cm2: '蒸汽' }
 const OUTCOME: Record<string, string> = { closed: '結案', safe_stop: '安全停止', open: '處理中', answered: '已回答' }
-const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室' }
+const TYPE: Record<string, string> = { event: '機台異常', command: '主管任務', plant: '工廠事件', ask: '問戰情室', main: 'NemoClaw 對話' }
 
 export function StateMachinePage() {
   const { transport } = useWarRoom()
@@ -134,6 +134,7 @@ function Live() {
       )}
       <p className="muted small">每張卡點進去是 Agent 頁的完整過程與狀態機圖。結案／安全停止只列今天（{day?.label ?? '目前這一天'}）。</p>
       <Detection events={events} today={events.filter(isToday).length} />
+      <PreClassPanel />
     </>
   )
 }
@@ -165,6 +166,24 @@ function AskList({ asks }: { asks: DayRun[] }) {
       {asks.map((a) => <li key={a.id}><span className="muted">{a.opened_at ? fmtHM(a.opened_at) : ''}</span><b>{a.title}</b><span className="tag">{OUTCOME[a.outcome] ?? a.outcome}</span><small className="muted">{a.id}・只查不改</small></li>)}
     </ul>
   )
+}
+
+/** 預測 column: a rising reading with an upper limit reads 「約 N 分後達上限 120°C」 (the detector's own words when its
+ *  message says so, else from the trend and the compound stage's stop line), not a linear extrapolation past the limit
+ *  (B 線開煉機 229.7°C（186.3–273.2）). */
+function forecastText(a: Anomaly, stage: CompoundStage | undefined): string {
+  const p = a.prediction
+  if (!p) return '—'
+  const r1 = (n: number) => Math.round(n * 10) / 10
+  const said = a.message.match(/預測約\s*(\d+)\s*分後達\s*(\d+(?:\.\d+)?)°C\s*上限/)
+  const stop = stage === 'curative_added' ? CURATIVE_STOP_C : stage === 'unvulcanized' ? COMPOUND_STOP_C : null
+  const limit = said ? Number(said[2]) : a.channel === 'temp_c' && p.trend_per_min > 0 ? stop : null
+  if (limit != null && (said || p.predicted_value > limit)) {
+    if (p.now_value >= limit) return `已達上限 ${limit}°C`
+    const min = said ? Number(said[1]) : Math.max(1, Math.round((limit - p.now_value) / p.trend_per_min))
+    return `約 ${min} 分後達上限 ${limit}°C`
+  }
+  return `${r1(p.predicted_value)}（${r1(p.band_lo)}–${r1(p.band_hi)}）`
 }
 
 /** 事件偵測: the detector watches every machine without the AI; per line, how many and when the last reading came;
@@ -205,7 +224,7 @@ function Detection({ events, today }: { events: Event[]; today: number }) {
             <tr key={a.id}>
               <td className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</td><td>{machineLabel(a.machine_id)}</td><td>{CHANNEL[a.channel] ?? a.channel}</td>
               <td>{Math.round(a.value * 10) / 10}／{Math.round(a.baseline * 10) / 10}</td>
-              <td>{a.prediction ? `${Math.round(a.prediction.predicted_value * 10) / 10}（${Math.round(a.prediction.band_lo * 10) / 10}–${Math.round(a.prediction.band_hi * 10) / 10}）` : '—'}</td>
+              <td>{forecastText(a, machines?.find((m) => m.machine_id === a.machine_id)?.compound_stage)}</td>
               <td>{evByAnom.has(a.id) ? <span className="tag">已開事件</span> : <span className="tag warn">未成事件</span>}</td>
             </tr>
           ))}</tbody>
@@ -272,3 +291,52 @@ function DayLog() {
     </section>
   )
 }
+
+// ---------------------------------------------------------------- 事件預分類 (issue #54)
+interface PreItem extends Anomaly {
+  route: { type: string; type_label: string; priority: number; priority_label: string }
+  event_id: string | null; event_state: string | null
+}
+interface PreView { items: PreItem[]; bad_data: { machine_id: string; count: number; last_quality: string; last_at: string }[]; bad_log: { ts: string; machine_id: string; channel: string; quality: string }[] }
+const QUALITY: Record<string, string> = { out_of_range: '超出範圍', jump: '突跳', stale: '數值凍結', neighbor_mismatch: '與鄰機不符', missing: '缺值' }
+
+/** CJ, 2026-10-20: 「我都沒有看到狀態機頁面用 python 去做事件預分類的部分」. What the Python detector decided before any
+ *  LLM ran: which rule fired, the signals and thresholds, the validation the readings passed, the forecast, and where
+ *  the main agent routes it; plus readings the validation layer rejected (they never wake the AI). */
+function PreClassPanel() {
+  const d = usePoll<PreView>('/api/preclass', 5000)
+  return (
+    <section className="panel sm-pre" aria-label="事件預分類" data-testid="sm-preclass">
+      <header className="panel-h"><h2>事件預分類（Python 偵測器，LLM 之前）</h2><span className="muted small">規則 → 驗證 → 預測 → 分派</span></header>
+      {!d?.items.length && <p className="muted small">還沒有異常。偵測器每秒檢查 28 台機台；觸發時這裡會列出是哪條規則、門檻、驗證結果與預測，再交給NemoClaw 分派。</p>}
+      <ol className="pre-list">
+        {(d?.items ?? []).slice(0, 8).map((a) => (
+          <li key={a.id} className={`pre sev-${a.severity}`} data-testid="preclass-item">
+            <div className="pre-h">
+              <span className="muted">{fmtMD(a.ts)} {fmtHMS(a.ts)}</span><b>{machineLabel(a.machine_id)}</b>
+              <span className="tag">{a.preclass?.label ?? a.kind}</span>
+              <span className={`tag ${a.severity === 'critical' ? 'rush' : ''}`}>{a.severity === 'critical' ? '嚴重' : a.severity === 'warn' ? '注意' : '資訊'}</span>
+              <span className="pre-route" data-testid="preclass-route">→ NemoClaw 派給 <b>{a.route.type_label}</b>（優先 {a.route.priority_label}）</span>
+              {a.event_id ? <a className="panel-link" href={`#console?event=${encodeURIComponent(a.event_id)}`}>{a.event_state ? STATE_LABEL[a.event_state as EventState] : ''} →</a> : <span className="muted small">併入既有事件</span>}
+            </div>
+            <div className="pre-grid">
+              <div><h4>規則</h4><code>{a.preclass?.rule ?? a.kind}</code><ul>{(a.preclass?.checks ?? []).map((c, i) => <li key={i}>{c}</li>)}</ul></div>
+              <div><h4>訊號</h4><p>{CHANNEL[a.channel] ?? a.channel} {a.value} ／ 基準 {a.baseline}{a.preclass ? `（雜訊 σ ${a.preclass.sigma}）` : ''}</p>{a.preclass?.limit != null && <p className="muted small">上限 {a.preclass.limit}°C</p>}</div>
+              <div><h4>驗證</h4><ul>{Object.entries(a.preclass?.validation ?? {}).map(([k, v]) => <li key={k}>{VAL_LABEL[k] ?? k}：{QUALITY[v] ?? (v === 'ok' ? '通過' : v)}</li>)}</ul></div>
+              <div><h4>預測</h4>{a.preclass?.forecast ? <p>{a.preclass.forecast.horizon_min} 分後 {a.preclass.forecast.predicted}°C（{a.preclass.forecast.band[0]}–{a.preclass.forecast.band[1]}）<br /><small className="muted">模型 {FIT[a.preclass.forecast.model] ?? a.preclass.forecast.model}・斜率 {a.preclass.forecast.trend_per_min}°C/分</small></p> : <p className="muted">—</p>}</div>
+            </div>
+          </li>
+        ))}
+      </ol>
+      <h3 className="sub">擋下的壞資料（不喚醒 AI）</h3>
+      {!d?.bad_log.length && <p className="muted small">沒有。</p>}
+      {!!d?.bad_log.length && (
+        <ul className="pre-bad" data-testid="preclass-bad">
+          {d.bad_log.slice(0, 8).map((b, i) => <li key={i}><span className="muted">{fmtHMS(b.ts)}</span> {machineLabel(b.machine_id)}・{CHANNEL[b.channel] ?? b.channel}・<b>{QUALITY[b.quality] ?? b.quality}</b></li>)}
+        </ul>
+      )}
+    </section>
+  )
+}
+const VAL_LABEL: Record<string, string> = { range: '範圍', jump: '突跳', stale: '凍結', quality: '最近讀值', steam_model: '蒸汽推算', neighbours: '鄰機' }
+const FIT: Record<string, string> = { constant: '常數', 'linear-trend': '線性趨勢', 'exp-approach': '指數逼近' }

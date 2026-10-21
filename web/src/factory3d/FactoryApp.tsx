@@ -12,22 +12,22 @@
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
-import { STATE_LABEL } from '../components/common'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useLinkStatus } from '../linkStatus'
-import { alertText, diffPending, type PushState } from '../phone/alert'
+import { alertText, diffPending, reviewAlerts, type PushState } from '../phone/alert'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
+import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
@@ -54,6 +54,9 @@ const DEMO_KEYS: Record<string, (paused: boolean) => { c: SimControl; label: str
   Digit3: () => ({ c: { action: 'speed', speed: 60 }, label: '60 倍速' }),
   Digit0: (paused) => ({ c: { action: paused ? 'play' : 'pause' }, label: paused ? '繼續播放' : '暫停' }),
 }
+
+/** The HUD's 已暫停 chip, in the amber tone of the link chip (.f3-conn.t-warn). */
+const PAUSED_CHIP = { padding: '0 9px', borderRadius: 999, background: '#fbecd0', color: 'var(--c-amber)', fontSize: 13, fontWeight: 700 } as const
 
 let audio: AudioContext | null = null
 function unlockAudio() {
@@ -110,7 +113,7 @@ export function FactoryApp() {
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
-  const [toast, setToast] = useState<{ title: string; body: string; at: number } | null>(null)
+  const [toast, setToast] = useState<{ title: string; body: string; at: number; review?: boolean } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
@@ -127,23 +130,25 @@ export function FactoryApp() {
   const ev = primaryEvent(state.snapshot?.events)
   const evOpen = ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
   const pending = state.pending
+  // fast repair: repaired events waiting for the supervisor's 覆核 ring the phone like a new approval
+  const reviews = useMemo(() => reviewAlerts(state.snapshot?.events), [state.snapshot?.events])
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
   const paused = !!state.clock?.paused
 
-  // New approval → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
+  // New approval (or 覆核 request) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
-    const out = diffPending(push.current, pending, connected && !lanDown)
+    const out = diffPending(push.current, [...pending, ...reviews], connected && !lanDown)
     if (!out.fire.length) return
     const { title, body } = alertText(out.fire, out.flushed)
-    setToast({ title, body, at: Date.now() })
+    setToast({ title, body, at: Date.now(), review: out.fire.every((a) => a.review) })
     setBuzzUntil(performance.now() + 2200)
     setBuzz(true)
     try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
     ring()
-  }, [pending, connected, lanDown])
+  }, [pending, reviews, connected, lanDown])
   useEffect(() => {
     if (!buzz) return
     const t = setTimeout(() => setBuzz(false), 2200)
@@ -230,7 +235,9 @@ export function FactoryApp() {
             (err) => { console.warn(err); setDemoNote({ text: `疊加：${lab}：沒有成功`, at: Date.now() }) })
           return
         }
-        transport.control(c).then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
+        // 1 / 5 while paused used to load the scenario and stay paused (the plant looked frozen): loading also plays
+        const sent = c.action === 'scenario' ? transport.control(c).then(() => transport.control({ action: 'play' })) : transport.control(c)
+        sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
       if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
@@ -308,7 +315,7 @@ export function FactoryApp() {
         {scene === 'toilet' && <Restroom />}
         <Player
           enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
-          pending={pending.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
+          pending={pending.length + reviews.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
           prompt={prompt}
         />
         <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
@@ -333,13 +340,15 @@ export function FactoryApp() {
               <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
             </span>
           )}
+          {/* paused (0, or the dashboard's ❚❚ 暫停): without this the plant just looks frozen */}
+          {paused && <span style={PAUSED_CHIP} role="status" data-testid="f3-paused">❚❚ 已暫停{TOUCH_DEVICE ? '' : '・按 0'}</span>}
           {/* the header's link chip wording (linkStatus.ts); .live = connected to the backend (e2e waits on it) */}
           <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
-          {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
+          {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
-        <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
+        <div className={`f3-pend ${pending.length || reviews.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{reviews.length ? `・待覆核 ${reviews.length} 件` : ''}{pending.length || reviews.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
         {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
@@ -354,7 +363,7 @@ export function FactoryApp() {
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
-          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機核准' : '按 P 拿起手機核准'}</i>
+          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.review ? '覆核' : '核准'}</i>
         </div>
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />

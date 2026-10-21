@@ -79,7 +79,9 @@ async def test_stale_confirm_skips_round_and_resolves(tmp_path):
     infos = [a for a in _writes(tools, ToolName.NOTIFY_TEAMS) if a["kind"] == "info"]
     assert len(infos) == 1
     assert any("未生效 → 本輪其餘動作不執行" in t.text for t in ev.timeline)
-    assert any("動作未完成" in t.text for t in ev.timeline)
+    # another event's schedule took effect first: said as that, not as a failed round (「動作未完成…」)
+    assert any("依現行排程重算（不算失敗）" in t.text for t in ev.timeline)
+    assert not any(t.text.startswith("動作未完成") for t in ev.timeline)
     assert len(tools.calls_of(ToolName.SOLVE_SCHEDULE)) == 2  # re-solved against the active schedule
     assert ev.hypotheses[0].id == "H1" and len(ev.hypotheses) == 1     # hypothesis kept, not swapped
     assert ev.state is EventState.CLOSED and store.active == 3

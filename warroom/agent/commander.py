@@ -11,6 +11,9 @@ vLLM (DGX Spark, Nemotron 3.5 Lightning NVFP4) or NVIDIA cloud via BASE_URL / MO
   per-event data goes in the user message, so vLLM prefix caching reuses the whole prefix.
 - Streaming measures TTFT. Invalid JSON, timeout or unreachable server falls back to the mock plan
   when settings.llm_fallback_to_mock (logged as fell_back_to_mock / valid_json=False).
+- The request is kept inside the model's context window (settings.llm_context_tokens minus the completion
+  cap): per-event context is trimmed first (TRIM_STEPS), the system prompt never; a request that still does
+  not fit is not sent and fails like any other model failure (cause too_long). Issue #33.
 
 MockCommander is a deterministic rule commander that reproduces page 11 (H1 steam pressure →
 H2 leak / sensor drift) and page 2 (cooling insufficient) with no model at all.
@@ -24,7 +27,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom.agent.narrate import machine_label
-from warroom.agent.strict import TruncatedOutput, failure_cause
+from warroom.agent.strict import PromptTooLong, TruncatedOutput, failure_cause
 from warroom.config import Settings
 from warroom.contracts import (
     AlertCard,
@@ -173,6 +176,77 @@ def build_messages(req: CommanderRequest, plant_text: str | None = None) -> list
 
 
 # =====================================================================================
+# Context budget (issue #33)
+# =====================================================================================
+# What may be cut from the per-event context, in this order, when a request would not fit the model's context
+# window. Measured on the six demo scenarios (2026-10-20, nat-lab twr/exp20b ctx_probe) the SOP text is the
+# largest part everywhere. The system prompt is never cut (prefix cache), nor are the anomaly, allowed_tools,
+# rejected hypotheses, supervisor constraints and text, commands or plant events: the plan depends on them,
+# and a model that cannot see a rejected hypothesis may propose it again.
+TRIM_STEPS = ("context.sop.text", "context.neighbours", "context.materials", "context.orders",
+              "context.supervisor_discussion.detail")
+TRIM_KEEP_ITEMS = 10
+
+
+def _trimmed_context(ctx: dict[str, Any], step: str) -> dict[str, Any] | None:
+    """ctx with one TRIM_STEPS step applied (a new dict; ctx is not changed), or None when there is nothing to cut."""
+    if step == "context.sop.text":           # keep sop_id / title / score: the plan can still cite or re-query
+        sop = ctx.get("sop")
+        if not isinstance(sop, list) or not any(isinstance(h, dict) and h.get("text") for h in sop):
+            return None
+        return {**ctx, "sop": [{k: v for k, v in h.items() if k != "text"} if isinstance(h, dict) else h
+                               for h in sop]}
+    if step == "context.neighbours":         # keep the *_now readings, drop min / max / trend
+        nb = ctx.get("neighbours")
+        if not isinstance(nb, dict):
+            return None
+        slim = {m: {k: v for k, v in s.items() if k.endswith("_now")} if isinstance(s, dict) else s
+                for m, s in nb.items()}
+        return None if slim == nb else {**ctx, "neighbours": slim}
+    if step in ("context.materials", "context.orders"):
+        key = step.split(".", 1)[1]
+        items = ctx.get(key)
+        if not isinstance(items, list) or len(items) <= TRIM_KEEP_ITEMS:
+            return None
+        if key == "materials":               # short or on-order materials first
+            items = sorted(items, key=lambda m: isinstance(m, dict) and m.get("status") == "ok")
+        return {**ctx, key: items[:TRIM_KEEP_ITEMS]}
+    if step == "context.supervisor_discussion.detail":   # keep the supervisor's text and constraint labels
+        sd = ctx.get("supervisor_discussion")
+        if not isinstance(sd, dict) or not {"constraint_detail", "superseded_card"} & sd.keys():
+            return None
+        return {**ctx, "supervisor_discussion": {k: v for k, v in sd.items()
+                                                 if k not in ("constraint_detail", "superseded_card")}}
+    raise ValueError(f"unknown trim step: {step}")
+
+
+def fit_context(req: CommanderRequest, system: str, settings: Settings, max_tokens: int
+                ) -> tuple[CommanderRequest, int, list[str]]:
+    """Estimate system + user prompt with approx_tokens(); while estimate * settings.prompt_token_factor exceeds
+    settings.llm_context_tokens - max_tokens, apply TRIM_STEPS in order. Returns the request to send (the same
+    object when nothing was cut, so the message stays byte-identical), the estimate of what is sent and the steps
+    applied. Raises PromptTooLong when it still does not fit after every step."""
+    budget = settings.llm_context_tokens - max_tokens
+    sys_est = approx_tokens(system)
+    est = sys_est + approx_tokens(build_user_message(req))
+    if est * settings.prompt_token_factor <= budget:
+        return req, est, []
+    ctx, trimmed = dict(req.context or {}), []
+    for step in TRIM_STEPS:
+        nxt = _trimmed_context(ctx, step)
+        if nxt is None:
+            continue
+        ctx, trimmed = nxt, [*trimmed, step]
+        req = req.model_copy(update={"context": ctx})
+        est = sys_est + approx_tokens(build_user_message(req))
+        if est * settings.prompt_token_factor <= budget:
+            return req, est, trimmed
+    raise PromptTooLong(f"prompt ≈{est} tokens ×{settings.prompt_token_factor:g} exceeds the context budget {budget} "
+                        f"({settings.llm_context_tokens} - max_tokens {max_tokens}) after trimming "
+                        f"{', '.join(trimmed) or 'nothing'}", estimate=est, trimmed=trimmed)
+
+
+# =====================================================================================
 # Parsing helpers
 # =====================================================================================
 _ALERT_KEY = re.compile(r'"alert_card"\s*:\s*')
@@ -313,12 +387,23 @@ class OpenAICommander:
         self.last_error: str | None = None     # why the latest call fell back (None = it did not)
         self.plant_override: str | None = None  # 後台 test run: a draft PLANT.md instead of the active one
         self.last_plant_sha: str | None = None  # sha256 of the PLANT.md text in the latest request
-        self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | invalid_output | error
+        self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | too_long | invalid_output | error
+        self.last_prompt_est: int | None = None  # approx_tokens() of the latest request as sent (issue #33)
+        self.last_trimmed: list[str] = []        # TRIM_STEPS applied to it
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
         from warroom.agent import plant
         self.last_plant_sha = plant.sha256(self.plant_override) if self.plant_override is not None else plant.active_sha()
-        kw: dict[str, Any] = dict(model=self.model, messages=build_messages(req, self.plant_override), temperature=0.0,
+        messages = build_messages(req, self.plant_override)
+        try:
+            sent, self.last_prompt_est, self.last_trimmed = fit_context(req, messages[0]["content"], self.settings,
+                                                                        self.max_tokens)
+        except PromptTooLong as e:
+            self.last_prompt_est, self.last_trimmed = e.estimate, e.trimmed
+            raise
+        if sent is not req:
+            messages[1] = {"role": "user", "content": build_user_message(sent)}
+        kw: dict[str, Any] = dict(model=self.model, messages=messages, temperature=0.0,
                                   max_tokens=self.max_tokens, stream=True,
                                   stream_options={"include_usage": True})
         # response_format json_schema works on vLLM (xgrammar; guided_json was removed in vLLM 0.12),
@@ -337,9 +422,14 @@ class OpenAICommander:
         text, usage, finish = "", None, None
         alert_sent = False
         self.last_intercepted, self.last_raw, self.last_error, self.last_cause = [], "", None, None
+        self.last_prompt_est, self.last_trimmed = None, []
+        est: int | None = None                 # this call's #33 numbers, local: concurrent events share self
+        trimmed: list[str] = []
         caught: list[dict[str, Any]] = []
         try:
-            stream = await self.client.chat.completions.create(**self.request_kwargs(req))
+            kw = self.request_kwargs(req)
+            est, trimmed = self.last_prompt_est, list(self.last_trimmed)   # read before the first await
+            stream = await self.client.chat.completions.create(**kw)
             async for chunk in stream:
                 if getattr(chunk, "usage", None):
                     usage = chunk.usage
@@ -362,11 +452,14 @@ class OpenAICommander:
             info = LLMCallInfo(mode=LLMMode.LLM, model=self.model, base_url=self.settings.base_url, ttft_ms=ttft,
                                total_ms=(time.perf_counter() - t0) * 1000,
                                prompt_tokens=getattr(usage, "prompt_tokens", None),
-                               completion_tokens=getattr(usage, "completion_tokens", None), valid_json=True)
+                               completion_tokens=getattr(usage, "completion_tokens", None), valid_json=True,
+                               prompt_tokens_est=est, trimmed=trimmed)
             if on_alert and not alert_sent:
                 on_alert(plan.alert_card)
             return plan, info
         except Exception as e:
+            if isinstance(e, PromptTooLong):   # raised by request_kwargs: nothing was sent
+                est, trimmed = e.estimate, list(e.trimmed)
             self.last_raw = text
             self.last_error = f"{type(e).__name__}: {e}"[:500]
             self.last_cause = failure_cause(e)
@@ -380,7 +473,8 @@ class OpenAICommander:
                                total_ms=(time.perf_counter() - t0) * 1000,
                                prompt_tokens=getattr(usage, "prompt_tokens", None),
                                completion_tokens=getattr(usage, "completion_tokens", None),
-                               valid_json=False, fell_back_to_mock=True)
+                               valid_json=False, fell_back_to_mock=True,
+                               prompt_tokens_est=est, trimmed=trimmed)
             return plan, info
 
     async def ping(self) -> bool:
