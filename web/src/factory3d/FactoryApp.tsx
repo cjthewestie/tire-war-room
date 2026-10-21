@@ -55,7 +55,7 @@ import { TouchControls } from './TouchControls'
 import { DRAWN_LIGHT, Lights, World } from './World'
 import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
-type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
+type Panel = { kind: 'machine'; id: string } | { kind: 'monitor'; hash?: string } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
 const PRESS7 = (SCENARIOS.find((s) => s.name === 'press7_temp_drop')?.label ?? '7 號硫化機溫降').replace(/（.*?）/, '')
 const CONC3 = SCENARIOS.find((s) => s.name === 'concurrent_3') ?? { label: '3 件同時異常', speed: 5 }
@@ -204,9 +204,10 @@ export function FactoryApp() {
   const onDemoBegin = useCallback(() => {
     setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
   }, [])
-  const onDemoEnd = useCallback(() => { window.focus(); canvasRef.current?.focus() }, [])
+  const onDemoEnd = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
+  const onDemoWalk = useCallback(() => setMode('first'), [])
   const nSlides = deck.slides.length
-  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, nSlides })
+  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, nSlides })
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
@@ -411,7 +412,10 @@ export function FactoryApp() {
     }
   }, [raisePhone, closePanel, goTo, start]))
 
-  const prompt = started && !overlay && !fading ? promptText(near) : null
+  const prompt = started && !overlay && !fading && !demoOn ? promptText(near) : null
+
+  // the demo at the war-room computer: the monitor shows the page the beat needs (主控台, then the Agent page)
+  const shownPanel: Panel = demoOn ? (demo.monitor ? { kind: 'monitor', hash: demo.monitor } : null) : panel
 
   return (
     <div className="f3-root">
@@ -532,8 +536,8 @@ export function FactoryApp() {
         </div>
       )}
 
-      {panel?.kind === 'machine' && <MachineDrawer id={panel.id} onClose={closePanel} extra={(d) => <FieldSop machineId={panel.id} tiles={d.tiles} />} />}
-      {panel?.kind === 'monitor' && <DeskMonitor onClose={closePanel} />}
+      {!demoOn && panel?.kind === 'machine' && <MachineDrawer id={panel.id} onClose={closePanel} extra={(d) => <FieldSop machineId={panel.id} tiles={d.tiles} />} />}
+      {shownPanel?.kind === 'monitor' && <DeskMonitor key={shownPanel.hash ?? ''} onClose={closePanel} hash={shownPanel.hash} demo={demoOn} />}
       <PhoneOverlay up={phoneUp} onLower={() => raisePhone(false)} buzzing={buzz} />
     </div>
   )

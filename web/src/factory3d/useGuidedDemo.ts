@@ -7,10 +7,13 @@
 // Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DemoRun, type LogRow } from '../demo/driver'
-import { AUTO_PITCH, CHECKPOINTS, CUES, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
+import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
 import type { WarRoomState } from '../store'
 import type { Transport } from '../transport'
 import { demoCam } from './demoCamera'
+import { ROBOT_MEET, stationFor, walker, type StationId } from './demoWalk'
+import { START } from './layout'
+import { teleport } from './pose'
 import { robot } from './patrol'
 import { director } from './pose'
 
@@ -33,11 +36,20 @@ function chime(loud = false) {
   } catch { /* no audio */ }
 }
 
-interface Snap { tl: DemoRun['tl']; t: number; sig: DemoRun['latched']; eventId: string | null; fallback: boolean; log: LogRow[] }
-const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.latched, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
+/** Which page the war-room computer shows at a beat (the lead has to be at the desk). */
+function monitorFor(cueId: string, eventId: string | null): string | null {
+  if (cueId === 'rush' || cueId === 'console') return '#agent'
+  if (cueId === 'agent') return eventId ? `#console?event=${encodeURIComponent(eventId)}` : '#console'
+  return null
+}
 
-export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
+interface Snap { tl: DemoRun['tl']; t: number; sig: DemoRun['latched']; eventId: string | null; fallback: boolean; log: LogRow[] }
+const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.arrived === undefined ? r.latched : { ...r.latched, arrived: r.arrived }, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
+
+export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlides }: {
   state: WarRoomState; transport: Transport | null
+  /** the overview hands over to the first-person walk (FactoryApp: first-person view) */
+  onWalk: () => void
   /** the demo starts: leave first person, close panels */
   onBegin: () => void
   onEnd: () => void
@@ -54,12 +66,18 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
   const [confirmExit, setConfirmExit] = useState(false)
   const [paused, setPaused] = useState(false)
   const lastRefused = useRef(0)
+  const walk = useRef<{ station: StationId | null; monitorAt: number; enteredAt: number }>({ station: null, monitorAt: 0, enteredAt: 0 })
+  const [monitor, setMonitor] = useState<string | null>(null)
+  const monitorRef = useRef<string | null>(null)
+  const slideOpened = useRef(false)
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
 
   const stop = useCallback(() => {
     run.current = null
     setSnap(null)
+    setMonitor(null); monitorRef.current = null
+    walker.reset()
     setRunning(false); setSlideView(false); setConfirmExit(false); setPaused(false)
     director.on = false
     onEnd()
@@ -74,7 +92,13 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
     run.current = r
     demoCam.reset()
     demoCam.reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
+    walker.reset()
+    // the lead starts inside the war-room door, like a fresh start of the 3D (the walk goes from there)
+    teleport(START.x, START.z, START.yaw)
     director.on = true
+    director.mode = 'orbit'
+    walk.current = { station: null, monitorAt: 0, enteredAt: 0 }
+    setMonitor(null)
     setSlide(0); setSlideView(false); setBigUntil(0); setConfirmExit(false); setPaused(false); setNote(null)
     setRunning(true)
     setSnap(snapOf(r))
@@ -113,24 +137,49 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
       const out = r.tick(performance.now(), stateRef.current)
       if (out === 'stopped') { stop(); return }
       const c = current(r.tl)
-      demoCam.setShot(c.shot, r.seen.machine ?? robot.target)
+      const now = performance.now()
+      const w = walk.current
       if (out === 'cue') {
         console.info(`[demo] ${r.t.toFixed(1)} ${c.id} (${r.tl.fired[r.tl.fired.length - 1].reason})`)
-        if (c.big) { chime(true); setBigUntil(performance.now() + 4000) } else chime()
-        if (c.id === 'robot') robot.playReq = true
+        if (c.big) { chime(true); setBigUntil(now + 4000) } else chime()
         if (c.id === 'pitch') setSlide(0)
+        w.enteredAt = now
+        w.station = stationFor(c.id, c.shot)
+        // the robot comes over to the lead at 7 號機, then plays its show facing the camera
+        if (c.id === 'robot') robot.visitReq = ROBOT_MEET
       }
+      // camera: the opening overview (orbit), a hand-over onto the lead, then the first-person walk between stations
+      if (director.mode === 'orbit') {
+        if (c.shot.kind === 'establish') demoCam.setShot(c.shot, null)
+        else {
+          demoCam.setShot({ kind: 'lead' } as unknown as Shot, null)
+          if (!demoCam.flying && now - w.enteredAt > 600) { director.mode = 'walk'; onWalk() }
+        }
+      }
+      if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
+      // the war-room computer: open at the desk once the lead has arrived (主控台 for the orders, Agent page later)
+      const want = monitorFor(c.id, r.seen.id)
+      const atDesk = director.mode === 'walk' && walker.at === 'desk' && walker.done
+      const show = want && atDesk ? want : null
+      if (show !== monitorRef.current) { monitorRef.current = show; setMonitor(show); w.monitorAt = now }
+      // the pitch: standing at the board, continue opens the slides full screen
+      if (c.id === 'pitch' && r.tl.released && !slideOpened.current) { slideOpened.current = true; setSlideView(true) }
+      if (c.id !== 'pitch' && c.id !== 'warn' && c.id !== 'end') slideOpened.current = false
+      // a checkpoint is ready only once the walk (and the monitor, the robot's show) has arrived
+      const robotDone = c.id !== 'robot' || robot.played.includes('bow') || now - w.enteredAt > 30000
+      const monitorDone = !want || (!!show && now - w.monitorAt > 1500)
+      r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
       if (r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt
         const w = waiting(r.tl, r.t, r.latched)
-        setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : '等工廠下一件事發生，不能跳過')
+        setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : r.arrived === false ? '還在走過去，到了再按' : '等工廠下一件事發生，不能跳過')
       }
       const d = stateRef.current.demo
       if (d?.running && d.paused !== paused) setPaused(d.paused)
       setSnap(snapOf(r))
     }, 250)
     return () => clearInterval(id)
-  }, [running, stop, paused])
+  }, [running, stop, paused, onWalk])
   useEffect(() => () => { director.on = false }, [])
 
   const tl = snap?.tl
@@ -148,8 +197,10 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
     w2.__demo3d = () => {
       const x = run.current
       return x ? {
-        running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released, waiting: waiting(x.tl, x.t, x.latched),
+        running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released,
+        waiting: waiting(x.tl, x.t, x.arrived === undefined ? x.latched : { ...x.latched, arrived: x.arrived }),
         simHeld: x.simHeld, paused, slide, slideView, fallback: x.fallback, log: x.log, signals: x.firstSeen, seen: { id: x.seen.id, machine: x.seen.machine },
+        walk: { mode: director.mode, at: walker.at, done: walker.done }, monitor: monitorRef.current, arrived: x.arrived,
         camMaxStep: demoCam.maxStep, flying: demoCam.flying, robotPlayed: [...robot.played], camTraceLen: demoCam.trace.length,
       } : { running: false, director: director.on }
     }
@@ -158,7 +209,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
   }, [paused, slide, slideView])
 
   return {
-    running, t, cue, next: tl ? upcoming(tl) : null, waiting: w, ready: isReady, released: !!tl?.released,
+    running, t, cue, monitor, next: tl ? upcoming(tl) : null, waiting: w, ready: isReady, released: !!tl?.released,
     paused, slide, setSlide, changeSlide, slideView, setSlideView, bigUntil, note, setNote, confirmExit, setConfirmExit,
     begin, stop, exit, cont, togglePause, fallback: snap?.fallback ?? false, incidentEventId: snap?.eventId ?? null,
     overTarget: !!tl && overTarget(tl, t), pitchLeft: tl ? pitchLeft(tl, t) : null, autoPitchIn: AUTO_PITCH - t, storyTarget: STORY_TARGET,

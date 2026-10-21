@@ -33,6 +33,8 @@ export class DemoRun {
   fallback = false
   /** the sim is paused by a checkpoint (we play it again on continue / exit) */
   simHeld = false
+  /** the 3D's walk / camera has arrived (cues.ts `arrived`); undefined = no such gate (the war room drives) */
+  arrived: boolean | undefined = undefined
   /** the last continue this checkpoint refused (an approval wait) */
   refusedAt = 0
   private loaded = new Set<number>()
@@ -123,7 +125,7 @@ export class DemoRun {
     const live = now >= this.armedAt ? signals(state, this.seen) : {}
     for (const [k, v] of Object.entries(live)) if (v && this.firstSeen[k] == null) this.firstSeen[k] = Math.round(t * 10) / 10
     this.latched = latch(this.latched, live)
-    const sig = this.latched
+    const sig = this.arrived === undefined ? this.latched : { ...this.latched, arrived: this.arrived }
     const before = this.tl
     const r = advance(before, t, sig, this.contReq)
     this.contReq = false
