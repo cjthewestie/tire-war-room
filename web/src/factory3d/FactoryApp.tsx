@@ -16,6 +16,7 @@ import { STATE_LABEL } from '../components/common'
 import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
+import { useLinkStatus } from '../linkStatus'
 import { alertText, diffPending, type PushState } from '../phone/alert'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
@@ -92,6 +93,7 @@ function promptText(n: Near) {
 
 export function FactoryApp() {
   const { state, transport, connected } = useWarRoom()
+  const link = useLinkStatus()
   const [started, setStarted] = useState(false)
   const [near, setNear] = useState<Near>(null)
   const [panel, setPanel] = useState<Panel>(null)
@@ -305,8 +307,14 @@ export function FactoryApp() {
           <b>戰情室負責人</b>
           <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}</span>
-          {state.clock?.day_loop && <span className="f3-loop" data-testid="f3-loop">一日循環・第 {state.clock.day_loop.loop} 輪</span>}
-          <span className={`f3-conn ${connected ? 'ok' : 'bad'}`}>{connected ? (transport?.mode === 'mock' ? '模擬資料' : '即時連線') : '連線中'}</span>
+          {/* the same as the dashboard header: 一日循環 small and muted beside the time, full wording in the tooltip */}
+          {state.clock?.day_loop && (
+            <span className="f3-loop" data-testid="f3-loop" title={`一日循環・第 ${state.clock.day_loop.loop} 輪：團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>
+              <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
+            </span>
+          )}
+          {/* the header's link chip wording (linkStatus.ts); .live = connected to the backend (e2e waits on it) */}
+          <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
           {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}

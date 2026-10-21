@@ -15,8 +15,10 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-hud-top { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .f3-hud-top b { color: var(--c-ink); }
 .f3-hud-top .muted { color: var(--c-ink-dim); }
-.f3-conn { padding: 0 9px; border-radius: 999px; font-size: 13px; font-weight: 700; }
-.f3-conn.ok { color: var(--c-green); background: #e6f2d8; } .f3-conn.bad { color: var(--c-amber); background: #fbecd0; }
+/* the dashboard's link chip tones (linkStatus.ts): ok green, warn / mock amber, down red; hover shows the details */
+.f3-conn { padding: 0 9px; border-radius: 999px; font-size: 13px; font-weight: 700; pointer-events: auto; cursor: help; }
+.f3-conn.t-ok { color: var(--c-green); background: #e6f2d8; } .f3-conn.t-warn, .f3-conn.t-mock { color: var(--c-amber); background: #fbecd0; }
+.f3-conn.t-down { color: var(--c-red); background: #fde3df; }
 .f3-ev { font-size: 14px; }
 .f3-ev.open { color: #fff !important; background: #e0665c !important; font-weight: 700; }
 .f3-pend.has { color: #5a3a00 !important; background: #ffd77a !important; font-weight: 700; }
@@ -115,6 +117,7 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-tbtn.act { background: #8fd16a; color: #1f3a0e; box-shadow: 0 4px 0 #6aa84a; max-width: 60vw; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* issue #36: 一日循環 label and the success moment (訂單完成 / 出貨已出廠) */
-.f3-loop { font-size: 12px; font-weight: 700; color: #3f7d00; background: #eaf6d8; border-radius: 999px; padding: 2px 9px; }
+/* 一日循環 like the dashboard header (.clock-loop): small muted text right beside the time, not a pill; hover = full wording */
+.f3-loop { margin-left: -8px; color: var(--c-ink-dim); font-size: 12px; white-space: nowrap; cursor: help; pointer-events: auto; }
 .f3-success { position: absolute; z-index: 16; left: 50%; top: 18px; transform: translateX(-50%); background: #eaf6d8; color: #23410a; border: 3px solid #76b900; border-radius: 999px; padding: 8px 20px; font-size: 16px; font-weight: 800; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .25s ease-out; }
 @media (max-width: 700px) { .f3-success { top: auto; bottom: 150px; font-size: 14px; max-width: calc(100vw - 32px); white-space: normal; text-align: center; } }
