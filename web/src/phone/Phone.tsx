@@ -28,6 +28,7 @@ import { OptionGuideNote } from '../OptionGuideNote'
 import { RepairNotice } from './RepairNotice'
 import { CUES } from '../demo/cues'
 import { isMachine } from '../demo/signals'
+import { APPROVAL_CUES } from '../demo/beats'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
@@ -38,7 +39,7 @@ export function Phone() {
   const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))
   const [pick, setPick] = useState<string | null>(null)
   // the guided demo's approval beat is about the machine incident: its card first, whatever else is waiting
-  const demoCard = state.demo?.running && state.demo.cue_id === 'phone'
+  const demoCard = state.demo?.running && APPROVAL_CUES.has(state.demo.cue_id ?? '')
     ? pending.filter((p) => isMachine(state.snapshot?.events.find((e) => e.id === p.event_id)?.machine_id)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]
     : undefined
   const top = pending.find((p) => p.id === pick) ?? demoCard ?? pending[0]
@@ -97,8 +98,8 @@ export function Phone() {
             approval beat says 現在核准 in big letters; 繼續 here moves every screen on */}
         {demo?.running && (
           <div className="ph-demo" data-testid="phone-demo">
-            <span>🎬 Demo・{demo.cue_id === 'phone' ? '核准時間' : CUE_TITLE[demo.cue_id ?? ''] ?? demo.cue_id}</span>
-            {transport?.demo && demo.cue_id !== 'phone' && <button onClick={() => void transport.demo!({ action: 'continue' }).catch(() => {})} data-testid="phone-demo-continue">繼續 ▶</button>}
+            <span>🎬 Demo・{APPROVAL_CUES.has(demo.cue_id ?? '') ? '核准時間' : CUE_TITLE[demo.cue_id ?? ''] ?? demo.cue_id}</span>
+            {transport?.demo && !APPROVAL_CUES.has(demo.cue_id ?? '') && <button onClick={() => void transport.demo!({ action: 'continue' }).catch(() => {})} data-testid="phone-demo-continue">繼續 ▶</button>}
           </div>
         )}
         {demo?.running && !alerts.armed && (

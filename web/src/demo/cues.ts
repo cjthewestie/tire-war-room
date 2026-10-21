@@ -22,9 +22,10 @@ export const FALLBACK_LOADS: DemoLoad[] = [
   { at: 0, scenario: 'normal', speed: 10 },
   { at: 40, scenario: 'press7_temp_drop', speed: 10 },
 ]
-/** morning_rush's own demo speed (PR #107, measured live: orders 0:01–0:14, 急單 card 0:28, 7 號機 0:77 at 30×). The
+/** morning_rush's demo speed on main (PR #107, measured live at 40×: 急單 card 0:28, 7 號機 0:50, H1 card 1:09, H1
+ *  rejected 1:33, H2 card 1:44, 停用檢修 done 2:01). The demo sets it itself (main has no speed buttons any more). The
  *  checkpoints pause the sim while CJ talks, so the speed only sets how long the plant runs between them. */
-export const DEMO_SPEED = 30
+export const DEMO_SPEED = 40
 export const MAIN_LOADS: DemoLoad[] = [{ at: 0, scenario: DEMO_SCENARIO, speed: DEMO_SPEED }]
 
 /** The story's soft target (「故事目標 3:00」), the automatic pitch, and the deck's length (CJ's slides: 180 s). */
@@ -40,7 +41,8 @@ export const ARRIVE = 2.5
 export interface DemoLoad { at: number; scenario: string; speed: number }
 /** Live facts a cue can wait for (demo/signals.ts). */
 export type Signal =
-  | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'worker' | 'workerDone' | 'closed'
+  | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'rejected' | 'approval2' | 'approved2'
+  | 'worker' | 'workerDone' | 'closed'
 export type Signals = Partial<Record<Signal, boolean>>
 /** What the camera frames (factory3d/demoCamera.ts). */
 export type Shot =
@@ -88,13 +90,17 @@ export const CUES: Cue[] = [
     hold: { wait: 'continue', until: 'preplan', untilTimeout: 25 }, shot: { kind: 'overview' } },
   { id: 'event', at: 75, enter: { on: 'event', timeout: 60 }, title: '⚠ 事件：7 號機溫降', body: '偵測器（不是 AI）先從讀值發現溫度往下掉，才喚醒 AI 規劃。巡檢車也開過去了。',
     hold: { wait: 'continue' }, shot: { kind: 'incident' } },
-  { id: 'phone', at: 95, enter: { on: 'approval', timeout: 40 }, title: '📱 拿起手機，核准', body: 'AI 的修正計劃要主管核准（R2 以上一定要人）。手機看方案、按核准。', links: ['phone'],
+  { id: 'h1', at: 70, enter: { on: 'approval', timeout: 40 }, title: '📱 拿起手機，核准 H1', body: 'AI 的第一個假設 H1：蒸汽壓不足，延長硫化就好。修正計劃要主管核准（R2 以上一定要人）。', links: ['phone'],
     hold: { wait: 'approval', approval: 'approved', card: 'approval' }, shot: { kind: 'incident', close: true } },
-  { id: 'worker', at: 115, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機處理完，程式驗證讀值回來了：圈圈轉綠。',
+  { id: 'verify', at: 95, enter: { on: 'rejected', timeout: 60 }, title: '❌ 讀值 119.5°C，H1 不成立', body: '程式比對預期：溫度沒回來，還在往下掉。AI 猜錯了，不是程式放過它，是讀值推翻它。',
+    hold: { wait: 'continue' }, shot: { kind: 'incident', close: true } },
+  { id: 'h2', at: 105, enter: { on: 'approval2', timeout: 40 }, title: '🔁 AI 換假設 H2：核准', body: '驗證失敗才換假設：H2 是蒸汽洩漏，停用 7 號機檢修、訂單移到別台。再核准一次。', links: ['phone'],
+    hold: { wait: 'approval', approval: 'approved2', card: 'approval2' }, shot: { kind: 'incident', close: true } },
+  { id: 'worker', at: 120, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
     hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
-  { id: 'agent', at: 130, title: '🧠 回頭看 Agent 頁面', body: '思考流程與解決過程：每一步、每個工具、為什麼這樣做，全部記在稽核鏈上。', links: ['agent'],
+  { id: 'agent', at: 135, title: '🧠 回頭看 Agent 頁面：H1 為什麼被推翻', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
     hold: { wait: 'continue' }, shot: { kind: 'overview' } },
-  { id: 'robot', at: 155, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
+  { id: 'robot', at: 158, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
     hold: { wait: 'continue', min: 8 }, shot: { kind: 'robot' } },
   { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
     hold: { wait: 'continue', autoAfter: 8 }, shot: { kind: 'whiteboard' } },
@@ -105,9 +111,9 @@ export const CUES: Cue[] = [
 ]
 export const PITCH_INDEX = CUES.findIndex((c) => c.id === 'pitch')
 export const ROBOT_INDEX = CUES.findIndex((c) => c.id === 'robot')
-/** The presenter checkpoints ①–⑧ (CJ: 「關鍵處可以讓我按按鍵再繼續」), for the badge 「④ / 8」 (the 急單 approval is
- *  an extra stop between ① and ②). */
-export const CHECKPOINTS = ['start', 'console', 'event', 'phone', 'worker', 'agent', 'robot', 'pitch']
+/** The presenter checkpoints (CJ: 「關鍵處可以讓我按按鍵再繼續」), for the badge 「④ / 10」 (the 急單 approval is an
+ *  extra stop between ① and ②). */
+export const CHECKPOINTS = ['start', 'console', 'event', 'h1', 'verify', 'h2', 'worker', 'agent', 'robot', 'pitch']
 
 export type Reason = 'time' | 'event' | 'continue' | 'auto' | 'skip'
 export interface Fired { id: string; t: number; reason: Reason; /** when its hold ended, and how */ out?: number; outBy?: Reason }
