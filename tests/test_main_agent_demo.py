@@ -253,8 +253,8 @@ async def test_order_question_with_a_plan_selected_is_looked_up():
 # ---------------------------------------------------------------- A7: plain short replies
 def test_tidy_reply():
     r = tidy("收到，主管。我是戰情室的 agent，可以幫你查資料。**7 號機**現在 122.3°C（discuss_waiting_plan 回覆：計劃未變更）。"
-             "\n\n第二段。\n\n第三段。\n\n第四段。", keep_intro=False)
-    assert r == "7 號機現在 122.3°C。第二段。第三段。"
+             "\n\n第二段。\n\n第三段。\n\n第四段。\n\n第五段。\n\n第六段。", keep_intro=False)
+    assert r == "7 號機現在 122.3°C。第二段。第三段。第四段。第五段。"        # at most 5 sentences (was 3 before 10-21)
     assert tidy("好，已擬計劃送你核准。", keep_intro=False) == "好，已擬計劃送你核准。"
     assert tidy("- 先確認蒸汽壓\n- 再看水流", keep_intro=False) == "先確認蒸汽壓；再看水流"
     assert tidy("7 號機正常，我是根據讀值判斷的。", keep_intro=False) == "7 號機正常，我是根據讀值判斷的。"

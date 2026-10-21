@@ -8,6 +8,11 @@ reference and a read-only context (plant status, open items, selected plan).
 Tools:
 - the read tools of 問戰情室 (ASK_TOOLS: read_sensors, predict_anomaly, cure_formula, query_orders_shifts,
   sop_search = the knowledge base), run through the same Registry and audited like any call;
+- query_plant {topic}: one general read over everything else the plant knows (shipments and trucks, today's schedule,
+  materials, open events, what was handled today, recent audit, 今日工廠概況, staffing, orders, machines, quality,
+  maintenance, energy; warroom/api/plant_query.py). CJ, 2026-10-21: 「現在的最大問題就是對話框agent nemo 不知道為什麼只能
+  回答特定問題」「這樣是不是太限縮資料來源」. It is not one of the 9 ToolNames (the Registry would refuse it): the caller
+  audits it as an R0 read, and no plan, gate or state-machine step can call it;
 - propose_plan {task}: something should be DONE on the floor → opens a supervisor-command event (the existing
   下新任務 path: PLAN → SIMULATE → GATE → approval → EXECUTE). Nothing runs before the supervisor approves;
 - discuss_waiting_plan {text}: only offered while a waiting plan is selected.
@@ -22,7 +27,8 @@ Code guards (the model is inside the loop, not in charge of the facts):
   with a plan selected, a request that names an order or machine the plan does not is such a new task, not a discussion;
 - after a discussion the reply is code's, from its result (「已改成第 N 版，請重新核准」 or what it said); any other reply
   that says 已改／已更新／已擬計劃／已送 is replaced (demo walk-through 10-21: 「這份待核准計畫現在已更新」, event_id=null);
-- greetings, 你是誰 and 謝謝 get the fixed replies without a model call; a model reply is plain text, at most 3 sentences.
+- greetings, 你是誰 and 謝謝 get the fixed replies without a model call; a model reply is plain text, at most 5 sentences;
+- a general-knowledge question (「硫化是什麼」「幫我寫一首詩」) is answered by the model directly: no plant read is forced.
 Rule mode (or a model failure) runs the same tools by keywords."""
 from __future__ import annotations
 
@@ -59,7 +65,25 @@ MEMORY_TURNS = 8
 READ_TOOLS = sorted(t.value for t in ASK_TOOLS)
 PROPOSE = "propose_plan"
 DISCUSS = "discuss_waiting_plan"
-ALL_TOOLS = [*READ_TOOLS, PROPOSE, DISCUSS]
+QUERY = "query_plant"
+# the topics of query_plant (warroom/api/plant_query.py TOPICS has the same keys; tests/test_main_agent_query.py checks)
+PLANT_TOPICS: dict[str, str] = {
+    "overview": "今日工廠概況：機台狀態、下一班出貨、在班人數、訂單進度、未結事件數",
+    "shipments": "出貨與貨車：下一班出貨時間、今天和明天的出貨時段、待出貨數量、碼頭上的車、最近出貨",
+    "schedule": "目前生效的排程：版本、今天的工單、每台硫化機接下來的入模／出模",
+    "materials": "原料庫存：每種原料的存量、還能用幾天、是否該補貨、在途採購",
+    "open_events": "還沒結案的事件：機台、目前狀態（等核准、執行中…）、目標",
+    "handled_today": "今天處理過的事件與任務、結果",
+    "audit_recent": "最近的稽核紀錄（系統做了什麼、誰核准）",
+    "staffing": "班表與人力：各班人數、需要人數、缺口、現在在班的人",
+    "orders": "訂單：各狀態數量、今天新進、急單、每張訂單的交期與進度",
+    "machines": "所有機台目前狀態與溫度一覽",
+    "quality": "今天品質：檢驗數、不良數、良率",
+    "maintenance": "保養：進行中、接下來的保養",
+    "energy": "用電：目前用電、契約容量、今天度數",
+}
+CHAT_READS = [*READ_TOOLS, QUERY]           # every read the chat agent can make
+ALL_TOOLS = [*CHAT_READS, PROPOSE, DISCUSS]
 
 IDENTITY_REPLY = "我是 Agent Nemo，戰情室的 AI agent。可以陪你看狀況、查 SOP；需要動到現場的事，我會擬計劃送你核准，核准後才執行。"
 HELLO_REPLY = "你好，我是 Agent Nemo。要查狀況或安排事情，直接說就好。"
@@ -121,19 +145,38 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 # 「（discuss_waiting_plan 回覆：…）」: a tool name in the reply
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
-MAX_SENTENCES = 3
+MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
+# a plant question that query_plant answers (「明天要出幾台車」「原料還夠嗎」「今天處理過什麼」): keyword -> topic, used for
+# the one reminder and the rules' read. First match wins: 「今天排程」 is the schedule, not today's work.
+_TOPIC_RX: list[tuple[str, re.Pattern[str]]] = [
+    ("shipments", re.compile(r"出貨|出車|貨車|卡車|台車|班車|車.{0,4}(?:走|出|來|到|離)|物流|碼頭")),
+    ("schedule", re.compile(r"排程|工單|入模|出模|下一模")),
+    ("materials", re.compile(r"原料|庫存|缺料|補料|進貨|採購|橡膠|碳黑|鋼絲|尼龍|硫化劑")),
+    ("open_events", re.compile(r"事件|還沒結|未結|待核准|等核准|警報")),
+    ("handled_today", re.compile(r"處理過|做了什麼|做過|今天.{0,4}(?:處理|完成)|結案")),
+    ("audit_recent", re.compile(r"稽核|紀錄|誰核准|log", re.IGNORECASE)),
+    ("staffing", re.compile(r"人力|人手|班表|排班|缺人|加班|在班|幾個人|多少人|夜班|早班|中班")),
+    ("orders", re.compile(r"訂單|交期|急單|客戶")),
+    ("quality", re.compile(r"品質|良率|不良|檢驗")),
+    ("maintenance", re.compile(r"保養|維修計[劃畫]")),
+    ("energy", re.compile(r"用電|電力|耗電|度數|契約容量")),
+    # not 「今天…怎樣」: 「今天天氣怎樣」 got the plant overview instead of 「我沒有天氣資料」
+    ("overview", re.compile(r"概況|整體|全廠|工廠.{0,4}(?:狀況|怎樣|如何)|今天的?(?:狀況|情況)")),
+]
 
 SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
 怎麼做：
-- 打招呼、問你是誰、閒聊：直接回答，不用工具。問你是誰就說你是 Agent Nemo，能查狀況、查 SOP、擬計劃送核准。
-- 問工廠的事（機台、訂單、班表、原料、SOP、怎麼處理）：先用讀取工具查，看完結果再回答。可以一次呼叫多個工具。
+- 打招呼、問你是誰、閒聊：直接回答，不用工具。問你是誰就說你是 Agent Nemo，能查工廠資料、查 SOP、擬計劃送核准。
+- 一般知識或跟工廠無關的請求：直接回答或直接做，不用工具，也不要先自我介紹。例如「幫我寫一首詩」就寫一首短詩（4–8 行）；「硫化是什麼」就解釋，並說一句這是一般知識、不是這座工廠的資料（只有講到製程、橡膠、硫化這類工廠相關知識時才要說）。
+- 你沒有的資料（例如天氣、新聞、股價）：直說「我沒有這份資料」，不要猜，也不要改講工廠狀態。
+- 問這座工廠的事：先用工具查，看完結果再回答，可以一次呼叫多個工具。機台讀值用 read_sensors；某張訂單的交期、每台硫化機的下一模用 query_orders_shifts；SOP、怎麼處理用 sop_search；其他（出貨與貨車、今天的排程、原料庫存、還沒結的事件、今天處理過什麼、稽核紀錄、工廠概況、班表人力、訂單總覽、品質、保養、用電）用 query_plant 選對的 topic。context.today 是今日工廠概況，裡面有的可以直接用。
 - 主管要你「做」一件會動到現場的事（重排、通知、調人、加班、補料、保養、停用），而且說得出對象：呼叫 propose_plan。
   它會擬計劃送主管核准，核准前什麼都不會執行；回覆時說「已擬計劃送你核准」，不要說已經做完。
 - 主管在談目前選的待核准計劃（加條件、問為什麼）：呼叫 discuss_waiting_plan。
 規則：
 1. 你不能直接改任何東西，沒有任何機台或 PLC 的寫入工具。
-2. 數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
-3. 回覆 2–3 句，短，純文字（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+2. 這座工廠的數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
+3. 回覆最多 5 句，純文字。資料是一長串清單時，先說總數，再挑最重要的 2–3 項，不要全部列出（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
    有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_asked 是你上一句最後問主管的問題）：把 message 當成對你那個問題的回答，往下接，不要重複你上一句。
 5. 有 waiting_plan（計劃標題、要做的事、A／B 人力方案），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
    {PROCESS_RULE}，也不可以說你會改溫度。
@@ -159,6 +202,8 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
             "actual_temp_c": {"type": "number"}, "elapsed_h": {"type": "number"}}, ["size", "actual_temp_c"]),
         _fn("query_orders_shifts", "訂單交期、班表、人力缺口、每台硫化機的下一模", {"order_ids": ids, "press_ids": ids}, []),
         _fn("sop_search", "查知識庫（SOP）。問「怎麼處理」一定先查", {"query": {"type": "string"}, "k": {"type": "integer"}}, ["query"]),
+        _fn(QUERY, "查工廠其他資料（只讀）。topic：" + "；".join(f"{k}＝{v}" for k, v in PLANT_TOPICS.items()),
+            {"topic": {"type": "string", "enum": list(PLANT_TOPICS)}}, ["topic"]),
         _fn(PROPOSE, "主管要做一件會動到現場的事：擬計劃送主管核准（核准前不執行）", {"task": {"type": "string",
             "description": "要完成的事，一句話，含對象"}}, ["task"]),
     ]
@@ -221,12 +266,27 @@ def wants_task(text: str) -> bool:
     return bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t)) and has_object(t) and not re.search(r"[?？]\s*$", t)
 
 
+def topic_for(text: str) -> str | None:
+    """The query_plant topic a plant question is about (「明天要出幾台車」 → shipments), or None."""
+    return next((k for k, rx in _TOPIC_RX if rx.search(text)), None)
+
+
 def wants_lookup(text: str) -> bool:
-    """A question about the plant (「大開煉機過熱怎麼處理」「7 號機現在怎樣」): answered from a read tool, never from memory."""
+    """A question about the plant (「大開煉機過熱怎麼處理」「7 號機現在怎樣」「原料還夠嗎」): answered from a read tool, never
+    from memory. A general question (「硫化是什麼」「今天天氣怎樣」) is not one: it names no machine, order or topic."""
     t = text.strip()
     if _IDENTITY_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t) or wants_task(t):
         return False
-    return bool(re.search(r"SOP|怎麼處理|處置", t) or (_QUESTION_RX.search(t) and has_object(t)))
+    return bool(re.search(r"SOP|怎麼處理|處置", t) or (_QUESTION_RX.search(t) and (has_object(t) or topic_for(t))))
+
+
+def rule_reads(text: str, context: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """The reads the rules make for a plant question: a machine / order / SOP question keeps the 問戰情室 plan
+    (read_sensors, query_orders_shifts, sop_search); anything else a query_plant topic answers goes there."""
+    topic = topic_for(text)
+    if topic and not (machines_in(text) or _ORDER_RX.search(text) or re.search(r"SOP|怎麼處理|處置", text)):
+        return [(QUERY, {"topic": topic})]
+    return [(str(st.tool), st.args) for st in mock_plan(text, context).steps if st.tool in ASK_TOOLS]
 
 
 def names_other(text: str, plan: str | None) -> bool:
@@ -271,6 +331,8 @@ def tidy(reply: str, keep_intro: bool) -> str:
 
 
 def ungrounded(reply: str, source: str) -> list[str]:
+    # 「1,239.9 kg」 is 1239.9: without this the check saw 「239.9」 and replaced a correct reply (preview run 10-21)
+    reply = re.sub(r"(?<=\d),(?=\d{3}\b)", "", reply)
     known = set(_NUM_RX.findall(source))
     known |= {n.split(".")[0] for n in known}
     return [n for n in _NUM_RX.findall(reply) if n not in known]
@@ -295,18 +357,21 @@ class MainAgent:
             self.server_kind = detect_server_kind(settings.base_url)
         self.memory: deque[tuple[str, str]] = deque(maxlen=MEMORY_TURNS)
         self._ids = itertools.count(1)
+        self._read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
 
     # ---------------------------------------------------------------- one turn
     async def turn(self, text: str, *, context: dict[str, Any], waiting_plan: str | None,
                    run_tool: Callable[[str, dict[str, Any], str], Awaitable[ToolResult]],
                    propose: Callable[[str], Awaitable[dict[str, Any]]],
                    discuss: Callable[[str], Awaitable[dict[str, Any]]] | None,
-                   slot: Callable[[], Any] | None = None) -> dict[str, Any]:
+                   slot: Callable[[], Any] | None = None,
+                   read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None) -> dict[str, Any]:
         t0 = time.perf_counter()
         tid = f"MAIN-{next(self._ids):04d}"
         steps: list[dict[str, Any]] = []
         out: dict[str, Any] = {"id": tid, "reply": "", "steps": steps, "event_id": None, "by": "rules",
                                "fell_back": False, "error": None, "intent": None}
+        self._read_plant = read_plant
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
         if not (self.llm and self.client is not None) and is_gibberish(text):
@@ -383,6 +448,8 @@ class MainAgent:
                           "version": approval.get("version") if isinstance(approval, dict) else None,
                           "chips": [str(c.get("label")) for c in r.get("constraints") or [] if isinstance(c, dict) and c.get("label")]})
             return reply
+        if name == QUERY:
+            return await self._query(args, out, tid)
         if name not in READ_TOOLS:
             steps.append({"tool": name, "args": args, "ok": False, "summary": "不允許：沒有寫入工具", "label": f"攔下 {name}"})
             return f"{name} 不能用：只能查資料或擬計劃送核准。"
@@ -405,6 +472,26 @@ class MainAgent:
             out.setdefault("unknown", []).append(bad.group(1))
             return f"沒有這台機台：{bad.group(1)}（硫化機只有 CURE-01..CURE-11）。直接告訴主管沒有這台，不要改查別台。"
         return summ
+
+    async def _query(self, args: dict[str, Any], out: dict[str, Any], tid: str) -> str:
+        """query_plant: one audited R0 read (the caller's `read_plant`); the JSON goes back to the model whole, the
+        step keeps a short line for the reply's tool line."""
+        steps = out["steps"]
+        topic = str((args or {}).get("topic") or "")
+        label = f"查了工廠資料（{PLANT_TOPICS[topic].split('：')[0]}）" if topic in PLANT_TOPICS else "查了工廠資料"
+        if topic not in PLANT_TOPICS:
+            err = f"沒有這個 topic：{topic or '（空）'}"
+        elif self._read_plant is None:
+            err = "工廠資料讀不到"
+        else:
+            r = await self._read_plant(topic, f"{tid}:T{len(steps) + 1}")
+            err = None if r.get("ok") else str(r.get("error") or "讀取失敗")
+            if err is None:
+                text = json.dumps(r.get("data") or {}, ensure_ascii=False, default=str)
+                steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": True, "summary": text[:200], "label": label})
+                return text
+        steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": False, "summary": f"失敗：{err}", "label": label})
+        return f"失敗：{err}。可用的 topic：{'、'.join(PLANT_TOPICS)}"
 
     @staticmethod
     def _propose_reply(steps: list[dict[str, Any]]) -> str:
@@ -438,12 +525,14 @@ class MainAgent:
     def _nothing_read(steps: list[dict[str, Any]]) -> str | None:
         """Read tools were called and every one failed: the reply must say so (CJ 2026-10-21: 「7 號機」 → 「狀態正常」
         after two failed reads)."""
-        reads = [s for s in steps if s["tool"] in READ_TOOLS]
+        reads = [s for s in steps if s["tool"] in CHAT_READS]
         if not reads or any(s["ok"] for s in reads):
             return None
         if all(s["tool"] == "sop_search" and "知識庫還在載入" in s["summary"] for s in reads):
             return KB_LOADING
         ids = [m for s in reads for m in (s["args"].get("machine_ids") or [s["args"].get("machine_id")]) if m]
+        if not ids and any(s["tool"] == QUERY for s in reads):
+            return NOTHING_READ.format(err=reads[-1]["summary"].removeprefix("失敗：")[:60], what="工廠資料")
         from warroom.agent.narrate import machine_label
         what = "、".join(dict.fromkeys(machine_label(m) if m in F.MACHINE_BY_ID else str(m) for m in ids)) or "這件事"
         err = reads[-1]["summary"].removeprefix("失敗：")[:60]
@@ -460,7 +549,10 @@ class MainAgent:
         # question the agent ended on (its whole reply alongside was copied back word for word, real run 2026-10-21).
         t = text.strip()
         prev = self.memory[-1] if self.memory else None
-        follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or len(t) <= SHORT_FOLLOW_UP or _ASKED_RX.search(prev[1]))
+        # a short message that is its own question or request (「硫化是什麼」「幫我寫一首詩」) stands alone: with the last turn
+        # alongside, the real model answered the previous topic (「如果您想知道 7 號機目前的溫度…」, preview run 10-21)
+        short = len(t) <= SHORT_FOLLOW_UP and not (_QUESTION_RX.search(t) or re.search(r"幫我|寫|請|翻譯|解釋", t))
+        follow = prev is not None and bool(_FOLLOW_UP_RX.search(t) or short or _ASKED_RX.search(prev[1]))
         earlier = [q for q, _a in self.memory] if follow else []
         ctx = {"message": text, "earlier_messages": earlier, "context": context, "waiting_plan": waiting_plan}
         if follow and prev is not None:
@@ -481,6 +573,7 @@ class MainAgent:
         nudged = waiting_plan is not None and not fresh   # a message about the selected plan is a discussion, not a new task
         looked = waiting_plan is not None and not other
         called: set[tuple[str, str]] = set()
+        regrounded = False
         edits = discuss is not None and not fresh and plan_edit(t)
         editing = vague or edits                      # the message is about changing the selected plan
         for i in range(MAX_STEPS + 1):
@@ -528,16 +621,24 @@ class MainAgent:
             if not reply:
                 raise ValueError("empty reply")
             if not out["steps"] and wants_lookup(text) and (waiting_plan is None or other):
-                read = [st for st in mock_plan(text, context).steps if st.tool in READ_TOOLS]
+                read = rule_reads(text, context)
                 if not looked and read and not last:
                     # a plant question answered without looking: remind the model once which tool answers it
                     looked = True
+                    hint = f"{read[0][0]}（topic={read[0][1]['topic']}）" if read[0][0] == QUERY else read[0][0]
                     msgs += [{"role": "assistant", "content": reply},
-                             {"role": "user", "content": f"主管在問工廠的事，不是閒聊。先呼叫 {read[0].tool} 查資料，再用 2–3 句回覆。"}]
+                             {"role": "user", "content": f"主管在問這座工廠的事。先呼叫 {hint} 查資料，再依結果回覆。"}]
                     continue
-                if read:                              # still nothing read: code reads by the rules, the results speak
-                    for st in read[:MAX_STEPS]:
-                        await self._tool(st.tool, st.args, text, out, tid, run_tool, propose, discuss)
+                if read:                              # still nothing read: code reads by the rules
+                    got = [await self._tool(name, args, text, out, tid, run_tool, propose, discuss)
+                           for name, args in read[:MAX_STEPS]]
+                    if any(s["tool"] == QUERY and s["ok"] for s in out["steps"]) and not last:
+                        # a query_plant result is JSON, not a reply: the model answers from it in one more call
+                        source += " " + " ".join(got)
+                        msgs += [{"role": "assistant", "content": reply},
+                                 {"role": "user", "content": "查到的工廠資料（回覆裡的數字只能來自這裡）：\n" + "\n".join(got)
+                                  + "\n請依這些資料回覆主管。"}]
+                        continue
                     out.update(reply=self._unknown_reply(out) or self._nothing_read(out["steps"])
                                or self._results_reply(out["steps"]) or NO_FACTS,
                                fell_back=True, error="model answered a plant question without a tool; read by rules")
@@ -559,6 +660,14 @@ class MainAgent:
                 edits = False
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": "主管給了這份待核准計劃的具體改法。請呼叫 discuss_waiting_plan，text 寫成完整一句，再回覆。"}]
+                continue
+            bad = ungrounded(tidy(reply, True), source)
+            if bad and not regrounded and not last and any(st["ok"] and st["tool"] in CHAT_READS for st in out["steps"]):
+                # a number the reads did not give (「25」 from query_plant handled_today, preview run 10-21): one retry
+                # before code replaces the words with the raw results
+                regrounded = True
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": f"回覆裡的 {'、'.join(bad[:5])} 不在查到的資料裡。只用上面工具結果的數字重寫回覆，不要自己算或猜。"}]
                 continue
             code = self._code_reply(out, reply, text, source, waiting_plan, editing)
             if code is None and prev is not None and tidy(reply, True) == prev[1] and not last:
@@ -612,6 +721,9 @@ class MainAgent:
         for s in steps:
             if not (s["ok"] and s["summary"]) or s["tool"] in (PROPOSE, DISCUSS):
                 continue
+            if s["tool"] == QUERY:                  # rules only (the model words its own reply): the data, unbracketed
+                ok.append(s["label"].removeprefix("查了") + "：" + re.sub(r'[{}\[\]"]', "", s["summary"])[:90])
+                continue
             sops = re.findall(r"(SOP-[A-Z]+-\d+)〈([^〉]+)〉", s["summary"]) if s["tool"] == "sop_search" else []
             ok.append("請照 " + "、".join(f"{a}〈{b}〉" for a, b in sops[:2]) + " 處理" if sops else s["summary"][:90].rstrip("。；，、 "))
         ok = list(dict.fromkeys(ok))                # the same SOP found by several searches is named once
@@ -649,9 +761,8 @@ class MainAgent:
             return
         if _QUESTION_RX.search(t) or asks or re.search(r"SOP|怎麼處理|處置", t):
             out["intent"] = "question"
-            plan = mock_plan(t, context)
-            for s in plan.steps[:MAX_STEPS]:
-                await self._tool(s.tool, s.args, t, out, tid, run_tool, propose, discuss)
+            for name, args in rule_reads(t, context)[:MAX_STEPS]:
+                await self._tool(name, args, t, out, tid, run_tool, propose, discuss)
             out["reply"] = (self._unknown_reply(out) or self._nothing_read(out["steps"]) or self._results_reply(out["steps"])
                             or "這個我手上的資料查不到。你想知道哪台機台或哪張訂單？")
             return

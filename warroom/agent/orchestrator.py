@@ -328,7 +328,8 @@ class Orchestrator:
         self.queue.tags[ev.id] = (t, p)
         self._audit({"orch": "dispatch", "phase": "plan", "type": t, "type_label": TYPES[t], "priority": p, "by": via,
                      "reason": why, "machine_id": ev.machine_id,
-                     "text": f"新任務：{TYPES[t]}（{self._what(ev)}）；這個任務的 agent 擬好計劃會送核准，核准後執行", **extra}, ev.id)
+                     # plain event words, no dispatch (CJ 2026-10-21: 「現在先不要派發，主要就是一個 agent 做 tool calling」)
+                     "text": f"{self._what(ev).strip('「」')}：開始處理，計劃擬好會送你核准", **extra}, ev.id)
         self.publish()
 
     async def dispatch_command(self, text: str, actor: str, start: Callable[[str, str], Event]) -> tuple[Event, dict[str, Any]]:
@@ -392,11 +393,11 @@ class Orchestrator:
         kind = d.decision.value
         name = self._name(self._event(ev_id))
         gap = " " if name[:1].isascii() and name[:1].isalnum() else ""
+        # plain event words (「已核准 7 號機方案 A，執行中」), never a dispatch to a typed agent (CJ 2026-10-21: 「好改」)
         if kind in ("approve", "modify"):
-            text = (f"已核准{gap}{name}，Agent Nemo（{TYPES.get(t, t)}）開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}"
-                    "；完成後回報")
+            text = f"已核准{gap}{name}{'方案 ' + d.option_id if d.option_id else '的計劃'}，執行中"
         elif kind == "reject":
-            text = f"主管駁回{gap}{name}{'的' if name else ''} Agent Nemo（{TYPES.get(t, t)}）計劃，不執行"
+            text = f"已駁回{gap}{name}{'的' if name else ''}計劃，不執行"
         else:
             return
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
@@ -439,12 +440,14 @@ class Orchestrator:
                 if r.decision is not None:
                     decided.append(f"{_DECISION.get(r.decision.decision.value, r.decision.decision.value)}"
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
-        head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "已停止"
+        repaired = ev.source == "detector" and ev.state is EventState.CLOSED and not sub.interrupted
+        head = "已中斷" if sub.interrupted else "已修復" if repaired else "完成" if ev.state is EventState.CLOSED else "已停止"
         outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
         name = self._name(ev)
         if ev.source == "supervisor" and (ev.command or "").strip()[:10] in outcome:
             name = ""                                       # the outcome already quotes the command
-        parts = [f"{name}{'・' if name else ''}Agent Nemo（{TYPES[sub.type]}）{head}：{outcome or '無需動作'}"]
+        done_at = f"（{ev.closed_at.astimezone(TZ):%H:%M} 結案）" if ev.closed_at and ev.state is EventState.CLOSED else ""
+        parts = [f"{name or '任務'}{head}：{outcome or '無需動作'}{done_at}"]   # 「7 號機已修復：溫度回到 128°C（02:14 結案）」
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
         parts.append(f"核准：{'、'.join(decided)}" if decided else "沒有核准")
         return "。".join(parts), {"writes": writes, "approvals": decided, "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
@@ -498,7 +501,7 @@ class Orchestrator:
         detail = {"orch": "interrupt", "by": by, "reason": reason, "cancelled_run": cancelled_run,
                   "superseded_approvals": superseded, "cancelled_tasks": cancelled_tasks, "schedule_kept": kept,
                   "state": ev.state.value, "type": sub.type,
-                  "text": f"主管中斷{self._name(ev)}{'的' if self._name(ev) else ''} Agent Nemo（{TYPES[sub.type]}）：停止新的工具呼叫"
+                  "text": f"主管中斷{self._name(ev)}：停止新的工具呼叫"
                           f"{f'，作廢核准卡 {len(superseded)} 張' if superseded else ''}"
                           f"{f'，取消人員任務 {len(cancelled_tasks)} 件' if cancelled_tasks else ''}"
                           f"，排程維持{f' v{kept}' if kept else '原樣'}"}
