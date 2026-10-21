@@ -7,7 +7,7 @@ import { machineLabel } from './factory'
 
 const SOP_FILES = import.meta.glob('../../warroom/kb/sop/*.md', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
 const SOP_TEXT: Record<string, string> = Object.fromEntries(Object.values(SOP_FILES).flatMap((t) => {
-  const m = t.split('\n', 1)[0].match(/^#\s*(SOP-[A-Z]+-\d+)\s/)
+  const m = t.split('\n', 1)[0].match(/^#\s*(SOP-\w+-\d+)\s/)
   return m ? [[m[1], t]] : []
 }))
 
