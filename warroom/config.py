@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     # COMMANDER_MAX_TOKENS: completion cap for a commander plan. 1200 cut the live p.11 plan mid-JSON
     # (Nemotron pretty-prints, ~1.2-1.5k tokens for a full plan); a cut plan is audited as "truncated"
     commander_max_tokens: int = 4096
+    # LLM_CONTEXT_TOKENS: the serving model's context window (vLLM --max-model-len, Ollama num_ctx). The commander
+    # keeps system + user prompt within it minus commander_max_tokens, trimming per-event context first (#33)
+    llm_context_tokens: int = 32768
+    # PROMPT_TOKEN_FACTOR: serving-tokenizer tokens per approx_tokens() unit. 2.0 stays on the safe side until it is
+    # measured against the server's prompt_tokens (every commander LLM_CALL audit entry carries both numbers)
+    prompt_token_factor: float = 2.0
     llm_fallback_to_mock: bool = True     # invalid JSON / unreachable -> mock plan, logged
     guided_json: bool = True              # vLLM extra_body guided_json; else response_format json_schema
 
