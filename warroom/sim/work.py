@@ -267,6 +267,13 @@ class TaskBoard:
                                          and t.machine_id == spec["machine_id"] and t.order_ids == spec["order_ids"]
                                          for t in self._tasks.values()):
                 continue
+            # fast repair: the crew is already on (or done with) this machine for this event. A later round re-runs
+            # the plan's R1 檢修 (a stale schedule re-solved by code, a replan): a second task would start the
+            # repair_fast_s wall seconds over and hold the fix and the 綠燈 back that long
+            if self.fast_s > 0 and spec["kind"] in REPAIR_KINDS and any(
+                    t.event_id == req.event_id and t.kind == spec["kind"] and t.machine_id == spec["machine_id"]
+                    for t in self._tasks.values()):
+                continue
             self._seq += 1
             t = _Task(id=f"TK-{self._seq:04d}", event_id=req.event_id, approval_id=req.approval_id, step_id=req.step_id,
                       created_at=now, **spec)
@@ -284,6 +291,25 @@ class TaskBoard:
             self._emit(t, now, "created")
         self._trim()
         self.update(now)                 # assign at once when someone is free
+        return [self._view(t) for t in out]
+
+    def add_specs(self, event_id: str, specs: list[dict[str, Any]], now: datetime) -> list[WorkTask]:
+        """Tasks a SUPERVISOR asked for outside a plan step (安全核心 ① 派現場檢查, 安全停止 交給現場處理): fixed SOP
+        specs (`_spec`), never written by the model. With fast repair on, every one of them runs on the wall clock
+        like a repair task, so a field check does not take factory minutes on the demo screen."""
+        out = []
+        for spec in specs:
+            self._seq += 1
+            t = _Task(id=f"TK-{self._seq:04d}", event_id=event_id, approval_id=None, step_id=None, created_at=now,
+                      **spec)
+            if self.fast_s > 0:
+                total = self.fast_s * max(float(self.speed() or 1.0), 1e-6) / 60.0
+                t.fast_s, t.walk_min, t.work_min = self.fast_s, total * FAST_WALK_FRAC, total * (1 - FAST_WALK_FRAC)
+            self._tasks[t.id] = t
+            out.append(t)
+            self._emit(t, now, "created")
+        self._trim()
+        self.update(now)
         return [self._view(t) for t in out]
 
     def cancel(self, event_id: str, step_id: str, now: datetime) -> list[str]:

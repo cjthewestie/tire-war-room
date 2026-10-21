@@ -81,7 +81,10 @@ def _assert_page11(rt: Runtime) -> None:
 
 
 # ---------------------------------------------------------------- 1. re-run replays page 11 fresh
-async def test_page11_twice_across_two_runtimes_matches_page11_both_times(tmp_path):
+async def test_page11_twice_across_two_runtimes_matches_page11_both_times(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     for run in (1, 2):
         rt = _real(tmp_path, P11)
         assert rt.resumed is False and rt.builder.reopened_store is False, run
@@ -101,7 +104,10 @@ async def test_page11_twice_across_two_runtimes_matches_page11_both_times(tmp_pa
         assert not (tmp_path / "sched" / "running.json").exists()      # clean stop clears the marker
 
 
-async def test_unclean_exit_resumes_clock_holds_and_store_without_replaying(tmp_path):
+async def test_unclean_exit_resumes_clock_holds_and_store_without_replaying(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt = _real(tmp_path, P11)
     await rt.start()
     await _run_p11(rt)
@@ -171,7 +177,10 @@ def test_missing_excel_is_reported_and_sim_seed_kept(tmp_path):
 
 
 # ---------------------------------------------------------------- 3 + 7. schedule impact
-async def test_impact_matches_phone_in_round2_and_shows_kept_version_after_safe_stop(tmp_path):
+async def test_impact_matches_phone_in_round2_and_shows_kept_version_after_safe_stop(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     from warroom.agent.narrate import moves_text
     rt = _real(tmp_path, P11)
     round2_seen: list[tuple[str, list[str]]] = []

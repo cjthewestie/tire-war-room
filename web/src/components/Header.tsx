@@ -1,6 +1,8 @@
 import { machineLabel } from '../factory'
-import { fmtHM, fmtMD } from '../format'
+import { useEffect, useRef, useState } from 'react'
+import { fmtHM, fmtMD, fmtWeekdayShort } from '../format'
 import { QUALITY_LABEL } from './common'
+import { ThemeToggle } from './ThemeToggle'
 import { useLinkStatus } from '../linkStatus'
 import { useWarRoom } from '../useWarRoom'
 
@@ -12,7 +14,6 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
   const { state, transport, connected } = useWarRoom()
   const link = useLinkStatus()
   const h = state.snapshot?.header
-  const ft = state.clock?.factory_time ?? h?.factory_time
   const net = h?.network ?? 'online'
   return (
     <header className="topbar">
@@ -38,23 +39,63 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
             <i className="dot data" />驗證層攔下 {h?.bad_data_total} 筆壞資料（{(h?.bad_data ?? []).map((b) => machineLabel(b.machine_id)).join('、')}・未喚醒 AI）
           </span>
         )}
-        {/* one chip for both counts (UX declutter); it turns red while any machine is abnormal */}
-        <span className={`chip ${h && h.abnormal_count > 0 ? 'bad' : 'ok'}`} data-testid="chip-counts">
-          <i className={`dot ${h && h.abnormal_count > 0 ? 'bad' : 'ok'}`} />
-          <span data-testid="chip-normal">正常 {h?.normal_count ?? '–'} 台</span>・<span data-testid="chip-abnormal">異常 {h?.abnormal_count ?? '–'} 台</span>
-        </span>
-        <span className="clock">{ft ? <><span>{fmtMD(ft)}</span><span>{fmtHM(ft)}</span></> : '—'}</span>
+        <RealClock />
         {/* README: 「畫面時間旁顯示一日循環・第 n 輪」 — kept beside the time, small and muted; full wording in the tooltip */}
         {state.clock?.day_loop && (
           <span className="clock-loop" data-testid="chip-loop" title={`一日循環・第 ${state.clock.day_loop.loop} 輪：團隊資料集 ${state.clock.day_loop.source_day} 一整天，24:00 回到 00:00 重跑`}>
             <span className="sr">一日循環・</span>第 {state.clock.day_loop.loop} 輪
           </span>
         )}
+        <UserMenu />
+        <ThemeToggle />
         {/* .live = connected to the backend (e2e waits on it); tone: ok | warn | mock | down */}
         <span className={`mode t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''} ${transport?.mode === 'mock' ? 'mock' : ''}`} title={link.title} data-testid="link-chip" role="status">
           {link.text}
         </span>
       </div>
     </header>
+  )
+}
+
+/** 系統時間: the real clock (Taipei), small label above. The plant's data runs on the simulated factory time, which is
+ *  labelled 模擬工廠時間 where it is shown (今日工廠概況). On a phone the date is the short 10/21 so it never wraps. */
+function RealClock() {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => { const t = setInterval(() => setNow(Date.now()), 10_000); return () => clearInterval(t) }, [])
+  const full = `${fmtMD(now)}（${fmtWeekdayShort(now)}）${fmtHM(now)}`
+  const short = `${fmtMD(now).slice(5)} ${fmtHM(now)}`
+  return (
+    <span className="clock-wrap">
+      <small className="clock-lbl">系統時間</small>
+      <span className="clock" data-testid="clock" title="現在的日期與時間（台北）">
+        <span className="clock-full">{full}</span><span className="clock-short" aria-hidden>{short}</span>
+      </span>
+    </span>
+  )
+}
+
+/** 登入身分: the page is shown as already signed in. A sketch only: no sign-in or sign-out is wired up. */
+function UserMenu() {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const off = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false) }
+    const esc = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', off); document.addEventListener('keydown', esc)
+    return () => { document.removeEventListener('mousedown', off); document.removeEventListener('keydown', esc) }
+  }, [open])
+  return (
+    <div className="usermenu" ref={box}>
+      <button type="button" className="user-btn" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((o) => !o)} data-testid="user-menu">
+        <span className="user-av" aria-hidden>主</span><span className="user-name">主管</span><span className="user-caret" aria-hidden>▾</span>
+      </button>
+      {open && (
+        <div className="user-pop" role="menu">
+          <div className="user-who"><b>主管</b><small>已登入・戰情室負責人</small></div>
+          <button type="button" role="menuitem" disabled title="示意畫面：尚未串接登入">登出（尚未啟用）</button>
+        </div>
+      )}
+    </div>
   )
 }

@@ -32,8 +32,7 @@ check('no 對話台 anywhere in the tabs', (await p.locator('.tabs').innerText()
 // (c) ticker: fixed counts left, scrolling items right
 await p.goto(BASE + '/', { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tk-track"] .tk-i')
-const fixed = await p.locator('[data-testid="tk-fixed"]').innerText()
-check('ticker: fixed 正常 / 異常 / 待核准', fixed.includes('正常') && fixed.includes('異常') && fixed.includes('待核准'), fixed.replace(/\n/g, ' '))
+check('ticker: full-width row, no fixed 正常 / 異常 / 待核准 bar (#100)', (await p.locator('[data-testid="tk-fixed"]').count()) === 0 && (await p.locator('[data-testid="status-strip"]').count()) === 1)
 const ticks = await p.locator('[data-testid="tk-track"] > .tk-i').allInnerTexts()
 check('ticker: per-line, press and plant items', ticks.some((t) => /A 線/.test(t)) && ticks.some((t) => /號硫化機/.test(t)) && ticks.length >= 12, `${ticks.length}: ${ticks.slice(0, 4).join(' | ')}`)
 check('ticker scrolls (animation running)', await p.evaluate(() => getComputedStyle(document.querySelector('[data-testid="tk-track"]')).animationName === 'tk-scroll'))
@@ -79,7 +78,7 @@ check('#world opens the merged 產線監控', await p.locator('[data-testid="tab
 check('no 工廠全貌 tab', await p.locator('.tabs button', { hasText: '工廠全貌' }).count() === 0)
 check('預警 first', await p.evaluate(() => document.querySelector('main')?.firstElementChild?.getAttribute('data-testid') === 'early-warnings'))
 check('28 machines', await p.locator('.machines [data-machine]').count() === 28, String(await p.locator('.machines [data-machine]').count()))
-for (const id of ['plant-panels', 'people-zones', 'materials', 'dock-trucks', 'world-goods', 'order-pipeline', 'kpi-people']) {
+for (const id of ['mon-answer', 'cure-schedule', 'next-at-press', 'plant-panels', 'people-zones', 'materials', 'dock-trucks', 'world-goods', 'order-pipeline']) {
   check(`monitor has ${id}`, await p.locator(`[data-testid="${id}"]`).count() >= 1)
 }
 check('one order pipeline only', await p.locator('[data-testid="order-pipeline"]').count() === 1)
@@ -96,12 +95,12 @@ await p.fill('[data-testid="order-search"]', 'A-311')
 check('search filters', await p.locator('[data-testid="order-list"] .ot-row').count() === 1 && await p.locator('[data-testid="order-card"]').count() === 1)
 await p.fill('[data-testid="order-search"]', '')
 
-// 3. 人力排程
+// 3. 人力排程 (Kyle 10-22 draft: the answer on top, today's shifts, the next de-molds / mold-ins in words; 硫化機排程 is on 產線監控)
 await p.click('.tabs button:has-text("人力排程")')
-await p.waitForSelector('.sched-help')
-const help = await p.locator('.sched-help').innerText()
-check('schedule explains order ids and the bottleneck', help.includes('訂單編號') && help.includes('瓶頸') && help.includes('11 台硫化機'))
-check('schedule lists next mold-ins in words', await p.locator('.sched-next tbody tr').count() >= 1)
+await p.waitForSelector('[data-testid=sched-answer]')
+check('schedule answers in one sentence on top', (await p.locator('[data-testid=sched-answer] h1').count()) === 1)
+check('schedule draws today\'s shifts', (await p.locator('[data-testid=sched-people] svg').count()) === 1)
+check('schedule lists the next de-molds / mold-ins in words', await p.locator('[data-testid=sched-next] li').count() >= 1)
 
 // 4. home: dialogue only + link
 await p.click('[data-testid="tab-agent"]')
@@ -134,6 +133,10 @@ await p.locator('[data-testid="state-diagram"] .sm-n[data-state="simulate"]').cl
 
 // (h) 狀態機 page
 await p.click('[data-testid="tab-sm"]')
+await p.waitForSelector('[data-testid="sm-rows"] [data-testid="sm-row"]', { timeout: 15000 }).catch(() => {})
+check('狀態機: 4 plain stages', (await p.locator('[data-testid="sm-stage"]').count()) === 4)
+check('狀態機: one row per open event', (await p.locator('[data-testid="sm-row"]').count()) >= 1)
+await p.click('[data-testid="sm-detail-toggle"]')  // the 11-state board sits behind 看細節
 await p.waitForSelector('[data-testid="sm-board"] [data-testid="sm-card"]', { timeout: 15000 }).catch(() => {})
 check('狀態機: header counts', (await p.locator('[data-testid="sm-counts"] .kpi').count()) === 5)
 check('狀態機: 11 state columns', await p.locator('[data-testid="sm-board"] .sm-col').count() === 11)
@@ -243,7 +246,7 @@ for (const theme of ['light', 'dark']) {
     const lum = ([r, g, b]) => { const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b) }
     const bg = (el) => { for (let e = el; e; e = e.parentElement) { const c = rgb(getComputedStyle(e).backgroundColor); if (c.length >= 3 && (c[3] ?? 1) > 0.5) return c } return [255, 255, 255] }
     let w = { ratio: 99, text: '' }
-    for (const el of document.querySelectorAll('.tk-i:not(.tk-dup .tk-i), .tk-fixed .as-item')) {
+    for (const el of document.querySelectorAll('.tk-i:not(.tk-dup .tk-i)')) {
       const a = lum(rgb(getComputedStyle(el).color)), bb = lum(bg(el))
       const ratio = (Math.max(a, bb) + 0.05) / (Math.min(a, bb) + 0.05)
       if (ratio < w.ratio) w = { ratio: Math.round(ratio * 100) / 100, text: el.textContent.slice(0, 24) }

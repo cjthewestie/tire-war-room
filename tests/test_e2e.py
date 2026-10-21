@@ -17,9 +17,9 @@ from warroom.contracts import AuditKind, EventState, MachineStatus
 pytestmark = pytest.mark.timeout(300)
 
 
-def _settings(tmp_path, scenario: str) -> Settings:
+def _settings(tmp_path, scenario: str, **over) -> Settings:
     return Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched",
-                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock")
+                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock", **over)
 
 
 def _at(rt: Runtime, hms: str) -> datetime:
@@ -33,8 +33,8 @@ async def _run_until(rt: Runtime, hms: str) -> None:
         await rt.tick(1.0, publish=False)
 
 
-async def _start(tmp_path, scenario: str):
-    rt = Runtime(_settings(tmp_path, scenario), allow_fallback=False, run_loop=False)
+async def _start(tmp_path, scenario: str, **over):
+    rt = Runtime(_settings(tmp_path, scenario, **over), allow_fallback=False, run_loop=False)
     assert rt.degraded == {}, rt.degraded               # nothing stubbed or faked in the live path
     await rt.start()
     rt._ingest_kb()                                      # deterministic: index SOPs before the event
@@ -48,7 +48,10 @@ async def _pending(client) -> list[dict]:
     return r.json()
 
 
-async def test_page11_press7_full_timeline(tmp_path):
+async def test_page11_press7_full_timeline(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt, client = await _start(tmp_path, "press7_temp_drop")
     try:
         # 02:14:00 detection (within 1 sim-minute of the fault), commander wakes, plan + simulate + gate;
@@ -142,7 +145,10 @@ async def test_page11_press7_full_timeline(tmp_path):
         await rt.stop()
 
 
-async def test_page2_open_mill_overheat(tmp_path):
+async def test_page2_open_mill_overheat(tmp_path, monkeypatch):
+    # page 2 at the real repair durations: the event closes while the crew is still on the cooling water; with the
+    # demo's fast repair it closes 「已修復」 after the 檢修 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt, client = await _start(tmp_path, "open_mill_overheat")
     try:
         start = rt.now()

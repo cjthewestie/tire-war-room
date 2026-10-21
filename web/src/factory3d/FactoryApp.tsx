@@ -8,6 +8,8 @@
 // lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
 // click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
 // is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
+// ▶ Demo（6 分鐘） (G): the guided 6-minute run for the finals (GuidedDemo.tsx, demoCues.ts): cue cards, the camera
+// flies to each beat, and at 3:00 the pitch on the whiteboard (Whiteboard.tsx; CJ's slides in web/public/pitch/).
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -20,13 +22,17 @@ import type { SimControl } from '../contracts'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { useLinkStatus } from '../linkStatus'
-import { alertText, diffPending, reviewAlerts, type PushState } from '../phone/alert'
+import { alertText, diffPending, repairNotices, type PushState } from '../phone/alert'
+import { repairStage } from '../aiStatus'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
+import { DemoOverlay, SlideView } from './GuidedDemo'
+import { useGuidedDemo } from './useGuidedDemo'
+import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
@@ -39,6 +45,7 @@ import { SPACES, arrival } from './spaces'
 import { TiltShift } from './TiltShift'
 import { TouchControls } from './TouchControls'
 import { DRAWN_LIGHT, Lights, World } from './World'
+import { PendingApprovalAlert } from '../components/PendingApprovalAlert'
 
 type Panel = { kind: 'machine'; id: string } | { kind: 'monitor' } | null
 const SCENE_LABEL: Record<SceneId, string> = { factory: '工廠', break: '休息區', toilet: '廁所' }
@@ -113,7 +120,7 @@ export function FactoryApp() {
   const [scene, setScene] = useState<SceneId>('factory')
   const [fading, setFading] = useState(false)
   const [locked, setLocked] = useState(false)
-  const [toast, setToast] = useState<{ title: string; body: string; at: number; review?: boolean } | null>(null)
+  const [toast, setToast] = useState<{ title: string; body: string; at: number; notice?: boolean } | null>(null)
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
@@ -130,25 +137,29 @@ export function FactoryApp() {
   const ev = primaryEvent(state.snapshot?.events)
   const evOpen = ev && ev.state !== 'closed' && ev.state !== 'safe_stop'
   const pending = state.pending
-  // fast repair: repaired events waiting for the supervisor's 覆核 ring the phone like a new approval
-  const reviews = useMemo(() => reviewAlerts(state.snapshot?.events), [state.snapshot?.events])
+  // fast repair (Kyle 10-21 flow): 維修完成 and 已恢復正常，報告已產生 ring the phone once each (notices, nothing waits)
+  const notices = useMemo(() => repairNotices(state.snapshot?.events, state.snapshot?.machines), [state.snapshot?.events, state.snapshot?.machines])
+  // HUD: 維修中 = after the decision, the crew working or the readings coming back; 報告待讀 = closed, report unread
+  const stages = (state.snapshot?.events ?? []).map((e) => repairStage(e, state.world?.tasks.items ?? []))
+  const repairing = stages.filter((x) => x === 'repairing' || x === 'recovering').length
+  const unread = stages.filter((x) => x === 'report').length
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
   const overlay = panel !== null || phoneUp
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const fp = started && mode === 'first'
   const paused = !!state.clock?.paused
 
-  // New approval (or 覆核 request) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
+  // New approval (or fast-repair notice) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
-    const out = diffPending(push.current, [...pending, ...reviews], connected && !lanDown)
+    const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
     if (!out.fire.length) return
     const { title, body } = alertText(out.fire, out.flushed)
-    setToast({ title, body, at: Date.now(), review: out.fire.every((a) => a.review) })
+    setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
     setBuzzUntil(performance.now() + 2200)
     setBuzz(true)
     try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
     ring()
-  }, [pending, reviews, connected, lanDown])
+  }, [pending, notices, connected, lanDown])
   useEffect(() => {
     if (!buzz) return
     const t = setTimeout(() => setBuzz(false), 2200)
@@ -179,6 +190,32 @@ export function FactoryApp() {
     const t = setTimeout(() => setDemoNote(null), demoNote.ms ?? 2500)
     return () => clearTimeout(t)
   }, [demoNote])
+  // ▶ Demo（6 分鐘）: the camera is the director's while it runs, so the lead stands still and the overview is on
+  const deck = useDeck()
+  const onDemoBegin = useCallback(() => {
+    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
+  }, [])
+  const onDemoEnd = useCallback(() => { window.focus(); canvasRef.current?.focus() }, [])
+  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd })
+  const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
+  const nSlides = deck.slides.length
+  const { running: demoOn, setSlide, setSlideView, slideView } = demo
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA')) return
+      if (e.code === 'KeyG' && !e.repeat) { void demo.begin(); return }
+      if (!demoOn) return
+      if (e.code === 'KeyN' && !e.repeat) demo.skip()
+      else if (e.code === 'KeyB' && !e.repeat) demo.togglePause()
+      else if ((pitchView || slideView) && (e.code === 'ArrowRight' || e.code === 'PageDown')) setSlide((i) => Math.min(nSlides - 1, i + 1))
+      else if ((pitchView || slideView) && (e.code === 'ArrowLeft' || e.code === 'PageUp')) setSlide((i) => Math.max(0, i - 1))
+      else if (e.code === 'Escape' && slideView) setSlideView(false)
+    }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [demo, demoOn, pitchView, slideView, nSlides, setSlide, setSlideView])
+
   const stateRef = useRef(state)          // 情境疊加: the key handler decides overlay / load on the latest state
   useEffect(() => { stateRef.current = state }, [state])
 
@@ -250,6 +287,7 @@ export function FactoryApp() {
       }
       if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
+      if (e.code === 'Escape' && demoOn) return   // the demo's slide view takes Esc
       if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
@@ -264,7 +302,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen, demoOn])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -310,15 +348,16 @@ export function FactoryApp() {
         <color attach="background" args={['#e9dfcf']} />
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
-        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null} />
+        <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
+          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
-          enabled={started && !overlay && !fading} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
-          pending={pending.length + reviews.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
+          enabled={started && !overlay && !fading && !demoOn} started={started} onNear={setNear} onDoor={goTo} phoneUp={phoneUp}
+          pending={pending.length + notices.length} buzzUntil={buzzUntil} mode={mode} scene={scene}
           prompt={prompt}
         />
-        <TiltShift enabled={(!started || mode === 'third') && !phoneUp} />
+        <TiltShift enabled={(!started || mode === 'third') && !phoneUp && !pitchView} />
       </Canvas>
 
       {/* first person: a small aim dot, and what F does right here */}
@@ -327,6 +366,8 @@ export function FactoryApp() {
       {fp && !overlay && !locked && (TOUCH_DEVICE
         ? <div className="f3-look-hint">拖曳畫面看四周</div>
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
+
+      <PendingApprovalAlert variant="corner" newTab />
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
@@ -348,22 +389,27 @@ export function FactoryApp() {
         <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
         </div>
-        <div className={`f3-pend ${pending.length || reviews.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{reviews.length ? `・待覆核 ${reviews.length} 件` : ''}{pending.length || reviews.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
-        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
+        <div className={`f3-pend ${pending.length || repairing || unread ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{repairing ? `・維修中 ${repairing} 件` : ''}{unread ? `・報告待讀 ${unread} 件` : ''}{pending.length || unread ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
+        {!demoOn && (
+          <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
+        )}
+        {started && !phoneUp && !demoOn && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
-      <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
+      {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
-      </div>
+      </div>}
+      <DemoOverlay demo={demo} slides={nSlides} onPhone={() => raisePhone(true)} />
+      {slideView && <SlideView slides={deck.slides} index={Math.min(demo.slide, nSlides - 1)} onIndex={setSlide} onClose={() => setSlideView(false)} />}
       {success.latest && shown !== success.latest.key && (
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
       )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
       {toast && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
-          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.review ? '覆核' : '核准'}</i>
+          <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
         </div>
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
@@ -387,6 +433,7 @@ export function FactoryApp() {
               <li><kbd>P</kbd> 拿起主管手機（真的手機頁，在哪都能核准）・<kbd>V</kbd> 切換俯瞰</li>
             </ul>}
             <button className="f3-go">點擊開始</button>
+            <button className="f3-go f3-go-demo" data-testid="demo-start-intro" onClick={(e) => { e.stopPropagation(); void demo.begin() }}>▶ Demo（6 分鐘）</button>
           </div>
         </div>
       )}
