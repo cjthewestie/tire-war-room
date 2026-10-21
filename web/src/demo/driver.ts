@@ -6,7 +6,7 @@
 import type { ScenarioName, SimControl } from '../contracts'
 import type { WarRoomState } from '../store'
 import {
-  CUES, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, advance, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
+  CUES, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
 import { freshSeen, signals, type Seen } from './signals'
@@ -160,5 +160,57 @@ export class DemoRun {
         .finally(() => { this.inflight-- })
     }
     return changed ? 'cue' : null
+  }
+}
+
+/** The 3D when another screen drives (the war room's 「▶ Demo 模式」): no timeline of its own, it follows the server's
+ *  cue (GET/POST /api/demo/state, WS "demo") and sends continue / pause / exit like any other screen. Same surface as
+ *  DemoRun, so the 3D's camera, walk and monitor code runs the same for both. */
+export class DemoFollow {
+  tl: Timeline = startTimeline()
+  t = 0
+  seen: Seen = freshSeen()
+  latched: Signals = {}
+  firstSeen: Record<string, number> = {}
+  log: LogRow[] = []
+  fallback = false
+  simHeld = false
+  refusedAt = 0
+  arrived: boolean | undefined = undefined
+  private io: DemoIO
+  private base = { t: 0, at: 0 }
+  constructor(io: DemoIO) { this.io = io }
+
+  async continue(): Promise<'ok' | 'approval'> {
+    try { await this.io.demo?.({ action: 'continue' }); return 'ok' } catch (e) {
+      this.refusedAt = performance.now()
+      return /approval/.test(String((e as Error).message ?? e)) ? 'approval' : 'ok'
+    }
+  }
+  pause(_now: number, paused: boolean) { void this.io.demo?.({ action: paused ? 'pause' : 'resume' }).catch(() => {}) }
+  async exit() { await this.io.demo?.({ action: 'exit' }).catch(() => null) }
+
+  tick(now: number, state: WarRoomState): 'stopped' | 'cue' | null {
+    const d = state.demo
+    if (!d?.running) return 'stopped'
+    // the server's elapsed time, carried forward between pushes
+    if (d.elapsed_s !== this.base.t) this.base = { t: d.elapsed_s, at: now }
+    const t = this.t = d.paused ? d.elapsed_s : d.elapsed_s + (now - this.base.at) / 1000
+    const live = signals(state, this.seen)
+    for (const [k, v] of Object.entries(live)) if (v && this.firstSeen[k] == null) this.firstSeen[k] = Math.round(t * 10) / 10
+    this.latched = latch(this.latched, live)
+    const i = Math.max(0, CUES.findIndex((c) => c.id === d.cue_id))
+    const released = d.waiting_for === 'event'
+    if (i !== this.tl.index) {
+      const c = CUES[i]
+      this.tl = {
+        index: i, enteredAt: t, released, releasedAt: t, pitchAt: i > PITCH_INDEX ? this.tl.pitchAt ?? t : null,
+        fired: [...this.tl.fired, { id: c.id, t, reason: 'follow' }],
+      }
+      this.log.push({ id: c.id, title: c.title, planned: c.at, t: Math.round(t * 10) / 10, reason: 'follow', wall: new Date().toISOString() })
+      return 'cue'
+    }
+    if (released && !this.tl.released) this.tl = { ...this.tl, released: true, releasedAt: t, pitchAt: this.tl.index === PITCH_INDEX ? t : this.tl.pitchAt }
+    return null
   }
 }

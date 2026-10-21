@@ -6,7 +6,7 @@
 // Keys (FactoryApp, and the same actions on the Xbox pad, gamepad.ts): G start · Space / N continue · B pause ·
 // Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { DemoRun, type LogRow } from '../demo/driver'
+import { DemoFollow, DemoRun, type LogRow } from '../demo/driver'
 import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
 import type { WarRoomState } from '../store'
 import type { Transport } from '../transport'
@@ -44,7 +44,7 @@ function monitorFor(cueId: string, eventId: string | null): string | null {
 }
 
 interface Snap { tl: DemoRun['tl']; t: number; sig: DemoRun['latched']; eventId: string | null; fallback: boolean; log: LogRow[] }
-const snapOf = (r: DemoRun): Snap => ({ tl: r.tl, t: r.t, sig: r.arrived === undefined ? r.latched : { ...r.latched, arrived: r.arrived }, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
+const snapOf = (r: DemoRun | DemoFollow): Snap => ({ tl: r.tl, t: r.t, sig: r.arrived === undefined ? r.latched : { ...r.latched, arrived: r.arrived }, eventId: r.seen.id, fallback: r.fallback, log: [...r.log] })
 
 export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlides }: {
   state: WarRoomState; transport: Transport | null
@@ -55,7 +55,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
   onEnd: () => void
   nSlides: number
 }) {
-  const run = useRef<DemoRun | null>(null)
+  /** this screen's driver (a demo started here), or a follower (started on the war room) */
+  const run = useRef<DemoRun | DemoFollow | null>(null)
+  const [following, setFollowing] = useState(false)
   const [running, setRunning] = useState(false)
   /** what the overlay shows, copied out of the driver every tick */
   const [snap, setSnap] = useState<Snap | null>(null)
@@ -73,23 +75,25 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
   const stateRef = useRef(state)
   useEffect(() => { stateRef.current = state }, [state])
 
+  /** the demo this screen just left (its started_at): not re-joined while the server's push catches up */
+  const left = useRef<string | null>(null)
   const stop = useCallback(() => {
+    left.current = stateRef.current.demo?.started_at ?? null
     run.current = null
     setSnap(null)
     setMonitor(null); monitorRef.current = null
     walker.reset()
     setRunning(false); setSlideView(false); setConfirmExit(false); setPaused(false)
     director.on = false
+    director.clearRadius = 0
+    setFollowing(false)
     onEnd()
   }, [onEnd])
 
-  const begin = useCallback(async () => {
-    if (!transport) return
-    if (run.current) await run.current.exit()
+  /** The 3D's own setup for a demo, whoever drives it. */
+  const setup = useCallback(() => {
     onBegin()
     chime()
-    const r = new DemoRun(transport, '3d')
-    run.current = r
     demoCam.reset()
     demoCam.reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches
     walker.reset()
@@ -100,11 +104,30 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
     walk.current = { station: null, monitorAt: 0, enteredAt: 0 }
     setMonitor(null)
     setSlide(0); setSlideView(false); setBigUntil(0); setConfirmExit(false); setPaused(false); setNote(null)
+  }, [onBegin])
+
+  const begin = useCallback(async () => {
+    if (!transport) return
+    if (run.current) await run.current.exit()
+    setup()
+    const r = new DemoRun(transport, '3d')
+    run.current = r
+    setFollowing(false)
     setRunning(true)
     setSnap(snapOf(r))
     const n = await r.start(performance.now())
     if (n) setNote(n)
-  }, [transport, onBegin])
+  }, [transport, setup])
+
+  // started on another screen (the war room's 「▶ Demo 模式」): join and follow it, camera and walk included
+  const demoState = state.demo
+  useEffect(() => {
+    if (!transport || run.current || !demoState?.running || demoState.started_at === left.current) return
+    setup()
+    run.current = new DemoFollow(transport)
+    setFollowing(true)
+    setRunning(true)
+  }, [transport, demoState?.running, demoState?.started_at, setup])
 
   /** A / Space / N. At the approval checkpoint it is refused: the approval has to happen on the phone. */
   const cont = useCallback(async () => {
@@ -169,6 +192,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       const robotDone = c.id !== 'robot' || robot.played.includes('bow') || now - w.enteredAt > 30000
       const monitorDone = !want || (!!show && now - w.monitorAt > 1500)
       r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
+      // the doorway view of 7 號機: nobody walks through the foreground between the camera and the press
+      director.clearRadius = director.mode === 'walk' && walker.at === 'doorway' && walker.done ? 3.2 : 0
       if (r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt
         const w = waiting(r.tl, r.t, r.latched)
@@ -209,7 +234,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
   }, [paused, slide, slideView])
 
   return {
-    running, t, cue, monitor, next: tl ? upcoming(tl) : null, waiting: w, ready: isReady, released: !!tl?.released,
+    running, t, cue, monitor, following,
+    /** the pitch board is the subject: world labels and the HUD stay out of the way */
+    quiet: running && (cue.id === 'pitch' || cue.id === 'warn' || cue.id === 'end'), next: tl ? upcoming(tl) : null, waiting: w, ready: isReady, released: !!tl?.released,
     paused, slide, setSlide, changeSlide, slideView, setSlideView, bigUntil, note, setNote, confirmExit, setConfirmExit,
     begin, stop, exit, cont, togglePause, fallback: snap?.fallback ?? false, incidentEventId: snap?.eventId ?? null,
     overTarget: !!tl && overTarget(tl, t), pitchLeft: tl ? pitchLeft(tl, t) : null, autoPitchIn: AUTO_PITCH - t, storyTarget: STORY_TARGET,

@@ -197,6 +197,19 @@ function story(times) {
   check('driver: after a burst, the next continue still works (no stuck pointer)', run.tl.index !== after || run.tl.released, `${D.CUES[after].id} → ${D.CUES[run.tl.index].id}`)
 }
 
+// the 3D follows a demo started on the war room (DemoFollow): the server's cue moves the 3D's beat
+{
+  const io = { mode: 'live', control: async () => {}, demo: async () => ({}) }
+  const f = new DR.DemoFollow(io)
+  const st = (cue, waiting = null, running = true) => ({ demo: { running, cue_id: cue, cue_index: D.CUES.findIndex((c) => c.id === cue), elapsed_s: 10, paused: false, waiting_for: waiting, rev: 1 }, snapshot: { events: [], machines: [] }, pending: [], resolved: [], world: null })
+  check('follow: same cue, nothing new', f.tick(1000, st('start')) === null && D.CUES[f.tl.index].id === 'start')
+  check('follow: the war room moves on → the 3D enters that beat', f.tick(1250, st('rush')) === 'cue' && D.CUES[f.tl.index].id === 'rush')
+  check('follow: jumps straight to a later beat too', f.tick(1500, st('worker')) === 'cue' && D.CUES[f.tl.index].id === 'worker')
+  f.tick(1750, st('pitch')); f.tick(2000, st('pitch', 'event'))
+  check('follow: the pitch released (deck started) when the driver waits for the next event', f.tl.released && f.tl.pitchAt != null)
+  check('follow: demo ended elsewhere → stopped', f.tick(2250, st('pitch', null, false)) === 'stopped')
+}
+
 // deck manifest
 {
   const d = S.parseDeck({ slides: [{ file: '01.png', title: '封面', seconds: 15 }, { file: '02.png', seconds: 25 }, '03.png'] })

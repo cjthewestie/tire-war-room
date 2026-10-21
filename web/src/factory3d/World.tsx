@@ -21,6 +21,7 @@ import { machineRing } from './machineRing'
 import { useRingRecoveries } from './recovery'
 import { DockCelebration } from './DockCelebration'
 import { PatrolRobot } from './PatrolRobot'
+import { director } from './pose'
 import { Whiteboard } from './Whiteboard'
 import { Alarms } from './Alarms'
 import type { Alarm } from './alarm'
@@ -707,17 +708,44 @@ export function Roof({ b, y, wallTop, lamps }: { b: Box; y: number; wallTop: num
 }
 const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 
+/** The guided demo frames a shot (the doorway view of 7 號機): people walking between the camera and the subject
+ *  are hidden while they are within director.clearRadius of the camera. Figures are found by userData.figure. */
+function FigureFade() {
+  const figs = useRef<THREE.Object3D[]>([])
+  const lastScan = useRef(-10)
+  const v = useMemo(() => new THREE.Vector3(), [])
+  useFrame(({ scene, camera, clock }) => {
+    const r = director.on ? director.clearRadius : 0
+    if (clock.elapsedTime - lastScan.current > 2) {
+      lastScan.current = clock.elapsedTime
+      const out: THREE.Object3D[] = []
+      scene.traverse((o) => { if (o.userData.figure) out.push(o) })
+      figs.current = out
+    }
+    for (const f of figs.current) {
+      if (r <= 0) { if (f.userData.faded) { f.visible = true; f.userData.faded = false } continue }
+      f.getWorldPosition(v)
+      const near = Math.hypot(v.x - camera.position.x, v.z - camera.position.z) < r
+      if (near && f.visible) { f.visible = false; f.userData.faded = true }
+      else if (!near && f.userData.faded) { f.visible = true; f.userData.faded = false }
+    }
+  })
+  return null
+}
+
 /** Live light per machine as last drawn (read by the e2e test hook). */
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
 /** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp, celebrate = null, board, alarms, arrows }: {
+export function World({ state, focusId, active, fp, celebrate = null, board, alarms, arrows, quiet = false }: {
   state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null
   /** the pitch whiteboard's deck and current slide; clicking the board opens the full-screen view */
   board: { slides: string[]; index: number; onOpen: () => void }
   /** abnormal machines (alarm.ts) for the stack lights, beacons and labels; arrows = the off-screen indicators */
   alarms: Record<string, Alarm>
   arrows: boolean
+  /** the demo's pitch: the board is the subject, so the floating signs and labels (which draw over it) are hidden */
+  quiet?: boolean
 }) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
@@ -744,7 +772,7 @@ export function World({ state, focusId, active, fp, celebrate = null, board, ala
       <Machines />
       {PLACED.map((p) => <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={active && focusId === p.id}
         work={active && focusId === p.id ? machineRing(p.id, tiles[p.id], state.world, now, speed, recs[p.id] ?? null).label : null} />)}
-      {active && <>
+      {active && !quiet && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         <RoomSign id="war" label={R.warRoom.label} x={5.6} z={R.warRoom.z0 + 0.3} y={1.45} />
         <RoomSign id="staff" label={R.staff.label} x={(R.staff.x0 + R.staff.x1) / 2} z={R.staff.z1 - 0.3} y={1.5} />
@@ -767,7 +795,8 @@ export function World({ state, focusId, active, fp, celebrate = null, board, ala
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />
       <PatrolRobot incident={incident} />
-      {active && <Alarms alarms={alarms} labels={!fp} arrows={arrows} />}
+      <FigureFade />
+      {active && <Alarms alarms={alarms} labels={!fp && !quiet} arrows={arrows} />}
       {active && <Whiteboard slides={board.slides} index={board.index} onOpen={board.onOpen} />}
       <Ambient />
     </group>
