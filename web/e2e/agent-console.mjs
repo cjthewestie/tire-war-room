@@ -163,6 +163,8 @@ try {
   await sim(d, { action: 'pause' })
   await d.locator('.tabs button', { hasText: '產線監控' }).click()
   await d.waitForTimeout(1500)
+  // a third card can land between the loop above and the pause: count again with the line on screen
+  np = await d.evaluate(() => fetch('/api/approvals?status=pending').then((x) => x.json()).then((a) => a.length))
   const many = await d.locator('[data-testid=monitor-pending]').innerText().catch(() => '')
   check('monitor: no card, one line with the other approvals', np >= 2 && (await d.locator('.monitor-wrap [data-testid=approval-visual]').count()) === 0 && many.includes(`另有 ${np - 1} 件`), `pending ${np}: ${many.replace(/\n/g, ' | ')}`)
   check('monitor: one row per abnormal machine', (await d.locator('[data-testid=abnormal-list] li').count()) >= np)
