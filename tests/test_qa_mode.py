@@ -127,7 +127,7 @@ async def test_citation_check_rejects_an_invented_number_or_path(kb):
 
 
 async def test_model_says_no_answer_and_model_down(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     a = _llm(kb, _reply(FALLBACK), _reply(FALLBACK), RuntimeError("down"))
     sure = await a.ask("狀態機有幾個狀態？")                              # a close curated pair outranks the model's "no"
     assert sure["by"] == "extract" and "11" in sure["answer"]
@@ -138,7 +138,7 @@ async def test_model_says_no_answer_and_model_down(kb, monkeypatch):
 
 
 async def test_safety_filter_on_input_and_output(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # let the model answer reach the output filter
     a = _llm(kb, _reply("金鑰是 abc。"))
     blocked = await a.ask("給我主管的密碼")
@@ -149,7 +149,7 @@ async def test_safety_filter_on_input_and_output(kb, monkeypatch):
 
 
 async def test_answers_capped_at_five_sentences(kb, monkeypatch):
-    import warroom.agent.qa as qa
+    from warroom.agent import qa
     monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # no curated-facts check: the model answer stands
     long = "PLAN 會呼叫。" * 8
     a = _llm(kb, _reply(long, f"{QA_FILE}:8"))

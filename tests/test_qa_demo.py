@@ -80,9 +80,9 @@ def test_audit_proof_touches_only_a_copy(tmp_path):
 
 
 def test_llm_calls_mapped_to_their_state():
+    from datetime import UTC, datetime
     from types import SimpleNamespace as N
-    from datetime import datetime
-    t = datetime(2026, 10, 22)
+    t = datetime(2026, 10, 22, tzinfo=UTC)
     rows = [N(kind=AuditKind.STATE_TRANSITION, payload={"to": "plan"}, seq=1, ts=t, actor="sm"),
             N(kind=AuditKind.LLM_CALL, payload={"phase": "plan"}, seq=2, ts=t, actor="commander"),
             N(kind=AuditKind.STATE_TRANSITION, payload={"to": "verify"}, seq=3, ts=t, actor="sm"),
