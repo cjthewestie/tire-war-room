@@ -44,7 +44,7 @@ def _writes(tools, tool):
 # ---------------------------------------------------------------- 1: no implicit staffing
 async def test_unoffered_transfer_is_not_put_in_force(tmp_path):
     """The solver adds a cross-team transfer for a shortage this card does not offer (no staffing
-    options): approving the single '核准全部' option must not activate it."""
+    options): approving the single option (the schedule as proposed) must not activate it."""
     clock, audit, sim, store, tools, approvals, sm = make_sm(tmp_path, stable)
     orig = tools._solve_schedule
 
@@ -57,7 +57,8 @@ async def test_unoffered_transfer_is_not_put_in_force(tmp_path):
     ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
     await sup
     card = approvals.all()[0]
-    assert len(card.options) == 1 and card.options[0].label.startswith("核准全部")
+    # one short line of what approving changes: no 「核准全部：」, no 「（公式 …）」, the cure time said once
+    assert [o.label for o in card.options] == ["第 2 版排程生效，7 號機這一模硫化 36.5 小時，#A-311 改 9 號"]
     assert any("本次不含人力調動" in a and "從 2 線調 1 人" in a for a in card.actions), card.actions
     assert ev.state is EventState.CLOSED and store.active == 2
     assert store.current().schedule.staffing_changes == []          # transfer not in force

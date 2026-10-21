@@ -2197,9 +2197,8 @@ class StateMachine:
         if not opts:
             # built in code from the validated args, never the commander's own wording (purpose)
             first = needs[0].step
-            label = self._action_text(run, first, True) if len(needs) == 1 else \
-                "核准全部：" + "；".join(self._action_text(run, sr.step, True) for sr in needs)
-            opts.append(ApprovalOption(id="A", label=label, tool=first.tool, args=first.args, recommended=True))
+            opts.append(ApprovalOption(id="A", label=self._option_label(run, needs), tool=first.tool, args=first.args,
+                                       recommended=True))
         if opts and not any(o.recommended for o in opts):
             opts[0] = opts[0].model_copy(update={"recommended": True})
         pref = [c for c in run.ev.constraints if c.kind == "prefer_option"]
@@ -2210,6 +2209,33 @@ class StateMachine:
             if hit is not None:      # the supervisor's preference becomes the recommended option (code, not model)
                 opts = [o.model_copy(update={"recommended": o.id == hit.id}) for o in opts]
         return opts
+
+    def _option_label(self, run: _Run, needs: list[StepRun]) -> str:
+        """The lone option of a card without a staffing choice, one short line of what approving changes (Kyle 10-21:
+        寫給主管的就是最簡單、最白話): 「第 3 版排程生效，10 號機這一模硫化 41.1 小時，不換機台」. No formula reference
+        and nothing said twice (the cure time the schedule carries is the one set on the press); every write with its
+        key args stays in the card's actions (核准內容)."""
+        bits: list[str] = []
+        for sr in needs:
+            a = sr.step.args
+            if sr.step.tool is ToolName.CONFIRM_SCHEDULE:
+                v = a.get("schedule_version")
+                bits.append(f"第 {v} 版排程生效")
+                for sstep, data in self._solve_steps(run):
+                    if data.get("schedule_version") != v:
+                        continue
+                    for p, h in (sstep.args.get("cure_overrides_h") or {}).items():
+                        bits.append(f"{machine_label(str(p))}這一模硫化 {fmt_num(h)} 小時")
+                    for p in sstep.args.get("unavailable_presses") or []:
+                        bits.append(f"{machine_label(str(p))}停用")
+                    mv = moves_text(data.get("moves"))
+                    bits.append("不換機台" if not mv else mv[0] if len(mv) == 1 and "×" not in mv[0]
+                                else f"{len(mv)} 張訂單換機台")
+            elif sr.step.tool is ToolName.SET_CURE_TIME:
+                bits.append(f"{machine_label(str(a.get('press_id')))}這一模硫化 {fmt_num(a.get('total_cure_h'))} 小時")
+            else:
+                bits.append(self._action_text(run, sr.step, True))
+        return "，".join(dict.fromkeys(bits))
 
     # ---- approval-card content: only what THIS event's own results say ----
     def _solve_steps(self, run: _Run) -> list[tuple[PlanStep, dict[str, Any]]]:
