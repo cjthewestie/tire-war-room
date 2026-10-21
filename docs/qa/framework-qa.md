@@ -7,7 +7,7 @@ A: 不是。偵測器發現異常才喚醒一個事件狀態機，狀態怎麼�
 
 ## Q: 狀態機裡哪些地方會呼叫 LLM？
 A: 只有 PLAN 和 REPLAN 兩個階段會呼叫事件指揮官（commander），程式碼裡唯一的呼叫點是 `_ask` 裡的 `self.commander.plan`。其他狀態（CLASSIFY、SIMULATE、GATE、VERIFY 等）全部是程式。要注意：狀態機之外還有 Agent Nemo 對話、計畫討論和任務分派會用同一個 Nemotron，但它們都不能直接寫入現場。
-證據: `warroom/agent/state_machine.py:10`, `warroom/agent/state_machine.py:1224`, `warroom/agent/state_machine.py:1239`, `docs/ARCHITECTURE.md:91`
+證據: `warroom/agent/state_machine.py:10`, `warroom/agent/state_machine.py:1241`, `warroom/agent/state_machine.py:1256`, `docs/ARCHITECTURE.md:91`
 關鍵詞: 只有一個 LLM, only LLM, PLAN, REPLAN, commander, 指揮官, LLM 呼叫點, 幾次模型呼叫, 叫 AI, 呼叫 AI, 哪裡用 AI, AI 在哪裡介入, 用到模型的地方, 只有哪裡會叫 AI, AI 只用在哪
 
 ## Q: 狀態機有幾個狀態？各自做什麼？
@@ -17,7 +17,7 @@ A: 共 11 個狀態：DETECTED（開事件）、CLASSIFY（分類、讀感測器
 
 ## Q: 什麼是 TOOLS_BY_STATE？為什麼工具要按狀態開放？
 A: TOOLS_BY_STATE 是一張表，規定每個狀態能用哪些工具，例如 CLASSIFY 只能讀感測器、異常預測、查 SOP，EXECUTE 只開三個寫入工具。每次呼叫都經過 `_call`，不在當前狀態開放的工具會被拒絕並記成 INTERCEPTED。GATE、AWAIT_APPROVAL 這些狀態完全不開工具。
-證據: `warroom/contracts.py:200`, `warroom/contracts.py:206`, `warroom/agent/state_machine.py:8`, `warroom/agent/state_machine.py:1111`
+證據: `warroom/contracts.py:200`, `warroom/contracts.py:206`, `warroom/agent/state_machine.py:8`, `warroom/agent/state_machine.py:1128`
 關鍵詞: TOOLS_BY_STATE, 工具權限, 按狀態開放, tool gating, INTERCEPTED, 攔截, 最小權限, least privilege
 
 ## Q: 寫入動作在哪裡發生？有哪些寫入工具？
@@ -32,7 +32,7 @@ A: 固定 9 個工具（ToolName 白名單）：6 個讀取／計算（read_sens
 
 ## Q: Agent Nemo 對話是怎麼運作的？會不會無限迴圈？
 A: Agent Nemo 是一個有上限的 tool-calling 迴圈：每輪最多 MAX_STEPS = 6 次會用工具的模型呼叫（第 7 次只能出文字），每步最多 MAX_CALLS_PER_STEP = 4 個工具呼叫，整輪 BUDGET_S = 60 秒。另外 query_plant 每輪最多 2 個主題、sop_search 最多 2 次。它的工具都是唯讀，要動現場只能 propose_plan 開一個事件走正常核准流程。
-證據: `warroom/agent/main_agent.py:60`, `warroom/agent/main_agent.py:61`, `warroom/agent/main_agent.py:64`, `warroom/agent/main_agent.py:856`, `warroom/agent/main_agent.py:21`
+證據: `warroom/agent/main_agent.py:60`, `warroom/agent/main_agent.py:61`, `warroom/agent/main_agent.py:64`, `warroom/agent/main_agent.py:928`, `warroom/agent/main_agent.py:21`
 關鍵詞: Agent Nemo, ReAct, 對話 agent, MAX_STEPS, BUDGET_S, 迴圈上限, bounded loop, 無限迴圈, chat
 
 ## Q: Action Gate 是什麼？R0 到 R3 怎麼分？
@@ -61,13 +61,13 @@ A: 目標是讀值到動作 < 0.2 秒。Mac 上量到 28 台機台一輪的決�
 關鍵詞: 延遲, latency, 0.2 秒, 反應時間, p99, 安全核心速度, 確認取樣, confirm_samples
 
 ## Q: 安全核心停機後，AI 可以把機台開回來嗎？
-A: AI 自己不行，只有人能恢復（按鈕或對話裡確認）。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫。CJ 2026-10-22 決定「開放」：主管也可以在對話裡對 Agent Nemo 確認「好」，走的是同一條放行路徑、同樣的前提（現場確認、連續安全讀值、主管身分），稽核記成「經 Agent Nemo」；這個在 nemo-reads 的 PR（分支 cj/nemo-fixes-3，待合併）。
-證據: `warroom/agent/state_machine.py:37`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1187`, `warroom/agent/main_agent.py:110`, `warroom/agent/main_agent.py:111`
+A: AI 自己不行，只有人能恢復。LLM 路徑永遠不會解除安全核心或決策設下的 STOPPED / OUT_OF_SERVICE，`_set_status` 遇到被停的機台直接保持停機。恢復運轉要主管在系統上按「確認復機」：讀值回到範圍、現場任務完成（或註明已現場確認）才放行，只有主管的登入能呼叫；Agent Nemo 沒有放行工具，被要求時會拒絕，只能報告①派現場檢查②讀值回安全範圍③主管放行各到哪一步。CJ 2026-10-22 決定「開放」在對話裡確認「好」也能放行（同一條路徑、同樣前提），但目前主線還沒做，測試仍保證對話碰不到放行。
+證據: `warroom/agent/state_machine.py:37`, `warroom/api/app.py:651`, `warroom/api/runtime.py:1249`, `warroom/agent/main_agent.py:268`, `tests/test_chat_control.py:74`
 關鍵詞: 解除停機, release, 人工復歸, 恢復運轉, 確認復機, 對話確認, STOPPED, OUT_OF_SERVICE, 開回來, human only, override
 
 ## Q: 什麼情況會進 SAFE_STOP？會不會把排程退回去？
 A: 失敗的工具重試 MAX_TOOL_RETRIES = 1 次，再走 SOP 路徑；連續失敗達 MAX_CONSECUTIVE_FAILURES = 2 次就進 SAFE_STOP。SAFE_STOP 不會回滾排程，主管已核准的版本保留生效，只丟掉這個事件自己沒核准的提案。主管駁回不算失敗。
-證據: `warroom/contracts.py:169`, `warroom/contracts.py:170`, `warroom/agent/state_machine.py:1100`, `warroom/agent/state_machine.py:3312`, `warroom/agent/state_machine.py:22`
+證據: `warroom/contracts.py:169`, `warroom/contracts.py:170`, `warroom/agent/state_machine.py:1117`, `warroom/agent/state_machine.py:3333`, `warroom/agent/state_machine.py:22`
 關鍵詞: SAFE_STOP, 安全中止, MAX_CONSECUTIVE_FAILURES, 重試, retry, 回滾, rollback, 失敗處理
 
 ## Q: 稽核日誌怎麼防竄改？
@@ -117,7 +117,7 @@ A: Context 預算是 llm_context_tokens = 32,768 減去回覆上限。超過時�
 
 ## Q: 怎麼防 prompt injection？
 A: 幾層：工具結果包在 DATA 分隔符裡，system prompt 說裡面只是資料不是指令；像「忽略以上指令」的句子先被程式移除，資料也不能自己關掉分隔區。主管訊息如果像在跟規則爭論（忽略、你現在是、jailbreak），這輪直接拿掉 propose_plan 和討論工具。最根本的是寫入都要過 Gate 和主管核准，tests/test_injection.py 驗證對話、SOP 文字、工人備註、提案任務四種注入都不會讓寫入工具未經核准執行。
-證據: `warroom/agent/main_agent.py:178`, `warroom/agent/main_agent.py:180`, `warroom/agent/main_agent.py:828`, `tests/test_injection.py:1`
+證據: `warroom/agent/main_agent.py:185`, `warroom/agent/main_agent.py:187`, `warroom/agent/main_agent.py:900`, `tests/test_injection.py:1`
 關鍵詞: prompt injection, 注入攻擊, 越獄, jailbreak, DATA 分隔符, 資安, 惡意指令, SOP 注入
 
 ## Q: 敏感詞和機密外洩怎麼擋？
@@ -132,7 +132,7 @@ A: Prompt 分兩層：核心 prompt（角色、工具、JSON 規則、安全規�
 
 ## Q: PLANT.md 改版的流程是什麼？可以回復嗎？
 A: 後台流程是草稿 → 試跑 → 啟用 → 回復。存草稿後要先試跑（用第 11 頁情境跑一次計畫），沒通過試跑不能啟用；每個啟用過的版本都以 sha256 保存，一鍵回復。每次 LLM 呼叫的稽核都記錄當時生效的 plant_sha256，每個後台動作也寫稽核。
-證據: `warroom/agent/plant.py:11`, `warroom/api/admin.py:286`, `warroom/api/admin.py:292`, `warroom/api/admin.py:312`, `warroom/api/admin.py:320`
+證據: `warroom/agent/plant.py:11`, `warroom/api/admin.py:299`, `warroom/api/admin.py:305`, `warroom/api/admin.py:325`, `warroom/api/admin.py:333`
 關鍵詞: 版本控制, 草稿, 試跑, 啟用, rollback, 回復, sha256, 後台, admin
 
 ## Q: 為什麼工具要做成模組化、固定的白名單？
@@ -157,7 +157,7 @@ A: 目前不會。memory_notes 是後台寫的每台機台備註，但 warroom/a
 
 ## Q: 什麼是預先規劃（pre-planning）？
 A: 有風險的訂單（可能晚交）在主管打開之前就先擬好計畫，主管只要按核准或討論。runtime 每 30 秒（模擬時間）看一次，同時最多 2 件，在 ModelQueue 裡排在事故之後。只改變「何時開始規劃」，跑的仍是正常的 PLAN → GATE → 核准流程。
-證據: `warroom/api/runtime.py:1091`, `warroom/api/runtime.py:1092`, `warroom/api/runtime.py:1116`, `tests/test_preplan.py:1`
+證據: `warroom/api/runtime.py:1149`, `warroom/api/runtime.py:1150`, `warroom/api/runtime.py:1112`, `tests/test_preplan.py:1`
 關鍵詞: preplan, 預先規劃, 主動, proactive, 待核准, 訂單晚交, 核准區
 
 ## Q: 只有一顆模型，多件事同時發生怎麼排？
@@ -181,8 +181,8 @@ A: 不會。AI 只產出計畫，寫入只在 EXECUTE 狀態、只有三個寫�
 關鍵詞: 亂改產線, 亂改, 失控, 自己下指令, 控制機台, 自主, autonomous, 改產線, 安全性, 誤動作
 
 ## Q: 指揮官（AI）可以做哪些事？做不到什麼？
-A: 指揮官從不自己執行，它只寫計劃；狀態機在 Gate 把關、主管核准後才去執行。整個系統只有三個寫入工具：confirm_schedule 確認排程、set_cure_time 設硫化時間建議值、notify_teams 通知各組，而且 set_cure_time 只是記在工單上的建議值，不是寫 PLC。它做不到：跟供應商叫料、改客戶交期、直接控制機台或 PLC、自己解除安全核心停機（只有人能恢復：主管按確認復機，或在對話裡確認「好」，後者在 cj/nemo-fixes-3 待合併）、找人或加人；遇到這些，計劃只能通知相關的人，或建議主管去做。這是刻意的：寫入少，每一個都能被管住；要加新能力（例如自動叫料），就做成一個新的工具模組，配上自己的風險等級和 Gate 規則，我們的說法是「工具模組化：限縮才能完全掌控」（團隊說法，出自簡報）。目前的缺口：原料缺料只會更新庫存，還不會自動開事件（#38 已關閉）。
-證據: `warroom/agent/state_machine.py:9`, `warroom/agent/state_machine.py:10`, `warroom/contracts.py:197`, `warroom/tools/impl.py:314`, `warroom/tools/specs.py:73`, `warroom/api/app.py:649`, `warroom/api/runtime.py:1694`
+A: 指揮官從不自己執行，它只寫計劃；狀態機在 Gate 把關、主管核准後才去執行。整個系統只有三個寫入工具：confirm_schedule 確認排程、set_cure_time 設硫化時間建議值、notify_teams 通知各組，而且 set_cure_time 只是記在工單上的建議值，不是寫 PLC。它做不到：跟供應商叫料、改客戶交期、直接控制機台或 PLC、自己解除安全核心停機（只有人能恢復：主管按確認復機）、找人或加人；遇到這些，計劃只能通知相關的人，或建議主管去做。這是刻意的：寫入少，每一個都能被管住；要加新能力（例如自動叫料），就做成一個新的工具模組，配上自己的風險等級和 Gate 規則，我們的說法是「工具模組化：限縮才能完全掌控」（團隊說法，出自簡報）。目前的缺口：原料缺料只會更新庫存，還不會自動開事件（#38 已關閉）。
+證據: `warroom/agent/state_machine.py:9`, `warroom/agent/state_machine.py:10`, `warroom/contracts.py:197`, `warroom/tools/impl.py:314`, `warroom/tools/specs.py:73`, `warroom/api/app.py:651`, `warroom/api/runtime.py:1759`
 關鍵詞: 指揮官, commander, 能做什麼, 做不到, 叫料, 採購, 改交期, 交期, 寫入, 三種寫入, 只有三個寫入, 權限, 限縮, 掌控, 工具模組, 新能力, 自動叫料, 缺料
 
 ## Q: 主管到底核准什麼？
