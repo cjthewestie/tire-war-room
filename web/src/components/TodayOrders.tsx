@@ -19,7 +19,7 @@ function RiskRow({ b, kind }: { b: OrderBrief; kind: 'overdue' | 'late' | 'other
     <li className={`to-risk to-${kind}`} data-order={b.id} data-testid={`today-risk-${kind}`}>
       <b>{b.id}</b><span className="to-tag">{kind === 'overdue' ? '已遲交' : kind === 'late' ? '會晚交' : '未排程'}</span>
       {kind === 'other'
-        ? <span className="to-line">交期 {dueText(b)}，{b.reasons.join('；') || (b.has_schedule ? `還有 ${b.unscheduled} 條還沒排進硫化排程` : '還沒排進硫化排程')}</span>
+        ? <span className="to-line">交期 {dueText(b)}，{b.reasons.join('；') || (b.has_schedule ? `還有 ${b.unscheduled} 條沒排進硫化排程` : '還沒排進硫化排程')}</span>
         : <><span className="to-line">交期 {dueText(b)}・預計完成 {etaText(b)}</span><span className="to-why">{b.reasons.join('；') || '—'}</span></>}
     </li>
   )
