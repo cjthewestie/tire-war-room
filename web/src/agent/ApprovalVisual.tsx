@@ -14,6 +14,7 @@ import {
 } from './approvalView'
 import { ToolIcon } from './ToolIcon'
 import { OptionGuideNote } from '../OptionGuideNote'
+import { askLine, deliveryWords, guideLine, optionLine, recommendLine, whoRows as planWhoRows, whyLine } from './planAnswer'
 import { expectationText, type Item, type ToolItem } from './transcript'
 import { useTranscript, useVersions } from './useTranscript'
 import './agent.css'
@@ -155,10 +156,33 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
       </dl>
     </Block>
   )
+  // 主控台 (plan layout), answer first (veteran 10-22 for HY): 選人 → 交期 → 誰去做, the plan steps folded
+  const staff = opts.length > 1 ? opts : []
+  const guide = guideLine(staff)
+  const pickBlock = (n: number) => staff.length > 0 && (
+    <Block key="pick" n={n} title={req.gaps.length ? `${req.gaps.map(plain).join('；')}，選一個方案` : '選一個人力方案'}>
+      {guide && <p className="opt-shared" data-testid="option-guide">{guide}</p>}
+      <div className="apv-opts" role="group" aria-label="人力方案">
+        {staff.map((o) => {
+          const on = chosen === o.opt.id
+          return (
+            <button key={o.opt.id} aria-pressed={on} className={`opt ${on ? 'on' : ''}`} disabled={busy || !!done}
+              onClick={() => setPick(o.opt.id)} data-testid={`option-${o.opt.id}`}>
+              <span className="opt-h"><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
+                {o.opt.recommended && <span className="opt-rec">系統建議</span>}</span>
+              <span className="opt-line">{optionLine(o)}</span>
+              {o.opt.recommended && <span className="opt-why">為什麼建議：{whyLine(req, ev, o, staff)}</span>}
+              <span className="opt-pick" aria-hidden>{on ? '● 已選' : '○ 選這個'}</span>
+            </button>
+          )
+        })}
+      </div>
+    </Block>
+  )
   // 對交期的影響: one row per order the proposed schedule changes (code-built diff of the two schedule versions)
   const impactRows = diff ? impactTable(diff, facts) : []
   const impact = (n: number) => (
-    <Block key="impact" n={n} title="對交期的影響" className="apv-impact">
+    <Block key="impact" n={n} title={`對交期的影響：${deliveryWords(req, ev)}`} className="apv-impact">
       {impactRows.length > 0 && (
         <table className="impact-t" data-testid="impact-table">
           <thead><tr><th>訂單</th><th>原本</th><th>改後</th><th>交期</th></tr></thead>
@@ -167,53 +191,62 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           ))}</tbody>
         </table>
       )}
-      {!impactRows.length && cure && <p className="impact-line">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</p>}
-      <p className="impact-line">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>
+      {!impactRows.length && cure && <p className="impact-line">{machineLabel(cure.press)}這一模硫化 {cure.from} → {round1(cure.to)} 小時</p>}
+      {!staff.length && req.gaps.length > 0 && <p className="impact-line">缺口：{req.gaps.map(plain).join('；')}</p>}
     </Block>
   )
-  // 核准後誰去做: what executes on approval (the card's actions, the chosen staffing option, the R1 steps after)
-  const whoRows = [
-    ...(req.actions ?? []).filter((a) => !(chosenOpt && /^人力：依所選方案/.test(a))).map((a) => splitAction(plain(a))),
-    ...opts.filter((o) => o.opt.id === chosen).map((o) => ({ who: o.who ?? (o.teams.join('、') || '人力'), what: `${o.opt.id} ${o.opt.label}${o.shift ? `・${o.shift}` : ''}` })),
-    ...afterSteps.map((n) => ({ who: '系統（R1 自動）', what: `${TOOL_LABEL[n.tool]}・${plain(n.purpose)}` })),
-  ]
+  // 核准後誰去做: what executes on approval, in plain words (planAnswer.ts)
+  const whoRows = planWhoRows(req, ev, state.world?.tasks?.items ?? [], staff.find((o) => o.opt.id === chosen) ?? null, diff, afterSteps)
   const who = (n: number) => (
     <Block key="who" n={n} title="核准後誰去做" className="apv-who">
       {whoRows.length ? <ul className="who-list" data-testid="who-does-what">{whoRows.map((r, i) => <li key={i}><b>{r.who}</b><span>{r.what}</span></li>)}</ul>
         : <p className="muted small">這張卡沒有列出要執行的動作</p>}
     </Block>
   )
-  const optionPick = (n: number) => opts.length > 1 && options(n)
-  // 計劃板: the steps as cards, key result per card (from the tool results), arrows = depends_on
+  // the plan steps (cards, key result per card, arrows = depends_on), folded: the decision comes first
   const lines: Record<string, string> = {}
   for (const sr of ev?.steps ?? []) {
     if (sr.result?.ok) { try { lines[sr.step.id] = plain(resultText(sr.step.tool, sr.step.args, sr.result.data)) } catch { /* purpose shown instead */ } }
   }
   const changedIds = planLayout && ev ? changedSteps(ev.id, req.version ?? 1, nodes, lines) : undefined
-  const boardBlock = (n: number) => (
-    <Block key="board" n={n} title="計劃板" hint={nodes.length ? `${nodes.length} 步・箭頭＝相依${changedIds?.size ? `・本版改了 ${changedIds.size} 步` : ''}` : undefined}>
-      {nodes.length ? <PlanFlow nodes={nodes} board lines={lines} changed={changedIds} /> : <p className="muted small">尚無計畫步驟資料</p>}
-    </Block>
+  const steps = () => nodes.length > 0 && (
+    <details key="steps" className="apv-b apv-steps" data-testid="plan-steps">
+      <summary className="apv-bh">Agent Nemo 的計畫步驟（{nodes.length} 步）{changedIds?.size ? <small>這次改了 {changedIds.size} 步</small> : null}</summary>
+      <PlanFlow nodes={nodes} board lines={lines} changed={changedIds} />
+    </details>
   )
-  // plan: impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
-  const order = planLayout ? [boardBlock, impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
+  // plan: 選人, impact, who, the folded steps; wide (產線監控): plan + schedule | options + tools + conclusion
+  const order = planLayout ? [pickBlock, impact, who, steps] : [plan, sched, options, toolsUsed, conclusion]
   let k = 0
   const blocks = order.map((f) => { const el = f(k + 1); if (el) k++; return el })
 
   return (
     <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
       <header className="apv-h">
-        <div className="apv-tags">
-          <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>
-          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
-          <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
-          {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
-          {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
-          {expires && <span className="apv-exp">{expires}決定</span>}
-          {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
-        </div>
-        <h3 className="apv-title">{plain(req.title)}</h3>
-        <p className="apv-reason">{plain(req.reason)}</p>
+        {planLayout ? <>
+          {/* 主控台: the answer first — what to approve by when, then Agent Nemo's recommendation; no R code, no 第一輪 */}
+          {(req.round > 1 || (req.version ?? 1) > 1) && (
+            <div className="apv-tags">
+              {req.round > 1 && <span className="apv-round">第 {req.round} 輪</span>}
+              {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
+            </div>
+          )}
+          <h3 className="apv-title" data-testid="plan-ask">{askLine(req, ev, now)}</h3>
+          <p className="apv-rec" data-testid="main-plan-tag"><b>Agent Nemo 建議：</b>{recommendLine(req, ev, state.world?.tasks?.items ?? [], opts)}</p>
+          <p className="apv-reason">{plain(req.reason)}</p>
+        </> : <>
+          <div className="apv-tags">
+            <span className="apv-main" data-testid="main-plan-tag">Agent Nemo 的計劃</span>
+            <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
+            <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
+            {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
+            {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
+            {expires && <span className="apv-exp">{expires}決定</span>}
+            {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
+          </div>
+          <h3 className="apv-title">{plain(req.title)}</h3>
+          <p className="apv-reason">{plain(req.reason)}</p>
+        </>}
         {(req.version ?? 1) > 1 && (
           <div className="apv-changed" data-testid="card-changes">
             <b>與 v{(req.version ?? 2) - 1} 相比</b>
@@ -242,7 +275,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
               {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
-            <span className="apv-hint">核准後才執行；要改，按「討論」</span>
+            {!planLayout && <span className="apv-hint">核准後才執行；要改，按「討論」</span>}
           </div>
         </>}
       </footer>
@@ -278,15 +311,6 @@ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: str
     const late = facts.late.some((l) => l.includes(order))
     return { order, before: before ? at(before) : '—', after: at(after), late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
   })
-}
-
-/** Who carries out one approved action: the line's own label ("人力：…", "通知：…"), else by what it changes. */
-function splitAction(a: string): { who: string; what: string } {
-  const m = /^([^：:（(]{1,8})[：:]\s*(.+)$/.exec(a)
-  if (m) return { who: m[1], what: m[2] }
-  if (a.includes('排程')) return { who: '排程（系統生效）', what: a }
-  if (a.includes('硫化')) return { who: '硫化機（系統設定）', what: a }
-  return { who: '系統', what: a }
 }
 
 function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {

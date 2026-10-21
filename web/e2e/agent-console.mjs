@@ -85,7 +85,13 @@ try {
     return { impactTop: Math.round(c?.top ?? 9e9), approveBottom: Math.round(btn?.bottom ?? 9e9), vh: innerHeight }
   })
   check('home: 核准 visible without scrolling', vis.approveBottom <= vis.vh, JSON.stringify(vis))
-  check('one delivery line for the options (not repeated per card)', (await apv.locator('[data-testid=option-delivery]').count()) === 1)
+  // answer first (veteran 10-22 for HY): 請核准 line, Agent Nemo's recommendation (派人…), 交期 said once in its block title
+  const ask = await apv.locator('[data-testid=plan-ask]').innerText().catch(() => '')
+  check('home card starts with 請核准 and the deadline', /^請核准：.+（.*\d{2}:\d{2} 前）$/.test(ask), ask)
+  check('Agent Nemo recommends sending someone to repair', /^Agent Nemo 建議：派人/.test(await apv.locator('[data-testid=main-plan-tag]').innerText().catch(() => '')))
+  check('交期 is said once, in its block title (no separate line under the options)', (await apv.locator('[data-testid=option-delivery]').count()) === 0 &&
+    (await apv.locator('.apv-impact .apv-bh', { hasText: '對交期的影響：' }).count()) === 1)
+  check('each staffing option says what it changes in one line', (await apv.locator('.opt .opt-line').count()) === 2 && (await apv.locator('.opt .opt-why').count()) === 1)
   // 討論 puts the caret in the docked conversation in 討論這個計劃 mode
   await apv.locator('[data-testid=visual-discuss]').click()
   await d.waitForTimeout(300)
