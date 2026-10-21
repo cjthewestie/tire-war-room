@@ -1,6 +1,7 @@
 // War room home 主控台 (was 對話台; CJ, 2026-10-20: 「這個 page 改成主控台名字」): the 核准區 list, the 計劃板 of the selected item and the docked Agent dialogue;
 // 產線監控 (proposal page 2 + the whole plant, which was 工廠全貌), 人力排程 (pages 4, 6, 11), 訂單, Agent (the full
 // transcript), 狀態機 (live board + 每日事件紀錄) and 後台 are the other tabs (#monitor, #schedule, #orders, #console, #sm, #admin); #world still opens 產線監控.
+// #qa opens QA 模式 (the judges' framework questions; its button lives in the demo controls).
 // CJ, 2026-10-20: 「產線監控跟人力排程是個別頁面」「產線監控跟工廠全貌…重複到了…可以合併一下」.
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Line } from './contracts'
@@ -22,6 +23,7 @@ const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
 const StateMachinePage = lazy(() => import('./statemachine/StateMachinePage').then((m) => ({ default: m.StateMachinePage })))
 const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default: m.AdminPage })))
+const QaPage = lazy(() => import('./qa/QaPage').then((m) => ({ default: m.QaPage })))
 
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
@@ -29,7 +31,7 @@ const EMBEDDED = (() => { try { return window.self !== window.top } catch { retu
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
   return h === '#schedule' ? 'schedule' : h === '#monitor' || h === '#world' ? 'monitor' : h === '#orders' ? 'orders'
-    : h === '#console' ? 'console' : h === '#sm' ? 'sm' : h === '#admin' ? 'admin' : 'agent'
+    : h === '#console' ? 'console' : h === '#sm' ? 'sm' : h === '#admin' ? 'admin' : h === '#qa' ? 'qa' : 'agent'
 }
 
 function Dashboard() {
@@ -80,6 +82,7 @@ function Dashboard() {
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
+        : tab === 'qa' ? <Suspense fallback={<div className="loading">載入 QA 模式…</div>}><QaPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}

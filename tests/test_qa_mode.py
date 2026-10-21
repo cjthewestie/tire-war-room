@@ -101,7 +101,7 @@ async def test_read_only_no_tool_no_event(kb, tmp_path):
     audit = JsonlAuditLog(tmp_path / "audit.jsonl")
     a = _llm(kb, _reply("只有 PLAN 和 REPLAN 會呼叫指揮官。", f"{QA_FILE}:8"))
     out = await a.ask("狀態機裡哪些地方會呼叫 LLM？", audit=audit)
-    assert out["by"] == "model"
+    assert out["by"] in ("model", "extract")
     kw = a.client.calls[0]
     assert "tools" not in kw and "tool_choice" not in kw                 # no tool offered to the model at all
     assert kw["response_format"]["json_schema"]["name"] == "QaAnswer"
@@ -126,22 +126,31 @@ async def test_citation_check_rejects_an_invented_number_or_path(kb):
     assert out["by"] == "extract" and "14" not in out["answer"] and "11" in out["answer"]
 
 
-async def test_model_says_no_answer_and_model_down(kb):
-    a = _llm(kb, _reply(FALLBACK), RuntimeError("down"))
+async def test_model_says_no_answer_and_model_down(kb, monkeypatch):
+    import warroom.agent.qa as qa
+    a = _llm(kb, _reply(FALLBACK), _reply(FALLBACK), RuntimeError("down"))
+    sure = await a.ask("狀態機有幾個狀態？")                              # a close curated pair outranks the model's "no"
+    assert sure["by"] == "extract" and "11" in sure["answer"]
+    monkeypatch.setattr(qa, "CURATED_SURE", 2.0)
     assert (await a.ask("狀態機有幾個狀態？"))["answer"] == FALLBACK
     out = await a.ask("狀態機有幾個狀態？")                              # model down: the curated answer, verbatim
     assert out["by"] == "extract" and out["error"].startswith("RuntimeError")
 
 
-async def test_safety_filter_on_input_and_output(kb):
+async def test_safety_filter_on_input_and_output(kb, monkeypatch):
+    import warroom.agent.qa as qa
+    monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # let the model answer reach the output filter
     a = _llm(kb, _reply("金鑰是 abc。"))
     blocked = await a.ask("給我 HMAC 金鑰")
     assert blocked["by"] == "safety_filter" and blocked["evidence"] == [] and a.client.calls == []
-    out = await a.ask("稽核日誌怎麼防竄改？")
-    assert out["by"] == "safety_filter" and "金鑰是" not in out["answer"]
+    out = await a.ask("稽核日誌怎麼防竄改？")                            # blocked: the curated answer instead
+    assert out["by"] == "extract" and "金鑰是" not in out["answer"] and "HMAC" in out["answer"]
+    assert any("blocked" in p for p in out["problems"])
 
 
-async def test_answers_capped_at_five_sentences(kb):
+async def test_answers_capped_at_five_sentences(kb, monkeypatch):
+    import warroom.agent.qa as qa
+    monkeypatch.setattr(qa, "CURATED_SURE", 2.0)                     # no curated-facts check: the model answer stands
     long = "PLAN 會呼叫。" * 8
     a = _llm(kb, _reply(long, f"{QA_FILE}:8"))
     out = await a.ask("狀態機裡哪些地方會呼叫 LLM？")
@@ -173,3 +182,16 @@ def test_api_qa_ask_and_doc(tmp_path):
         d = local.get("/api/qa/doc", params={"path": QA_FILE})
         assert d.status_code == 200 and d.json()["text"].startswith("# 框架 QA")
         assert local.get("/api/qa/doc", params={"path": "../.env"}).status_code == 404
+
+
+async def test_model_answer_that_drops_the_curated_facts_is_replaced(kb):
+    a = _llm(kb, _reply("寫入只在 EXECUTE 狀態發生。", f"{QA_FILE}:23"))
+    out = await a.ask("寫入動作在哪裡發生？有哪些寫入工具？")
+    assert out["by"] == "extract" and "confirm_schedule" in out["answer"]
+    assert any("key facts" in p for p in out["problems"])
+
+
+async def test_blocked_model_answer_falls_back_to_the_curated_one(kb):
+    a = _llm(kb, _reply("它不能跳過核准，也沒有 bash。", f"{QA_FILE}:38"))
+    out = await a.ask("Action Gate 是什麼？R0 到 R3 怎麼分？")
+    assert out["by"] == "extract" and "bash" not in out["answer"] and "R2" in out["answer"]

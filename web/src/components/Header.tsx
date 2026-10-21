@@ -4,7 +4,7 @@ import { QUALITY_LABEL } from './common'
 import { useLinkStatus } from '../linkStatus'
 import { useWarRoom } from '../useWarRoom'
 
-export type Tab = 'monitor' | 'schedule' | 'orders' | 'console' | 'sm' | 'admin' | 'agent'
+export type Tab = 'monitor' | 'schedule' | 'orders' | 'console' | 'sm' | 'admin' | 'qa' | 'agent'
 
 const NET_LABEL = { online: '網路正常', weak: '弱網・延後推播（Agent 不受影響）', wan_down: 'WAN 中斷・手機走廠內 LAN', lan_down: 'LAN 中斷・現場觸控螢幕＋警示燈' }
 
