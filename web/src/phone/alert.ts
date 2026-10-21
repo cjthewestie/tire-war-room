@@ -196,7 +196,8 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
       try { perm = (await Notification.requestPermission()) as AlertPermission } catch { /* ignore */ }
     }
     setPermission(perm)
-    setBlocked(perm === 'denied' ? '系統通知被瀏覽器擋住，聲音和震動照常提醒'
+    // only what still rings: the sound when this tap unlocked it (vibration is not reported by every phone)
+    setBlocked(perm === 'denied' ? `系統通知被瀏覽器擋住，${sound ? '改用聲音和畫面提醒' : '請查看畫面提醒'}`
       : !sound ? '瀏覽器未允許播放聲音：再點一下畫面試試，或檢查手機靜音' : null)
     setArmed(sound)
     setTries((n) => n + 1)
