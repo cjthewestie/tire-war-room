@@ -117,7 +117,8 @@ def test_walkthrough_p11_tracker_ticks_from_backend_state(tmp_path):
     assert tagged
     if w2["waiting_approval"]:
         assert w2["paused_for"] == w2["waiting_approval"][0] and rt.paused
-        assert all(a.status is ApprovalStatus.PENDING for a in rt.all_approvals() if a.event_id == w2["event_id"])
+        decisions = [e for e in rt.audit.tail(limit=0) if e.kind is AuditKind.APPROVAL_DECISION and e.event_id == w2["event_id"]]
+        assert not [e for e in decisions if "qa" in e.actor]                 # the walkthrough never decides; a person does
     rows = rt.tasklog.rows() if rt.tasklog is not None else []
     assert any(r.get("qa_demo") for r in rows if r["id"] == w2["event_id"]) or not rows
 
