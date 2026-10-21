@@ -115,7 +115,7 @@ export function recoverText(x: Expectation | null, now: number | null, normal: n
 /** The field already works on this task: someone took it, or (fast repair) its wall seconds run. Until the supervisor's
  *  decision a fast repair task stays 待派 with no progress (warroom/sim/work.py TaskBoard.hold, runtime
  *  _awaits_decision); after it the task runs on, even while code re-solves the approved round's schedule. */
-function released(t: WorkTask): boolean {
+export function released(t: Pick<WorkTask, 'status' | 'assigned_at' | 'progress'>): boolean {
   return t.status !== '待派' || !!t.assigned_at || (t.progress ?? 0) > 0
 }
 

@@ -6,8 +6,9 @@
 // Pure (no React, no fetch): built only from the event, its card, the task board and /api/health repair_fast_s; the
 // repair seconds are never written into the text by hand (本機 3 秒, 展示機 12 秒).
 import type { ApprovalRequest, Event, WorkTask } from '../contracts'
-import { CH_LABEL, expectationOf, readingText, recoverWord } from '../aiStatus'
+import { CH_LABEL, expectationOf, readingText, recoverWord, released } from '../aiStatus'
 import { cureChange } from '../agent/approvalView'
+import { workerName } from '../agent/subagents'
 import type { OptionChoice } from '../optionGuide'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
@@ -60,12 +61,24 @@ function cause(ev: Event): string | null {
   return s ? `${h?.status === 'confirmed' ? '' : '疑似'}${s}` : null
 }
 
+/** The event's repair tasks the crew already works on: a card recomputed after the approved repair went ahead
+ *  (concurrent_3: 3 號's schedule went stale while it was being repaired) does not send anyone again. */
+const sentOut = (ev: Event, tasks: WorkTask[]) => tasks.filter((t) => t.event_id === ev.id && isRepairTask(t) && t.status !== '完成' && released(t))
+
 /** The sentence under the title: why, what 核准 does and how long, when it turns green. A plant event or a command says
- *  its reason instead. */
+ *  its reason instead. A recomputed card whose repair is already under way says so, and that it only changes the
+ *  schedule. */
 export function cardSentence(ev: Event | null, req: ApprovalRequest, tasks: WorkTask[], fast: FastRepair | null): string {
   if (!ev || !isMachineEvent(ev)) return plain(req.reason)
   const x = expectationOf(ev)
   const why = cause(ev)
+  const going = sentOut(ev, tasks)
+  if (going.length) {
+    const left = fast ? `，${secText(Math.max(...going.map((t) => taskLeftS(t, fast))))}後維修完成` : ''
+    // the recomputed card's own box (rebasedText) already ends 「請再核准一次」
+    const again = (req.version ?? 1) > 1 && rebasedText(ev, req) ? '' : '，請再核准一次'
+    return `${why ? `${why}。` : ''}Agent Nemo 已派人${fieldVerb(ev, req)}${left}；這張只改排程${again}。`
+  }
   const act = repairs(ev, req, tasks) ? `派人${fieldVerb(ev, req)}${fast ? `，約 ${num(fast.repair_s)} 秒` : ''}` : '照下面的計畫處理'
   return `${why ? `${why}。` : ''}核准後 Agent Nemo ${act}；${x ? CH_LABEL[x.channel] : '讀值'}回到正常才轉綠。`
 }
@@ -93,10 +106,12 @@ export function doLines(ev: Event | null, req: ApprovalRequest, tasks: WorkTask[
   const acts = (req.actions ?? []).filter((a) => !a.startsWith('人力：')).map(plain)
   // who goes to do what: the event's repair tasks (held 待派 until the decision), then the card's own field actions (a
   // mill's 「…，請放慢生料投入直到冷卻恢復」); the seconds once, on the first
+  // (a repair already under way is not sent again: a card recomputed while the crew repairs)
   const fix = ev ? tasks.filter((t) => t.event_id === ev.id && isRepairTask(t) && t.status !== '完成') : []
-  const out = [...fix.map((t) => `派人${taskWhat(t.title)}`),
+  const going = fix.some(released)
+  const out = going ? [] : [...fix.map((t) => `派人${taskWhat(t.title)}`),
     ...acts.filter((a) => !/排程|硫化總時數/.test(a) && a.includes('請')).map((a) => `派人${taskWhat(a)}`)]
-  if (ev && !out.length && repairs(ev, req, tasks)) out.push(`派人${fieldVerb(ev, req)}`)
+  if (ev && !going && !out.length && repairs(ev, req, tasks)) out.push(`派人${fieldVerb(ev, req)}`)
   if (out.length && fast) out[0] += `（約 ${num(fast.repair_s)} 秒）`
   const cure = cureChange(ev)
   if (cure) out.push(`這一模硫化延長到 ${round1(cure.to)} 小時（公式計算）${acts.some((a) => a.includes('無機台異動')) ? '，不換機台' : ''}`)
@@ -160,13 +175,18 @@ export function liveLine(ev: Event, tasks: WorkTask[], fast: FastRepair | null):
   const x = expectationOf(ev)
   // the flow stopped, the fault did not (Phone keeps the event until its machine reads normal again)
   if (ev.state === 'safe_stop') return { ...base, phase: '已安全停止，需要人工處置', who: '自動處置沒有完成，原排程保留。請到現場確認設備。' }
-  if (fix.length && ev.state !== 'await_approval' && !['detected', 'classify', 'plan', 'simulate', 'gate'].includes(ev.state)) {
+  // the crew works on it (released, as aiStatus.ts says it): also while code re-solves the approved round's stale
+  // schedule (concurrent_3: simulate / gate) — not 「Agent Nemo 擬方案中」 while 3D says 維修中
+  if (fix.length && ev.state !== 'await_approval'
+    && (fix.some(released) || !['detected', 'classify', 'plan', 'simulate', 'gate'].includes(ev.state))) {
     const lead = fix.find((t) => t.worker_name) ?? fix[0]
     const feed = fix.map((t) => FEED[t.kind]).find(Boolean)
+    // on the way first (the 3D tag and the Agent page say 前往中 too), then at it
+    const who = lead.worker_name ? workerName(lead.worker_name) : null
     return {
       ...base, phase: feed ?? '維修中',
       secs: fast ? secText(Math.max(...fix.map((t) => taskLeftS(t, fast)))) : null,
-      who: `${lead.worker_name ? `${lead.worker_name}正在${taskWhat(lead.title)}` : `${taskWhat(lead.title)}，等人接手`}。`
+      who: `${who ? (lead.status === '前往中' ? `${who}正前往 ${name}` : `${who}正在${taskWhat(lead.title)}`) : `${taskWhat(lead.title)}，等人接手`}。`
         + `${x ? CH_LABEL[x.channel] : '讀值'}回到正常才轉綠。`,
     }
   }
