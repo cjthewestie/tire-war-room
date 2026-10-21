@@ -1,3 +1,134 @@
 /* 產線監控 (council review 10-21): an empty 預警 is one line, not a whole panel */
 .early.is-empty { padding-block: 12px; }
 .early.is-empty .panel-h { margin-bottom: 0; }
+
+/* ---------- 產線監控 (issue #102), laid out like the approved 人力排程 draft: the answer first, then plain panels,
+   few colours, generous spacing. Scoped to .mon and to the <main> that holds this tab, so other tabs are untouched. */
+
+/* App renders 預警 before this tab: the sentence goes first and 預警 right under it (DOM order unchanged) */
+main:has(> .monitor-wrap) { display: flex; flex-direction: column; gap: var(--gap); }
+main:has(> .monitor-wrap) > .early { order: 1; margin-bottom: 0; }
+.monitor-wrap.mon { display: contents; }
+.mon > * { order: 2; min-width: 0; }
+.mon > .mon-answer { order: 0; }
+
+.mon .panel { padding: 20px 22px; }
+.mon .panel-h { margin-bottom: 6px; }
+.mon .panel-h h2 { font-size: 19px; font-weight: 700; color: var(--ink); letter-spacing: 0; }
+.mon-sub { margin: 0 0 14px; color: var(--ink-dim); font-size: 14.5px; line-height: 1.6; }
+.mon-row { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: var(--gap); align-items: start; }
+
+/* 1. the answer: one sentence, and the one thing to do */
+.mon-answer { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px 28px; align-items: center; border-left: 6px solid var(--alarm); }
+.mon-answer.is-calm { border-left-color: var(--accent); }
+.mon-k { font-size: 14px; font-weight: 700; color: var(--alarm); }
+.mon-answer.is-calm .mon-k { color: var(--accent); }
+.mon-answer h1 { margin: 2px 0 6px; font-size: 30px; line-height: 1.3; font-weight: 700; color: var(--ink); letter-spacing: 0; }
+.mon-answer h1 .nw { white-space: nowrap; }
+.mon-answer p { margin: 0; max-width: 46em; font-size: 16px; line-height: 1.6; color: var(--ink-dim); }
+.mon-fix { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 300px; max-width: 440px; background: var(--panel-2); border-radius: 10px; padding: 12px 16px; }
+.mon-fix-k { font-size: 14px; color: var(--ink-dim); }
+.mon-fix b { max-width: 100%; font-size: 20px; line-height: 1.35; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mon-fix small { font-size: 14px; color: var(--ink-dim); }
+.mon-btn { margin-top: 8px; min-height: 40px; padding: 8px 16px; border: 0; border-radius: 8px; background: var(--accent); color: var(--accent-ink); font-size: 15px; font-weight: 700; }
+.mon-btn:hover { filter: brightness(1.1); }
+
+/* 2. abnormal machines: one row each, the event in focus keeps its evidence underneath */
+.mon-bad-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.mon-bad-list li { display: grid; grid-template-columns: 8.5em minmax(0, 1fr) auto; gap: 4px 16px; align-items: baseline; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.mon-bad-list li:last-child { border-bottom: 0; }
+.mon-m { display: flex; flex-direction: column; align-items: flex-start; padding: 0; border: 0; background: none; text-align: left; font: inherit; font-size: 17px; font-weight: 700; line-height: 1.35; color: var(--ink); }
+button.mon-m:hover { text-decoration: underline; text-underline-offset: 3px; }
+.mon-m small { font-size: 14px; font-weight: 500; color: var(--ink-dim); }
+.mon-bad-list li.is-bad .mon-m, .mon-bad-list li.is-bad .mon-m small { color: var(--alarm); }
+.mon-what { font-size: 15px; line-height: 1.55; color: var(--ink-dim); }
+.mon-step { padding: 2px 10px; border-radius: 999px; background: var(--panel-2); color: var(--ink-dim); font-size: 13px; font-weight: 700; white-space: nowrap; }
+.mon-step.is-wait { background: var(--warn-soft); color: var(--warn); }
+.mon-fd { margin-top: 14px; padding-top: 18px; border-top: 1px solid var(--border); }
+.mon-fd-h { margin: 0 0 12px; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.mon-fd-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: start; }
+.mon-fd-grid.has-judge { grid-template-columns: minmax(0, 1.25fr) minmax(220px, 1fr); }
+.mon-fd .judge .sub { margin-top: 0; }
+.mon-fd .judge-list { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.mon-fd .impact { margin-top: 14px; }
+
+/* 3. machines: the 11 presses first (one row when the panel is wide), the other 17 one line per production line */
+.mon .machines { container-type: inline-size; }
+.mon .machines .presses { gap: 8px; margin-bottom: 16px; }
+.mon .machines .mlines { gap: 4px; }
+.mon .machines .dq-note { margin: 14px 0 0; }
+@container (min-width: 760px) { .mon .machines .presses { grid-template-columns: repeat(11, minmax(0, 1fr)); } }
+
+/* 4. 硫化機排程（今天＋明天） and 接下來要有人在場 */
+.cs-ver { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; font-size: 15px; color: var(--ink-dim); }
+.cs-ver b { color: var(--accent); }
+.cs-wait { padding: 0; border: 0; background: none; color: var(--warn); font-size: 15px; font-weight: 700; }
+.cs-wait:hover { text-decoration: underline; text-underline-offset: 3px; }
+.cs-back { font-size: 13.5px; }
+.cs-panel[open] > summary .fold-sum { display: none; }   /* phone: the version line shows inside once opened */
+.cs-gantt { margin-top: 2px; }
+.cs-tick { stroke: var(--border); }
+.cs-tick.day { stroke: var(--ink-faint); }
+.cs-tick-t { fill: var(--ink-dim); font-size: 12.5px; }
+.cs-press { fill: var(--ink); font-size: 14px; font-weight: 700; }
+.cs-press.bad { fill: var(--alarm); }
+.cs-ml { fill: var(--ink-faint); font-size: 11.5px; font-weight: 500; }
+.cs-out { fill: var(--alarm); font-size: 12px; font-weight: 700; }
+.cs-row { stroke: var(--panel-2); }
+.cs-job.sz-S { fill: var(--sz-s); }
+.cs-job.sz-M { fill: var(--sz-m); }
+.cs-job.sz-L { fill: var(--sz-l); }
+.cs-job.held { opacity: .5; }
+.cs-job.moved { stroke: var(--ink); stroke-width: 2; stroke-dasharray: 5 3; }
+.cs-job-t { fill: #0c0e11; font-size: 12.5px; font-weight: 700; pointer-events: none; }
+.cs-held line { stroke: var(--alarm); stroke-width: 2.5; }
+.cs-held text { fill: var(--alarm); font-size: 12px; font-weight: 700; paint-order: stroke; stroke: var(--panel); stroke-width: 3px; stroke-linejoin: round; }
+.cs-now { stroke: var(--accent); stroke-width: 2; }
+.mon-legend { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 10px; font-size: 14px; color: var(--ink-dim); }
+.mon-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.cs-lg { display: inline-block; width: 14px; height: 10px; border-radius: 2px; }
+.cs-lg.sz-S { background: var(--sz-s); }
+.cs-lg.sz-M { background: var(--sz-m); }
+.cs-lg.sz-L { background: var(--sz-l); }
+.cs-lg.now { width: 2px; height: 14px; border-radius: 0; background: var(--accent); }
+.cs-lg.moved { height: 12px; border: 2px dashed var(--ink); }
+.cs-lg.out { width: 3px; height: 14px; border-radius: 0; background: var(--alarm); }
+.cs-next-list { list-style: none; margin: 0; padding: 0; }
+.cs-next-list li { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 15.5px; }
+.cs-next-list li:last-child { border-bottom: 0; }
+.cs-next-list .t { min-width: 3.2em; font-size: 17px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cs-k { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 13px; font-weight: 700; }
+.cs-k.dm { background: var(--alarm-soft); color: var(--alarm); }
+.cs-k.mi { background: var(--panel-2); color: var(--ink); }
+
+/* 5. 更多全廠資訊: one closed panel */
+.mon .mon-more { padding: 0; }
+.mon-more > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 14px; padding: 16px 22px; cursor: pointer; list-style: none; }
+.mon-more > summary::-webkit-details-marker { display: none; }
+.mon-more > summary h2 { margin: 0; font-size: 17px; font-weight: 700; color: var(--ink); }
+.mon-more > summary h2::before { content: "▸"; display: inline-block; width: 1.1em; color: var(--ink-faint); }
+.mon-more[open] > summary h2::before { content: "▾"; }
+.mon-more-sum { font-size: 14px; color: var(--ink-dim); }
+.mon-more > .world, .mon-more > .foot-note, .mon-more > .plant-wait { margin: 0 22px; }
+.mon .mon-more[open] { padding-bottom: 18px; }
+
+@media (max-width: 1099px) {
+  .mon-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 899px) {
+  .mon-answer { grid-template-columns: minmax(0, 1fr); }
+  .mon-fix { min-width: 0; max-width: none; }
+  .mon-fd-grid.has-judge { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 599px) {
+  .mon .panel { padding: 16px; }
+  .mon .mon-more { padding: 0; }
+  .mon-answer { border-left-width: 5px; }
+  .mon-answer h1 { font-size: 24px; }
+  .mon-answer p { font-size: 15px; }
+  .mon-fix b { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; font-size: 18px; }
+  .mon-bad-list li { grid-template-columns: minmax(0, 1fr) auto; }
+  .mon-bad-list .mon-what { grid-column: 1 / -1; order: 3; }
+  .mon-more > summary { padding: 14px 16px; }
+  .mon-more > .world, .mon-more > .foot-note, .mon-more > .plant-wait { margin: 0 12px; }
+}

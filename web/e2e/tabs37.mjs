@@ -79,7 +79,7 @@ check('#world opens the merged 產線監控', await p.locator('[data-testid="tab
 check('no 工廠全貌 tab', await p.locator('.tabs button', { hasText: '工廠全貌' }).count() === 0)
 check('預警 first', await p.evaluate(() => document.querySelector('main')?.firstElementChild?.getAttribute('data-testid') === 'early-warnings'))
 check('28 machines', await p.locator('.machines [data-machine]').count() === 28, String(await p.locator('.machines [data-machine]').count()))
-for (const id of ['plant-panels', 'people-zones', 'materials', 'dock-trucks', 'world-goods', 'order-pipeline', 'kpi-people']) {
+for (const id of ['mon-answer', 'cure-schedule', 'next-at-press', 'plant-panels', 'people-zones', 'materials', 'dock-trucks', 'world-goods', 'order-pipeline']) {
   check(`monitor has ${id}`, await p.locator(`[data-testid="${id}"]`).count() >= 1)
 }
 check('one order pipeline only', await p.locator('[data-testid="order-pipeline"]').count() === 1)
