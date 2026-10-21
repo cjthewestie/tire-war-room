@@ -1,5 +1,6 @@
 // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
 // talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
+// #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
 import { useState } from 'react'
 import type { ApprovalRequest, AskAnswer } from '../contracts'
 import { STATE_LABEL } from '../components/common'
@@ -11,6 +12,7 @@ import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
+import { RepairEta } from './RepairEta'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -55,6 +57,7 @@ export function Phone() {
             {ev ? (
               <p className="muted">最新事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.outcome ? `・${plain(ev.outcome)}` : ''}</p>
             ) : <p className="muted">全廠正常，事件偵測常駐監看中。</p>}
+            {ev && ev.state !== 'closed' && ev.state !== 'safe_stop' && <RepairEta ev={ev} />}
             {state.resolved.slice(0, 3).map((r) => (
               <p key={r.id} className="ph-hist">{fmtHMS(r.decision?.decided_at ?? r.created_at)}・{plain(r.title)}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</p>
             ))}
@@ -173,6 +176,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
         <dt>交期</dt><dd>{plain(a.delivery_impact)}</dd>
         {a.gaps.length > 0 && <><dt>缺口</dt><dd>{a.gaps.map(plain).join('；')}</dd></>}
       </dl>
+      <RepairEta ev={ev} />
       <details className="ph-why">
         <summary>為什麼</summary>
         {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
