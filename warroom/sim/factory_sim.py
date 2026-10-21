@@ -141,6 +141,10 @@ class Factory:
             ((t0 + timedelta(seconds=s.at_offset_s), s.plant) for s in sc.steps if s.plant is not None),
             key=lambda x: x[0])
         self._plant_fired: list[tuple[datetime, PlantInput]] = []
+        # issue #104: normal order arrivals (no plant event) join the order book at their scripted time
+        self._order_pending: list[tuple[datetime, Order]] = sorted(
+            ((t0 + timedelta(seconds=s.at_offset_s), s.order) for s in sc.steps if s.order is not None),
+            key=lambda x: x[0])
         self._absences: list[tuple[TeamId, date, str, int]] = []
         self.safety_log = []
         self._m: dict[str, _Mach] = {}
@@ -161,7 +165,8 @@ class Factory:
         # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
         # staffing gap, if any, is the scripted sick call)
         from warroom.sim.scenarios import PLANT_SCENARIOS
-        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS or sc.name is ScenarioName.DAY_LOOP \
+        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS or \
+            sc.name in (ScenarioName.DAY_LOOP, ScenarioName.MORNING_RUSH) \
             else t0.date()
         if self.backfill_min > 0:
             self._backfill(t0, self.backfill_min)
@@ -479,6 +484,9 @@ class Factory:
         while self._plant_pending and self._plant_pending[0][0] <= now:
             at, pin = self._plant_pending.pop(0)
             self.apply_plant_input(pin, at)
+        while self._order_pending and self._order_pending[0][0] <= now:
+            at, order = self._order_pending.pop(0)
+            self.receive_order(order, at)
         n_sub = min(MAX_SUBSTEPS, max(1, math.ceil(dt))) if dt > 0 else 0
         h = dt / n_sub if n_sub else 0.0
         for k in range(n_sub):
@@ -790,6 +798,16 @@ class Factory:
         """Plant inputs fired since the last call (the runtime opens a plant event for each)."""
         out, self._plant_fired = self._plant_fired, []
         return out
+
+    def receive_order(self, order: Order, at: datetime | None = None) -> None:
+        """Issue #104: a normal order arrives. It joins the order book (the scheduler sees it on the next solve) and
+        the world feed; no plant event, no machine touched."""
+        at = at or self._t
+        self.add_order(order)
+        try:
+            self.world.on_order_arrival(order, at)
+        except Exception:  # noqa: BLE001 - the world view must never break the plant loop
+            log.exception("world order arrival failed")
 
     def add_order(self, order: Order) -> None:
         if order.id in self._orders:
