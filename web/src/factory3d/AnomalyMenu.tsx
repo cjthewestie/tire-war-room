@@ -22,23 +22,24 @@ export function AnomalyMenu({ open, onOpen, onNote }: {
   const [busy, setBusy] = useState(false)
   if (!transport) return null
   const paused = !!state.clock?.paused
-  /** fn may return the note to show when it is done (情境疊加: what was added) */
-  const run = async (text: string, fn: () => Promise<unknown>, wait = '（情境要載入幾十秒）') => {
+  /** fn may return the note to show when it is done (情境疊加: what was added).
+   *  #85: only a scenario load (or an overlay) shows a wait note first; speed / pause / reset / single events are instant */
+  const run = async (text: string, fn: () => Promise<unknown>, wait: string | null = null) => {
     setBusy(true)
     onOpen(false)
-    onNote(`${text}…${wait}`)
+    if (wait !== null) onNote(`${text}…${wait}`)
     try {
       const done = await fn()
       if (typeof done === 'string') onNote(done, OVERLAY_NOTE_MS)
       else onNote(text)
     } catch (e) { console.warn(e); onNote(`${text}：沒有成功`) } finally { setBusy(false) }
   }
-  const control = (c: SimControl, text: string) => run(text, () => transport.control(c))
+  const control = (c: SimControl, text: string, wait: string | null = null) => run(text, () => transport.control(c), wait)
   const scenario = (n: ScenarioName) => {
     // 情境疊加: another scenario's event or approval still open → add this one on top (the demo strip's rule)
     if (scenarioClick(n, state) === 'overlay') return run(`疊加異常：${label(n)}`, async () => overlayNote(label(n), await transport.overlay(n)), '')
     const s = SCENARIOS.find((x) => x.name === n)
-    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, `載入異常：${label(n)}`)
+    return control({ action: 'scenario', scenario: n, speed: s?.speed ?? 10, preroll: true }, `載入異常：${label(n)}`, '（載入中，第一次較久）')
   }
   return (
     <div className="f3-anom" data-testid="f3-anomaly">
