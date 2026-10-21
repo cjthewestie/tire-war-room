@@ -119,8 +119,11 @@ def test_llm_calls_latency_tps_fallbacks_and_calls_per_minute(rt):
     rt.audit.append(AuditKind.LLM_CALL, "main_agent", {"phase": "chat", "total_ms": 2000.0, "completion_tokens": 50})
     rt.audit.append(AuditKind.LLM_CALL, "commander", {"mode": "llm", "total_ms": 9000.0, "fell_back_to_mock": True})
     rt.audit.append(AuditKind.LLM_CALL, "ask", {"mode": "llm", "total_ms": 30.0, "error": "TimeoutError"})
+    rt.audit.append(AuditKind.LLM_CALL, "commander", {"mode": "llm", "fell_back_to_mock": True, "cause": "budget",
+                                                      "error": "budget"})
     m = asyncio.run(s.sample())["model"]
-    assert m["calls_last_min"]["v"] == 3 and m["fallbacks"]["v"] == 1 and m["errors"]["v"] == 1
+    assert m["budget_refused"]["v"] == 1
+    assert m["calls_last_min"]["v"] == 4 and m["fallbacks"]["v"] == 1 and m["errors"]["v"] == 2
     assert m["p50_ms"]["v"] == 4000 and m["p90_ms"]["v"] == 8000            # 2000 / 4000 / 9000, errors left out
     assert m["tps_last"]["v"] == 25.0
 

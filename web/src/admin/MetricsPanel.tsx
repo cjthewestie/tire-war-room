@@ -13,7 +13,7 @@ interface Metrics {
   machine: { platform: string; cpu_pct: M; ram_used: M; disk_free: M; rss: M; proc_cpu: M; uptime_s: M; boot_s: M; sampler_ms: M; gpus: Gpu[]; gpu_na: string | null; wired: M | null }
   model: {
     mode: string; model: string; host: string | null; server: string | null; loaded: M; memory: M; vram: M; cache_pct: M; vllm_running: M; vllm_waiting: M
-    p50_ms: M; p90_ms: M; tps_last: M; tps_live: M; calls_last_min: M; calls_seen: M; fallbacks: M; errors: M
+    p50_ms: M; p90_ms: M; budget_refused: M; tps_last: M; tps_live: M; calls_last_min: M; calls_seen: M; fallbacks: M; errors: M
     queue: { running: Run[]; waiting: number; slots: number | null; src: string }
   }
   history: Record<'t' | 'cpu' | 'ram' | 'gpu' | 'model_mem' | 'tps' | 'queue' | 'calls_min', (number | null)[]>
@@ -124,7 +124,7 @@ export function MetricsPanel() {
           <Stat label="tokens/s" m={md.tps_live} fmt={(v) => `${v}${num(md.tps_last) != null ? `（最近一次 ${num(md.tps_last)}）` : ''}`} spark={h.tps} lo={0} testid="mx-tps" />
           <Stat label="延遲 p50 / p90" m={md.p50_ms} fmt={(v) => `${sec(v)} / ${num(md.p90_ms) != null ? sec(num(md.p90_ms)!) : '—'}`} />
           <Stat label="最近一分鐘呼叫" m={md.calls_last_min} fmt={(v) => `${v} 次`} spark={h.calls_min} lo={0} testid="mx-calls" />
-          <Stat label="改用規則（備援）" m={md.fallbacks} fmt={(v) => `${v} 次${md.calls_seen.v ? `／${md.calls_seen.v} 次呼叫` : ''}${num(md.errors) ? `・失敗 ${num(md.errors)}` : ''}`} />
+          <Stat label="改用規則（備援）" m={md.fallbacks} fmt={(v) => `${v} 次${md.calls_seen.v ? `／${md.calls_seen.v} 次呼叫` : ''}${num(md.errors) ? `・失敗 ${num(md.errors)}` : ''}${num(md.budget_refused) ? `・用量上限擋下 ${num(md.budget_refused)}` : ''}`} />
           <div className="mx-stat mx-queue" title={`來源：${q.src}`} data-testid="mx-queue">
             <span className="mx-label">模型排隊 {q.slots != null ? <small>（同時 {q.slots} 個）</small> : null}</span>
             <b className="mx-val">{q.running.length ? q.running.map((r) => `${r.work}${r.label && r.label !== r.work ? `「${r.label}」` : ''} ${r.secs.toFixed(0)} 秒`).join('、') : '閒置'}{q.waiting ? `・等待 ${q.waiting}` : ''}</b>
