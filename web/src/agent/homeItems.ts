@@ -124,7 +124,7 @@ const CURE_PRESSES = 11
 export function precheckLine(orderId: string, size: string, due: string, events: Event[], now: number): string | null {
   const ev = events.filter((e) => e.source === 'supervisor' && (e.command ?? '').startsWith(`${orderId} `) && (e.command ?? '').includes('可能晚交'))
     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0]
-  if (!ev || ev.state !== 'closed' || ev.steps.some((s) => s.gate?.risk === 'R2' || s.gate?.risk === 'R3')) return null
+  if (!ev || ev.state !== 'closed' || ev.approvals.length > 0) return null      // it asked for approval: a real card
   const days = Math.round((ms(`${due.slice(0, 10)}T00:00:00+08:00`) - ms(`${new Date(now + 8 * 3_600_000).toISOString().slice(0, 10)}T00:00:00+08:00`)) / 86_400_000)
   const when = days <= 0 ? '今天' : days === 1 ? '明天' : `${fmtMD(due)} 前`
   const [n, kind] = size === 'S' ? [CURE_PRESSES - ML_PRESSES.length, '小胎機'] : [ML_PRESSES.length, '中大胎機']
