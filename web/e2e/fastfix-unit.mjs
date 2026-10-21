@@ -90,6 +90,9 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   check('repaired 2 wall s ago (4 s ramp) → recovering ~50 %', rw['B-OPEN']?.phase === 'recovering' && Math.abs(rw['B-OPEN'].frac - 0.5) < 0.01, JSON.stringify(rw['B-OPEN']))
   const amber = machineRing('B-OPEN', { ...tile, status: 'warning' }, world([done]), now + 32_000, 10, rw['B-OPEN'])
   check('… ring 回溫中, amber, not the green 檢修完成', amber.kind === 'recover' && amber.label === '回溫中' && amber.color === '#f5b83d' && amber.progress === 0.5, `${amber.label} ${amber.color} ${amber.progress}`)
+  const cure = { ...repair, id: 'TK-8', kind: '設定硫化時間', status: '執行中' }
+  const over = machineRing('B-OPEN', { ...tile, status: 'warning' }, world([done, cure]), now + 32_000, 10, rw['B-OPEN'])
+  check('… 回溫中 over another task of the plan (設定硫化時間) on the same machine', over.kind === 'recover' && over.label === '回溫中', `${over.kind} ${over.label}`)
   const fresh = recs([warm], {}, wall0)
   check('… a phase not recorded yet counts as just seen (no green flash first)', fresh['B-OPEN']?.phase === 'recovering' && fresh['B-OPEN'].frac < 0.1)
   const back = { ...warm, state: 'closed', closed_at: iso(now + 34_000), recovered_at: iso(now + 34_000), review: { status: 'pending', requested_at: iso(now + 34_000), done_at: null, by: null } }

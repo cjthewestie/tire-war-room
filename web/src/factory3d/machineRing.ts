@@ -68,18 +68,20 @@ function liveProgress(t: WorkTask, now: number): number {
 export function machineRing(id: string, tile: MachineTile | undefined, world: WorldSnapshot | null, now: number, speed = 1, rec: RingRecovery | null = null): MachineRing {
   const items = world?.tasks.items ?? []
   const here = items.filter((t: WorkTask) => t.machine_id === id && (t.status === '執行中' || t.status === '前往中'))
-  const task = here.find((t) => REPAIR_KINDS.has(t.kind)) ?? here[0]
-  if (task) {
+  const ringOf = (task: WorkTask): MachineRing => {
     const p = liveProgress(task, now)
     return { kind: 'task', progress: p, color: TASK_COLOR[task.kind] ?? '#5db2f5',
       label: `${task.kind}${task.status === '前往中' ? '（人員前往中）' : ` ${Math.round(p * 100)}%`}` }
   }
+  const repairing = here.find((t) => REPAIR_KINDS.has(t.kind))
+  if (repairing) return ringOf(repairing)
   // the repair is done: 回溫中 (amber, filling over the ramp) while the machine is not back to running, then 已恢復 (green)
-  // for DONE_HOLD_WALL_S; it replaces the 檢修完成 ring below
+  // for DONE_HOLD_WALL_S; over another task of the same plan (設定硫化時間) and instead of the 檢修完成 ring below
   if (rec?.phase === 'recovering' && tile?.status !== 'running') return { kind: 'recover', progress: rec.frac, color: RECOVER_AMBER, label: rec.label }
   if (rec && !ALARM.has(tile?.status ?? '') && (rec.phase === 'recovering' || rec.ageS <= DONE_HOLD_WALL_S)) {
     return { kind: 'recover', progress: 1, color: DONE_GREEN, label: '已恢復' }
   }
+  if (here[0]) return ringOf(here[0])
   const hold = Math.max(60_000, DONE_HOLD_WALL_S * 1000 * speed)
   const fixed = rec ? undefined : items.filter((t) => t.machine_id === id && t.status === '完成' && REPAIR_KINDS.has(t.kind) && t.done_at && now - Date.parse(t.done_at) <= hold)
     .sort((a, b) => Date.parse(b.done_at!) - Date.parse(a.done_at!))[0]

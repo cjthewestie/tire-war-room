@@ -6,7 +6,7 @@
 //   small 「知道了」 (POST /api/events/{id}/review = 主管已讀報告, PIN like approvals)
 import { useState } from 'react'
 import type { Event } from '../contracts'
-import { REPAIR_KINDS, expectationOf, meetsExpectation, recoverText } from '../aiStatus'
+import { REPAIR_KINDS, expectationOf, recoverText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtHMS } from '../format'
 import { plain } from '../plain'
@@ -50,7 +50,6 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
       </div>
     )
   }
-  const ok = x && now != null ? meetsExpectation(x, now) : false
   return (
     <div className="ph-card ph-review" data-testid="phone-repaired" data-event={ev.id}>
       <div className="ph-top">
@@ -66,7 +65,7 @@ export function RepairNotice({ ev, disabled, onRead }: { ev: Event; disabled: bo
           ))}</ul>
         ) : '現場維修已完成'}</dd>
       </dl>
-      <p className="ph-foot">{ok ? '讀值已回到正常範圍，' : ''}恢復正常後機台轉回綠燈，異常報告自動產生。</p>
+      <p className="ph-foot">讀值恢復正常後機台轉回綠燈，異常報告自動產生。</p>
     </div>
   )
 }

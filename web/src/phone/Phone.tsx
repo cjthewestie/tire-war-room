@@ -43,6 +43,9 @@ export function Phone() {
   const events = state.snapshot?.events ?? []
   const notices = events.filter((e) => e.repaired_at && !read[rkey(e)] && (e.state === 'closed' ? e.review?.status === 'pending' : e.state !== 'safe_stop'))
     .sort((a, b) => (a.repaired_at! < b.repaired_at! ? -1 : 1))
+  const reports = notices.filter((e) => e.state === 'closed'), fixed = notices.filter((e) => e.state !== 'closed')
+  const names = (xs: Event[]) => xs.map((e) => machineLabel(e.machine_id)).join('、')
+  const noticeLine = [names(reports), fixed.length ? `${reports.length ? '維修完成：' : ''}${names(fixed)}` : ''].filter(Boolean).join('；')
   const readReports = events.filter((e) => e.review?.status === 'done' || read[rkey(e)])
     .map((e) => (e.review?.status === 'done' ? e : read[rkey(e)]))
   // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line; 主管已讀
@@ -67,7 +70,7 @@ export function Phone() {
           <ThemeToggle className="ph-tog" />
         </div>
         {top ? <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>
-          : notices.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・{notices.some((e) => e.state === 'closed') ? '異常報告已產生' : '維修完成'}</b>{notices.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
+          : notices.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・{reports.length ? '異常報告已產生' : '維修完成'}</b>{noticeLine}</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
