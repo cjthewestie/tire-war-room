@@ -1643,6 +1643,10 @@ class Runtime:
             # an approval carried over after a stale schedule (state machine: "<id>-rebased") ran in a
             # later round than the one it carries over
             start = ri + 1 if "-rebased" in req.id and req.id.split("-rebased")[0] in done_ids else ri
+            # card n is raised in plan round n or later (a discussion or a card-less replan adds plan rounds, never
+            # cards), so the search starts at its own round: from the previous card's round, round 2's card (gated
+            # step "S4" again) matched round 1, whose confirm went stale, and read 「未生效」 while its v4 was in force
+            start = max(start, req.round - 1)
             done_ids.add(req.id)
             j = next((k for k in range(start, len(rounds)) if any(owns(sr) for sr in rounds[k])), None)
             ran: list[Any] = []

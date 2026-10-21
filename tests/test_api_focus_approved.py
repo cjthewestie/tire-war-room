@@ -55,3 +55,33 @@ async def test_page11_round1_steps_kept_and_overtime_shown(tmp_path):
         assert any("28.5" in x for x in labels), labels
     finally:
         await rt.stop()
+
+
+async def test_concurrent3_round2_card_is_not_marked_stale(tmp_path):
+    # concurrent_3: 10 號's round-1 confirm went stale (3 號's version won), its round-2 card put v4 in force. ③ showed
+    # both cards 「（✗ 未生效：排程已被另一事件更新）」 beside 「已生效 第 4 版」: the round-2 card was matched to round 1
+    rt = _real_runtime(tmp_path, ScenarioName.CONCURRENT_3.value)
+    await rt.start()
+    try:
+        for _ in range(5 * 60):
+            await rt.tick(1.0, publish=False)
+            await asyncio.sleep(0)
+            for req in rt.approvals.pending():
+                rt.approvals.decide(ApprovalDecision(
+                    request_id=req.id, decision=DecisionKind.APPROVE, option_id=req.options[0].id if req.options else None,
+                    decided_by="主管", decided_at=rt.now()))
+        ev = next(e for e in rt.events() if e.machine_id == "CURE-10")
+        rounds = [r.steps for r in ev.prior_rounds] + [ev.steps]
+        confirms = [[sr.state for sr in rnd if sr.step.tool.value == "confirm_schedule"] for rnd in rounds]
+        assert confirms == [["failed"], ["ok"]], confirms
+        active = rt.c.store.current().version
+        f = rt.focus_panel(ev)
+        by = {}
+        for a in f.approved:
+            by.setdefault(a.approval_id, []).append(a.label)
+        r1, r2 = (by.get(f"AP-{ev.id}-{n}", []) for n in (1, 2))
+        assert len(r1) == 1 and "未生效" in r1[0], by
+        assert r2 and not any("未生效" in x for x in r2), by
+        assert any(f"排程 v{active}" in x for x in r2), (active, by)
+    finally:
+        await rt.stop()
