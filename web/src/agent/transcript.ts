@@ -68,7 +68,10 @@ export interface VersionItem extends Base { k: 'version'; to: number; from: numb
 export interface TaskItem extends Base {
   k: 'task'; phase: 'created' | 'assigned' | 'started' | 'done' | 'cancelled' | 'count'; text: string; who: string | null; repair: boolean
   taskId: string | null; kind: string | null; machine: string | null
-  /** made by an automatic step before the supervisor decided: a fast repair waits for the approval (work.py hold) */
+  /** made 待派: nobody sent yet */
+  waiting: boolean
+  /** a fast repair an automatic step made before the card: it waits for the supervisor's decision (work.py hold). Set
+   *  only when the transcript shows it (holdForApproval); a task 待派 for want of a free person is just 待派. */
   held: boolean
   times: Partial<Record<'assigned' | 'started' | 'done' | 'cancelled', string>>
 }
@@ -99,11 +102,12 @@ function taskItems(e: AuditEntry, base: { key: string; ts: string; seq: number }
   const p = (e.payload ?? {}) as D
   const one = (n: number, phase: TaskItem['phase'], text: string, x: Partial<TaskItem> = {}): TaskItem => ({
     ...base, key: `${base.key}.${n}`, k: 'task', phase, text, who: null, repair: REPAIR_KINDS.has(String(x.kind ?? '')), taskId: null,
-    kind: null, machine: null, held: false, times: {}, ...x,
+    kind: null, machine: null, waiting: false, held: false, times: {}, ...x,
   })
   if (Array.isArray(p.created)) {
     return (p.created as D[]).map((t, i) => one(i, 'created', String(t.title ?? t.kind ?? ''), {
-      kind: str(t.kind), taskId: str(t.id), machine: str(t.machine_id), held: p.approval_id == null && t.status === '待派',
+      kind: str(t.kind), taskId: str(t.id), machine: str(t.machine_id), waiting: t.status === '待派',
+      held: p.approval_id == null && t.status === '待派' && REPAIR_KINDS.has(String(t.kind ?? '')),
     }))
   }
   if (typeof p.change === 'string' && CHANGE[p.change]) {
@@ -115,6 +119,18 @@ function taskItems(e: AuditEntry, base: { key: string; ts: string; seq: number }
   if (Array.isArray(p.cancelled)) return [one(0, 'cancelled', `${p.cancelled.length} 件（撤回 ${String(p.revoked_step ?? '')}）`)]
   if (typeof p.tasks === 'number') return [one(0, 'count', `${String(p.done ?? 0)}/${p.tasks} 完成${p.ok ? '' : '（逾時）'}`)]
   return []
+}
+
+/** A repair made before the card is held for the decision only when a card follows it and nobody went before that
+ *  card's decision (the fast repair hold); otherwise it simply waited for someone free. */
+function holdForApproval(out: Item[]): void {
+  out.forEach((it, i) => {
+    if (it.k !== 'task' || it.phase !== 'created' || !it.held) return
+    const req = out.findIndex((x, n) => n > i && x.k === 'approval' && x.phase === 'request')
+    const dec = req < 0 ? -1 : out.findIndex((x, n) => n > req && x.k === 'approval' && x.phase === 'decision')
+    const sent = out.findIndex((x, n) => n > i && x.k === 'task' && x.taskId === it.taskId && x.phase !== 'created')
+    it.held = req >= 0 && (sent < 0 || (dec >= 0 && sent > dec))
+  })
 }
 
 /** One row per worker task (the audit writes 派工, 前往中, 執行中 and 完成 apart: four rows a task). The row sits where the
@@ -379,6 +395,7 @@ export function fromAudit(entries: AuditEntry[], ev: Event | null): Item[] {
     }
   }
   createdFirst(out)
+  holdForApproval(out)
   for (const it of out) {
     if (it.k !== 'approval' || it.phase !== 'decision') continue
     const req = out.find((x): x is ApprovalItem => x.k === 'approval' && x.phase === 'request' && x.requestId === it.requestId)

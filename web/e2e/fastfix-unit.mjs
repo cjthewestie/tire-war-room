@@ -180,6 +180,19 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const old = fromAudit([a('system', 'world', { msg: '現場處置完成，故障排除', machine_id: 'B-OPEN' }, at(14))], base)
   check('… the runtime\'s older wording counts as 維修完成 too', old[0]?.k === 'review' && old[0].phase === 'repaired')
 
+  // 「核准後才派人」 only on evidence of the approval hold (a card follows the repair, nobody went before its decision);
+  // a notice 待派 for want of a free person says 待派
+  const made = (id, kind, x = {}) => a('task', 'state_machine', { created: [{ id, kind, title: `${kind} B 線開煉機`, machine_id: 'B-OPEN', status: '待派' }], approval_id: null, from_step: 'S6', ...x }, at(1))
+  // rows in audit order (seq): build each list in the order it was written
+  const card = () => a('approval_request', 'state_machine', { id: 'AP-9', risk: 'R3', round: 1, title: 't', options: [] }, at(2))
+  const hold = fromAudit([made('TK-0101', '檢修'), made('TK-0102', '宣達'), card()], base).filter((i) => i.k === 'task')
+  check('a repair made before the card, nobody sent → held (核准後才派人)', hold[0]?.held === true, JSON.stringify(hold[0]))
+  check('… a 宣達 nobody took yet → 待派, not held', hold[1]?.held === false && hold[1]?.waiting === true, JSON.stringify(hold[1]))
+  const noCard = fromAudit([made('TK-0103', '檢修')], base).find((i) => i.k === 'task')
+  check('… a repair 待派 with no card after it → not held', noCard?.held === false && noCard?.waiting === true)
+  const early = fromAudit([made('TK-0104', '檢修'), a('task', 'world', { task_id: 'TK-0104', change: 'assigned', kind: '檢修', worker: 'S05' }, at(1.5)), card()], base)
+  check('… a repair somebody took before the card → not held', early.find((i) => i.k === 'task')?.held === false)
+
   // H1 → the stale H1 round re-solved by code (no 規劃 block) → H2: the second block is H2's own round
   const sr = (id, tool) => ({ step: { id, tool, purpose: 'p', args: {}, depends_on: [] }, state: 'ok', result: null, gate: null })
   const h1 = [sr('S1', 'cure_formula'), sr('S2', 'query_orders_shifts')]

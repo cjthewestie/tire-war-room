@@ -72,8 +72,9 @@ function madeText(it: TaskItem): string {
 const TASK_TIMES: [keyof TaskItem['times'], string][] = [['assigned', '派人'], ['started', '開始'], ['done', '完成'], ['cancelled', '取消']]
 const NOW: Partial<Record<TaskItem['phase'], string>> = { assigned: '前往中', started: '進行中' }
 
-/** One row per worker task (mergeTasks): who, what, and when they were sent, started and finished; a task made before
- *  the approval first has its own 「建立維修工作…（核准後才派人）」 row. Repair tasks are marked: they fix the machine. */
+/** One row per worker task (mergeTasks): who, what, and when they were sent, started and finished; a repair held for the
+ *  approval first has its own 「建立維修工作…（核准後才派人）」 row, a task nobody took yet says 待派. Repair tasks are
+ *  marked: they fix the machine. */
 function TaskRow({ it }: { it: TaskItem }) {
   const row = (head: string, body: React.ReactNode) => (
     <div className={`r-line r-task tp-${it.phase} ${it.repair ? 'repair' : ''}`} data-kind="task" data-phase={it.phase} data-testid="task-row">
@@ -83,7 +84,7 @@ function TaskRow({ it }: { it: TaskItem }) {
   )
   if (it.phase === 'count') return row('現場工作', `　${it.text}`)
   if (!it.taskId) return row('取消現場工作', `　${it.text}`)
-  if (it.phase === 'created') return row(it.repair ? '建立維修工作' : '建立現場工作', `：${madeText(it)}${it.held ? '（核准後才派人）' : ''}`)
+  if (it.phase === 'created') return row(it.repair ? '建立維修工作' : '建立現場工作', <>：{madeText(it)}{it.held ? '（核准後才派人）' : it.waiting && <small>待派</small>}</>)
   const what = it.kind && it.machine && AT_MACHINE.has(it.kind) ? `${it.kind} ${machineLabel(it.machine)}` : plain(it.text)
   const times = TASK_TIMES.filter(([k]) => it.times[k]).map(([k, w]) => `${w} ${fmtHMS(it.times[k])}`)
   const now = NOW[it.phase] && (it.repair && it.phase === 'started' ? '維修中' : NOW[it.phase])
