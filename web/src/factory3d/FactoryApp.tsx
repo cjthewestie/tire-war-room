@@ -2,6 +2,7 @@
 // factory building: walk the rows (F at a machine for its live readings), sit at the war-room computer (F at the desk)
 // to use the real dashboard, watch it live on the big wall screen, go through the doors to the 休息區 and 廁所
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
+// F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo
 // never has to leave the 3D view; ?demo=1 also lists them in the key strip. #71: the ⚡ 觸發異常 button (or T) does
 // the same with a click, for presenters and touch devices.
@@ -21,6 +22,7 @@ import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
+import { FieldSop } from './FieldSop'
 import { successTitle, useSuccessMoments } from './success'
 import { PLACED_BY_ID, ROOMS, collide, walkable, type Near, type SceneId } from './layout'
 import { releaseLook, requestLook } from './look'
@@ -355,7 +357,7 @@ export function FactoryApp() {
         </div>
       )}
 
-      {panel?.kind === 'machine' && <MachineDrawer id={panel.id} onClose={closePanel} />}
+      {panel?.kind === 'machine' && <MachineDrawer id={panel.id} onClose={closePanel} extra={(d) => <FieldSop machineId={panel.id} tiles={d.tiles} />} />}
       {panel?.kind === 'monitor' && <DeskMonitor onClose={closePanel} />}
       <PhoneOverlay up={phoneUp} onLower={() => raisePhone(false)} buzzing={buzz} />
     </div>
