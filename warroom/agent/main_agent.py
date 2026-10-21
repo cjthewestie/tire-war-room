@@ -18,7 +18,11 @@ Code guards (the model is inside the loop, not in charge of the facts):
 - read tools all failed → the reply says nothing was read (never 「狀態正常」 from no data);
 - numbers in the reply must come from tool results, the context or the message;
 - a plant question answered with no tool gets one reminder, then code reads by the rules;
-- a request to do something with no propose_plan gets one reminder, then code proposes (never claims one it didn't).
+- a request to do something with no propose_plan gets one reminder, then code proposes (never claims one it didn't);
+  with a plan selected, a request that names an order or machine the plan does not is such a new task, not a discussion;
+- after a discussion the reply is code's, from its result (「已改成第 N 版，請重新核准」 or what it said); any other reply
+  that says 已改／已更新／已擬計劃／已送 is replaced (demo walk-through 10-21: 「這份待核准計畫現在已更新」, event_id=null);
+- greetings, 你是誰 and 謝謝 get the fixed replies without a model call; a model reply is plain text, at most 3 sentences.
 Rule mode (or a model failure) runs the same tools by keywords."""
 from __future__ import annotations
 
@@ -34,7 +38,16 @@ from typing import Any
 
 from warroom import factory as F
 from warroom.agent import plant
-from warroom.agent.ask import _HELLO_RX, _NUM_RX, _THANKS_RX, machines_in, mock_plan, summarize
+from warroom.agent.ask import (
+    _HELLO_RX,
+    _NUM_RX,
+    _THANKS_RX,
+    ORDER_RX,
+    machines_in,
+    mock_plan,
+    orders_in,
+    summarize,
+)
 from warroom.agent.state_machine import _brief
 from warroom.contracts import ASK_TOOLS, ToolName, ToolResult
 
@@ -51,14 +64,25 @@ ALL_TOOLS = [*READ_TOOLS, PROPOSE, DISCUSS]
 IDENTITY_REPLY = "我是戰情室的 agent。可以陪你看狀況、查 SOP；需要動到現場的事，我會擬計劃送你核准，核准後才執行。"
 HELLO_REPLY = "你好，我是戰情室的 agent。要查狀況或安排事情，直接說就好。"
 THANKS_REPLY = "不客氣，有事再叫我。"
-GIBBERISH_REPLY = "這句我看不懂，可以再說一次嗎？例如：「#M-201 會不會晚交？」"
+GIBBERISH_REPLY = "這句我看不懂，可以再說一次嗎？例如：「#A-311 會不會晚交？」"
 UNCLEAR_REPLY = "我不太確定你要我做什麼。你是想查狀況，還是要我安排一件事？例如：「7 號機現在怎樣？」"
 NO_OBJECT = "要安排事情，我需要知道是哪台機台、哪張訂單、哪種原料或哪個班。"
 NOTHING_READ = "我剛剛去查，但沒有讀到資料（{err}），所以不能判斷{what}現在的狀況。你可以換個說法，或直接看產線監控。"
+# what discuss_waiting_plan can really do to a waiting plan (warroom/agent/talk.py: machine_unavailable, no_overtime,
+# no_transfer, prefer_option). 「計劃改」 got 「調低到 118°C、加快降溫、縮短硫化時間」 (real run 2026-10-21): none of them exist
+PLAN_CHANGES = "某台硫化機某時段不排（例如「9 號機今晚要保養」）、不要加班、不要跨組調人、改選 A 或 B 方案"
+PLAN_EDIT_Q = f"這份計劃能改的是：{PLAN_CHANGES}；也可以直接核准或駁回。你要改哪一項？"
+NOT_CHANGED = "計劃沒有改。" + PLAN_EDIT_Q
+NOT_DONE = "我還沒有改任何東西，也沒有擬計劃。要安排的話，直接說要做什麼和對象，例如「請安排 9 號機明天保養」。"
+NO_FACTS = "這個我沒有查到資料，不能給你數字。要我查哪台機台或哪張訂單？例如：「#A-311 會不會晚交？」"
+NO_SUCH_ORDER = "沒有這張訂單：{what}，所以查不到交期。你要查的是哪一張？例如：「#A-311 會不會晚交？」"
+KB_LOADING = "知識庫還在載入，請稍候再問。"
+# process sense (page 11): a temperature drop is the anomaly; the plant never cures below 120 °C (SR-CURE-LOW-120)
+PROCESS_RULE = "溫度下降是異常：不可以建議降溫、把溫度降到 120°C 以下或縮短硫化時間"
 
 _IDENTITY_RX = re.compile(r"(?:你|妳|您)(?:是誰|是什麼|叫什麼|能做什麼|會做什麼|會什麼|可以做什麼)|介紹(?:一下)?(?:你|妳|您)自己|who are you", re.IGNORECASE)
 _CJK_RX = re.compile(r"[㐀-鿿]")
-_ORDER_RX = re.compile(r"#\s?[A-Z]-?\d{2,4}", re.IGNORECASE)
+_ORDER_RX = ORDER_RX
 _MATERIAL_RX = re.compile(r"原料|橡膠|碳黑|鋼絲|尼龍|硫化劑|補料|缺料|進貨|庫存|採購")
 _PEOPLE_RX = re.compile(r"人力|人手|調人|加班|請假|缺人|病假|夜班|早班|中班|排班|班表|組長")
 _TASK_RX = re.compile(r"請|幫我|安排|通知|重排|調人|加班|補料|檢查|保養|處理|派|排程|停用|重新|改")
@@ -72,17 +96,30 @@ NO_SUCH_MACHINE = "廠裡沒有{what}（硫化機是 1–11 號，另有 A／B �
 # (CJ 2026-10-21: 「計畫改」 → 「怎改」 got the self-introduction again: the model saw 「怎改」 with no conversation)
 SHORT_FOLLOW_UP = 6
 _ASKED_RX = re.compile(r"[?？][^。！!?？]*$|請告訴我|請問|要不要|還是")
-# a concrete change to the selected plan (「降到120」「延後一小時」「換 8 號」), not a question about it
+# a concrete change to the selected plan (「降到120」「延後一小時」「換 8 號」), not a question about it. Only with Chinese
+# words: the digits of 「vu04y94u.3s83uv,」 counted as an edit and the agent answered 「目標溫度已改成 122°C」 (real run)
 _PLAN_EDIT_RX = re.compile(r"\d|降|升|調|改成|改到|改用|換|延後|提前|不要|不可|不能")
 # 「計畫改」「怎改」「改一下」: wants a change but says none, so the agent asks what to change (no discuss tool offered:
 # it called discuss_waiting_plan with nothing and answered 「目標溫度已改成 122°C」, real run 2026-10-21)
 _VAGUE_EDIT_RX = re.compile(r"^(?:這個|這份)?(?:計[劃畫])?(?:要)?(?:怎麼?|如何)?(?:改|修改|調整)(?:一下|看看)?(?:計[劃畫])?[?？]?$")
 _LAST_Q_RX = re.compile(r"[^。！!?？\n]*[?？]\s*$")
-_INTRO_RX = re.compile(r"^\s*(?:(?:早安|早上好|午安|下午好|晚安|晚上好|你好|您好|哈囉|嗨)[！!，,。～~\s]*)?(?:我是[^。！!\n]{0,30}?agent[^。！!\n]*[。！!]\s*)?",
+_GREETING = r"(?:早安|早上好|午安|下午好|晚安|晚上好|你好|您好|哈囉|嗨)"
+# a short acknowledgement before a greeting or a self-introduction (「收到，主管。我是戰情室的 agent…」) goes with it
+_INTRO_RX = re.compile(r"^\s*(?:(?:[^。！!？?\n]{1,8}?[，,。！!]\s*){1,2}?(?=" + _GREETING + r"|我是))?"
+                       r"(?:" + _GREETING + r"[！!，,。～~\s]*)?(?:我是[^。！!\n]{0,30}?agent[^。！!\n]*[。！!]\s*)?",
                        re.IGNORECASE)
 _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛剛|剛才|上面|前面|這台|那台|它|他們|同一")
+# a reply that says something was changed or sent (「這份待核准計畫現在已更新」「已擬計劃送你核准」) is only true after a
+# propose_plan or a discussion that replanned; otherwise code writes the reply (real run 2026-10-21, event_id=null)
+_CLAIM_RX = re.compile(r"已(?:經)?(?:幫你|替你|為你)?(?:改|更新|修改|調整|重排|擬|送)")
+# advice that breaks process sense for a temperature-drop plan (「調低到 118°C」「加快降溫」「縮短硫化時間」)
+_UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{0,6}(?:硫化|時間)|(?:硫化|時間).{0,4}縮短")
+# 「（discuss_waiting_plan 回覆：…）」: a tool name in the reply
+_TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
+_SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
+MAX_SENTENCES = 3
 
-SYSTEM = """你是實心胎工廠戰情室的 agent，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
+SYSTEM = f"""你是實心胎工廠戰情室的 agent，用繁體中文、像同事一樣自然地跟主管對話。你有工具可以用（tool calling）。
 怎麼做：
 - 打招呼、問你是誰、閒聊：直接回答，不用工具。問你是誰就說你是戰情室的 agent，能查狀況、查 SOP、擬計劃送核准。
 - 問工廠的事（機台、訂單、班表、原料、SOP、怎麼處理）：先用讀取工具查，看完結果再回答。可以一次呼叫多個工具。
@@ -92,10 +129,12 @@ SYSTEM = """你是實心胎工廠戰情室的 agent，用繁體中文、像同�
 規則：
 1. 你不能直接改任何東西，沒有任何機台或 PLC 的寫入工具。
 2. 數字和狀態只能來自工具結果或 context；工具失敗或查不到，就照實說查不到，不可以說「正常」。
-3. 回覆 2–3 句，短。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
+3. 回覆 2–3 句，短，純文字（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
    有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_asked 是你上一句最後問主管的問題）：把 message 當成對你那個問題的回答，往下接，不要重複你上一句。
-5. 有 waiting_plan，而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪裡，給 2–3 個這份計劃能改的具體選項（例如目標溫度、換機台、執行時間），不要再介紹一次計劃。
-6. 有 waiting_plan，主管給了具體改法（例如「降到120」「延後一小時」「換 8 號」）：呼叫 discuss_waiting_plan，text 寫成完整的一句（例如「目標溫度改成 120°C」）。
+5. 有 waiting_plan（計劃標題、要做的事、A／B 人力方案），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
+   {PROCESS_RULE}，也不可以說你會改溫度。
+6. 有 waiting_plan，主管給了具體改法（例如「9 號機今晚要保養」「不要加班」「改選 A」）：呼叫 discuss_waiting_plan，text 寫成完整的一句。改法不在第 5 條裡（例如改溫度）也交給它，它會照實說能不能做；計劃有沒有改，以它的結果為準。
+7. 主管要做的是一件新的事（例如「#A-311 可能晚交，請重排保交期」，對象不在 waiting_plan 裡）：呼叫 propose_plan，不要當成在改這份計劃。
 4. 主管的話很短或看不懂（例如「?」）：依 context 猜他可能想知道什麼，簡短回應並問一句確認，不要只說看不懂。
 機台代號：CURE-01..CURE-11 = 1..11 號硫化機（一定要補零，例如 7 號 = CURE-07）；A-BIGOPEN = A 線大開煉機；其他依 context。"""
 
@@ -147,6 +186,10 @@ def normalize_args(args: dict[str, Any]) -> dict[str, Any]:
             out[k] = [normalize_machine(out[k])]
     if "machine_id" in out:
         out["machine_id"] = normalize_machine(out["machine_id"])
+    if isinstance(out.get("order_ids"), (str, list)):
+        ids = out["order_ids"] if isinstance(out["order_ids"], list) else [out["order_ids"]]
+        # 「A-311」「#a311」 → #A-311 (the plant's spelling); anything else is kept and reported as no such order
+        out["order_ids"] = [(orders_in(s if str(s).startswith("#") else f"#{s}") or [s])[0] for s in map(str, ids)]
     return out
 
 
@@ -180,6 +223,47 @@ def wants_lookup(text: str) -> bool:
     if _IDENTITY_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t) or wants_task(t):
         return False
     return bool(re.search(r"SOP|怎麼處理|處置", t) or (_QUESTION_RX.search(t) and has_object(t)))
+
+
+def names_other(text: str, plan: str | None) -> bool:
+    """The message names an order or a machine the selected plan does not (「#M-201 可能晚交，請重排保交期」 while the
+    7 號機 card is selected): it is about something else, not this plan."""
+    if not plan:
+        return False
+    mine = set(machines_in(text)) | set(orders_in(text))
+    return bool(mine - (set(machines_in(plan)) | set(orders_in(plan))))
+
+
+def new_task(text: str, plan: str | None) -> bool:
+    """A new task while a plan is selected: 「請…」 with an object the plan does not name, and not one of the plan
+    changes discuss can encode (「9 號機今晚要保養」 stays a change to this plan)."""
+    from warroom.agent.talk import rule_intent
+    t = text.strip()
+    return plan is not None and wants_task(t) and names_other(t, plan) and rule_intent(t) != "change"
+
+
+def plan_edit(text: str) -> bool:
+    """A concrete change to the selected plan (「降到120」「不要加班」), in Chinese words, and not a question."""
+    t = text.strip()
+    return bool(_PLAN_EDIT_RX.search(t) and _CJK_RX.search(t) and not _QUESTION_RX.search(t)
+                and not re.search(r"[?？]\s*$", t))
+
+
+def tidy(reply: str, keep_intro: bool) -> str:
+    """The model's words as one short plain reply: no Markdown bold, no tool names in brackets, no self-introduction
+    after 「收到，主管。」, at most MAX_SENTENCES sentences (real runs 10-21: 「**7 號機**」「（discuss_waiting_plan 回覆：…）」,
+    four paragraphs)."""
+    r = reply.replace("**", "").replace("__", "")
+    r = _TOOL_PAREN_RX.sub("", r)
+    r = re.sub(r"(?m)^\s*(?:[-*•]|\d+[.、)])\s+", "", r)                # list markers
+    r = re.sub(r"(?<=[。！!？?：:；;，,])\s*\n+\s*", "", r)
+    r = re.sub(r"\s*\n+\s*", "；", r.strip())
+    if not keep_intro:
+        r = _INTRO_RX.sub("", r, count=1).strip() or r
+    parts = _SENTENCE_RX.findall(r)
+    if len(parts) > MAX_SENTENCES:
+        r = "".join(parts[:MAX_SENTENCES])
+    return r.strip()
 
 
 def ungrounded(reply: str, source: str) -> list[str]:
@@ -224,7 +308,7 @@ class MainAgent:
         if not (self.llm and self.client is not None) and is_gibberish(text):
             out.update(reply=GIBBERISH_REPLY, intent="unclear")
             return self._done(out, text, t0)
-        if self.llm and self.client is not None:
+        if self.llm and self.client is not None and not self._canned(text):
             try:
                 await asyncio.wait_for(self._model_loop(text, context, waiting_plan, out, run_tool, propose, discuss, tid,
                                                         slot), BUDGET_S)
@@ -236,8 +320,24 @@ class MainAgent:
                     out["reply"] = out["reply"] or self._propose_reply(steps)
                     return self._done(out, text, t0)
                 steps.clear()
+                out.pop("unknown", None)
+                out.pop("unknown_orders", None)
         await self._rule_turn(text, context, waiting_plan, out, run_tool, propose, discuss, tid)
         return self._done(out, text, t0)
+
+    def _canned(self, text: str) -> bool:
+        """A greeting, 你是誰 or a thanks gets the fixed reply without the model: they took 14 s on the Spark while the
+        commander was planning (real run 2026-10-21). 「好」「收到」 answering the agent's own question still go to it."""
+        t = text.strip()
+        prev = self.memory[-1] if self.memory else None
+        asked = prev is not None and bool(_ASKED_RX.search(prev[1]))
+        return bool((_IDENTITY_RX.search(t) and not has_object(t)) or _HELLO_RX.match(t)
+                    or (_THANKS_RX.match(t) and not asked))
+
+    def clear(self) -> None:
+        """Forget the conversation (a scenario was loaded or reset: 「你好」 → 「您剛才說『降到 120』…」 from the
+        previous rehearsal). Turn ids keep counting so the console never mixes an old turn with a new one."""
+        self.memory.clear()
 
     def _done(self, out: dict[str, Any], text: str, t0: float) -> dict[str, Any]:
         out["reply"] = (out["reply"] or UNCLEAR_REPLY).strip()
@@ -251,7 +351,7 @@ class MainAgent:
         steps = out["steps"]
         if name == PROPOSE:
             task = str((args or {}).get("task") or text)
-            if not has_object(task) and not has_object(text):
+            if is_gibberish(text) or (not has_object(task) and not has_object(text)):   # never a task from no words
                 steps.append({"tool": name, "args": args, "ok": False, "summary": "沒有具體對象，沒有擬計劃", "label": "沒有擬計劃"})
                 return NO_OBJECT
             if out["event_id"]:
@@ -266,17 +366,35 @@ class MainAgent:
             if discuss is None:
                 steps.append({"tool": name, "args": args, "ok": False, "summary": "目前沒有選待核准的計劃", "label": "沒有計劃可討論"})
                 return "目前沒有選待核准的計劃。"
+            if not _CJK_RX.search(text):
+                # 「vu04y94u.3s83uv,」: the model wrote its own change from no words; nothing the supervisor said
+                steps.append({"tool": name, "args": args, "ok": False, "summary": "主管這句看不懂，沒有拿來改計劃",
+                              "label": "沒有改計劃"})
+                return "主管這句看不懂，不能拿來改計劃。請問主管要改哪一項。"
             r = await discuss(str((args or {}).get("text") or text))
             reply = str(r.get("reply") or "")
-            steps.append({"tool": name, "args": args, "ok": True, "summary": reply[:200], "label": "討論計劃"})
+            approval = r.get("approval") or {}
+            steps.append({"tool": name, "args": args, "ok": True, "summary": reply[:200], "label": "討論計劃",
+                          "reply": reply, "replanned": bool(r.get("replanned")),
+                          "version": approval.get("version") if isinstance(approval, dict) else None,
+                          "chips": [str(c.get("label")) for c in r.get("constraints") or [] if isinstance(c, dict) and c.get("label")]})
             return reply
         if name not in READ_TOOLS:
             steps.append({"tool": name, "args": args, "ok": False, "summary": "不允許：沒有寫入工具", "label": f"攔下 {name}"})
             return f"{name} 不能用：只能查資料或擬計劃送核准。"
         args = normalize_args(args)
         res = await run_tool(name, args, f"{tid}:T{len(steps) + 1}")
-        summ = summarize(ToolName(name), res.data) if res.ok else f"失敗：{res.error}"
+        err = str(res.error or "")
+        if name == "sop_search" and "timeout" in err.lower():
+            err = "知識庫還在載入"                 # 「timeout after 10 s」 while the knowledge base loads, in English
+        summ = summarize(ToolName(name), res.data, args) if res.ok else f"失敗：{err}"
         steps.append({"tool": name, "args": args, "ok": res.ok, "summary": summ, "label": _label(name, args, res)})
+        if res.ok and name == "query_orders_shifts" and args.get("order_ids"):
+            have = {str(o.get("id")) for o in (res.data or {}).get("orders") or [] if isinstance(o, dict)}
+            missing = [o for o in args["order_ids"] if o not in have]
+            if missing:                          # 「#M-201」: say there is no such order, never another order's due date
+                out.setdefault("unknown_orders", []).extend(missing)
+                return f"沒有這張訂單：{'、'.join(missing)}。直接告訴主管沒有這張訂單，不要改查別的。"
         bad = None if res.ok else _UNKNOWN_ID_RX.search(str(res.error or ""))
         if bad:
             # the asked machine does not exist: say so (「15 號機」 → it read 11, 10, 9, 8, 7 號 instead)
@@ -290,12 +408,37 @@ class MainAgent:
         return "好，已擬計劃送你核准（AI 指揮官正在排），核准後才執行。" if d else UNCLEAR_REPLY
 
     @staticmethod
+    def _discuss_reply(steps: list[dict[str, Any]]) -> str | None:
+        """The reply after a discussion is code's, from its result: a new card → 「已改成第 N 版，請重新核准」; no new
+        card → what the discussion said (「計劃沒有改」), never the model's 「這份待核准計畫現在已更新」."""
+        ds = [s for s in steps if s["tool"] == DISCUSS]
+        if not ds:
+            return None
+        new = next((s for s in reversed(ds) if s.get("replanned") and s.get("version")), None)
+        if new is not None:
+            chips = "、".join(new.get("chips") or [])
+            return f"好，已改成第 {new['version']} 版{f'（{chips}）' if chips else ''}，請重新核准。"
+        said = next((s.get("reply") or s["summary"] for s in reversed(ds) if s["ok"]), None)
+        return said or NOT_CHANGED
+
+    @staticmethod
+    def _unknown_reply(out: dict[str, Any]) -> str | None:
+        """The asked machine or order does not exist: code answers (「15 號機」「#M-201」)."""
+        ids = list(dict.fromkeys(out.get("unknown") or []))
+        if ids:
+            return NO_SUCH_MACHINE.format(what="、".join(_press_name(i) for i in ids))
+        orders = list(dict.fromkeys(out.get("unknown_orders") or []))
+        return NO_SUCH_ORDER.format(what="、".join(orders)) if orders else None
+
+    @staticmethod
     def _nothing_read(steps: list[dict[str, Any]]) -> str | None:
         """Read tools were called and every one failed: the reply must say so (CJ 2026-10-21: 「7 號機」 → 「狀態正常」
         after two failed reads)."""
         reads = [s for s in steps if s["tool"] in READ_TOOLS]
         if not reads or any(s["ok"] for s in reads):
             return None
+        if all(s["tool"] == "sop_search" and "知識庫還在載入" in s["summary"] for s in reads):
+            return KB_LOADING
         ids = [m for s in reads for m in (s["args"].get("machine_ids") or [s["args"].get("machine_id")]) if m]
         from warroom.agent.narrate import machine_label
         what = "、".join(dict.fromkeys(machine_label(m) if m in F.MACHINE_BY_ID else str(m) for m in ids)) or "這件事"
@@ -322,12 +465,20 @@ class MainAgent:
         msgs.append({"role": "user", "content": json.dumps(ctx, ensure_ascii=False, default=str)})
         from warroom.agent.commander import thinking_off
         extra = thinking_off(self.server_kind)
-        tools = tool_specs(with_discuss=discuss is not None and not _VAGUE_EDIT_RX.match(text.strip()))
-        source = text + " " + json.dumps(context, ensure_ascii=False, default=str) + " " + (waiting_plan or "")
-        nudged = waiting_plan is not None             # a message about the selected plan is a discussion, not a new task
-        looked = waiting_plan is not None
+        vague = waiting_plan is not None and bool(_VAGUE_EDIT_RX.match(t))
+        # a new task while a card is selected (「#M-201 可能晚交，請重排保交期」 with the 7 號機 card): not a discussion of
+        # that plan, so the propose reminder and the code proposal stay on and discuss is not offered
+        fresh = new_task(t, waiting_plan)
+        other = waiting_plan is not None and names_other(t, waiting_plan)
+        tools = tool_specs(with_discuss=discuss is not None and not vague and not fresh and bool(_CJK_RX.search(t)))
+        # numbers the reply may use: the message, what rode along with it, the context, the plan and the tool results
+        source = " ".join([text, *earlier, prev[0] if follow and prev is not None else "",
+                           json.dumps(context, ensure_ascii=False, default=str), waiting_plan or "", PROCESS_RULE])
+        nudged = waiting_plan is not None and not fresh   # a message about the selected plan is a discussion, not a new task
+        looked = waiting_plan is not None and not other
         called: set[tuple[str, str]] = set()
-        edits = discuss is not None and bool(_PLAN_EDIT_RX.search(t)) and not _QUESTION_RX.search(t)
+        edits = discuss is not None and not fresh and plan_edit(t)
+        editing = vague or edits                      # the message is about changing the selected plan
         for i in range(MAX_STEPS + 1):
             last = i >= MAX_STEPS
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
@@ -361,11 +512,10 @@ class MainAgent:
                                                   run_tool, propose, discuss)
                         source += " " + result
                     msgs.append({"role": "tool", "tool_call_id": c.id, "content": result})
-                if out.get("unknown") and not out["event_id"]:
-                    # the machine asked about does not exist: code answers, the model does not go looking elsewhere
-                    ids = list(dict.fromkeys(out["unknown"]))
-                    out.update(reply=NO_SUCH_MACHINE.format(what="、".join(_press_name(i) for i in ids)),
-                               error=f"unknown machine {ids}")
+                unknown = self._unknown_reply(out)
+                if unknown and not out["event_id"]:
+                    # the machine or order asked about does not exist: code answers, the model does not look elsewhere
+                    out.update(reply=unknown, error=f"unknown {out.get('unknown') or out.get('unknown_orders')}")
                     return
                 continue
             reply = (m.content or "").strip()
@@ -373,7 +523,7 @@ class MainAgent:
                 reply, out["error"] = self._results_reply(out["steps"]) or self._propose_reply(out["steps"]), "no reply after tools"
             if not reply:
                 raise ValueError("empty reply")
-            if not out["steps"] and wants_lookup(text) and waiting_plan is None:
+            if not out["steps"] and wants_lookup(text) and (waiting_plan is None or other):
                 read = [st for st in mock_plan(text, context).steps if st.tool in READ_TOOLS]
                 if not looked and read and not last:
                     # a plant question answered without looking: remind the model once which tool answers it
@@ -384,7 +534,8 @@ class MainAgent:
                 if read:                              # still nothing read: code reads by the rules, the results speak
                     for st in read[:MAX_STEPS]:
                         await self._tool(st.tool, st.args, text, out, tid, run_tool, propose, discuss)
-                    out.update(reply=self._nothing_read(out["steps"]) or self._results_reply(out["steps"]) or reply,
+                    out.update(reply=self._unknown_reply(out) or self._nothing_read(out["steps"])
+                               or self._results_reply(out["steps"]) or NO_FACTS,
                                fell_back=True, error="model answered a plant question without a tool; read by rules")
                     return
             if not nudged and not out["event_id"] and wants_task(text) and not last:
@@ -393,52 +544,68 @@ class MainAgent:
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": "主管是要你「做」這件事，不只是查。請呼叫 propose_plan 擬計劃送核准，再回覆。"}]
                 continue
-            if not out["event_id"] and wants_task(text) and waiting_plan is None:
+            if not out["event_id"] and wants_task(text) and (waiting_plan is None or fresh):
                 # asked twice, still no propose_plan: code proposes (never claim a plan that does not exist)
                 await self._tool(PROPOSE, {"task": text}, text, out, tid, run_tool, propose, discuss)
                 out.update(reply=self._propose_reply(out["steps"]), fell_back=True,
                            error="model did not call propose_plan; proposed by rules")
                 return
-            nothing = self._nothing_read(out["steps"])
-            if nothing:                               # every read failed: never a status from no data
-                out["error"] = "all read tools failed"
-                reply = nothing
-            else:
-                bad = ungrounded(reply, source)
-                if bad:                               # a number the tools did not give: the results speak instead
-                    out["error"] = f"ungrounded numbers {bad}"
-                    reply = self._results_reply(out["steps"]) or reply
-            if out["event_id"]:                       # the proposal line is code's (never 「已完成」 before approval)
-                reply = self._propose_reply(out["steps"])
             if edits and not last and not any(st["tool"] == DISCUSS for st in out["steps"]):
                 # a concrete change to the waiting plan answered with words only (「降到120」 → 「您覺得如何？」): remind once
                 edits = False
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": "主管給了這份待核准計劃的具體改法。請呼叫 discuss_waiting_plan，text 寫成完整一句，再回覆。"}]
                 continue
-            if prev is not None and reply == prev[1] and not last:
+            code = self._code_reply(out, reply, text, source, waiting_plan, editing)
+            if code is None and prev is not None and tidy(reply, True) == prev[1] and not last:
                 # the same answer as last turn: the supervisor said something new, answer that
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": f"這跟你上一句一模一樣。主管這次說的是「{t}」，針對這句回應，不要重複。"}]
                 continue
-            if not (_IDENTITY_RX.search(t) or _HELLO_RX.match(t)):
-                # no greeting / self-introduction unless asked (it opened every reply with 「早上好！我是戰情室的 agent」)
-                reply = _INTRO_RX.sub("", reply, count=1).strip() or reply
-            out["reply"] = reply
+            # no greeting / self-introduction unless asked (it opened every reply with 「早上好！我是戰情室的 agent」)
+            out["reply"] = code if code is not None else tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
             return
         raise TimeoutError("too many tool steps")
 
+    def _code_reply(self, out: dict[str, Any], reply: str, text: str, source: str, waiting_plan: str | None,
+                    about_edit: bool) -> str | None:
+        """The reply code writes instead of the model's, or None to keep the model's (tidied) words. The model is inside
+        the loop, not in charge of the facts: what was proposed, what a discussion changed, what was read."""
+        steps = out["steps"]
+        if out["event_id"]:                           # the proposal line is code's (never 「已完成」 before approval)
+            return self._propose_reply(steps)
+        said = self._discuss_reply(steps)
+        if said is not None:                          # a discussion ran: its result says whether the plan changed
+            return said
+        nothing = self._nothing_read(steps)
+        if nothing:                                   # every read failed: never a status from no data
+            out["error"] = "all read tools failed"
+            return nothing
+        words = tidy(reply, True)
+        bad = ungrounded(words, source)
+        if bad:                                       # a number the tools did not give: the results speak instead
+            out["error"] = f"ungrounded numbers {bad}"
+            return self._results_reply(steps) or (PLAN_EDIT_Q if waiting_plan and about_edit else NO_FACTS)
+        if waiting_plan and about_edit and _UNSAFE_RX.search(words):
+            out["error"] = "advice outside what the plan can change"
+            return PLAN_EDIT_Q
+        if _CLAIM_RX.search(words):                   # 「已改／已更新／已擬計劃／已送」 with nothing proposed or replanned
+            out["error"] = "claimed a change that was not made"
+            return GIBBERISH_REPLY if is_gibberish(text) else NOT_CHANGED if waiting_plan else NOT_DONE
+        return None
+
     @staticmethod
     def _results_reply(steps: list[dict[str, Any]]) -> str:
-        """Short: a SOP is named, not pasted (the full lines stay in the reply's tool line)."""
+        """Short: a SOP is named, not pasted (the full lines stay in the reply's tool line). A discussion is not a read:
+        its reply is used as it is (it got 「查到：」 in front)."""
         ok = []
         for s in steps:
-            if not (s["ok"] and s["summary"]) or s["tool"] == PROPOSE:
+            if not (s["ok"] and s["summary"]) or s["tool"] in (PROPOSE, DISCUSS):
                 continue
             sops = re.findall(r"(SOP-[A-Z]+-\d+)〈([^〉]+)〉", s["summary"]) if s["tool"] == "sop_search" else []
-            ok.append("請照 " + "、".join(f"{a}〈{b}〉" for a, b in sops[:2]) + " 處理" if sops else s["summary"][:90].rstrip("；，、 "))
+            ok.append("請照 " + "、".join(f"{a}〈{b}〉" for a, b in sops[:2]) + " 處理" if sops else s["summary"][:90].rstrip("。；，、 "))
         ok = list(dict.fromkeys(ok))                # the same SOP found by several searches is named once
-        return ("查到：" + "；".join(ok)[:220] + "。") if ok else ""
+        return ("查到：" + "；".join(ok)[:220].rstrip("。；，、 ") + "。") if ok else ""
 
     # ---------------------------------------------------------------- rules (rule mode, or the model failed)
     async def _rule_turn(self, text, context, waiting_plan, out, run_tool, propose, discuss, tid) -> None:
@@ -453,10 +620,17 @@ class MainAgent:
             out.update(reply=THANKS_REPLY, intent="chat")
             return
         asks = bool(re.search(r"[?？]\s*$", t))
-        if waiting_plan and discuss is not None and (re.search(r"為什麼|為何", t) or (_CHANGE_RX.search(t) and not asks)):
-            out["intent"] = "change_plan"
-            out["reply"] = await self._tool(DISCUSS, {"text": t}, t, out, tid, run_tool, propose, discuss)
-            return
+        if waiting_plan and discuss is not None and not new_task(t, waiting_plan):
+            if _VAGUE_EDIT_RX.match(t):
+                # 「計劃改」「怎改」: ask which change, listing what this plan can change (it got UNCLEAR_REPLY with an
+                # unrelated example)
+                out.update(reply=PLAN_EDIT_Q, intent="change_plan")
+                return
+            if re.search(r"為什麼|為何", t) or (_CHANGE_RX.search(t) and not asks) or plan_edit(t):
+                out["intent"] = "change_plan"
+                await self._tool(DISCUSS, {"text": t}, t, out, tid, run_tool, propose, discuss)
+                out["reply"] = self._discuss_reply(out["steps"]) or NOT_CHANGED
+                return
         imperative = bool(re.search(r"請|幫我|安排|通知|重排|調人|加班|補料|派", t))
         if _TASK_RX.search(t) and not asks and has_object(t) and (imperative or not _QUESTION_RX.search(t)):
             out["intent"] = "new_task"
@@ -468,9 +642,7 @@ class MainAgent:
             plan = mock_plan(t, context)
             for s in plan.steps[:MAX_STEPS]:
                 await self._tool(s.tool, s.args, t, out, tid, run_tool, propose, discuss)
-            unknown = list(dict.fromkeys(out.get("unknown") or []))
-            out["reply"] = ((NO_SUCH_MACHINE.format(what="、".join(_press_name(i) for i in unknown)) if unknown else None)
-                            or self._nothing_read(out["steps"]) or self._results_reply(out["steps"])
+            out["reply"] = (self._unknown_reply(out) or self._nothing_read(out["steps"]) or self._results_reply(out["steps"])
                             or "這個我手上的資料查不到。你想知道哪台機台或哪張訂單？")
             return
         out.update(reply=UNCLEAR_REPLY, intent="unclear")

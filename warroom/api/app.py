@@ -930,7 +930,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         waiting = None
         if body.event_id:
             card = getattr(sm, "waiting_card", lambda _e: None)(body.event_id)
-            waiting = card.title if card is not None else None
+            if card is not None:
+                # the card as the supervisor sees it: title, what it does and the A／B staffing options (the title alone
+                # let the model invent changes: 「調低到 118°C、縮短硫化時間」, real run 2026-10-21)
+                opts = "；".join(f"{o.id} {o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
+                waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(card.actions) or '無'}"
+                           + (f"。人力方案：{opts}" if opts else ""))
         from warroom.agent.ask import AskAgent
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult
@@ -992,6 +997,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 raise HTTPException(status_code=503, detail={
                     "message": f"情境切換失敗，維持原情境 {r.scenario.value}：{type(e).__name__}: {e}"[:400],
                     "scenario": r.scenario.value}) from None
+            if "main" in holder:
+                # a new scenario starts a new conversation: 「你好」 got 「您剛才說『降到 120』…」 from the last rehearsal
+                holder["main"].clear()
         if ctl.preroll and ctl.action in ("reset", "scenario"):
             await r.preroll()
         if ctl.speed is not None and ctl.action != "speed":
