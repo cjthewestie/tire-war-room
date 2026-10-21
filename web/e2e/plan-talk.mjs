@@ -1,8 +1,11 @@
 // Issue #10: 討論這個計劃 + 下新任務, end to end against a running backend. Headless only.
 //   PORT=8060 ./start.sh   then   node web/e2e/plan-talk.mjs http://localhost:8060
 // (a) press-7 scenario: while the approval card waits, type 「9 號機今晚要保養」 in the 主控台's Agent panel →
-//     the agent re-plans, card v2 replaces v1 and says what changed (#A-311 no longer on press 9), v1 can
+//     the agent re-plans, card v2 replaces v1 and says what changed (nothing moves onto press 9), v1 can
 //     no longer be approved, v2 is approved from the card. The phone shows the newest version.
+//     Dataset EV-2: round 1 (v1) moves #A-311 to press 6, so what v2 moves follows the solver (the server's own diff).
+//     The reply in the conversation is code's 「好，已改成第 2 版（…），請重新核准。」 (main_agent._discuss_reply); the
+//     code check 「程式已檢查新排程：…」 is the plan's summary on the Agent page.
 // (b) 下新任務 「通知維修組明早檢查 3 號機」 → a supervisor event goes PLAN → gate → approval → closed,
 //     every step in the audit log.
 // Writes web/e2e/screenshots/plan-talk-*.png at 1440 and 390 wide.
@@ -46,7 +49,7 @@ try {
   await api(d, '/api/sim/control', { action: 'speed', speed: 5 })      // keep the plant running while we talk
   check('approval card v1 reached the agent tab', gotCard)
   const v1 = (await api(d, '/api/approvals?status=pending')).json?.[0]
-  check('v1 is version 1 and sends #A-311 to press 9', v1?.version === 1 && (v1?.actions ?? []).some((a) => a.includes('#A-311 改 9 號')), (v1?.actions ?? [])[0])
+  check('v1 is version 1 and sends #A-311 to press 6', v1?.version === 1 && (v1?.actions ?? []).some((a) => a.includes('#A-311 改 6 號')), (v1?.actions ?? [])[0])
 
   // ---------------- (a) discuss the waiting plan
   check('one 主 agent input (no mode switch) that knows the waiting plan', (await d.locator('[data-testid=mode-discuss]').count()) === 0 && (await d.locator('.console [data-testid=chat-input][data-plan=waiting]').count()) === 1)
@@ -60,7 +63,7 @@ try {
   check('transcript shows the supervisor message', me.includes('9 號機今晚要保養'), me.slice(0, 60))
   await until(d, async () => !(await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')).includes('思考中'))
   const reply = await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')
-  check('agent reply names v2 and the code check', /v2|第 2 版/.test(reply) && reply.includes('程式已檢查'), reply.replace(/\n/g, ' ').slice(0, 160))
+  check('agent reply names v2 and asks to approve again', /第 2 版（9 號機 今晚不可用）/.test(reply) && reply.includes('請重新核准'), reply.replace(/\n/g, ' ').slice(0, 160))
   check('agent shows the latest plan summary (建議處置) for v2', (await d.locator('[data-testid=con-brief]', { hasText: '建議處置' }).count()) >= 1)
   // issue #37: chips, the replan row and the card version are steps, shown on the Agent page (看完整過程)
   await d.locator('[data-testid=see-full]').click()
@@ -71,17 +74,20 @@ try {
     check('transcript shows the constraint chip 「9 號機 今晚不可用」', chips.includes('9 號機 今晚不可用'), chips.replace(/\n/g, ' ').slice(0, 80))
     check('transcript shows a replan row', (await tr.locator('[data-kind=state][data-to=replan]').count()) >= 1)
     check('the subagent posted a plain summary for v2 (Agent page)', (await tr.locator('[data-testid=chat-summary]', { hasText: '請主管核准' }).count()) >= 2)
+    const body = await tr.innerText().catch(() => '')
+    check('Agent page: the code check of the new schedule', body.includes('程式已檢查新排程：9 號機 今晚沒有排任何模次'), body.match(/程式已檢查[^\n]*/)?.[0] ?? '(none)')
     const ver = await tr.locator('[data-testid=card-version]').last().innerText().catch(() => '')
-    check('transcript shows the recalculated card with what changed', ver.includes('核准卡已重算') && /#A-311：9 號 →/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
+    check('transcript shows the recalculated card with what changed, nothing onto press 9', ver.includes('核准卡已重算') && /：\d+ 號 → \d+ 號/.test(ver) && !/→ 9 號/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
   }
   await d.locator('[data-testid=tab-agent]').click()
   await d.waitForSelector('[data-testid=transcript]')
-  const changes = await side.locator('[data-testid=card-changes]').innerText().catch(() => '')
-  check('card v2 shows 「與 v1 相比」 and #A-311 off press 9', changes.includes('與 v1 相比') && /#A-311：9 號 →/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
   const pend = (await api(d, '/api/approvals?status=pending')).json ?? []
   const v2 = pend.find((x) => x.version === 2)
+  const changes = await side.locator('[data-testid=card-changes]').innerText().catch(() => '')
+  const first = (v2?.changes ?? [])[0]?.split('（')[0] ?? '(no change)'
+  check('card v2 shows 「與 v1 相比」 with the server\'s first change, nothing onto press 9', changes.includes('與 v1 相比') && changes.includes(first) && !/→ 9 號/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
   check('API: one pending card, v2, supersedes v1', pend.length === 1 && v2?.supersedes === v1?.id, pend.map((x) => `${x.id}/v${x.version}`).join(','))
-  check('API: v2 no longer sends #A-311 to press 9', !!v2 && !(v2.actions ?? []).some((a) => a.includes('#A-311 改 9 號')), (v2?.actions ?? [])[0])
+  check('API: v2 sends nothing to press 9', !!v2 && !(v2.actions ?? []).some((a) => /改 9 號|→ 9 號/.test(a)) && !(v2.changes ?? []).some((c) => /→ 9 號/.test(c)), (v2?.actions ?? [])[0])
   await d.screenshot({ path: `${OUT}/plan-talk-v2-1440.png` })
 
   // the phone shows the newest version (390 wide)
