@@ -12,7 +12,7 @@ import { ObChips } from '../admin/MemoryTimeline'
 interface Card { name: string; label: string; sentences: string[]; source: string | null; handled?: string; learned?: string; completed?: string; todo?: string }
 interface Today {
   label: string; source: 'summary' | 'live'; observations: number; orders_in: number; rush: number; shipped: number
-  events: { closed: number; safe_stop: number; open: number }; approvals: { approve: number; reject: number; sent: number }
+  events: { closed: number; safe_stop: number; open: number; cancelled?: number }; approvals: { approve: number; reject: number; sent: number }
   key: { id: string; ts: string; type: string; title: string; icon: string }[]; summary: Card | null; previous: Card | null
 }
 
@@ -50,7 +50,7 @@ export function TodaySummary() {
       <p className="ts-k"><b>🗓 今日總結</b><span className="muted small">{t.label}・{t.source === 'summary' ? '每日摘要' : `即時，依今天 ${t.observations} 筆紀錄`}</span></p>
       <dl className="ts-g">
         <dt>訂單</dt><dd>進來 {t.orders_in} 張{t.rush ? `（急單 ${t.rush}）` : ''}・出貨 {t.shipped} 次</dd>
-        <dt>事件</dt><dd>結案 {ev.closed}・安全停止 {ev.safe_stop}・進行中 {ev.open}</dd>
+        <dt>事件</dt><dd>結案 {ev.closed}・安全停止 {ev.safe_stop}・進行中 {ev.open}{ev.cancelled ? `・取消 ${ev.cancelled}` : ''}</dd>
         <dt>核准</dt><dd>送核准 {t.approvals.sent}・核准 {t.approvals.approve}・否決 {t.approvals.reject}</dd>
         {!!t.key.length && <><dt>重點</dt><dd><ul className="ts-key">{t.key.map((o) => <li key={o.id}><span aria-hidden>{o.icon}</span> <time>{fmtHM(o.ts)}</time> {plain(o.title)}</li>)}</ul></dd></>}
       </dl>
