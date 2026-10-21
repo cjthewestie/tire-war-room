@@ -150,10 +150,11 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, nSlides }: {
       return x ? {
         running: true, t: x.t, cue: current(x.tl).id, index: x.tl.index, released: x.tl.released, waiting: waiting(x.tl, x.t, x.latched),
         simHeld: x.simHeld, paused, slide, slideView, fallback: x.fallback, log: x.log, signals: x.firstSeen, seen: { id: x.seen.id, machine: x.seen.machine },
-        camMaxStep: demoCam.maxStep, flying: demoCam.flying, robotPlayed: [...robot.played],
+        camMaxStep: demoCam.maxStep, flying: demoCam.flying, robotPlayed: [...robot.played], camTraceLen: demoCam.trace.length,
       } : { running: false, director: director.on }
     }
-    return () => { delete w2.__demo3d }
+    w2.__demoCamTrace = () => demoCam.trace
+    return () => { delete w2.__demo3d; delete w2.__demoCamTrace }
   }, [paused, slide, slideView])
 
   return {
