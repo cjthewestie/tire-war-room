@@ -48,11 +48,11 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
   return (
     <button type="button" className={`hl-item tone-${i.tone} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
       <span className="hl-top">
-        <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
+        <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}${i.back ? ' is-back' : ''}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
         <span className="hl-t">{i.title}</span>
       </span>
       <span className="hl-s">{i.sub}</span>
-      {sub && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
+      {sub && !i.back && <span className={`hl-agent s-${sub.status}`} data-testid="item-subagent">{['running', 'waiting_tasks'].includes(sub.status) && i.rank === 4 ? '執行中' : SUB_STATUS[sub.status]}</span>}
       {rp === null && <span className="hl-hint" data-testid="item-replan-hint">{REPLAN_HINT}</span>}
       {planning && <span className="hl-hint live" data-testid="item-planning"><i className="spin" />Agent Nemo 規劃中…好了會自動切到核准卡</span>}
       {rp?.state === 'ready' && <span className="hl-hint">Agent Nemo 的計劃已送出，見 ③ 的待核准卡</span>}

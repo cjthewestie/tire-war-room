@@ -5,6 +5,9 @@
 import { useEffect } from 'react'
 import type { Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
+import { repairStage } from '../aiStatus'
+import { useHealth } from '../health'
+import { fastApplies } from '../phone/fastEta'
 import { OrderCard } from '../components/OrderCard'
 import { warningsFor } from '../components/orderModel'
 import { machineLabel } from '../factory'
@@ -26,6 +29,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
   onDiscuss: () => void; onAsk: () => void; onCommand: (text: string) => void
 }) {
   const { state, transport } = useWarRoom()
+  const fastS = useHealth()?.repair_fast_s ?? null
   const replans = useReplans()
   // issue #54 (CJ: 「下方應該要有核准，核准完要請主 agent 派一個 subagent 完成任務並回報」): an item without a plan gets
   // one by itself — the 主 agent asks the order subagent to draft it as soon as the item is opened; no button needed
@@ -87,13 +91,19 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     const lines: Record<string, string> = {}
     for (const sr of ev.steps) if (sr.result?.ok) { try { lines[sr.step.id] = plain(resultText(sr.step.tool, sr.step.args, sr.result.data)) } catch { /* purpose instead */ } }
     const tasks = (state.world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
+    // fast repair (Kyle 10-21 flow): the event stays in verify through the repair and the ramp back; the pill says the
+    // crew's stage, and the check is the reading, not a 30-minute window (veteran 10-22)
+    const fast = fastS && fastS > 0 && fastApplies(ev, tasks) ? fastS : null
+    const stage = fast ? repairStage(ev, tasks) : null
+    const pill = stage === 'repairing' ? '維修中' : stage === 'recovering' ? '維修完成' : stage ? '已恢復正常' : STATE_LABEL[ev.state]
+    const back = closed && !!ev.repaired_at && /^已修復/.test(ev.outcome ?? '')
     return (
       <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
         <div className="po-body">
           <ResultStrip ev={ev} />
-          <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span></div>
+          <div className="apv-tags"><span className="apv-round">{ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}</span><span className={`state-pill st-${ev.state}`}>{pill}</span></div>
           <h3 className="apv-title">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}</h3>
-          {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome)}</p>}
+          {ev.outcome && <p className="apv-reason">結果：{plain(ev.outcome).replace(/^已修復[：:]\s*/, '')}</p>}
           {nodes.length > 0 && (
             <div className="apv-b">
               <h4 className="apv-bh">計劃板<small>{ok}/{steps.length} 步完成</small></h4>
@@ -102,7 +112,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
           )}
           {tasks.length > 0 && (
             <div className="apv-b">
-              <h4 className="apv-bh">人員執行（核准後由程式派工）<small>{tasks.filter((t) => t.status === '完成').length}/{tasks.length} 完成</small></h4>
+              <h4 className="apv-bh">現場工作（核准後才派人）<small>{tasks.filter((t) => t.status === '完成').length}/{tasks.length} 完成</small></h4>
               <TaskList tasks={tasks} eventId={ev.id} testId="event-tasks" />
             </div>
           )}
@@ -113,12 +123,14 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
               ))}
             </ul>
           )}
-          {!closed && exp && <div className="apv-b"><h4 className="apv-bh">怎麼確認做完</h4><p className="impact-line">程式比對讀值：{exp}；達標即自動結案，不達標換下一個假設。</p></div>}
+          {!closed && exp && <div className="apv-b"><h4 className="apv-bh">怎麼確認修好</h4><p className="impact-line">{fast
+            ? `核准後約 ${Math.round(fast)} 秒維修完成，${exp.replace(/^\d+ 分鐘內/, '')}才算修好，系統用讀值自動確認。`
+            : `${exp}，系統用讀值自動確認；沒達到就換下一個判斷。`}</p></div>}
           {!steps.length && !closed && <p className="muted">Agent Nemo 正在規劃；有需要你決定的會變成待核准。</p>}
         </div>
         <footer className="apv-act"><div className="apv-btns">
-          <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
+          <button className="btn-sec" onClick={onAsk}>問 Agent Nemo</button>
+          <span className="apv-hint">{closed ? `${ev.state === 'safe_stop' ? '已安全停止' : back ? '已恢復正常' : /停用/.test(ev.outcome ?? '') ? '已停用該機' : '已處理完'}${ev.ai_report ? '；Agent Nemo 異常報告在對話區' : ''}` : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )

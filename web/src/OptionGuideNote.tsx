@@ -1,9 +1,15 @@
 // 核准卡「怎麼選」 note (logic in optionGuide.ts), shared by the phone card and the dashboard card.
 import type { ApprovalRequest, Event } from './contracts'
+import { useHealth } from './health'
 import { optionGuide } from './optionGuide'
+import { fastApplies } from './phone/fastEta'
+import { useWarRoom } from './useWarRoom'
 
 export function OptionGuideNote({ a, ev, className }: { a: ApprovalRequest; ev: Event | null; className?: string }) {
-  const g = optionGuide(a, ev)
+  const fastS = useHealth()?.repair_fast_s ?? null
+  const tasks = useWarRoom().state.world?.tasks.items ?? []
+  // fast repair, for a machine the crew fixes: the repair seconds, not the verification window
+  const g = optionGuide(a, ev, fastS && ev && fastApplies(ev, tasks.filter((t) => t.event_id === ev.id)) ? fastS : null)
   if (!g) return null
   return (
     <div className={`opt-guide ${className ?? ''}`} data-testid="option-guide">

@@ -48,7 +48,7 @@ export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] 
 
 /** The report notice's text under its title (the machine): 「溫度回到 128°C（02:16 維修完成）」, the reading the ramp
  *  ended at (the anomaly's baseline, as the status line's 已恢復正常（128°C）); the outcome without 「已修復：」 when unknown. */
-function backText(e: Event): string {
+export function backText(e: Event): string {
   const x = expectationOf(e)
   const normal = normalOf(e, x)
   if (!x || normal == null) return plain(e.outcome).replace(/^已修復[：:]\s*/, '') || '異常報告已產生'

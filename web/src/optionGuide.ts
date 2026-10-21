@@ -24,13 +24,18 @@ const short = (id: string) => (id.startsWith('CURE-') ? plain(id) : machineLabel
 export interface OptionGuide { head: string; fix: string | null; lines: { id: string; text: string }[]; rec: string | null }
 
 /** The remedy in one line: the machine taken out (round 2), the cure extension (round 1), else the first action that is
- *  neither staffing nor the schedule dump (「排程（第 2 版）生效（…）」 is the consequence, not the fix). */
-function remedy(a: ApprovalRequest, ev: Event | null): string | null {
+ *  neither staffing nor the schedule dump (「排程（第 2 版）生效（…）」 is the consequence, not the fix). `fastS`: with
+ *  fast repair (/api/health repair_fast_s, a machine the crew fixes) the repair is what clears it, seconds after the
+ *  approval: no 「約 30 分鐘內驗證」 (veteran 10-22). */
+function remedy(a: ApprovalRequest, ev: Event | null, fastS: number | null = null): string | null {
   const x = expectationOf(ev)
   const out = ev?.plan?.steps.find((s) => s.tool === 'notify_teams' && s.args.kind === 'machine_out')
   const outId = typeof out?.args.machine_id === 'string' ? out.args.machine_id : out ? ev?.machine_id : null
   if (outId) return `${short(outId)}停用交維修，其他模次改由別台`
   const cure = cureChange(ev)
+  if (fastS && fastS > 0) {
+    return `派人維修，核准後約 ${Math.round(fastS)} 秒維修完成${cure ? `；${short(cure.press)}這一模硫化延長到 ${Math.round(cure.to * 10) / 10} h` : ''}`
+  }
   if (cure) {
     const check = x ? `，約 ${x.within_min} 分鐘內驗證是否${x.op === '<=' ? '降到' : '回到'} ${targetText(x)}` : ''
     return `延長 ${short(cure.press)}硫化到 ${Math.round(cure.to * 10) / 10} h${check}`
@@ -39,7 +44,7 @@ function remedy(a: ApprovalRequest, ev: Event | null): string | null {
   return act || x ? `${act ?? '現場依 SOP 處置'}${x ? `，約 ${x.within_min} 分鐘內由系統自動驗證是否恢復` : ''}` : null
 }
 
-export function optionGuide(a: ApprovalRequest, ev: Event | null): OptionGuide | null {
+export function optionGuide(a: ApprovalRequest, ev: Event | null, fastS: number | null = null): OptionGuide | null {
   if (a.options.length < 2 || !a.options.every(isStaffing)) return null
   const rec = a.options.find((o) => o.recommended)
   // the solver picks the recommended option; the card has one delivery_impact for every option, so only the risk differs
@@ -47,7 +52,7 @@ export function optionGuide(a: ApprovalRequest, ev: Event | null): OptionGuide |
   const safer = rec ? a.options.find((o) => rank(o) < rank(rec)) : undefined
   return {
     head: `${a.options.map((o) => o.id).join('、')} 只決定由誰補人力，選哪個都會照同一個計劃解除異常。`,
-    fix: remedy(a, ev),
+    fix: remedy(a, ev, fastS),
     lines: a.options.map((o) => ({ id: o.id, text: `${o.label}：${TRADE_OFF[String(o.args.kind)] ?? ''}` })),
     rec: rec ? `系統建議 ${rec.id}：排程求解器挑的方案${safer ? `；交期相同，想降低風險可改選 ${safer.id}` : ''}` : null,
   }

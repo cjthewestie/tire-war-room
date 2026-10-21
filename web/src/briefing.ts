@@ -54,6 +54,9 @@ export interface BriefCtx {
   now: string | null
   /** maintenance in progress, per machine id (world.maintenance.in_progress) */
   maintenance?: { machine_id: string; title: string; status: string }[]
+  /** fast repair (/api/health repair_fast_s > 0) after the decision: the crew's stage and the 公版 line's words
+   *  (aiStatusParts phase / eta, 「約 9 秒後維修完成」), so the panel says what the phone and the 3D say */
+  repair?: { stage: 'repairing' | 'recovering'; phase: string; eta: string } | null
 }
 
 const STATUS_PLAIN: Record<MachineStatus, string> = {
@@ -347,7 +350,7 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
     const okN = writes.filter((s) => s.state === 'ok').length
     const progress: string[] = []
     if (writes.length) progress.push(`系統動作 ${okN}/${writes.length} 完成`)
-    if (evTasks.length) progress.push(`現場任務 ${evTasks.length - openTasks.length}/${evTasks.length} 完成`)
+    if (evTasks.length) progress.push(`現場工作 ${evTasks.length - openTasks.length}/${evTasks.length} 完成`)
     if (ev.state === 'replan') progress.push('驗證未達預期：正在換假設重新規劃')
     else if (ev.state === 'verify') progress.push('動作完成後，系統正依讀值驗證是否達到預期')
     // 目前卡點: a step that failed / is stopped, else the field task that is waiting longest
@@ -357,18 +360,26 @@ export function buildBriefing(c: BriefCtx): Briefing | null {
       : nextTask ? `${plain(nextTask.title)}：${nextTask.status}${nextTask.eta ? `，預計 ${fmtHM(nextTask.eta)}` : ''}` : null
     const w = repairWindow(ev, c.now, c.tasks, c.resolved)
     const eta = w.doneBy
-      ? `${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)}${w.lastEta ? '（含現場任務）' : w.x ? `（${expectationText(w.x)}）` : ''}`
+      ? `${fmtMD(w.doneBy)} ${fmtHM(w.doneBy)}${w.lastEta ? '（含現場工作）' : w.x ? `（${expectationText(w.x)}）` : ''}`
       : '待確認'
-    const sections: BriefSection[] = [{ key: 'progress', title: '實際進度', lines: progress.length ? progress : ['待確認'] }]
-    if (blocker) sections.push({ key: 'blocker', title: '目前卡點', lines: [blocker], plain: true })
-    sections.push({ key: 'eta', title: '預計完成', lines: [eta], plain: true })
+    // fast repair: the crew fixes it in wall seconds and the readings ramp back; the factory-clock 預計完成 (the field
+    // work's or the verification window's) and 「依讀值驗證」 are not what happens next (veteran 10-22)
+    const fast = c.repair ?? null
+    const steps = fast ? progress.filter((l) => !l.startsWith('動作完成後')) : progress
+    const sections: BriefSection[] = [{ key: 'progress', title: '實際進度', lines: steps.length ? steps : ['待確認'] }]
+    if (blocker && !fast) sections.push({ key: 'blocker', title: '目前卡點', lines: [blocker], plain: true })
+    if (!fast) sections.push({ key: 'eta', title: '預計完成', lines: [eta], plain: true })
+    else if (fast.stage === 'repairing' && fast.eta) sections.push({ key: 'eta', title: '預計完成', lines: [fast.eta], plain: true })
     const risk = riskLines()
     if (risk.length) sections.push({ key: 'impact', title: '交期與風險', lines: risk })
     const more = [...writes.map((s) => `${stepName(s)}：${STEP_STATE[s.state]}`), ...evTasks.map(taskLine)]
+    const said = approved ? approvedLead(approved, ev) : (staffingChoice(ev.steps) ? `已核准：${staffingChoice(ev.steps)}。` : '已核准。')
+    const phase = fast?.phase.replace(/（\d+\/\d+）$/, '') ?? ''
     return {
-      ...base, state: 'running', stateLabel: '執行中', sections, deadline: null,
+      ...base, state: 'running', stateLabel: fast ? (fast.stage === 'repairing' ? phase : '維修完成') : '執行中', sections, deadline: null,
       details: more.length ? { title: '查看執行明細', lines: more } : undefined,
-      lead: approved ? approvedLead(approved, ev) : (staffingChoice(ev.steps) ? `已核准：${staffingChoice(ev.steps)}。` : '已核准。'),
+      // 「維修中，約 9 秒後維修完成。方案 B 已核准：…」 / 「維修完成，溫度回升中。…」
+      lead: fast ? `${fast.stage === 'repairing' ? `${phase}${fast.eta ? `，${fast.eta}` : ''}` : fast.phase.replace('・', '，')}。${said}` : said,
     }
   }
   return null   // still planning: the existing 「AI 指揮官…中」 line covers it

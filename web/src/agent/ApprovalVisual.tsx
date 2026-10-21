@@ -366,7 +366,7 @@ export function PlanFlow({ nodes, board = false, lines = {}, changed }: {
               <rect width={NW} height={NH} rx={9} />
               <text x={10} y={21} className="fn-t"><tspan className="fn-id">{n.id}</tspan> {TOOL_LABEL[n.tool]}</text>
               {board && <text x={10} y={42} className="fn-l">{line}</text>}
-              <text x={10} y={NH - 13} className="fn-s">{statusGlyph(n.status)} {n.status === 'wait' ? '等你核准' : NODE_LABEL[n.status]}{risk}</text>
+              <text x={10} y={NH - 13} className="fn-s">{statusGlyph(n.status)} {n.status === 'wait' ? '待核准' : NODE_LABEL[n.status]}{risk}</text>
               {isNew && <g className="fn-new"><rect x={NW - 30} y={6} width={24} height={17} rx={4} /><text x={NW - 18} y={18.5} textAnchor="middle">改</text></g>}
             </g>
           )

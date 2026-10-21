@@ -6,13 +6,14 @@
 //   ④ 執行中，等確認完成 — approved work being executed or verified
 //   ⑤ AI 已自行處理 — closed events, Safety Core actions, rejected bad data (collapsed)
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
+import { REPAIR_KINDS, expectationOf, recoverWord, repairStage } from '../aiStatus'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
 import { fmtHM, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
-export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
+export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 處理中', 5: '⑤ AI 已自行處理' }
 
 export interface HomeItem {
   key: string                // event id, or `order:<id>` / `fyi:<id>`
@@ -21,6 +22,7 @@ export interface HomeItem {
   sub: string
   pill: string
   tone: 'wait' | 'bad' | 'run' | 'risk' | 'done'
+  back?: boolean            // ④: the machine is back to normal (a reading confirmed it); only field work is left
   eventId: string | null
   orderId: string | null
   req: ApprovalRequest | null
@@ -53,9 +55,19 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
       const done = tasks.length - tasksOpen
-      out.push({ ...base, rank: 4, tone: 'run', progress: tasks.length ? done / tasks.length : ok / Math.max(1, total), pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
+      // veteran 10-22: the machine back to normal, confirmed by a reading (the 「已修復：…回到 128°C」 close, no repair open),
+      // with only field work (宣達, 人力) left: 「已恢復正常／還有 4 件現場工作」, green; while the crew repairs or the readings
+      // come back (fast repair, the event still in verify) say that, not 程式驗證中
+      const back = ev.state === 'closed' && !!ev.repaired_at && /^已修復/.test(ev.outcome ?? '')
+        && !tasks.some((t) => REPAIR_KINDS.has(t.kind) && t.status !== '完成')
+      const stage = back ? null : repairStage(ev, tasks)
+      const doing = stage === 'repairing' ? '維修中・' : stage === 'recovering' ? `維修完成・${recoverWord(expectationOf(ev))}・` : ''
+      out.push({ ...base, rank: 4, tone: back ? 'done' : 'run', back, progress: tasks.length ? done / tasks.length : ok / Math.max(1, total),
+        pill: back ? '已恢復正常' : tasks.length ? `現場工作 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
         title: titled(task ? (ev.source === 'plant' ? who : '主管指令') : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
+        sub: back ? `還有 ${tasksOpen} 件現場工作`
+          : tasks.length ? `${doing}現場工作 ${done}/${tasks.length} 件完成${ev.state === 'verify' && !stage ? '・程式驗證中' : ''}`
+          : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
