@@ -22,16 +22,18 @@ d.on('pageerror', (e) => errors.push(e.message))
 await d.goto(BASE + '/#monitor', { waitUntil: 'networkidle' })
 await d.waitForSelector('.mode.live', { timeout: 10000 }).catch(() => {})
 check('auto mode picked live backend', /連線中|模型未連線/.test(await d.locator('.mode').innerText()) && (await d.locator('.mode').getAttribute('class')).includes('live'), await d.locator('.mode').innerText())
-check('snapshot rendered', (await d.locator('body').innerText()).includes('訂單進度'))
+// issue #102: 產線監控 opens on its one-sentence answer and the 28 machines (訂單進度 is folded into 更多全廠資訊)
+check('snapshot rendered', (await d.locator('[data-testid=mon-answer]').count()) === 1 && (await d.locator('.machines [data-machine]').count()) === 28)
 const r = await d.evaluate(async (sc) => {
   const post = (body) => fetch('/api/sim/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((x) => x.status)
   return [await post({ action: 'scenario', scenario: sc }), await post({ action: 'speed', speed: 30 })]
 }, SCENARIO)
 check('sim control accepted', r.every((s) => s === 200), r.join(','))
 let pending = false
-for (let i = 0; i < 90 && !pending; i++) { await d.waitForTimeout(1000); pending = (await d.locator('.btn-approve').count()) > 0 }
+// issue #102: the approval is one line on 產線監控 (到主控台核准); the card itself is on 主控台
+for (let i = 0; i < 90 && !pending; i++) { await d.waitForTimeout(1000); pending = (await d.locator('[data-testid=monitor-pending]').count()) > 0 }
 const t = await d.locator('body').innerText()
-check('event reached focus panel with pending approval', pending, t.match(/異常：[^\n]*/)?.[0] ?? '(no focus)')
+check('event reached 產線監控 with its pending approval', pending && (await d.locator('[data-testid=focus-detail]').count()) === 1, t.match(/異常：[^\n]*/)?.[0] ?? '(no focus)')
 await d.screenshot({ path: `${OUT}/live-dashboard-1440.png`, fullPage: true })
 const ph = await ctx.newPage()
 await ph.setViewportSize({ width: 390, height: 844 })
@@ -51,7 +53,8 @@ await d.click('text=人力排程')
 await d.waitForTimeout(2500)
 const s = await d.locator('body').innerText()
 check('schedule tab draws today\'s shifts', (await d.locator('[data-testid=sched-people] svg').count()) === 1)
-check('timeline has rows', (await d.locator('.tl-row').count()) > 0, `${await d.locator('.tl-row').count()} rows`)
+// issue #102: 人力排程 lists who has to be at the presses next in words (the event timeline left the tab)
+check('schedule lists who is needed next', (await d.locator('[data-testid=sched-next] li').count()) > 0, `${await d.locator('[data-testid=sched-next] li').count()} rows`)
 await d.screenshot({ path: `${OUT}/live-schedule-1440.png`, fullPage: true })
 // 硫化機排程 (the Gantt) moved from 人力排程 to 產線監控 (Kyle 10-22)
 await d.click('text=產線監控')
