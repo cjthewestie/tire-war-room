@@ -1015,6 +1015,61 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                             "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
             return {"ok": err is None, "data": data, "error": err}
 
+        class Control:
+            """Task control from chat (CJ 2026-10-22: 「A」): only existing supervisor actions, on an event that exists,
+            run after the supervisor confirmed in chat, audited as the supervisor via Agent Nemo. Approval and a Safety
+            Core release are not here: they stay buttons."""
+            actor = f"{session.actor} via Agent Nemo"
+
+            @staticmethod
+            def resolve(ref: str) -> tuple[str, str] | None:
+                from warroom.agent.ask import machines_in, orders_in
+                from warroom.agent.narrate import machine_label
+                evs = list(r.events())
+                ref = (ref or body.event_id or "").strip()
+                hit = [e for e in evs if e.id == ref]
+                if not hit:
+                    open_ = [e for e in evs if e.closed_at is None] or evs
+                    mids = machines_in(ref)
+                    oids = orders_in(ref)
+                    hit = [e for e in open_ if (mids and e.machine_id in mids) or (oids and any(o in (e.command or "") for o in oids))]
+                if len(hit) != 1:
+                    return None
+                e = hit[0]
+                return e.id, (f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件")
+
+            def audit_request(self, action: str, eid: str) -> None:
+                r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
+                                                              "confirmed": False}, event_id=eid)
+
+            async def run(self, action: str, eid: str) -> str:
+                ev = sm.get(eid)
+                state = ev.state.value
+                try:
+                    if action == "interrupt_task":
+                        d = await r.orch.interrupt(eid, self.actor)
+                        result = str(d.get("text") or "已中斷")
+                    elif action == "replan_task":
+                        if state == "await_approval" and waiting_of(eid):
+                            out = await discuss(eid, DiscussRequest(text="請重新規劃這份計劃"), session)
+                            result = out.reply
+                        elif state in ("closed", "safe_stop"):
+                            what = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
+                            nev = r.start_command(f"重新規劃：{what}", self.actor)
+                            result = f"已重新開一件來規劃（{nev.id}），計劃擬好會送你核准。"
+                        else:
+                            result = "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
+                    else:
+                        result = "「交給現場」目前沒有現成的按鈕路徑（resolve-safety-paths 合併後會有），這次沒有執行。"
+                except (KeyError, ValueError) as e:
+                    result = f"沒有執行：{e}"
+                r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": action, "confirmed": True,
+                                                              "state_before": state, "result": result[:200]}, event_id=eid)
+                return result
+
+        def waiting_of(eid: str) -> bool:
+            return getattr(sm, "waiting_card", lambda _e: None)(eid) is not None
+
         # safety and sensitive terms, by code on both sides of the model (CJ 2026-10-21: 「一些安全跟敏感詞彙還是要用程式擋下來」)
         from warroom.agent import safety_filter
         sf = safety_filter.default()
@@ -1026,9 +1081,17 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        if body.event_id:
+            # the task picked on the Agent page (or the 主控台): the chat talks about it (CJ 2026-10-22: 「A」)
+            ev_sel = _safe(lambda: sm.get(body.event_id), None)
+            if ev_sel is not None:
+                context["selected_task"] = {"id": ev_sel.id, "state": ev_sel.state.value, "machine": ev_sel.machine_id,
+                                            "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
+                                                                        else ev_sel.anomaly.message))[:60]}
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}")
+                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}",
+                                        control=Control())
         key = getattr(r.audit, "_key", None)
         out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
         if out_hit is not None:

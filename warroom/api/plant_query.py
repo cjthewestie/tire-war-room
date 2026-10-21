@@ -338,10 +338,42 @@ def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
     return out
 
 
+def tasks(r: Any) -> dict[str, Any]:
+    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long."""
+    now = r.clock.now()
+    subs = {x["id"]: x for x in r.orch.subagents()}
+    pending = {a.event_id: a for a in r.approvals.pending()} if r.approvals is not None else {}
+    pre = getattr(r.orch, "preplan_ids", set())
+    items = []
+    for e in sorted(_open_events(r), key=lambda e: e.opened_at):
+        sa = subs.get(e.id, {})
+        card = pending.get(e.id)
+        st = e.state.value
+        if card is not None:
+            label, waits = f"待核准 v{card.version}", "等主管核准"
+        elif st in ("execute", "verify") and sa.get("tasks_total"):
+            label = f"執行中 {sa['tasks_done']}/{sa['tasks_total']}" if st == "execute" else "驗證中"
+            waits = "等現場完成" if st == "execute" else "等讀值驗證"
+        elif st == "verify":
+            label, waits = "驗證中", "等讀值驗證"
+        elif st == "execute":
+            label, waits = "執行中", "執行核准的步驟"
+        elif st in ("detected", "classify", "plan", "simulate", "gate", "replan"):
+            label, waits = "規劃中", "等 AI 擬計劃" + ("（模型排隊中）" if sa.get("status") == "waiting_model" else "")
+        else:
+            label, waits = STATE.get(st, st), ""
+        last = e.timeline[-1].ts if e.timeline else e.opened_at
+        items.append({"id": e.id, "what": (e.command or (e.alert_card.title if e.alert_card else e.anomaly.message))[:40],
+                      "machine": e.machine_id, "state": label, "waits_on": waits, "preplan": e.id in pre,
+                      "open_min": round((now - e.opened_at).total_seconds() / 60, 1),
+                      "in_state_min": round((now - last).total_seconds() / 60, 1), "round": len(e.prior_rounds) + 1})
+    return {"count": len(items), "tasks": items}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
-          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup}
+          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks}
 
 
 def _shrink(d: Any, n: int) -> Any:
