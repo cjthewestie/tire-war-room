@@ -1,6 +1,6 @@
-// 今日訂單 (issue #95): today's overview first (production / delivery, counted once per order), then the orders
-// that are overdue, predicted late, or otherwise at risk -- kept apart and each with its due time, evidence-based
-// finish time and reason. Everything else is one compact line (id, done count, status). Detail is a fold-out;
+// 今日訂單 (issue #95; the phone only since the 訂單 tab answers first): today's production / delivery first, then the
+// orders that are overdue, will be late, or are not scheduled yet (未排程, the server's other_risk: not a delay) --
+// kept apart and each with its due time, evidence-based finish time and reason. Everything else is one compact line (id, done count, status). Detail is a fold-out;
 // the counts always come from the whole list. Same data and rules as 問戰情室 (GET /api/orders/today), so the page
 // and the chat cannot disagree. Unknown stays 待確認 / 尚無排程; nothing is shown as 0.
 import { useEffect, useState } from 'react'
@@ -9,16 +9,17 @@ import { useWarRoom } from '../useWarRoom'
 import type { OrderBrief, OrdersToday } from './ordersToday'
 
 const dt = (iso: string | null) => (iso ? `${fmtMD(iso)} ${fmtHM(iso)}` : '待確認')
-const dueText = (b: OrderBrief) => (b.due_at ? dt(b.due_at) : `${fmtMD(b.due)}（只有日期，未提供時間）`)
+const dueText = (b: OrderBrief) => (b.due_at ? dt(b.due_at) : fmtMD(b.due))
 const etaText = (b: OrderBrief) => (b.eta ? dt(b.eta) : `待確認（${b.eta_unknown_reason ?? '尚無資料'}）`)
 const mach = (ids: string[]) => ids.map((m) => m.replace(/^CURE-0?/, '') + ' 號機').join('、')
 
 function RiskRow({ b, kind }: { b: OrderBrief; kind: 'overdue' | 'late' | 'other' }) {
   return (
     <li className={`to-risk to-${kind}`} data-order={b.id} data-testid={`today-risk-${kind}`}>
-      <b>{b.id}</b><span className="to-tag">{kind === 'overdue' ? '已遲交' : kind === 'late' ? '預估會遲交' : '其他風險'}</span>
-      <span className="to-line">交期 {dueText(b)}・預計完成 {etaText(b)}</span>
-      <span className="to-why">{b.reasons.join('；') || '—'}</span>
+      <b>{b.id}</b><span className="to-tag">{kind === 'overdue' ? '已遲交' : kind === 'late' ? '會晚交' : '未排程'}</span>
+      {kind === 'other'
+        ? <span className="to-line">交期 {dueText(b)}，{b.reasons.join('；') || '還沒排進硫化排程'}</span>
+        : <><span className="to-line">交期 {dueText(b)}・預計完成 {etaText(b)}</span><span className="to-why">{b.reasons.join('；') || '—'}</span></>}
     </li>
   )
 }
@@ -51,9 +52,9 @@ export function TodayOrders({ compact = false }: { compact?: boolean }) {
   const shown = more ? calm : calm.slice(0, LIM)
   return (
     <section className="panel today-orders" data-testid="today-orders" aria-label="今日訂單">
-      <header className="to-h"><h2>今日訂單</h2><span className="muted small">{fmtMD(data.date)}・排程 v{data.schedule_version ?? '待確認'}</span></header>
+      <header className="to-h"><h2>今日訂單</h2><span className="muted small">{fmtMD(data.date)}・{data.schedule_version != null ? `第 ${data.schedule_version} 版排程` : '排程待確認'}</span></header>
       <p className="to-sum" data-testid="today-summary">
-        今日生產 <b>{c.production}</b> 張・今日交貨 <b>{c.delivery}</b> 張・合計 <b>{c.unique_today}</b> 張不重複<span className="muted small">（共 {c.total} 張）</span>
+        今天生產 <b>{c.production}</b> 張、交貨 <b>{c.delivery}</b> 張
       </p>
       {c.overdue + c.late + c.other_risk > 0 ? (
         <ul className="to-risks" role="list" aria-label="需要注意的訂單">
@@ -61,7 +62,7 @@ export function TodayOrders({ compact = false }: { compact?: boolean }) {
           {get(data.late).map((b) => <RiskRow key={b.id} b={b} kind="late" />)}
           {get(data.other_risk).map((b) => <RiskRow key={b.id} b={b} kind="other" />)}
         </ul>
-      ) : <p className="muted small" data-testid="today-no-risk">目前沒有遲交或其他風險的訂單。</p>}
+      ) : <p className="muted small" data-testid="today-no-risk">目前沒有會晚交或未排程的訂單。</p>}
       {c.unique_today === 0 && <p className="muted small">今天沒有生產或交貨的訂單（沒有拿其他日期的訂單代替）。</p>}
       {calm.length > 0 && (
         <ul className="to-calm" role="list" aria-label="其他今日訂單">
