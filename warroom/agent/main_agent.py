@@ -111,6 +111,7 @@ NOT_CHANGED = "計劃沒有改。" + PLAN_EDIT_Q
 NOT_DONE = "我還沒有改任何東西，也沒有擬計劃。要安排的話，直接說要做什麼和對象，例如「請安排 9 號機明天保養」。"
 NO_FACTS = "這個我沒有查到資料，不能給你數字。要我查哪台機台或哪張訂單？例如：「#A-311 會不會晚交？」"
 NO_SUCH_ORDER = "沒有這張訂單：{what}，所以查不到交期。你要查的是哪一張？例如：「#A-311 會不會晚交？」"
+INJECT_REPLY = "這個我不能直接做：我沒有任何寫入工具，變更都要擬計劃送你核准才會執行。要改什麼，直接說要做的事就好。"
 INJECTED_DATA_REPLY = "查到的資料裡有一段像指令的文字（要我照某句話回覆），我沒有照做。要判斷現況，我需要讀機台讀值，要我現在去讀嗎？"
 KB_LOADING = "知識庫還在載入，請稍候再問。"
 # process sense (page 11): a temperature drop is the anomaly; the plant never cures below 120 °C (SR-CURE-LOW-120)
@@ -352,7 +353,7 @@ def plan_edit(text: str) -> bool:
 
 
 # lines that read oddly in a chat (「請問您今天想聊什麼？」, 「這是一般知識」 after 「我沒有天氣資料」, preview runs 10-21)
-_ODD_RX = re.compile(r"[^。！!？?]*(?:想聊什麼|想聊些什麼|想聊點什麼)[^。！!？?]*[。！!？?]?")
+_ODD_RX = re.compile(r"[^。！!？?]*(?:想聊什麼|想聊些什麼|想聊點什麼|輪到您了|輪到你了)[^。！!？?]*[。！!？?]?")
 _NO_DATA_RX = re.compile(r"沒有.{0,8}資料|沒有這份資料|查不到")
 _GENERAL_TAG_RX = re.compile(r"[，,；;]?\s*(?:這|那)是一般知識[^。！!？?]*[。！!？?]?")
 
@@ -832,6 +833,9 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+            if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
+                # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
+                words = INJECT_REPLY
             out["reply"] = code if code is not None else words
             return
         raise TimeoutError("too many tool steps")
