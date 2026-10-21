@@ -1,10 +1,8 @@
-import { createContext, useContext, useEffect, useReducer, useState, type ReactNode } from 'react'
+import { useContext, useEffect, useReducer, useState, type ReactNode } from 'react'
 import { useHistoryRecorder } from './history'
-import { initialState, reduce, type WarRoomState } from './store'
+import { initialState, reduce } from './store'
 import { pickTransport, type Transport } from './transport'
-
-interface Ctx { state: WarRoomState; transport: Transport | null; connected: boolean }
-const WarRoomCtx = createContext<Ctx>({ state: initialState, transport: null, connected: false })
+import { WarRoomCtx } from './warRoomCtx'
 
 export function WarRoomProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reduce, initialState)

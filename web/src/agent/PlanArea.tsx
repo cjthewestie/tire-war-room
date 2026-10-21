@@ -11,6 +11,7 @@ import { machineLabel } from '../factory'
 import { plain } from '../plain'
 import { TOOL_LABEL, stepLabel } from '../stepText'
 import { TaskList } from '../components/TaskList'
+import { SafetyCaseCard } from '../components/Resolve'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalVisual } from './ApprovalVisual'
 import { ResultStrip } from './ResultStrip'
@@ -41,6 +42,14 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
     } else void startPlan(transport, autoOrder)
   }, [autoOrder, transport, prior])
   if (!sel) return null
+  const sc = sel.caseId ? (state.snapshot?.safety_cases ?? []).find((c) => c.id === sel.caseId) : undefined
+  if (sc) {
+    return (
+      <section className="plan-area panel plan-other" aria-label="計劃" data-testid="plan-area">
+        <div className="po-body"><SafetyCaseCard c={sc} /></div>
+      </section>
+    )
+  }
   if (sel.req && ev) {
     return (
       <section className="plan-area" aria-label="計劃" data-testid="plan-area">
@@ -65,10 +74,12 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
             : <p className="muted">工廠紀錄裡找不到 {sel.orderId} 的明細。</p>}
         </div>
         <footer className="apv-act">
-          <ReplanStatus r={rp} />{/* the backend pre-plans it (Runtime._preplan_orders): a progress line, never 「點左邊這一項」 */}
+          {sel.checked
+            ? <p className="apv-next" data-testid="plan-prechecked"><b>{sel.checked.split('，建議')[0]}</b>{sel.checked.includes('，建議') ? `，建議${sel.checked.split('，建議')[1]}` : ''}</p>
+            : <ReplanStatus r={rp} />}{/* the backend pre-plans it (Runtime._preplan_orders): a progress line, never 「點左邊這一項」 */}
           <div className="apv-btns">
-            <button className="btn-approve" disabled title="Agent Nemo 的計劃還沒好；好了會自動切到它的核准卡" data-testid="plan-approve-wait">核准</button>
-            <button className="btn-sec" onClick={onDiscuss} data-testid="plan-discuss">討論</button>
+            {!sel.checked && <button className="btn-approve" disabled title="Agent Nemo 的計劃還沒好；好了會自動切到它的核准卡" data-testid="plan-approve-wait">核准</button>}
+            <button className={sel.checked ? 'btn-approve' : 'btn-sec'} onClick={onDiscuss} data-testid="plan-discuss">討論</button>
             {transport?.command && (rp?.state === 'failed' || rp?.state === 'closed') &&
               <button className="btn-ghost" onClick={() => void startPlan(transport, orderId)} data-testid="plan-again">再規劃一次</button>}
           </div>
@@ -107,7 +118,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>
-          <span className="apv-hint">{closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
+          <span className="apv-hint">{ev.state === 'safe_stop' ? '安全停止：用上面的按鈕走向解決' : closed ? '已結案，Agent Nemo 的回報在右邊' : '執行中，不需要再核准'}</span>
         </div></footer>
       </section>
     )

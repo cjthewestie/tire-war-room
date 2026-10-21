@@ -4,9 +4,10 @@ import type { OrdersToday } from './components/ordersToday'
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
-  type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+  type MachineDetail, type OverlayResult, type SafetyCase, type SafetyRelease, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
+import { DEMO_API, type DemoCommand, type DemoState } from './demo/state'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
 import { shiftInstances } from './mock/schedule'
@@ -66,6 +67,14 @@ export interface Transport {
   /** Live only (fast repair): 知道了 on the 異常報告已產生 notice = 主管已讀報告 (POST /api/events/{id}/review), PIN like
    *  approvals. 409 when the event has no unread report. */
   review?(eventId: string, note?: string): Promise<Event>
+  /** Live only (#104): 恢復運轉, the supervisor puts a machine whose 檢修 is done back in service. PIN like approvals. */
+  returnToService?(machineId: string): Promise<{ machine_id: string; status: string }>
+  /** Live only: resolution paths (warroom/api/resolve.py), supervisor session like approvals. */
+  safetyDispatch?(caseId: string): Promise<SafetyCase>
+  safetyRelease?(caseId: string, body: SafetyRelease): Promise<SafetyCase>
+  stopReplan?(eventId: string): Promise<Event>
+  stopHandoff?(eventId: string): Promise<Event>
+  stopClose?(eventId: string, note?: string): Promise<Event>
   /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
   interrupt?(eventId: string): Promise<Record<string, unknown>>
   /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
@@ -76,6 +85,8 @@ export interface Transport {
   fireEvent?(kind: string): Promise<SimEventFired>
   /** Live only (#72): 現場處置完成 in the 3D factory, remove the injected faults on one machine (POST /api/sim/clear). */
   clearFault?(machineId: string): Promise<void>
+  /** Live only: the guided demo's shared cue (POST /api/demo/state); every screen follows the WS "demo" push. */
+  demo?(c: DemoCommand): Promise<DemoState>
 }
 
 // ---------------- live ----------------
@@ -123,6 +134,9 @@ async function postJSON<T>(path: string, body: unknown, retried = false): Promis
   return (await r.json()) as T
 }
 
+/** QA 模式 (POST /api/qa/ask): same supervisor rule as 問戰情室 — the on-site seat needs no PIN. */
+export const supervisorPost = postJSON
+
 /** 後台 (issue #37): every admin call, reads included, carries the supervisor PIN when this tab has one and
  *  asks for it on a 401 — same PIN rule as approvals, plus the server's factory-network check. */
 export async function adminFetch<T>(path: string, init: { method?: string; body?: unknown } = {}, retried = false): Promise<T> {
@@ -143,6 +157,28 @@ export async function adminFetch<T>(path: string, init: { method?: string; body?
   return (await r.json()) as T
 }
 
+/** 後台 稽核紀錄 匯出: the same PIN rule as adminFetch, but the body is a file the browser saves. Returns the row count. */
+export async function adminDownload(path: string, retried = false): Promise<number> {
+  const pin = supervisorPin()
+  const r = await fetch(path, { headers: pin ? { 'X-Supervisor-Pin': pin } : {} })
+  if (r.status === 401) { try { sessionStorage.removeItem(PIN_KEY) } catch { /* private mode */ } }
+  if (r.status === 401 && !retried && typeof window !== 'undefined' && window.prompt) {
+    const p = window.prompt('後台需要主管 PIN')
+    if (p) {
+      try { sessionStorage.setItem(PIN_KEY, p) } catch { /* private mode */ }
+      return adminDownload(path, true)
+    }
+  }
+  if (!r.ok) throw new Error(`${r.status}${await errDetail(r)}`)
+  const name = /filename="([^"]+)"/.exec(r.headers.get('Content-Disposition') ?? '')?.[1] ?? 'audit.jsonl'
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a')
+  a.href = url; a.download = name
+  document.body.appendChild(a); a.click(); a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  return Number(r.headers.get('X-Rows') ?? 0)
+}
+
 export class LiveTransport implements Transport {
   mode: Mode = 'live'
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void) {
@@ -159,6 +195,9 @@ export class LiveTransport implements Transport {
     // to nobody, and the previous scenario's version stayed on screen), then WS "schedule" messages
     const pullSchedule = () => getJSON<ScheduleVersion>(API.schedule)
       .then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
+    // the guided demo: a screen opened (or reconnected) mid-demo joins the current cue
+    const pullDemo = () => getJSON<DemoState>(DEMO_API)
+      .then((d) => onMsg({ type: 'demo', ts: new Date().toISOString(), data: d })).catch(() => {})
     let soon: ReturnType<typeof setTimeout> | undefined
     const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
     // issue #54: the main agent's subagents (status follows every state change; the server also pushes WS "subagents")
@@ -169,7 +208,7 @@ export class LiveTransport implements Transport {
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
-      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents() }
+      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents(); pullDemo() }
       ws.onclose = () => {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))
@@ -197,8 +236,14 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
+  returnToService(machineId: string) { return postJSON<{ machine_id: string; status: string }>(apiPath(API.returnToService, { machine_id: machineId }), {}) }
   // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
   message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
+  safetyDispatch(caseId: string) { return postJSON<SafetyCase>(apiPath(API.safetyDispatch, { case_id: caseId }), {}) }
+  safetyRelease(caseId: string, body: SafetyRelease) { return postJSON<SafetyCase>(apiPath(API.safetyRelease, { case_id: caseId }), body) }
+  stopReplan(eventId: string) { return postJSON<Event>(apiPath(API.stopReplan, { event_id: eventId }), {}) }
+  stopHandoff(eventId: string) { return postJSON<Event>(apiPath(API.stopHandoff, { event_id: eventId }), {}) }
+  stopClose(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.stopClose, { event_id: eventId }), note ? { note } : {}) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {
@@ -222,6 +267,7 @@ export class LiveTransport implements Transport {
   audit() { return getJSON<AuditEntry[]>(`${API.audit}?limit=200`) }
   eventAudit(eventId: string) { return getJSON<AuditEntry[]>(`${API.audit}?event_id=${encodeURIComponent(eventId)}&limit=5000`) }
   async setNetwork(n: Network) { await postJSON('/api/sim/network', { network: n }) }
+  demo(c: DemoCommand) { return postJSON<DemoState>(DEMO_API, c) }
 }
 
 // ---------------- mock ----------------

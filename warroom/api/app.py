@@ -78,6 +78,8 @@ from warroom.contracts import (
     ReviewRequest,
     RiskLevel,
     SafetyAction,
+    SafetyCase,
+    SafetyRelease,
     ScenarioName,
     ScheduleVersion,
     Shift,
@@ -89,6 +91,12 @@ from warroom.contracts import (
 
 log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
+
+
+class QaAsk(BaseModel):
+    """QA 模式 (warroom/agent/qa.py): a judge's question about the agent framework."""
+    question: str = Field(min_length=1, max_length=300)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
 
 
 class MainMessage(BaseModel):
@@ -464,6 +472,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     if runtime is not None:
         app.state.runtime = runtime
     app.state.access = access
+    app.state.pin_guard, app.state.weak_push_delay_s, app.state.holder = guard, weak_push_delay_s, holder   # 後台 系統參數 / 健康
 
     # ------------------------------------------------------------------ on-site seat pairing
     @app.get("/kiosk", include_in_schema=False)
@@ -597,6 +606,68 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise _404(event_id) from None
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.post("/api/machines/{machine_id}/return-to-service")
+    async def return_to_service(machine_id: str, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """#104 恢復運轉: the supervisor puts a machine whose 檢修 is done back in service (OUT_OF_SERVICE -> RUNNING).
+        Same session rule as approvals; 409 when it is not out of service or not repaired yet. Audited."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        try:
+            r.return_to_service(machine_id, session.actor)
+        except KeyError:
+            raise _404(machine_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        return {"machine_id": machine_id, "status": "running"}
+
+    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+    # CJ, 2026-10-22: 「安全核心要設計可以被解決 安全停止也要有可以走向解決的按鈕」. Every write here is a HUMAN supervisor
+    # action (same session rule as approvals); none of it is a tool, and the agent / commander cannot reach it.
+    def _resolve_call(session: Session, fn: Callable[[], Any], what: str) -> Any:
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail=f"LAN 中斷：請至現場觸控螢幕{what}")
+        try:
+            return fn()
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=f"not found: {e.args[0] if e.args else ''}") from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/safety/cases", response_model=list[SafetyCase])
+    async def safety_cases() -> list[SafetyCase]:
+        r = rt()
+        return r.cases.view(r._board())
+
+    @app.post("/api/safety/{case_id}/dispatch", response_model=SafetyCase)
+    async def safety_dispatch(case_id: str, session: Session = Depends(supervisor)) -> SafetyCase:
+        """① 派現場檢查: worker tasks from the rule's SOP."""
+        return _resolve_call(session, lambda: rt().safety_dispatch(case_id, session.actor), "派工")
+
+    @app.post("/api/safety/{case_id}/release", response_model=SafetyCase)
+    async def safety_release(case_id: str, body: SafetyRelease, session: Session = Depends(supervisor)) -> SafetyCase:
+        """③ 確認恢復運轉 / QC 合格放行 / 報廢. 409 until the reading is back in range for the core's re-arm count AND the
+        field tasks are done (or 「已現場確認」 with a reason). Audited with the session as actor."""
+        return _resolve_call(session, lambda: rt().safety_release(case_id, body, session.actor), "確認復機")
+
+    @app.post("/api/events/{event_id}/replan", response_model=Event)
+    async def stop_replan(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「請 AI 重新規劃」: returns the NEW event (its `previous` names the stopped one and why)."""
+        return _resolve_call(session, lambda: rt().stop_replan(event_id, session.actor), "操作")
+
+    @app.post("/api/events/{event_id}/handoff", response_model=Event)
+    async def stop_handoff(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「交給現場處理」: worker tasks from the SOP; the event shows 人工處理中."""
+        return _resolve_call(session, lambda: rt().stop_handoff(event_id, session.actor), "派工")
+
+    @app.post("/api/events/{event_id}/close", response_model=Event)
+    async def stop_close(event_id: str, body: ReviewRequest | None = Body(default=None),
+                         session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「確認結案」 (supervisor acknowledge; after the floor's tasks when it was handed over)."""
+        note = ((body.note or "").strip() if body is not None else "") or None
+        return _resolve_call(session, lambda: rt().stop_close(event_id, session.actor, note), "結案")
 
     # ------------------------------------------------------------------ approvals
     @app.get("/api/approvals", response_model=list[ApprovalRequest])
@@ -867,7 +938,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
     # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
     from warroom.api.admin import install_admin
+    from warroom.api.demo import install_demo
     install_admin(app, rt, supervisor)
+    demo_state = install_demo(app, rt, demo)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
@@ -1135,6 +1208,37 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                   "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
         return res
 
+    # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)
+    def _qa_agent(r: Runtime):
+        if "qa" not in holder:
+            from warroom.agent.qa import QaAgent
+            from warroom.kb.framework import FrameworkKB
+            holder["qa"] = QaAgent(r.settings, kb=FrameworkKB.from_settings(r.settings))
+        return holder["qa"]
+
+    @app.post("/api/qa/ask")
+    async def qa_ask(body: QaAsk, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """QA 模式 (warroom/agent/qa.py): a short spoken answer to a judge's question about the agent framework, only
+        from the framework knowledge base (its own collection, not the plant SOPs), with evidence ids. No tool, no event,
+        no write; the model call waits in the ModelQueue at the plant-question priority, behind incidents."""
+        r = rt()
+        from warroom.agent.orchestrator import PRIORITY
+        key = getattr(r.audit, "_key", None)
+        return await _qa_agent(r).ask(
+            body.question, conversation_id=body.conversation_id, audit=r.audit,
+            slot=lambda: r.orch.queue.slot(PRIORITY["task"], "qa", None, "QA 模式"),
+            secrets=[access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+
+    @app.get("/api/qa/doc")
+    async def qa_doc(path: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
+        """The evidence viewer: the text of one file the framework KB indexes or a curated answer cites. Any other
+        path is a 404 (no file browsing)."""
+        from warroom.agent.qa import viewable
+        text = await asyncio.to_thread(viewable, path, _qa_agent(rt())._kb())
+        if text is None:
+            raise _404(path)
+        return {"path": path, "text": text}
+
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")
     async def sim_control(ctl: SimControl, _: Session = Depends(demo)) -> dict[str, Any]:
@@ -1284,6 +1388,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         try:
             await _send(sock, WsType.SNAPSHOT, r.snapshot().model_dump(mode="json"), r.now())
             await _send(sock, WsType.CLOCK, r.clock_info(), r.now())
+            if demo_state.running:            # a screen opened mid-demo joins the current cue
+                await _send(sock, WsType.DEMO, demo_state.view(), r.now())
             while True:
                 done, _ = await asyncio.wait({nxt, drain}, timeout=buf.wait_s(loop.time()),
                                              return_when=asyncio.FIRST_COMPLETED)
@@ -1349,6 +1455,12 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    # the 3D whiteboard's pitch deck (web/public/pitch/README.md): served straight from the source folder, so CJ's
+    # slides show without a rebuild; the built copy is the fallback
+    pitch = next((d for d in (ROOT / "web" / "public" / "pitch", dist / "pitch") if d.is_dir()), None)
+    if pitch is not None:
+        app.mount("/pitch", StaticFiles(directory=pitch), name="pitch")
 
     def page(name: str):
         p = dist / name

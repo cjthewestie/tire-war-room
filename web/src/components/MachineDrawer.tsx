@@ -34,6 +34,7 @@ export function MachineDrawer({ id, onClose, extra }: { id: string; onClose: () 
   const { transport, state } = useWarRoom()
   const [d, setD] = useState<MachineDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [back, setBack] = useState<string | null>(null)   // 恢復運轉: null | "sending" | the error
   const tick = state.clock?.factory_time
   useEffect(() => {
     let alive = true
@@ -54,6 +55,8 @@ export function MachineDrawer({ id, onClose, extra }: { id: string; onClose: () 
   const job = st?.cure_job ?? null
   // page 11: a press taken out of service keeps its tire in the mold for QC; there is no de-mold time any more
   const out = isPress && st?.status === 'out_of_service'
+  // #104 檢修完成 while still out of service: only the supervisor's 恢復運轉 puts it back (POST …/return-to-service)
+  const repaired = !!state.snapshot?.machines.find((m) => m.machine_id === id)?.repaired && st?.status === 'out_of_service'
   const held = out ? heldAt(state.snapshot?.safety_actions ?? [], state.snapshot?.events ?? [], id) : null
   const bad = (state.snapshot?.header.bad_data ?? []).find((b) => b.machine_id === id)
   // cure_formula result for this press (page 11): suggested total cure; shown next to the recipe value, never replacing it
@@ -77,7 +80,13 @@ export function MachineDrawer({ id, onClose, extra }: { id: string; onClose: () 
         {!d ? <p className="muted">讀取中…</p> : (
           <>
             <div className="drawer-meta">
-              <span className={`state-pill ms-${d.state.status}`}>{STATUS_LABEL[d.state.status]}</span>
+              <span className={`state-pill ms-${repaired ? 'running' : d.state.status}`}>{repaired ? '檢修完成・停用中' : STATUS_LABEL[d.state.status]}</span>
+              {repaired && transport?.returnToService && (
+                <button className="btn-approve" disabled={back === 'sending'} data-testid="return-to-service"
+                  title={`主管確認現場已修好：${machineLabel(id)}從停用恢復運轉（AI 計劃不會自己恢復）`}
+                  onClick={() => { setBack('sending'); transport.returnToService!(id).then(() => setBack(null)).catch((e) => setBack(String(e).replace(/^Error: /, ''))) }}>恢復運轉</button>
+              )}
+              {back && back !== 'sending' && <span className="err small">{back}</span>}
               {isPress
                 ? <span className="muted small">在模：{job ? `${job.order_id} ${SIZE_LABEL[job.size]}${out ? '・扣模待品管' : ''}` : '無'}</span>
                 : <span className="muted small">膠料：{STAGE_LABEL[d.state.compound_stage]}</span>}

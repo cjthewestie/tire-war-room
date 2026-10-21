@@ -521,9 +521,12 @@ class Runtime:
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self._orch: Any = None
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._repaired_out: dict[str, str] = {}   # #104 machine id -> event id: 檢修完成 while out of service
         self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
+        self._cases: Any = None                  # SafetyCases of the current components (warroom/api/resolve.py)
+        self._cases_c: Any = None
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -534,6 +537,7 @@ class Runtime:
         # 討論」): on in the served app; tests that drive tick() opt in (WARROOM_PREPLAN=0/1 overrides)
         self.preplan_on = os.environ.get("WARROOM_PREPLAN", "1" if run_loop else "0") == "1"
         self._preplanned: dict[str, tuple[str, str]] = {}   # order id -> (risk signature, event id)
+        self._preplan_keys: dict[str, tuple] = {}             # order id -> inputs at its last pre-plan (_preplan_inputs)
         self._preplan_at: datetime | None = None
         self.started_wall = time.monotonic()
         self.safety_log: list[SafetyAction] = []
@@ -914,6 +918,15 @@ class Runtime:
             applied.append(a.model_copy(update={"latency_ms": round((time.perf_counter() - t0) * 1000.0, 3)}))
         self.safety_log.extend(applied)
         del self.safety_log[:-100]
+        # resolution path (CJ, 2026-10-22: 「安全核心要設計可以被解決」): a case per stopped machine, ② counted read-only
+        try:
+            cases = self.cases
+            for a in applied:
+                cases.on_action(a, self._open_event_id(a.machine_id))
+            if cases.observe(readings) or applied:
+                self._last_snapshot_pub = 0.0       # republish the snapshot on the next periodic publish
+        except Exception:  # noqa: BLE001 - bookkeeping must never touch the red path
+            log.exception("safety case bookkeeping")
         # 2. then record. A record that fails is queued, retried every pass, and lights the warning light.
         self._retry_safety_records()
         for a in applied:
@@ -1119,16 +1132,156 @@ class Runtime:
             if fast and ev is not None and ev.state not in TERMINAL_STATES and ev.state is not EventState.VERIFY:
                 continue                         # 主管核准 first: the approved round's tasks run, then the fix lands
             del self._repaired[mid]
+            takeout = getattr(self.sim, "needs_takeout", None)
+            if callable(takeout) and takeout(mid) and not any(x.kind == "停用檢修" for x in same):
+                # page 11: H1's 檢修 (check the steam supply) finds the press still leaking; only H2's 停用檢修 fixes
+                # it, so VERIFY still sees 119.5 °C and the next hypothesis follows (fast repair or not)
+                self.audit.append(AuditKind.SYSTEM, "world", {"msg": "檢修完成，洩壓仍在：需停用檢修", "machine_id": mid}, eid)
+                continue
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
                 continue                        # nothing injected on it (a replayed or already-cleared fault)
             self.sim.clear_faults(mid)
             self.c.detector.reset(mid, repaired=True)
+            status_of = getattr(self.sim, "status_of", None)
+            if callable(status_of) and status_of(mid) is MachineStatus.OUT_OF_SERVICE:
+                self._repaired_out[mid] = eid      # 檢修完成: green, still out of service until 恢復運轉
             self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
             on_repaired = getattr(self.state_machine, "on_repaired", None)
             if fast and callable(on_repaired):
                 on_repaired(eid, mid, self.clock.now())
             if fast:
                 self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
+
+    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+    @property
+    def cases(self) -> Any:
+        """The Safety Core cases of the current run (rebuilt with the components on a scenario load)."""
+        if getattr(self, "_cases", None) is None or self._cases_c is not self.c:
+            from warroom.api.resolve import SafetyCases
+            self._cases = SafetyCases(self.c.safety, self.audit)
+            self._cases_c = self.c
+        return self._cases
+
+    def _board(self) -> Any:
+        return getattr(getattr(self.sim, "world", None), "tasks", None)
+
+    def _after_resolution(self) -> None:
+        self._last_snapshot_pub = 0.0
+        try:
+            self.bus.publish(WsType.SNAPSHOT, self.snapshot())
+        except Exception:  # noqa: BLE001
+            log.exception("snapshot publish after a resolution step")
+
+    def safety_dispatch(self, case_id: str, actor: str) -> Any:
+        """① 派現場檢查 (supervisor session only). KeyError: no such case; ValueError: not allowed now."""
+        cases = self.cases
+        c = cases.get(case_id)
+        tasks = cases.dispatch(case_id, actor, self._board(), self.clock.now())
+        sm = self.state_machine
+        if c.event_id and callable(getattr(sm, "add_note", None)):
+            sm.add_note(c.event_id, "主管", f"[人工] 安全核心處置：派現場檢查 {len(tasks)} 項（"
+                        + "、".join(t.kind for t in tasks) + "，" + "、".join(c.sop_ids) + "）")
+        self._after_resolution()
+        return c
+
+    def safety_release(self, case_id: str, body: Any, actor: str) -> Any:
+        """③ 確認恢復運轉 / QC 放行 / 報廢 (supervisor session only; never the agent). KeyError / ValueError as above."""
+        c = self.cases.release(case_id, body, actor, self.sim, self._board(), self.clock.now())
+        if c.resolution != "scrap":
+            # the core re-arms by itself after the same count of clear samples (② required it); the detector goes back
+            # to the machine's normal baseline (as after a repair), so the way back to normal is not a new 「溫度驟降」
+            try:
+                self.c.detector.reset(c.machine_id, repaired=True)
+            except Exception:  # noqa: BLE001
+                log.exception("detector reset after release")
+        sm = self.state_machine
+        label = {"resume": "確認恢復運轉", "qc_pass": "QC 合格，放行", "scrap": "QC 報廢"}[c.resolution]
+        if c.event_id and callable(getattr(sm, "add_note", None)):
+            sm.add_note(c.event_id, "主管", f"[人工] 安全核心解除：{label}（讀值 {c.reading}°C，連續 {c.safe_samples} 筆在安全範圍"
+                        + (f"；已現場確認：{c.reason}" if c.field_confirmed else "") + "）")
+        self._after_resolution()
+        return c
+
+    def _stopped_event(self, event_id: str) -> Event:
+        ev = self._event_obj(event_id)
+        if ev is None:
+            raise KeyError(event_id)
+        if ev.state is not EventState.SAFE_STOP:
+            raise ValueError(f"{event_id} 不是安全停止的事件")
+        if ev.follow_up is not None and ev.follow_up.status in ("replanned", "closed"):
+            raise ValueError("這件安全停止已經處理過了")
+        return ev
+
+    def stop_replan(self, event_id: str, actor: str) -> Event:
+        """「請 AI 重新規劃」: a new event through the normal state machine, gate and approval; the stopped one is marked
+        replanned (and leaves the waiting list)."""
+        from warroom.contracts import StopFollowUp
+        old = self._stopped_event(event_id)
+        sm = self.state_machine
+        if not callable(getattr(sm, "open_replan", None)):
+            raise ValueError("agent unavailable (degraded mode)")
+        ev = sm.open_replan(event_id, actor)
+        run = sm.run_command if ev.source == "supervisor" else sm.run_plant if ev.source == "plant" else sm.run_event
+        task = asyncio.create_task(run(ev.id), name=f"replan-{ev.id}")
+        self._tasks[ev.id] = task
+        task.add_done_callback(lambda t, eid=ev.id: self._event_done(eid, t))
+        prev_tasks = old.follow_up.task_ids if old.follow_up else []
+        old.follow_up = StopFollowUp(status="replanned", by=actor, at=self.clock.now(), new_event_id=ev.id,
+                                     task_ids=prev_tasks)
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：請 AI 重新規劃", "follow_up": "replanned",
+                                                    "new_event_id": ev.id, "stop_reason": old.stop_reason,
+                                                    "stop_reason_text": old.stop_reason_text}, old.id)
+        sm.add_note(old.id, "主管", f"[人工] 請 AI 重新規劃 → {ev.id}")
+        self._after_resolution()
+        return ev
+
+    def stop_handoff(self, event_id: str, actor: str) -> Event:
+        """「交給現場處理」: worker tasks from the SOP for this machine; the event shows 「人工處理中」 until 確認結案."""
+        from warroom.api.resolve import sop_for_stop
+        from warroom.contracts import StopFollowUp
+        ev = self._stopped_event(event_id)
+        if ev.follow_up is not None:
+            raise ValueError("已交給現場處理")
+        board = self._board()
+        if board is None or not callable(getattr(board, "add_specs", None)):
+            raise ValueError("現場任務板不可用（模擬工廠沒有人員）")
+        sops, specs = sop_for_stop(ev.machine_id, ev.alert_card.title if ev.alert_card else ev.anomaly.message)
+        tasks = board.add_specs(ev.id, specs, self.clock.now())
+        ev.follow_up = StopFollowUp(status="manual", by=actor, at=self.clock.now(), task_ids=[t.id for t in tasks],
+                                    sop_ids=sops)
+        self.audit.append(AuditKind.TASK, actor,
+                          {"created": [t.model_dump(mode="json", include={"id", "kind", "title", "team", "machine_id",
+                                                                          "zone", "status", "worker_id", "eta"})
+                                       for t in tasks], "sop_ids": sops, "generated_by": "code",
+                           "follow_up": "manual"}, ev.id)
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：交給現場處理", "follow_up": "manual",
+                                                    "task_ids": [t.id for t in tasks], "sop_ids": sops}, ev.id)
+        self.state_machine.add_note(ev.id, "主管", f"[人工] 交給現場處理：{len(tasks)} 項任務（{'、'.join(sops)}）・人工處理中")
+        self._after_resolution()
+        return ev
+
+    def stop_close(self, event_id: str, actor: str, note: str | None = None) -> Event:
+        """「確認結案」: the supervisor acknowledges the SAFE_STOP (after the floor's tasks, if handed over). Audited, and
+        the daylog shows it (warroom/api/daylog.py)."""
+        from warroom.contracts import StopFollowUp
+        ev = self._stopped_event(event_id)
+        now = self.clock.now()
+        if ev.follow_up is not None and ev.follow_up.status == "manual":
+            board = self._board()
+            live = {t.id: t.status for t in board.for_event(ev.id)} if board is not None else {}
+            left = [t for t in ev.follow_up.task_ids if live.get(t, "完成") != "完成"]
+            if left:
+                raise ValueError(f"現場任務還沒完成（{len(ev.follow_up.task_ids) - len(left)}/{len(ev.follow_up.task_ids)}）")
+            ev.follow_up = ev.follow_up.model_copy(update={"status": "closed", "closed_at": now, "closed_by": actor,
+                                                           "note": note})
+        else:
+            ev.follow_up = StopFollowUp(status="closed", by=actor, at=now, closed_at=now, closed_by=actor, note=note)
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "安全停止：確認結案", "follow_up": "closed", "note": note,
+                                                    "stop_reason": ev.stop_reason, "stop_reason_text": ev.stop_reason_text,
+                                                    "task_ids": ev.follow_up.task_ids}, ev.id)
+        self.state_machine.add_note(ev.id, "主管", "[人工] 主管確認結案" + (f"：{note}" if note else ""))
+        self._after_resolution()
+        return ev
 
     @property
     def orch(self) -> Any:
@@ -1141,6 +1294,7 @@ class Runtime:
                                       board=lambda: getattr(getattr(self.sim, "world", None), "tasks", None),
                                       dispatcher=Dispatcher(self.settings))
             self._orch.queue.on_change = self._orch.publish
+            self._orch.precheck = lambda ev: self.precheck_line(self._preplan_order(ev))
             self._orch_c = self.c
         return self._orch
 
@@ -1210,6 +1364,9 @@ class Runtime:
             mine = events.get(prior[1]) if prior else None
             if mine is not None and (prior[0] == sig or mine.state not in TERMINAL_STATES):
                 continue                                         # planned already (or still drafting)
+            inputs = self._preplan_inputs(oid)
+            if mine is not None and not mine.approvals and self._preplan_keys.get(oid) == inputs:
+                continue          # it found nothing to change: a new ETA alone (a schedule version bump) is no reason
             asked = [e for e in events.values() if e.source == "supervisor" and (e.command or "").startswith(f"{oid} ")]
             if any(e.state not in TERMINAL_STATES for e in asked) or (asked and mine is None and prior is None):
                 # the supervisor (or an earlier pre-plan before a restart) already asked for this order
@@ -1220,11 +1377,63 @@ class Runtime:
             t, _p = self.orch.queue.tags.get(ev.id, ("order", 0))
             self.orch.queue.tags[ev.id] = (t, PRIORITY["preplan"])    # also when the run opens later (Orchestrator._opened)
             self._preplanned[oid] = (sig, ev.id)
+            self._preplan_keys[oid] = inputs
             self.audit.append(AuditKind.SYSTEM, "agent_nemo", {"msg": "pre-plan", "order_id": oid, "signature": sig},
                               event_id=ev.id)
             running += 1
             started.append(ev.id)
         return started
+
+    def return_to_service(self, machine_id: str, actor: str) -> None:
+        """#104 恢復運轉: the supervisor puts a repaired machine back in service (OUT_OF_SERVICE -> RUNNING). Human only:
+        reachable from the supervisor-session route, never from a plan or a tool. Only after 檢修完成 (its repair tasks
+        done and the fault cleared). Audited with the supervisor as actor. (#105 releases Safety Core STOPPED holds;
+        OUT_OF_SERVICE is this one.)"""
+        if machine_id not in F.MACHINE_BY_ID:
+            raise KeyError(machine_id)
+        status_of = getattr(self.sim, "status_of", None)
+        if not callable(status_of) or status_of(machine_id) is not MachineStatus.OUT_OF_SERVICE:
+            raise ValueError(f"{machine_id} 不是停用狀態")
+        if machine_id not in self._repaired_out:
+            raise ValueError(f"{machine_id} 還沒檢修完成，不能恢復運轉")
+        eid = self._repaired_out.pop(machine_id)
+        self.sim.set_machine_status(machine_id, MachineStatus.RUNNING, "主管恢復運轉")
+        self.c.detector.reset(machine_id, repaired=True)
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "恢復運轉", "machine_id": machine_id, "after": "檢修完成"}, eid)
+        self._publish_periodic(force=True)
+
+    def _available_presses(self, size: Any) -> int:
+        """Curing presses that can take this size and are not out of service (a Safety Core hold is temporary)."""
+        pool = F.SMALL_ONLY_PRESSES if getattr(size, "value", size) == "S" else F.ML_PRESSES
+        status_of = getattr(self.sim, "status_of", None)
+        if not callable(status_of):
+            return len(pool)
+        return sum(1 for p in pool if status_of(p) is not MachineStatus.OUT_OF_SERVICE)
+
+    def _preplan_inputs(self, order_id: str) -> tuple:
+        """What a pre-plan's answer depends on: the order's due date, quantity and size, and the presses that can cure
+        it. A pre-plan that found nothing to change runs again only when one of these changed (#104)."""
+        o = next((x for x in (self.sim.orders() if callable(getattr(self.sim, "orders", None)) else []) if x.id == order_id),
+                 None)
+        if o is None:
+            return (order_id,)
+        return (o.due, o.qty, o.done, getattr(o.size, "value", o.size), self._available_presses(o.size))
+
+    @staticmethod
+    def _preplan_order(ev: Any) -> str:
+        return (getattr(ev, "command", None) or "").split(" ", 1)[0]
+
+    def precheck_line(self, order_id: str) -> str | None:
+        """The report for a pre-plan that found nothing to change (CJ, 2026-10-22: 「計劃已經先擬好，只等核准或討論」):
+        what was checked and what to do, e.g. 「已預先檢查：SO-012 明天無法交齊（7 台小胎機都滿），建議聯絡客戶延交或分批」."""
+        o = next((x for x in (self.sim.orders() if callable(getattr(self.sim, "orders", None)) else []) if x.id == order_id),
+                 None)
+        if o is None:
+            return None
+        days = (o.due - self.clock.now().date()).days
+        when = "今天" if days <= 0 else "明天" if days == 1 else f"{o.due:%m/%d} 前"
+        kind = "小胎機" if getattr(o.size, "value", o.size) == "S" else "中大胎機"
+        return f"已預先檢查：{order_id} {when}無法交齊（{self._available_presses(o.size)} 台{kind}都滿），建議聯絡客戶延交或分批"
 
     def _spawn(self, an: Anomaly) -> None:
         task = asyncio.create_task(self.state_machine.handle(an), name=f"event-{an.id}")
@@ -1351,6 +1560,7 @@ class Runtime:
                 self._baseline.clear()
                 self._oob_seen.clear()
                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+                self._repaired_out.clear()
                 self._recovering.clear()
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
@@ -1740,7 +1950,8 @@ class Runtime:
             out.append(MachineTile(machine_id=d.id, line=d.line, short_name=d.short_name,
                                    status=self._effective_status(m),
                                    temp_c=m.last_reading.temp_c if m.last_reading else None,
-                                   step_progress=self._step_progress(m)))
+                                   step_progress=self._step_progress(m),
+                                   repaired=m.machine_id in self._repaired_out and m.status is MachineStatus.OUT_OF_SERVICE))
         return out
 
     @staticmethod
@@ -2228,6 +2439,9 @@ class Runtime:
         evs = sorted(self.events(), key=lambda e: e.opened_at, reverse=True)
         open_ = [e for e in evs if e.state not in TERMINAL_STATES]
         closed = [e for e in evs if e.state in TERMINAL_STATES][:5]
+        # a SAFE_STOP nobody resolved yet stays on the list however old (its buttons are the way out)
+        closed += [e for e in evs if e.state is EventState.SAFE_STOP and e not in closed
+                   and (e.follow_up is None or e.follow_up.status == "manual")]
         from warroom.api import progress as P
         wip = self.__dict__.setdefault("_wip", P.WipTracker())
         return DashboardSnapshot(header=self.header(), orders=P.order_progress(self.sim, self.events(), self.c.store),
@@ -2235,7 +2449,15 @@ class Runtime:
                                  focus=self.focus_panel(),
                                  machines=self.machine_tiles(), events=open_ + closed,
                                  pending_approvals=list(self.approvals.pending()),
-                                 safety_actions=list(reversed(self.safety_log[-20:])))
+                                 safety_actions=list(reversed(self.safety_log[-20:])),
+                                 safety_cases=self._case_view())
+
+    def _case_view(self) -> list[Any]:
+        try:
+            return self.cases.view(self._board())
+        except Exception:  # noqa: BLE001 - the snapshot must never fail on this
+            log.exception("safety case view")
+            return []
 
     def _active_schedule(self):
         if self.c.store is None:

@@ -287,6 +287,7 @@ class ScenarioName(StrEnum):
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
     DAY_LOOP = "day_loop"                      # issue #36 一日循環: one dataset day 00:00 -> 24:00, repeated
+    MORNING_RUSH = "morning_rush"              # issue #104 一早訂單湧入: shift start, order flood, p.11, truck
 
 
 class AuditKind(StrEnum):
@@ -305,6 +306,7 @@ class AuditKind(StrEnum):
     NOTIFY = "notify"
     SYSTEM = "system"
     TASK = "task"                    # issue #17: a worker task created from an approved step, or its status change
+    SAFETY_RELEASE = "safety_release"  # a supervisor lifted a Safety Core stop / hold (human only, never the agent)
 
 
 class ScheduleStatus(StrEnum):
@@ -444,6 +446,9 @@ class ScenarioStep(_M):
     fault: FaultSpec | None = None
     note: str | None = None
     plant: PlantInput | None = None   # issue #17
+    # issue #104: a normal order arrives. It joins the order book (the scheduler sees it on the next solve) and the
+    # world feed; unlike a rush order it opens no plant event
+    order: Order | None = None
 
 
 class Scenario(_M):
@@ -512,6 +517,47 @@ class SafetyAction(_M):
     threshold: float
     message: str                      # "7 號機 119.5°C < 120°C：安全核心停用並扣模"
     latency_ms: float                 # reading ts -> action decided
+
+
+class SafetyCase(_M):
+    """One Safety Core stop / hold / alarm on a machine and its way back (CJ, 2026-10-22: 「安全核心要設計可以被解決」).
+    ① 派現場檢查 (worker tasks from the rule's SOP) → ② the reading back in the safe range for `safe_needed` valid samples
+    in a row (counted by code, read-only beside the core) → ③ the supervisor's release (POST /api/safety/{id}/release).
+    Later actions on the same machine while it is open join it (`actions`)."""
+    id: str                           # the first SafetyAction's id
+    machine_id: str
+    rule_id: str                      # the first action's rule
+    rule_ids: list[str] = Field(default_factory=list)
+    actions: list[str] = Field(default_factory=list)   # SafetyAction ids
+    action: SafetyActionKind
+    message: str
+    value: float
+    threshold: float
+    ts: datetime
+    latency_ms: float
+    status: Literal["open", "resolved"] = "open"
+    event_id: str | None = None       # the AI event open on the machine when it fired (the resolution is noted there)
+    sop_ids: list[str] = Field(default_factory=list)
+    task_ids: list[str] = Field(default_factory=list)
+    tasks_done: int = 0
+    dispatched_at: datetime | None = None
+    reading: float | None = None      # latest valid reading of the rule's channel
+    safe_samples: int = 0             # valid in-range samples in a row
+    safe_needed: int = 30             # the core's own re-arm count (RuleSafetyCore.rearm_samples)
+    reading_ok: bool = False
+    decisions: list[Literal["resume", "qc_pass", "scrap"]] = Field(default_factory=list)
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None
+    resolution: Literal["resume", "qc_pass", "scrap"] | None = None
+    reason: str | None = None
+    field_confirmed: bool = False
+
+
+class SafetyRelease(_M):
+    """POST /api/safety/{case_id}/release. `field_confirmed` + `reason` stand in for unfinished field tasks."""
+    decision: Literal["resume", "qc_pass", "scrap"] = "resume"
+    reason: str = Field(default="", max_length=200)
+    field_confirmed: bool = False
 
 
 # =====================================================================================
@@ -945,6 +991,27 @@ class EventReview(_M):
     by: str | None = None
 
 
+class PreviousRun(_M):
+    """A run the supervisor asked the AI to plan again after it ended in SAFE_STOP (「請 AI 重新規劃」)."""
+    event_id: str
+    reason: str                       # the state machine's reason (「核准逾時」)
+    reason_text: str                  # plain Chinese (「10 分鐘內沒核准」)
+
+
+class StopFollowUp(_M):
+    """What the supervisor did with a SAFE_STOP: replanned (a new event), handed to the floor (worker tasks,
+    「人工處理中」), then closed (「確認結案」)."""
+    status: Literal["replanned", "manual", "closed"]
+    by: str
+    at: datetime
+    new_event_id: str | None = None
+    task_ids: list[str] = Field(default_factory=list)
+    sop_ids: list[str] = Field(default_factory=list)
+    closed_at: datetime | None = None
+    closed_by: str | None = None
+    note: str | None = None
+
+
 class ReviewRequest(_M):
     """POST /api/events/{event_id}/review (主管已讀報告)."""
     note: str | None = Field(default=None, max_length=300)
@@ -983,6 +1050,11 @@ class Event(_M):
     repaired_at: datetime | None = None
     recovered_at: datetime | None = None
     review: EventReview | None = None
+    # SAFE_STOP → resolution (CJ, 2026-10-22: 「安全停止也要有可以走向解決的按鈕」)
+    stop_reason: str | None = None            # why it safe-stopped (state machine reason)
+    stop_reason_text: str | None = None       # the same in plain Chinese (「10 分鐘內沒核准」)
+    follow_up: StopFollowUp | None = None
+    previous: PreviousRun | None = None       # set on the event a 「請 AI 重新規劃」 opened
 
 
 # =====================================================================================
@@ -1043,6 +1115,9 @@ class MachineTile(_M):
     # issue #36: how far the current batch / step is (0-1): a press's cure (elapsed / required), any other
     # machine's batch (MachineState.step_elapsed_min / its cycle). None = no batch (an empty press).
     step_progress: float | None = None
+    # issue #104: 檢修完成 — its repair tasks are done and the fault is cleared, but it stays OUT_OF_SERVICE until the
+    # supervisor's 恢復運轉 (POST /api/machines/{id}/return-to-service); no AI plan lifts it
+    repaired: bool = False
 
 
 class BadDataMark(_M):
@@ -1074,6 +1149,7 @@ class DashboardSnapshot(_M):
     events: list[Event]               # open + last few closed
     pending_approvals: list[ApprovalRequest]
     safety_actions: list[SafetyAction]   # recent
+    safety_cases: list[SafetyCase] = Field(default_factory=list)   # open ones + the last few resolved
 
 
 class MachineDetail(_M):
@@ -1097,6 +1173,7 @@ class WsType(StrEnum):
     CLOCK = "clock"                     # data: {"factory_time": iso, "speed": float, "paused": bool}
     WORLD = "world"                     # data: {"full": bool, "rev": int, "factory_time": iso, <changed WorldSnapshot sections>}
     SUBAGENTS = "subagents"             # issue #54: {"items": subagent rows, "queue": model queue} (warroom/agent/orchestrator.py)
+    DEMO = "demo"                       # the guided demo's shared cue state (warroom/api/demo.py, GET /api/demo/state)
 
 
 class WsMessage(_M):
@@ -1176,6 +1253,12 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
     ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管已讀報告 (an event closed after a repair)
+    ("GET", "/api/safety/cases", None, "SafetyCase[]"),
+    ("POST", "/api/safety/{case_id}/dispatch", None, "SafetyCase"),           # ① 派現場檢查
+    ("POST", "/api/safety/{case_id}/release", "SafetyRelease", "SafetyCase"),  # ③ 確認恢復運轉 (human only)
+    ("POST", "/api/events/{event_id}/replan", None, "Event"),       # SAFE_STOP: 請 AI 重新規劃 (returns the new event)
+    ("POST", "/api/events/{event_id}/handoff", None, "Event"),      # SAFE_STOP: 交給現場處理
+    ("POST", "/api/events/{event_id}/close", "ReviewRequest", "Event"),   # SAFE_STOP: 確認結案
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream
 )
 

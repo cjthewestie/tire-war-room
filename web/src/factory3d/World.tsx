@@ -10,7 +10,7 @@ import * as THREE from 'three'
 import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
 import { LINES } from '../factory'
-import type { WarRoomState } from '../store'
+import { primaryEvent, type WarRoomState } from '../store'
 import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
@@ -20,9 +20,11 @@ import { MachineRings } from './MachineRings'
 import { machineRing } from './machineRing'
 import { useRingRecoveries } from './recovery'
 import { DockCelebration } from './DockCelebration'
+import { PatrolRobot } from './PatrolRobot'
+import { Whiteboard } from './Whiteboard'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
-  ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
+  PLACED_BY_ID, ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
 } from './layout'
 
 const CREAM = '#f3ead8', STEEL = '#a9b2ba', DARK = '#5d636b', YELLOW = '#f2c14e', ROLL = '#6b7078', WOOD = '#c89a6a'
@@ -706,10 +708,19 @@ const HALL_LAMPS = [-3.5, -1.3, 0.95, 3.25]
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
 /** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen. */
-export function World({ state, focusId, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
+export function World({ state, focusId, active, fp, celebrate = null, board }: {
+  state: WarRoomState; focusId: string | null; active: boolean; fp: boolean; celebrate?: number | null
+  /** the pitch whiteboard's deck and current slide; clicking the board opens the full-screen view */
+  board: { slides: string[]; index: number; onOpen: () => void }
+}) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
   // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
+  // the patrol robot goes to the newest open event's machine
+  const incident = useMemo(() => {
+    const open = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop' && !!PLACED_BY_ID[e.machine_id])
+    return primaryEvent(open)?.machine_id ?? null
+  }, [state.snapshot?.events])
   const now = Date.parse(state.clock?.factory_time ?? state.world?.factory_time ?? '') || 0
   const speed = state.clock?.speed ?? 1
   const recs = useRingRecoveries(state.snapshot?.events, now, speed)   // 回溫中 / 已恢復 after a fast repair
@@ -749,6 +760,8 @@ export function World({ state, focusId, active, fp, celebrate = null }: { state:
       <MachineRings tiles={tiles} world={state.world} now={now} speed={speed} recs={recs} />
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       <DockCelebration at={celebrate} />
+      <PatrolRobot incident={incident} />
+      {active && <Whiteboard slides={board.slides} index={board.index} onOpen={board.onOpen} />}
       <Ambient />
     </group>
   )

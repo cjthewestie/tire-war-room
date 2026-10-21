@@ -7,9 +7,10 @@
 //   ⑤ AI 已自行處理 — closed events, Safety Core actions, rejected bad data (collapsed)
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
-import { machineLabel } from '../factory'
+import { ML_PRESSES, machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
+import { caseTitle } from '../resolveText'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
 export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
@@ -26,6 +27,8 @@ export interface HomeItem {
   req: ApprovalRequest | null
   ts: number
   progress?: number         // ④: share of the event's worker tasks done (0–1)
+  checked?: string          // ②: the pre-plan ran and found nothing to change (precheckLine)
+  caseId?: string           // ①: an open Safety Core case (key `safety:<id>`, components/Resolve.tsx)
   /** 待核准 cards only: the card's own lines — equipment name and the anomaly in words (the list shows them in this order) */
   machine?: string; desc?: string
 }
@@ -50,7 +53,19 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       out.push({ ...base, machine: task ? '主管指令' : who, desc: plain(ev.anomaly?.message ?? req.reason ?? ''), rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
         title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
     } else if (ev.state === 'safe_stop') {
-      out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
+      // CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」: stays in ① until replanned or 確認結案 (buttons in the plan area)
+      const fu = ev.follow_up ?? null
+      const why = ev.stop_reason_text ?? plain(ev.outcome ?? '')
+      const title = `${ev.source === 'supervisor' ? '主管指令' : who}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}`
+      if (!fu || fu.status === 'manual') {
+        const fuDone = fu ? fu.task_ids.filter((id) => (tasks.find((t) => t.id === id)?.status ?? '完成') === '完成').length : 0
+        out.push({ ...base, rank: 1, tone: 'bad', pill: fu ? '人工處理中' : '安全停止', title,
+          sub: `原因：${why}${fu ? `・現場任務 ${fuDone}/${fu.task_ids.length}` : '・可請 AI 重新規劃、交給現場或確認結案'}`,
+          ...(fu && fu.task_ids.length ? { progress: fuDone / fu.task_ids.length } : {}) })
+      } else {
+        out.push({ ...base, rank: 5, tone: 'done', pill: fu.status === 'replanned' ? '已重新規劃' : '已結案', title,
+          sub: `安全停止（${why}）・${fu.status === 'replanned' ? `已請 AI 重新規劃 → ${fu.new_event_id ?? ''}` : `主管確認結案${fu.closed_at ? `・${fmtHM(fu.closed_at)}` : ''}`}` })
+      }
     } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
       // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
@@ -77,8 +92,9 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     const due = /^\d{4}-\d{2}-\d{2}$/.test(o.due) ? ms(`${o.due}T23:59:00+08:00`) : ms(o.due)
     if (!(eta > due)) continue
     seen.add(o.id)
-    out.push({ key: `order:${o.id}`, rank: 2, tone: 'risk', pill: '交期預警', eventId: null, orderId: o.id, req: null, ts: eta,
-      title: `${o.id} 可能晚 ${Math.ceil((eta - due) / 3_600_000)} 小時交貨`, sub: `${o.customer}・排程最後一條 ${fmtMD(eta)} ${fmtHM(eta)} 出模・交期 ${fmtMD(o.due)}` })
+    const checked = precheckLine(o.id, o.size, o.due, events, now) ?? undefined
+    out.push({ key: `order:${o.id}`, rank: 2, tone: 'risk', pill: checked ? '已預先檢查' : '交期預警', eventId: null, orderId: o.id, req: null, ts: eta,
+      title: `${o.id} 可能晚 ${Math.ceil((eta - due) / 3_600_000)} 小時交貨`, sub: `${o.customer}・排程最後一條 ${fmtMD(eta)} ${fmtHM(eta)} 出模・交期 ${fmtMD(o.due)}`, checked })
   }
   for (const w of schedule?.schedule.warnings ?? []) {
     const [head, list] = w.includes('：') ? [w.slice(0, w.indexOf('：')), w.slice(w.indexOf('：') + 1)] : ['', w]
@@ -89,6 +105,13 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
       out.push({ key: `order:${id}`, rank: 2, tone: 'risk', pill: '交期預警', eventId: null, orderId: id, req: null, ts: now,
         title: `${id} 預估晚於交期`, sub: `${plain(seg.trim())}${head ? `・${plain(head)}` : ''}` })
     }
+  }
+  // ① a Safety Core stop / hold still open: its checklist is the way back (components/Resolve.tsx)
+  for (const c of (snap?.safety_cases ?? []).filter((x) => x.status === 'open')) {
+    const done = c.tasks_done
+    out.push({ key: `safety:${c.id}`, rank: 1, tone: 'bad', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(c.ts), caseId: c.id,
+      title: caseTitle(c),
+      sub: `${c.task_ids.length ? `① 現場檢查 ${done}/${c.task_ids.length}` : '① 待派現場檢查'}・${c.reading_ok ? '② 讀值已回到安全範圍' : `② 讀值 ${c.safe_samples}/${c.safe_needed}`}・③ 待主管確認` })
   }
   // ⑤ the Safety Core and the validation layer acted without the AI
   for (const a of (snap?.safety_actions ?? []).slice(-5)) {
@@ -115,4 +138,19 @@ export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | 
   if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM12(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
   const end = isNaN(now) ? Infinity : factoryMidnight(now) + 86_400_000        // 「接下來」只列今天，不列明天以後
   return out.filter((x) => x.t < end).sort((a, b) => a.t - b.t).map((x) => x.s)
+}
+
+const CURE_PRESSES = 11
+
+/** A pre-plan (Runtime._preplan_orders: 「<id> 可能晚交，請重排保交期」) that ended without a change to approve — the solver
+ *  could not bring the order forward. The ② item then shows what was checked and what to do instead of 「正在預先擬計劃」
+ *  (CJ, 2026-10-22: 「計劃已經先擬好，只等核准或討論」). null while it runs, when it produced a card, or never ran. */
+export function precheckLine(orderId: string, size: string, due: string, events: Event[], now: number): string | null {
+  const ev = events.filter((e) => e.source === 'supervisor' && (e.command ?? '').startsWith(`${orderId} `) && (e.command ?? '').includes('可能晚交'))
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0]
+  if (!ev || ev.state !== 'closed' || ev.approvals.length > 0) return null      // it asked for approval: a real card
+  const days = Math.round((ms(`${due.slice(0, 10)}T00:00:00+08:00`) - ms(`${new Date(now + 8 * 3_600_000).toISOString().slice(0, 10)}T00:00:00+08:00`)) / 86_400_000)
+  const when = days <= 0 ? '今天' : days === 1 ? '明天' : `${fmtMD(due)} 前`
+  const [n, kind] = size === 'S' ? [CURE_PRESSES - ML_PRESSES.length, '小胎機'] : [ML_PRESSES.length, '中大胎機']
+  return `已預先檢查：${orderId} ${when}無法交齊（${n} 台${kind}都滿），建議聯絡客戶延交或分批`
 }
