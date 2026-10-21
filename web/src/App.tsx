@@ -76,7 +76,7 @@ function Dashboard() {
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
-        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
+        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} onApprove={openAgent} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>

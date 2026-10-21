@@ -4,11 +4,13 @@
 // left the code-written draft.
 import type { Event } from '../contracts'
 import { fmtHM } from '../format'
+import { useHealth } from '../health'
 import { plain } from '../plain'
 import './aiReport.css'
 
 export function AiReport({ ev }: { ev: Event }) {
   const r = ev.ai_report
+  const mock = useHealth()?.llm_mode === 'mock'
   if (!r) return null
   const [head = '', ...rest] = r.text.split('\n').filter((l) => l.trim())
   const ai = r.by === 'model'
@@ -32,7 +34,9 @@ export function AiReport({ ev }: { ev: Event }) {
           )
         })}
       </dl>
-      <p className="ai-foot">{ai ? '由 Agent Nemo 依系統紀錄撰寫；「結果」由程式在機台恢復正常時補上' : '規則備援：模擬模式或模型沒有及時回應，由程式依同一份紀錄整理；「結果」由程式補上'}</p>
+      {/* veteran audit 10-22; with LLM_MODE=mock no model was asked at all, so 「沒有及時回應」 would not be true */}
+      <p className="ai-foot">{ai ? 'Agent Nemo 依系統紀錄撰寫；「結果」在機台恢復正常時由系統補上。'
+        : `${mock ? '沒有呼叫模型' : '模型沒有及時回應'}，這份由規則依同一份紀錄整理；「結果」由系統補上。`}</p>
     </section>
   )
 }
