@@ -19,6 +19,7 @@ Goods status
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING, Any, Literal
@@ -56,6 +57,13 @@ WORK_MIN: dict[str, float] = {       # how long each kind of task takes once the
     "宣達": 5.0,
 }
 TASK_KEEP = 40                       # tasks kept in the view (oldest done ones drop first)
+# worker tasks that fix the machine itself (plan_tasks); 換模準備 / 設定硫化時間 do not
+REPAIR_KINDS = frozenset({"檢修", "停用檢修", "放慢投料", "暫停投料"})
+# Fast repair (Settings.repair_fast_s > 0, Kyle 10-21: 紅燈到綠燈只要 2–5 秒): a repair task runs on the WALL clock, at any
+# sim speed: the first third is 前往中, the rest 執行中. The runtime moves it every loop turn (0.2 s), so it is done on the
+# turn that would otherwise overshoot repair_fast_s.
+FAST_WALK_FRAC = 1.0 / 3.0
+FAST_SLACK_S = 0.25
 UNASSIGNED_ANY_TEAM_MIN = 5.0        # a task nobody of its team can take goes to any free operator after 5 min
 RUSH_FEED_LOTS = 8                   # SOP-02: 中胎 8 批 (A 線) -> what one 補料 carries for a medium rush tyre
 GOODS_AHEAD_H = 24.0                 # tyres whose mold-in is within the next 24 h are listed
@@ -193,6 +201,8 @@ class _Task:
     done_at: datetime | None = None
     walk_min: float = WALK_MIN
     work_min: float = 10.0
+    fast_s: float | None = None      # fast repair: wall seconds this task takes (None = factory minutes above)
+    fast_done_s: float = 0.0         # wall seconds of it run so far (paused time does not count)
 
 
 @dataclass
@@ -219,6 +229,9 @@ class TaskBoard:
         self._tasks: dict[str, _Task] = {}
         self._seq = 0
         self._listeners: list[Any] = []
+        # set by the runtime (Settings.repair_fast_s and its sim speed); 0 = every task takes its factory minutes
+        self.fast_s: float = 0.0
+        self.speed: Callable[[], float] = lambda: 1.0
 
     # ---- public
     def add_listener(self, fn) -> None:
@@ -250,6 +263,10 @@ class TaskBoard:
             self._seq += 1
             t = _Task(id=f"TK-{self._seq:04d}", event_id=req.event_id, approval_id=req.approval_id, step_id=req.step_id,
                       created_at=now, **spec)
+            if self.fast_s > 0 and t.kind in REPAIR_KINDS:
+                # fast repair: shown in factory minutes worth repair_fast_s wall seconds at the current speed
+                total = self.fast_s * max(float(self.speed() or 1.0), 1e-6) / 60.0
+                t.fast_s, t.walk_min, t.work_min = self.fast_s, total * FAST_WALK_FRAC, total * (1 - FAST_WALK_FRAC)
             # an "after" given as a kind+machine key is resolved to the task created just before for that machine
             if t.after and not t.after.startswith("TK-"):
                 prev = next((x for x in reversed(list(self._tasks.values()))
@@ -272,6 +289,9 @@ class TaskBoard:
 
     def update(self, now: datetime) -> None:
         for t in list(self._tasks.values()):
+            if t.fast_s is not None:
+                self._advance_fast(t, now, 0.0)
+                continue
             if t.status == "待派":
                 if t.after and self._tasks.get(t.after) is not None and self._tasks[t.after].status != "完成":
                     continue
@@ -289,6 +309,39 @@ class TaskBoard:
             if t.status == "執行中" and t.started_at is not None and now >= t.started_at + timedelta(minutes=t.work_min):
                 t.status, t.done_at = "完成", t.started_at + timedelta(minutes=t.work_min)
                 self._emit(t, now, "done")
+
+    def advance_fast(self, now: datetime, wall_dt: float) -> bool:
+        """Fast repair: run every open fast task `wall_dt` wall seconds further (the runtime calls this every loop turn
+        and tick, never while paused). True while any is still open (the world view should be republished)."""
+        open_ = [t for t in self._tasks.values() if t.fast_s is not None and t.status != "完成"]
+        for t in open_:
+            self._advance_fast(t, now, wall_dt)
+        if open_:
+            self.w.rev += 1                  # the ring above the machine moves on the wall clock, not the world grid
+        return any(t.status != "完成" for t in open_)
+
+    def _advance_fast(self, t: _Task, now: datetime, wall_dt: float) -> None:
+        """待派 → 前往中 → 執行中 → 完成 of a fast repair task: assigned at once (its team first, else any free person on
+        duty); done within fast_s wall seconds of its creation even when nobody was free."""
+        if t.status == "完成" or t.fast_s is None:
+            return
+        t.fast_done_s += max(0.0, wall_dt)
+        frac = min(1.0, t.fast_done_s / max(t.fast_s - FAST_SLACK_S, 1e-6))
+        if t.status == "待派" and frac < 1.0:
+            wid = self.w.pick_worker(t.team, t.machine_id, self.busy_worker_ids(), any_team=True)
+            if wid is not None:
+                t.worker_id, t.assigned_at, t.status = wid, now, "前往中"
+                self._emit(t, now, "assigned")
+        if t.status == "前往中" and frac >= FAST_WALK_FRAC:
+            t.status, t.started_at = "執行中", now
+            self._emit(t, now, "started")
+        if frac >= 1.0:
+            t.status, t.done_at = "完成", now
+            t.started_at = t.started_at or now
+            self._emit(t, now, "done")
+
+    def fast_open(self) -> bool:
+        return any(t.fast_s is not None and t.status != "完成" for t in self._tasks.values())
 
     def view(self) -> TasksView:
         items = [self._view(t) for t in self._tasks.values()]
@@ -321,12 +374,16 @@ class TaskBoard:
         total = max(1e-6, t.walk_min + t.work_min)
         if t.status == "完成":
             prog = 1.0
+        elif t.fast_s is not None:           # fast repair: the share of its wall seconds already run
+            prog = min(1.0, t.fast_done_s / max(t.fast_s - FAST_SLACK_S, 1e-6))
         elif t.status == "待派" or t.assigned_at is None:
             prog = 0.0
         else:
             prog = min(1.0, max(0.0, (now - t.assigned_at).total_seconds() / 60.0 / total))
         if t.done_at is not None:
             eta = t.done_at
+        elif t.fast_s is not None:
+            eta = t.created_at + timedelta(minutes=total)
         elif t.assigned_at is not None:
             eta = t.assigned_at + timedelta(minutes=total)
         else:
@@ -583,5 +640,5 @@ def goods_view(world: World, t: datetime) -> GoodsView:
     return GoodsView(items=items, orders=og, counts=counts, schedule_id=plan.id if plan is not None else None)
 
 
-__all__ = ["GoodsItem", "GoodsTracker", "GoodsView", "OrderGoods", "TaskBoard", "TaskRequest", "TasksView", "WorkTask",
-           "goods_view", "plan_tasks", "CURE_HOURS"]
+__all__ = ["GoodsItem", "GoodsTracker", "GoodsView", "OrderGoods", "REPAIR_KINDS", "TaskBoard", "TaskRequest", "TasksView",
+           "WorkTask", "goods_view", "plan_tasks", "CURE_HOURS"]

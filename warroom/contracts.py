@@ -931,6 +931,19 @@ class StepRound(_M):
     steps: list[StepRun] = Field(default_factory=list)
 
 
+class EventReview(_M):
+    """主管覆核 of an event closed after a repair: pending (「請主管覆核」) until the supervisor confirms."""
+    status: Literal["pending", "done"]
+    requested_at: datetime
+    done_at: datetime | None = None
+    by: str | None = None
+
+
+class ReviewRequest(_M):
+    """POST /api/events/{event_id}/review (主管覆核)."""
+    note: str | None = Field(default=None, max_length=300)
+
+
 class Event(_M):
     id: str                           # "EV-20261003-021400-CURE-07"
     opened_at: datetime
@@ -956,6 +969,10 @@ class Event(_M):
     command: str | None = None
     constraints: list["PlanConstraint"] = Field(default_factory=list)
     discuss_replans: int = 0
+    # fast repair (Kyle 10-21): every repair task of this event (檢修 / 停用檢修 / 放慢投料 / 暫停投料) finished and the
+    # machine's fault was cleared; review: 「請主管覆核」 once it closed after that repair, done when the supervisor confirms
+    repaired_at: datetime | None = None
+    review: EventReview | None = None
 
 
 # =====================================================================================
@@ -1097,6 +1114,7 @@ class HealthStatus(_M):
     factory_time: datetime
     uptime_s: float
     agent_runtime: str | None = None   # WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」 when the app runs inside OpenShell
+    repair_fast_s: float = 0.0         # REPAIR_FAST_S (read only): wall seconds a repair task takes; 0 = real durations
 
 
 # REST surface (warroom/api implements; web/src/contracts.ts mirrors). method, path, request, response
@@ -1125,6 +1143,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
+    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管覆核 (an event closed after a repair)
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream
 )
 

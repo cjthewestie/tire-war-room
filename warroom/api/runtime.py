@@ -47,6 +47,7 @@ from warroom.contracts import (
     CompoundStage,
     DashboardSnapshot,
     Event,
+    EventState,
     FaultSpec,
     FocusPanel,
     HeaderStatus,
@@ -67,6 +68,7 @@ from warroom.contracts import (
     ToolName,
     WsType,
 )
+from warroom.sim.work import REPAIR_KINDS
 
 log = logging.getLogger("warroom.runtime")
 
@@ -78,10 +80,6 @@ CAUSE_TEXT = {
 KIND_TEXT = {"overheat": "溫度過高", "temp_drop": "溫度下降", "pressure_low": "壓力偏低",
              "water_flow_low": "水流偏低", "steam_low": "蒸汽壓偏低", "sensor_fault": "感測器異常",
              "multi_machine": "多機同時異常", "schedule_slip": "排程延誤"}
-
-
-# worker tasks that fix the machine itself (warroom/sim/work.py plan_tasks); 換模準備 / 設定硫化時間 do not
-REPAIR_KINDS = frozenset({"檢修", "停用檢修", "放慢投料", "暫停投料"})
 
 
 @dataclass
@@ -502,6 +500,7 @@ class Runtime:
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self._orch: Any = None
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
         self.speed = float(self.settings.sim_speed)
         self.paused = False
@@ -519,6 +518,7 @@ class Runtime:
         self._last_machines_pub = 0.0
         self._last_snapshot_pub = 0.0
         self._last_world_pub = 0.0
+        self._fast_world_until = 0.0             # fast repair running: WORLD deltas every 0.25 s until then
         self._world_obj: Any = None              # the sim's World the last WORLD message described
         self._world_rev = -1
         self._world_sent: dict[str, str] = {}    # section -> JSON last published (WORLD deltas)
@@ -723,6 +723,7 @@ class Runtime:
             await asyncio.sleep(self.tick_wall_s)
             now = time.monotonic()
             wall, last = now - last, now
+            self._advance_fast_repairs(running=not self.paused)
             if self.paused:
                 continue
             if self.speed > 1 and self.compute_busy():
@@ -802,7 +803,9 @@ class Runtime:
         w = getattr(self.sim, "world", None)
         if w is None or (w is self._world_obj and w.rev == self._world_rev):
             return
-        if not force and now - self._last_world_pub < 1.0:
+        if callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open():
+            self._fast_world_until = now + 1.0   # a fast repair's ring fills smoothly, up to its 完成
+        if not force and now - self._last_world_pub < (0.25 if now < self._fast_world_until else 1.0):
             return
         from warroom.sim.world import WORLD_SECTIONS
         data = w.snapshot().model_dump(mode="json")
@@ -833,6 +836,7 @@ class Runtime:
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
             self.clock.advance(dt_s)
+        self._advance_fast_repairs()
         self._apply_repairs()
         self.ticks += 1
         self.safety_pass(readings)              # RED path first: nothing below can delay it
@@ -967,6 +971,8 @@ class Runtime:
         if board is None or getattr(board, "_audited", False):
             return
         board._audited = True
+        board.fast_s = float(self.settings.repair_fast_s)    # fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒)
+        board.speed = lambda: self.speed
 
         def on_task(what: str, t: Any, now: datetime) -> None:
             if what == "created":
@@ -983,15 +989,46 @@ class Runtime:
                     self._repaired[t.machine_id] = t.event_id
         board.add_listener(on_task)
 
+    def _advance_fast_repairs(self, running: bool = True) -> None:
+        """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
+        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+        now = time.monotonic()
+        dt, self._fast_wall = now - self._fast_wall, now
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        if not running or self._switching or self.settings.repair_fast_s <= 0 or \
+                not callable(getattr(board, "advance_fast", None)):
+            return
+        board.advance_fast(self.clock.now(), dt)
+        self._apply_repairs()
+
     def _apply_repairs(self) -> None:
-        """Clear the faults of machines whose repair tasks all finished (once per machine and event)."""
-        while self._repaired:
-            mid, eid = self._repaired.popitem()
+        """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
+        (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
+        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
+        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+        fast = self.settings.repair_fast_s > 0
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        for mid, eid in list(self._repaired.items()):
+            same = [x for x in board.for_event(eid) if x.kind in REPAIR_KINDS and x.machine_id == mid] \
+                if board is not None else []
+            if not all(x.status == "完成" for x in same):
+                del self._repaired[mid]          # another repair task of this event started since: wait for that one
+                continue
+            ev = self._event_obj(eid)
+            if fast and ev is not None and ev.state not in TERMINAL_STATES and ev.state is not EventState.VERIFY:
+                continue                         # 主管核准 first: the approved round's tasks run, then the fix lands
+            del self._repaired[mid]
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
                 continue                        # nothing injected on it (a replayed or already-cleared fault)
             self.sim.clear_faults(mid)
+            snap = getattr(self.sim, "snap_to_nominal", None)
+            if fast and callable(snap):
+                snap(mid)                        # no slow cool-down: the next reading is normal
             self.c.detector.reset(mid, repaired=True)
-            self.audit.append(AuditKind.SYSTEM, "world", {"msg": "現場處置完成，故障排除", "machine_id": mid}, eid)
+            self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
+            on_repaired = getattr(self.state_machine, "on_repaired", None)
+            if fast and callable(on_repaired):
+                on_repaired(eid, mid, self.clock.now())
 
     @property
     def orch(self) -> Any:
@@ -1139,6 +1176,7 @@ class Runtime:
                 self.anomalies.clear()
                 self._baseline.clear()
                 self._oob_seen.clear()
+                self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
                 self.audit.append(AuditKind.SYSTEM, "supervisor",
