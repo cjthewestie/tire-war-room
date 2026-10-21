@@ -345,6 +345,11 @@ def control_specs() -> list[dict[str, Any]]:
 # claude-mem style memory, overview chat only (CJ 2026-10-22: 「可以試著套用claude mem的方法嗎然後只有在Agent Nemo 對話統整區
 # 有這個功能(非單一任務區)」): today's observations come as an index in the context; these two read more on demand.
 MEM_SEARCH, MEM_GET = "memory_search", "memory_get"
+
+
+def _ob_ids(hits: Any) -> list[str]:
+    """The observation ids a memory read returned (the 總覽 reply shows them as chips that open the observation)."""
+    return [str(h["id"]) for h in hits or [] if isinstance(h, dict) and str(h.get("id", "")).startswith("OB-")]
 MEMORY_TYPES = {"訂單": "order", "事件": "event", "核准": "approve", "否決": "reject", "安全": "safety", "任務": "task",
                 "出貨": "ship", "指示": "note", "對話": "chat"}
 MEMORY_RULE = ("context.today_index 是今天的紀錄索引（編號 · 時間 · 類型 · 標題，新的在上面），context.earlier_days 是前幾天的每日摘要。"
@@ -352,6 +357,8 @@ MEMORY_RULE = ("context.today_index 是今天的紀錄索引（編號 · 時間 
                "要細節才呼叫 memory_get（給編號，最多 5 個），索引裡沒有、或問更早的事才用 memory_search。"
                "這些是「發生過的事」；現在的讀值、目前排程、庫存仍用 read_sensors／query_plant 查。數字只能用索引、摘要或查到的資料裡有的。"
                "回覆最多 3 句、先講重點，不要寫 OB 編號，清單只挑最重要的 2–3 項。")
+# 「查記憶 7 號機 溫度」「在記憶裡找 SO-004」: rule mode (no model) still answers from memory_search in the 總覽 chat
+_MEMORY_ASK_RX = re.compile(r"(?:查|找|搜尋?)(?:一下)?\s*(?:記憶|紀錄)(?:裡|中)?|(?:記憶|紀錄)(?:裡|中)\s*(?:找|查|搜尋?)(?:一下)?")
 _YESTERDAY_RX = re.compile(r"(?:昨天|前天|上一?個?循環|上一天).{0,8}(?:發生|怎樣|如何|做了|處理|什麼事|有什麼|摘要)")
 _SUBJECT_RX = re.compile(r"急單|訂單|#\s?[A-Z]|SO-?\d|號機|任務|事件|出貨")
 # a question about what already happened today / yesterday: the index answers it (no forced plant read)
@@ -673,6 +680,14 @@ class MainAgent:
             out["steps"].append({"tool": "daily_summary", "args": {"day": d["day"]}, "ok": True, "summary": d["summary"][:200],
                                  "label": "看了每日摘要"})
             return self._done(out, text, t0)
+        if self._memory is not None and not (self.llm and self.client is not None) and _MEMORY_ASK_RX.search(text):
+            q = _MEMORY_ASK_RX.sub(" ", text).strip(" ：:，,？?")
+            ids = (self._memory_tool(MEM_SEARCH, {"q": q}, out, tid) and out["steps"][-1].get("ids") or []) if q else []
+            got = json.loads(self._memory_tool(MEM_GET, {"ids": ids[:3]}, out, tid)) if ids else []   # index → detail
+            out.update(reply=("記憶裡找到：" + "；".join(f"{o['id']} {o['title']}" for o in got) + "。" if got
+                              else "記憶裡找不到相關內容。") if q else "要查什麼？例如「查記憶 7 號機 溫度」。",
+                       intent="memory_search", by="memory")
+            return self._done(out, text, t0)
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
         if not (self.llm and self.client is not None) and is_gibberish(text):
@@ -957,7 +972,8 @@ class MainAgent:
             ids = [str(x).strip().upper() for x in (args.get("ids") or [])][:5]
             got = self._memory.get(ids, call) if ids else []
             text = json.dumps(got, ensure_ascii=False, default=str) if got else "沒有這些編號的紀錄。"
-            steps.append({"tool": name, "args": {"ids": ids}, "ok": bool(got), "summary": text[:200], "label": "查了記憶（細節）"})
+            steps.append({"tool": name, "args": {"ids": ids}, "ok": bool(got), "summary": text[:200], "label": "查了記憶（細節）",
+                          "ids": [o["id"] for o in got]})
             return text
         q = str(args.get("q") or "").strip()[:80]
         typ = MEMORY_TYPES.get(str(args.get("type") or ""), None)
@@ -967,7 +983,7 @@ class MainAgent:
         else:
             text = "\n".join(f"{h['id']}｜{h['date']}｜{h['text']}" for h in res["hits"])
         steps.append({"tool": name, "args": {k: v for k, v in (("q", q), ("type", typ)) if v}, "ok": True,
-                      "summary": text[:200], "label": "查了記憶（搜尋）"})
+                      "summary": text[:200], "label": "查了記憶（搜尋）", "ids": _ob_ids(res.get("hits"))})
         return text
 
     @staticmethod
@@ -1089,7 +1105,8 @@ class MainAgent:
             err = None if r.get("ok") else str(r.get("error") or "讀取失敗")
             if err is None:
                 text = json.dumps(r.get("data") or {}, ensure_ascii=False, default=str)
-                steps.append({"tool": QUERY, "args": qargs, "ok": True, "summary": text[:200], "label": label})
+                steps.append({"tool": QUERY, "args": qargs, "ok": True, "summary": text[:200], "label": label,
+                              **({"ids": _ob_ids((r.get("data") or {}).get("hits"))} if topic == "memory_search" else {})})
                 out.setdefault("query_texts", []).append(text)
                 return text
         steps.append({"tool": QUERY, "args": qargs, "ok": False, "summary": f"失敗：{err}", "label": label})

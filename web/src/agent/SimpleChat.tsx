@@ -17,6 +17,7 @@ import { plainStatus } from './subagents'
 import type { ToolItem } from './transcript'
 import type { Bubble } from './mainThread'
 import { useTranscript } from './useTranscript'
+import { ObChips } from '../admin/MemoryTimeline'
 
 /** `extra`: one node placed among the bubbles by time (the 待核准 notice / briefing: bubbles at or before `at` come first).
  *  `guide`: shown instead of the plain `empty` text when there is nothing yet. `follow`: the 主控台 behaviour — stay at
@@ -98,6 +99,7 @@ function ReplyText({ text }: { text: string }) {
 export function BubbleRow({ b, onLink }: { b: Bubble; onLink?: (eventId: string) => void }) {
   const [open, setOpen] = useState(false)
   const steps = b.steps ?? []
+  const obIds = [...new Set(steps.flatMap((s) => s.ids ?? []))]     // the memory it read (memory_search / memory_get)
   return (
     <div className={`sc-row ${b.who}`} data-testid={b.who === 'me' ? 'sc-me' : 'sc-agent'}>
       <div className={`sc-b ${b.pending ? 'pending' : ''}`}>
@@ -111,6 +113,7 @@ export function BubbleRow({ b, onLink }: { b: Bubble; onLink?: (eventId: string)
         </button>
       )}
       {open && <ul className="sc-tool-list">{steps.map((s, i) => <li key={i} className={s.ok ? '' : 'bad'}>{s.label}：{plain(s.summary)}</li>)}</ul>}
+      {obIds.length > 0 && <ObChips ids={obIds} />}
       {b.fellBack && <p className="sc-fb" title={b.error ?? ''} data-testid="sc-fallback">模型沒有回應，這句先用規則處理</p>}
       {!!b.links?.length && (
         <ul className="sc-links" aria-label="提到的任務" data-testid="sc-links">
