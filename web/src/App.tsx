@@ -5,7 +5,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Line } from './contracts'
 import type { LocalItem } from './agent/transcript'
-import { DemoStrip } from './components/DemoStrip'
+import { ALL_SCENARIOS, DEMO_MODE, DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
@@ -24,6 +24,10 @@ const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default:
 
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
+/** 展示列 (the strip on desktop, the 展示控制 tab on phones) is the presenter's, not the supervisor's: only with ?demo=1 or
+ *  ?scenarios=all, and inside the 3D factory, whose desk screen is where the presenter loads a scenario (its iframe
+ *  inherits the factory page's own query, ?test=1 in e2e). */
+const SHOW_DEMO = DEMO_MODE || ALL_SCENARIOS || EMBEDDED
 
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
@@ -67,13 +71,15 @@ function Dashboard() {
   return (
     <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
       <Header tab={tab} onTab={go} />
-      <div className="demo-sheet" role="region" aria-label="展示控制">
-        <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
-        <DemoStrip />
-      </div>
+      {SHOW_DEMO && (
+        <div className="demo-sheet" role="region" aria-label="展示控制">
+          <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
+          <DemoStrip />
+        </div>
+      )}
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
       {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
-      {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
+      {lanDown && <div className="banner">廠內網路斷線：手機收不到通知，請到現場觸控螢幕核准（{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}）。Agent Nemo 與安全核心照常在廠內主機運作。</div>}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
@@ -82,7 +88,7 @@ function Dashboard() {
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}
-      <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測
+      <footer className="foot-note">模擬工廠資料・硫化時間與排程由公式和排程求解器計算，不由 AI 推測
         {!EMBEDDED && <a className="foot-link" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" data-testid="factory-link">3D 工廠 ↗</a>}</footer>
       <nav className="bottomnav" aria-label="分頁">
         <button className={tab === 'agent' ? 'on' : ''} aria-current={tab === 'agent' ? 'page' : undefined} aria-label="主控台" onClick={() => go('agent')}>
@@ -97,15 +103,17 @@ function Dashboard() {
         <button className={tab === 'orders' ? 'on' : ''} aria-current={tab === 'orders' ? 'page' : undefined} aria-label="訂單" onClick={() => go('orders')}>
           <svg viewBox="0 0 24 24" aria-hidden><circle cx="10.5" cy="10.5" r="6" /><path d="M15 15l5 5" /></svg>訂單
         </button>
-        <button className={tab === 'console' ? 'on' : ''} aria-current={tab === 'console' ? 'page' : undefined} aria-label="Agent 完整過程" onClick={() => go('console')}>
+        <button className={tab === 'console' ? 'on' : ''} aria-current={tab === 'console' ? 'page' : undefined} aria-label="Agent Nemo 完整過程" onClick={() => go('console')}>
           <svg viewBox="0 0 24 24" aria-hidden><path d="M4 5h16v14H4zM7 9l3 3-3 3M12 15h5" /></svg>Agent
         </button>
         <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={EMBEDDED ? '更多：狀態機、後台' : '更多：狀態機、後台、3D 工廠'} onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
           <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>{tab === 'sm' ? '狀態機' : tab === 'admin' ? '後台' : '更多'}
         </button>
-        <button className={demoOpen ? 'on' : ''} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
-        </button>
+        {SHOW_DEMO && (
+          <button className={`nav-demo ${demoOpen ? 'on' : ''}`} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
+            <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
+          </button>
+        )}
       </nav>
       {moreOpen && (
         <>
@@ -117,7 +125,7 @@ function Dashboard() {
             </button>
             <button role="menuitem" className={tab === 'admin' ? 'on' : ''} onClick={() => { setMoreOpen(false); go('admin') }}>
               <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>
-              <span><b>後台</b><small>RAG 知識庫、工廠指示、記憶、狀態（主管 PIN）</small></span>
+              <span><b>後台</b><small>SOP 知識庫、記憶、工廠指示、系統狀態、執行紀錄（限廠內網路，要主管 PIN）</small></span>
             </button>
             {!EMBEDDED && (
               <a role="menuitem" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" onClick={() => setMoreOpen(false)} data-testid="factory-link-more">

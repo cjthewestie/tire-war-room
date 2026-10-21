@@ -29,8 +29,8 @@ export function useLinkStatus(): LinkStatus {
   const lastPlan = [...state.audit].reverse().find((e) => e.kind === 'llm_call' && e.actor === 'commander')
   const fellBack = lastPlan?.payload?.fell_back_to_mock === true
   const mode = health?.llm_mode ?? state.snapshot?.header.llm_mode
-  if (mode !== 'llm') return { text: '模型未連線', tone: 'warn', title: '規則模式：指揮官不呼叫模型（詳細見後台 → 狀態）' }
-  if (health && !health.llm_reachable) return { text: '模型未連線', tone: 'warn', title: `模型 ${health.model} 連不上，指揮官改用規則（詳細見後台 → 狀態）` }
-  if (fellBack) return { text: '模型未連線', tone: 'warn', title: '指揮官上一次的計劃改用規則備援（模型輸出沒通過檢查；詳細見後台 → 狀態）' }
+  if (mode !== 'llm') return { text: '模型未連線', tone: 'warn', title: '規則模式：Agent Nemo 不呼叫模型，用規則產生計畫（詳細見後台 → 狀態）' }
+  if (health && !health.llm_reachable) return { text: '模型未連線', tone: 'warn', title: `模型 ${health.model} 連不上，Agent Nemo 改用規則（詳細見後台 → 狀態）` }
+  if (fellBack) return { text: '模型未連線', tone: 'warn', title: 'Agent Nemo 上一次的計畫改用規則備援：模型的輸出沒通過檢查（詳細見後台 → 狀態）' }
   return { text: '連線中', tone: 'ok', title: `已連線・${health?.model ?? 'Nemotron'}（詳細見後台 → 狀態）` }
 }

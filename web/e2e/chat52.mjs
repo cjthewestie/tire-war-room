@@ -92,14 +92,14 @@ await p.click('[data-testid="tab-console"]')
 await p.click('[data-testid="tree-root"]')
 check('a question from 主控台 shows in the Agent page 主 agent thread', await until(async () => (await p.locator('[data-testid="main-thread"] [data-testid="sc-me"]', { hasText: '9 號機下一模' }).count()) >= 1, 20))
 
-// 3. phones: 7 nav items, 狀態機 and 後台 under 「更多」
+// 3. phones: 6 nav items (展示控制 only with ?demo=1 or ?scenarios=all), 狀態機 and 後台 under 「更多」
 {
   const c = await b.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
   const m = await c.newPage()
   m.on('pageerror', (e) => errors.push(`390: ${e.message}`))
   await m.goto(BASE + '/', { waitUntil: 'networkidle' })
   const labels = await m.locator('.bottomnav button').allInnerTexts()
-  check('390: bottom nav has 7 items', labels.length === 7, labels.join('|'))
+  check('390: bottom nav has 6 items, no 展示控制 without ?demo=1', labels.length === 6 && !labels.join('|').includes('展示控制'), labels.join('|'))
   const wraps = await m.evaluate(() => [...document.querySelectorAll('.bottomnav button')].filter((b) => b.scrollWidth > b.clientWidth + 1).length)
   check('390: no nav label is cut or wraps', wraps === 0)
   await m.tap('[data-testid="nav-more"]')

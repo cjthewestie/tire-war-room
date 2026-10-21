@@ -28,11 +28,11 @@ const lan = d.locator('.seg.net button', { hasText: 'LAN 斷' })
 check('LAN 斷 button enabled live', await lan.isEnabled())
 await lan.click()
 await d.waitForTimeout(5000)
-check('header shows LAN tier', (await d.locator('.topbar').innerText()).includes('LAN 中斷'))
+check('header shows LAN tier', (await d.locator('.topbar').innerText()).includes('廠內網路斷線'))
 await d.screenshot({ path: `${OUT}/fix-lan-down-1440.png` })
 await d.locator('.seg.net button', { hasText: '在線' }).click()
 await d.waitForTimeout(5000)
-check('back online', !(await d.locator('.topbar').innerText()).includes('LAN 中斷'))
+check('back online', !(await d.locator('.topbar').innerText()).includes('廠內網路斷線'))
 
 await d.evaluate(async () => {
   const post = (body) => fetch('/api/sim/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
