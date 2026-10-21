@@ -595,6 +595,9 @@ class QueryOrdersShiftsData(_M):
     leave: list[dict[str, Any]] | None = None
     materials: list[dict[str, Any]] | None = None
     today: dict[str, Any] | None = None
+    # issue #95: today's orders from warroom/tools/orders_today.py (all orders, risk, ETA); error text if it failed
+    orders_today: dict[str, Any] | None = None
+    orders_today_error: str | None = None
 
 
 class SopSearchArgs(_M):
@@ -1129,6 +1132,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("POST", "/api/schedule/rollback", "{version?: int}", "ScheduleVersion"),  # one-click rollback
     ("GET", "/api/capacity", None, "CapacityReport"),
     ("GET", "/api/orders", None, "Order[]"),
+    ("GET", "/api/orders/today", None, "dict (warroom/tools/orders_today.py: today's orders, risk first)"),
     ("GET", "/api/shifts", None, "Shift[]"),
     ("GET", "/api/audit", None, "AuditEntry[]"),                  # ?since_seq=N&limit=200
     ("GET", "/api/sop/search", None, "SopHit[]"),                 # ?q=...&k=3
@@ -1146,6 +1150,9 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
 
 class AskRequest(_M):
     question: str = Field(min_length=1, max_length=300)
+    # issue #95: the page's conversation. Follow-ups (「那張單呢？」) are resolved against what this conversation just
+    # talked about (order / event ids only, see warroom/agent/convo.py). None = no memory, every question stands alone.
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class AskStep(_M):
@@ -1182,7 +1189,11 @@ class AskAnswer(_M):
     total_ms: float = 0.0
     # chitchat: a greeting / thanks, answered with no tool call; unclear: not sure what to look up (no
     # machine is guessed); model_cold: the model did not answer in time and the rules could not tell
-    intent: Literal["query", "chitchat", "unclear", "model_cold"] = "query"
+    # needs_choice / needs_order (issue #95): the question points at an order (「那張單」「它」) and the conversation
+    # does not say which one, so nothing was looked up; `choices` lists the orders it could be (none for needs_order)
+    intent: Literal["query", "chitchat", "unclear", "model_cold", "needs_choice", "needs_order"] = "query"
+    conversation_id: str | None = None
+    choices: list[str] = Field(default_factory=list)
 
 
 # =====================================================================================

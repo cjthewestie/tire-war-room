@@ -193,11 +193,14 @@ class Factory:
 
     def _init_orders(self, t0: datetime) -> None:
         st = self._plan_state
+        self._due_at: dict[str, datetime] = {}
         if st is None:
             return self._init_orders_demo(t0)
         shift = t0 - self._plan_at
         self._orders = {o.id: o.model_copy(update={"due": (datetime.combine(due, datetime.min.time()) + shift).date()})
                         for o, due in st.orders}
+        # the dataset's due date AND time of day, moved onto the scenario day like the date above
+        self._due_at = {oid: at + shift for oid, at in st.due_at.items() if oid in self._orders}
         self._remaining0 = {z: sum(o.qty - o.done for o in self._orders.values() if o.size is z) for z in TireSize}
 
     def _init_presses(self, t0: datetime) -> None:
@@ -665,6 +668,11 @@ class Factory:
     # ------------------------------------------------------------------ orders / shifts / WIP
     def orders(self) -> list[Order]:
         return list(self._orders.values())
+
+    def due_at(self, order_id: str) -> datetime | None:
+        """The exact due time of an order when the source states one (the team dataset does; the built-in demo
+        book and orders added later carry a date only), else None. Order.due stays a date."""
+        return getattr(self, "_due_at", {}).get(order_id)
 
     def order_progress(self) -> list[OrderProgress]:
         out = []

@@ -1,7 +1,9 @@
 // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
 // talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
 // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
+import { TodayOrders } from '../components/TodayOrders'
+import { newConversationId } from '../components/ordersToday'
 import type { ApprovalRequest, AskAnswer } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
@@ -80,12 +82,13 @@ export function Phone() {
             </div>
           )}
         </>}
+        <TodayOrders compact />
         {transport?.ask && <AskBox disabled={lanDown} />}
       </div>
     </div>
   )
 }
-const ASK_EXAMPLES = ['7 號機現在怎樣？', '今晚夜班缺誰？', '大開煉機過熱怎麼處理？']
+const ASK_EXAMPLES = ['今天有哪些訂單？', '哪些訂單有遲交風險？', '7 號機現在怎樣？']
 const TOOL_ZH: Record<string, string> = {
   read_sensors: '讀感測器', predict_anomaly: '異常預測', cure_formula: '硫化公式',
   query_orders_shifts: '訂單／班表', sop_search: 'SOP',
@@ -99,11 +102,12 @@ function AskBox({ disabled }: { disabled: boolean }) {
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [answers, setAnswers] = useState<AskAnswer[]>([])
+  const convId = useRef(newConversationId())
   const send = async (question: string) => {
     if (!transport?.ask || !question.trim()) return
     setBusy(true); setErr(null)
     try {
-      const a = await transport.ask(question.trim())
+      const a = await transport.ask(question.trim(), convId.current)
       setAnswers((xs) => [a, ...xs].slice(0, 3)); setQ('')
     } catch (e) { setErr(String(e)) } finally { setBusy(false) }
   }
@@ -126,6 +130,7 @@ function AskBox({ disabled }: { disabled: boolean }) {
         <div key={a.id} className="ph-answer" data-testid="ask-answer">
           <p className="ph-hist"><b>問</b>　{a.question}</p>
           <p><b>答</b>　{a.answer}</p>
+          {a.choices && a.choices.length > 0 && <div className="ph-opts">{a.choices.map((c) => <button key={c} className="ph-opt" disabled={disabled || busy} onClick={() => void send(`${c} 現在做到哪裡？`)}>{c}</button>)}</div>}
           <p className="muted small">{a.id}・{a.steps.map((s) => `${TOOL_ZH[s.tool] ?? s.tool}${s.ok ? '' : '（失敗）'}`).join('、') || '未查詢'}
             {a.intercepted.length ? `・已攔下 ${a.intercepted.length}` : ''}{a.fell_back_to_mock ? '・規則模式備援' : ''}</p>
         </div>

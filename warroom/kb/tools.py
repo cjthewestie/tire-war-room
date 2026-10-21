@@ -77,4 +77,9 @@ def query_orders_shifts_tool(ctx: Any, args: dict[str, Any]) -> dict[str, Any]:
     data = db.query(a)
     out = data.model_dump(mode="json")
     out["gap_details"] = db.gap_details(data.shifts)
+    try:                                                    # issue #95: the same today's-orders brief, from the workbook
+        from warroom.tools import orders_today
+        out["orders_today"] = orders_today.collect_from_db(db, db.now())
+    except Exception as e:  # noqa: BLE001
+        out["orders_today_error"] = f"{type(e).__name__}: {e}"[:200]
     return out

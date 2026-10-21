@@ -1,5 +1,6 @@
 // One interface, two backends: the real FastAPI (REST + /ws) or the in-browser MockEngine.
 // Mock mode syncs tabs over BroadcastChannel, so approving on /phone updates the dashboard.
+import type { OrdersToday } from './components/ordersToday'
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
@@ -52,7 +53,9 @@ export interface Transport {
   /** Mock only: jump factory time. */
   jump?(t: number): Promise<void>
   /** Live only: 問戰情室, a read-only question answered from the read tools (POST /api/ask). */
-  ask?(question: string): Promise<AskAnswer>
+  ask?(question: string, conversationId?: string): Promise<AskAnswer>
+  /** Live only (issue #95): today's orders from the same rules 問戰情室 answers with (GET /api/orders/today). */
+  ordersToday?(): Promise<OrdersToday>
   /** Live only (issue #10): 下新任務, a task in plain Chinese that opens an event (POST /api/command). */
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
@@ -169,7 +172,8 @@ export class LiveTransport implements Transport {
     return () => { closed = true; clearTimeout(timer); clearInterval(poll); ws?.close() }
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
-  ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
+  ask(question: string, conversationId?: string) { return postJSON<AskAnswer>(API.ask, { question, conversation_id: conversationId ?? null }) }
+  ordersToday() { return getJSON<OrdersToday>(API.ordersToday) }
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }

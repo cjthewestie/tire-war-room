@@ -785,6 +785,27 @@ class World:
                 for o in self._orders.values()]
         return out
 
+    def order_inputs(self, t: datetime | None = None) -> list[dict[str, Any]]:
+        """Every order the dashboard shows (the factory's order book AND the orders that arrived in the world), with
+        the fields the order brief needs and the dashboard's view does not carry: when a world order was scheduled in
+        or completed, and the exact due time a seed order has. Read only; ids are unique (the seed book wins)."""
+        t = t or self._t
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for o in self.f._orders.values():
+            seen.add(o.id)
+            out.append({"id": o.id, "size": o.size, "qty": o.qty, "done": o.done, "due": o.due,
+                        "due_at": self.f.due_at(o.id), "customer": o.customer, "status": self._seed_status(o, t),
+                        "rush": o.priority >= 2, "source": "seed", "start_at": None,
+                        "completed_at": self._seed_completed.get(o.id), "shipped_at": self._seed_shipped.get(o.id)})
+        for o in self._orders.values():
+            if o.id in seen:
+                continue
+            out.append({"id": o.id, "size": o.size, "qty": o.qty, "done": o.done, "due": o.due, "due_at": None,
+                        "customer": o.customer, "status": o.status, "rush": o.rush, "source": "world",
+                        "start_at": o.start_at, "completed_at": o.completed_at, "shipped_at": o.shipped_at})
+        return out
+
     def _orders_view(self, t: datetime) -> OrdersView:
         items = self._all_orders(t)
         pipe = {s: 0 for s in ORDER_STAGES}

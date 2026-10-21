@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from 'react'
 import type { AskAnswer, CommandReply, DiscussReply, Event } from '../contracts'
 import { machineLabel } from '../factory'
 import { useWarRoom } from '../useWarRoom'
+import { newConversationId } from '../components/ordersToday'
 import type { ChatItem, LocalItem } from './transcript'
 
-const ASK_EXAMPLES = ['7 號機現在怎樣？', '今晚夜班缺誰？', '9 號機下一模是哪張訂單？']
+const ASK_EXAMPLES = ['今天有哪些訂單？', '哪些訂單有遲交風險？', '7 號機現在怎樣？']
 
 export interface BarFocus { mode?: BarMode; text?: string; n: number }
 
@@ -40,6 +41,8 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
   const [busy, setBusy] = useState<string | null>(null)
   const [picked, setPicked] = useState<BarMode | null>(null)
   const input = useRef<HTMLTextAreaElement>(null)
+  // one conversation per page load: the server keeps order ids only, so 「那張單呢？」 works and a reload starts fresh
+  const convId = useRef(newConversationId())
   // 討論 / 問 AI / 請 AI 重排 in the plan area: switch the bar's mode, prefill, and put the caret here
   const [seen, setSeen] = useState(0)
   if (focus && focus.n !== seen) {
@@ -66,7 +69,7 @@ export function ChatBar({ ev, waiting, setAsks, onPick, focus }: {
       setAsks((xs) => [...xs, { k: 'ask', key, ts: ft || new Date().toISOString(), seq: 1e9 + n, question: text, answer: null, error: null }])
       setBusy('查詢中…')
       try {
-        const a: AskAnswer = await transport.ask(text)
+        const a: AskAnswer = await transport.ask(text, convId.current)
         setAsks((xs) => xs.map((x) => (x.key === key && x.k === 'ask' ? { ...x, answer: a, ts: a.factory_time || x.ts } : x)))
       } catch (e) {
         setAsks((xs) => xs.map((x) => (x.key === key && x.k === 'ask' ? { ...x, error: `查詢失敗：${String(e)}` } : x)))

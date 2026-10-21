@@ -196,6 +196,11 @@ export interface AskAnswer {
   fell_back_to_mock: boolean
   factory_time: string
   total_ms: number
+  // issue #95: needs_choice / needs_order = the question pointed at an order (「那張單」「它」) and the conversation
+  // does not say which one, so nothing was looked up; `choices` lists the orders it could be
+  intent?: 'query' | 'chitchat' | 'unclear' | 'model_cold' | 'needs_choice' | 'needs_order'
+  conversation_id?: string | null
+  choices?: string[]
 }
 
 export interface ToolResult {
@@ -733,6 +738,7 @@ export const API = {
   scheduleRollback: "/api/schedule/rollback", // POST {version?: number}
   capacity: "/api/capacity",
   orders: "/api/orders",
+  ordersToday: "/api/orders/today", // GET OrdersToday (issue #95: today's orders, risk first; one rule set with 問戰情室)
   shifts: "/api/shifts",
   audit: "/api/audit", // ?since_seq=N&limit=200
   sopSearch: "/api/sop/search", // ?q=...&k=3
