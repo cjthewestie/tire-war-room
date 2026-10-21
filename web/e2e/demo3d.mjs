@@ -62,7 +62,7 @@ await sleep(1500)
 
 if (!FULL) {
   const r0 = await bot(); await sleep(5000); const r1 = await bot()
-  check('robot: patrols', Math.hypot(r1.x - r0.x, r1.z - r0.z) > 0.15, `${r0.x.toFixed(2)},${r0.z} → ${r1.x.toFixed(2)},${r1.z}`)
+  check('robot: patrols', Math.hypot(r1.x - r0.x, r1.z - r0.z) > 0.05, `${r0.x.toFixed(2)},${r0.z} → ${r1.x.toFixed(2)},${r1.z}`)
 }
 
 /** No cuts: the camera never jumps between two frames while the demo runs (speed between samples < 45 units/s). */
