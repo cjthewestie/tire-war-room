@@ -58,6 +58,7 @@ from warroom.contracts import (
     MachineStatus,
     MachineTile,
     MetricTile,
+    NotifyKind,
     PendingAction,
     RiskLevel,
     SafetyAction,
@@ -442,6 +443,22 @@ class ImportedPlanSim:
 def _is_revoke(step_id: str) -> bool:
     """The state machine's compensating notice for replaced staffing: '<approval id>-revoke-<n>'."""
     return "-revoke-" in step_id
+
+
+def _needs_approval(sr: Any) -> bool:
+    """A write step of a plan that needs 主管核准 (R2/R3): by its gate decision, or for a step the gate never saw (its
+    round stopped first), by what the gate would rule from the tool and the notice kind."""
+    if sr.gate is not None and sr.gate.risk is not None:
+        return sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
+    if sr.step.tool in (ToolName.CONFIRM_SCHEDULE, ToolName.SET_CURE_TIME):
+        return True
+    if sr.step.tool is not ToolName.NOTIFY_TEAMS:
+        return False
+    from warroom.agent.gate import NOTIFY_RISK
+    try:
+        return NOTIFY_RISK[NotifyKind(sr.step.args.get("kind"))] is not RiskLevel.R1_NOTIFY
+    except (KeyError, ValueError):
+        return True                         # not a valid notice: never an auto (R1) one
 
 
 class _NoLock:
@@ -1046,9 +1063,13 @@ class Runtime:
     def _awaits_decision(self, event_id: str | None) -> bool:
         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
         auto (R1) writes that run in EXECUTE before the card (state machine: GATE → EXECUTE (auto R1) →
-        AWAIT_APPROVAL), while its plan still has an R2/R3 write nobody approved yet (Spark timing 10-21: the R1
-        檢修 walked to 7 號 13 s before the card). Not while code re-solves an approved round whose schedule another
-        event's version made stale (StateMachine.approved_rebase): the approved repair goes on meanwhile."""
+        AWAIT_APPROVAL), while a write of that round waits for the card (Spark timing 10-21: the R1 檢修 walked to
+        7 號 13 s before the card) or its round stopped before its R2/R3 writes were gated — or an event that ended
+        (SAFE_STOP) with no decision while a round of its plan had, or would have had once gated, an R2/R3 write
+        (steam_low on an idle press: the solve was refused, the event stopped with no card and its R1 檢修 walked out
+        on its own). Only a plan of R1 writes repairs with no decision. Not while code re-solves an approved round
+        whose schedule another event's version made stale (StateMachine.approved_rebase): the approved repair goes on
+        meanwhile."""
         ev = self._event_obj(event_id)
         if ev is None:
             return False
@@ -1058,11 +1079,14 @@ class Runtime:
         if ev.state in (EventState.DETECTED, EventState.CLASSIFY, EventState.PLAN, EventState.SIMULATE,
                         EventState.GATE, EventState.AWAIT_APPROVAL, EventState.REPLAN):
             return True
-        needs = any(sr.gate is not None and sr.gate.risk in (RiskLevel.R2_CHANGE, RiskLevel.R3_CRITICAL)
-                    for sr in ev.steps)
-        decided = any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
-                      for r in self.approvals.all())
-        return needs and not decided
+        if any(r.event_id == ev.id and r.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+               for r in self.approvals.all()):
+            return False
+        if ev.state in TERMINAL_STATES:
+            return ev.state is not EventState.CLOSED and \
+                any(_needs_approval(sr) for sr in [*ev.steps, *(s for r in ev.prior_rounds for s in r.steps)])
+        # EXECUTE / VERIFY: a no-op confirm the gate dropped (gated, skipped) needed no card, so that plan repairs
+        return any(sr.state == "awaiting_approval" or (sr.gate is None and _needs_approval(sr)) for sr in ev.steps)
 
     def _apply_repairs(self) -> None:
         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair

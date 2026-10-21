@@ -360,10 +360,11 @@ export interface Event {
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
-  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared
-  // (repaired_at, 「維修完成」); the readings then ramp back to nominal (回溫中) and recovered_at is when they are back
-  // (「已恢復正常」, green). review: the incident report, pending (「報告待讀」, 「異常報告已產生」) from the close, done
-  // (「主管已讀報告」) after POST /api/events/{id}/review — a notice, nothing waits for it
+  // fast repair (Kyle 10-21 flow: 核准 → 維修 → 維修完成 → 回溫 → 綠燈 → 異常報告): repaired_at = every repair task
+  // (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; the readings then ramp back to nominal over
+  // recover_fast_s wall seconds (machine WARNING, 「回溫中」); recovered_at = back to normal (VERIFY confirms, the event
+  // closes, the machine RUNNING). review = the incident report: pending (「報告待讀」, not a gate: nothing waits for it)
+  // at close, done (「主管已讀報告」) after POST /api/events/{id}/review
   repaired_at?: ISODate | null
   recovered_at?: ISODate | null
   review?: EventReview | null
@@ -634,7 +635,7 @@ export interface HealthStatus {
   uptime_s: number
   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
   repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
-  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after it (回溫中)
+  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after the repair
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------

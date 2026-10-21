@@ -101,7 +101,10 @@ def _stop(p: subprocess.Popen) -> None:
 
 
 @pytest.mark.timeout(240)
-def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path, healthy_url):
+def test_sigterm_restart_by_watchdog_keeps_schedule_holds_and_clock(tmp_path, monkeypatch, healthy_url):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     port = _port()
     base = f"http://127.0.0.1:{port}"
     p1 = _serve(tmp_path, port, "serve1.log")

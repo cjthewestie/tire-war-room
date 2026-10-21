@@ -585,7 +585,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         report. Clients get it as any event change."""
         r = rt()
         if r.network == "lan_down" and not session.local:
-            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕覆核")
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕標記已讀")
         sm = r.state_machine
         if not callable(getattr(sm, "review", None)):
             raise HTTPException(status_code=503, detail="agent unavailable (degraded mode)")

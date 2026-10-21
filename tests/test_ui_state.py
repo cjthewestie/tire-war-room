@@ -47,7 +47,10 @@ async def test_header_bad_data_is_zero_when_normal(tmp_path):
         await rt.stop()
 
 
-async def test_page11_close_summary_is_final_state_only(tmp_path):
+async def test_page11_close_summary_is_final_state_only(tmp_path, monkeypatch):
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     rt, client = await _start(tmp_path, "press7_temp_drop")
     try:
         await _run_until(rt, "02:16:40")
