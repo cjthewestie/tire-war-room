@@ -280,6 +280,11 @@ class StreamDetector:
             c = tr.chans[ch]
             prev = c.last_valid
             q = check_channel(ch, v, prev[1] if prev else None, (t - prev[0]) if prev else 1.0)
+            if q is DataQuality.JUMP and tr.recovering and c.normal is not None and \
+                    abs(v - c.normal) < abs(prev[1] - c.normal):
+                # repaired: a step back toward the machine's normal is the repair's ramp (wall seconds; the sim clock
+                # may stand still meanwhile), not a glitch; a step away from normal still is one
+                q = DataQuality.OK
             if q is DataQuality.JUMP and len(c.recent_raw) == 2:
                 # three consistent samples at the new level = a real change, accept it
                 vals = [x for _, x in c.recent_raw] + [v]

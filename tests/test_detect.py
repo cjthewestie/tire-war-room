@@ -127,29 +127,39 @@ def test_press7_debounced_until_reset_then_leak_detected():
     assert "持續下降" in leak[0].message
 
 
-@pytest.mark.parametrize("ramp_s", [4, 40, 240])           # RECOVER_FAST_S=4 wall s at 1x, 10x, 60x
-def test_the_ramp_back_after_a_fast_repair_is_not_bad_data(ramp_s):
-    """回溫中 (Settings.recover_fast_s): the repaired press's readings ramp to nominal faster than the platen follows its
-    steam, so the steam model read them as 與比對值不符 (concurrent_3 at 10x: 9 readings of 10 號 擋下 after its repair).
-    A repaired machine on its way back is not checked against the steam model; once back it is again."""
-    f, d = setup(ScenarioName.PRESS7_TEMP_DROP)
-    assert [a.machine_id for a in drive(f, d, 600)] == ["CURE-07"]       # 02:22, stable at 122 °C
-    assert sum(d.quality_counts.values()) == 0
-    f.clear_faults("CURE-07")                                            # 維修完成 (runtime._apply_repairs)
-    d.reset("CURE-07", repaired=True)
-    f.begin_recovery("CURE-07")
+@pytest.mark.parametrize("scenario,mid,settle_s,nominal", [
+    (ScenarioName.PRESS7_TEMP_DROP, "CURE-07", 600, 128.0),          # 02:22, stable at 122 °C
+    (ScenarioName.OPEN_MILL_OVERHEAT, "A-BIGOPEN", 720, 100.0),      # cooling water failed: well over 100 °C
+])
+@pytest.mark.parametrize("ramp_s", [1, 4, 40, 240])
+def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_s, nominal, ramp_s):
+    """回溫中 (Settings.recover_fast_s): the repaired machine's readings are moved to nominal over 4 WALL seconds, i.e. 4, 40
+    and 240 sim seconds at 1x, 10x and 60x, or at once (1: another event's model call held the sim clock for the whole
+    ramp, concurrent_3 at 60x). Validation read that as bad data: faster than a platen follows its steam (與比對值不符;
+    concurrent_3 at 10x: 9 readings of 10 號 擋下 after its repair) or a step bigger than physics (跳值; the mill at
+    60x). A repaired machine on its way back to normal is the repair, not a sensor; once back it is checked again."""
+    f, d = setup(scenario)
+    assert mid in [a.machine_id for a in drive(f, d, settle_s)]
+    assert not [k for k in d.quality_counts if k[0] == mid]
+    f.clear_faults(mid)                                                  # 維修完成 (runtime._apply_repairs)
+    d.reset(mid, repaired=True)
+    f.begin_recovery(mid)
     found = []
     for k in range(1, ramp_s + 1):
-        f.recover("CURE-07", k / ramp_s)
+        f.recover(mid, k / ramp_s)
         found += d.ingest(f.step(1))
     found += drive(f, d, 600)
-    assert found == [] and sum(d.quality_counts.values()) == 0, dict(d.quality_counts)
-    assert abs(f.machine("CURE-07").last_reading.temp_c - 128.0) < 0.5
-    assert not d._tracks["CURE-07"].recovering                          # back: watched again
-    f.inject_fault(FaultSpec(id="dr", machine_id="CURE-07", kind=FaultKind.SENSOR_DRIFT,
-                             params={"rate_c_per_min": -0.3}))
-    assert drive(f, d, 600) == []
-    assert d.last_quality["CURE-07"] is DataQuality.NEIGHBOR_MISMATCH    # the steam model checks it again
+    assert not [a for a in found if a.machine_id == mid]
+    assert not {k: n for k, n in d.quality_counts.items() if k[0] == mid}, dict(d.quality_counts)
+    assert abs(f.machine(mid).last_reading.temp_c - nominal) < 0.5
+    assert not d._tracks[mid].recovering                                # back: watched again
+    f.inject_fault(FaultSpec(id="spike", machine_id=mid, kind=FaultKind.SPIKE, params={"delta": 25.0}))
+    drive(f, d, 5)
+    assert d.quality_counts[(mid, DataQuality.JUMP)] == 1               # a glitch is bad data again
+    if mid.startswith("CURE-"):
+        f.inject_fault(FaultSpec(id="dr", machine_id=mid, kind=FaultKind.SENSOR_DRIFT, params={"rate_c_per_min": -0.3}))
+        assert drive(f, d, 600) == []
+        assert d.last_quality[mid] is DataQuality.NEIGHBOR_MISMATCH     # the steam model checks it again
 
 
 def test_predict_api():
