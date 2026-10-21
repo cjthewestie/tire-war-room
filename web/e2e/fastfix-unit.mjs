@@ -163,19 +163,25 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   ]
   const items = fromAudit([...rows].reverse(), base)
   const seqd = items.map((i) => (i.k === 'task' ? `task:${i.phase}${i.who ? `@${i.who}` : ''}` : i.k === 'review' ? `review:${i.phase}` : i.k === 'state' ? `state:${i.to}` : i.k === 'note' ? 'note' : i.k))
-  const want = ['state:detected', 'approval', 'task:created', 'task:assigned@陳志明', 'task:started@陳志明', 'task:done@陳志明', 'review:repaired',
+  // veteran audit: one row per task (派工, 前往中, 執行中 and 完成 merged), its latest phase and when each change happened
+  const want = ['state:detected', 'approval', 'task:done@陳志明', 'review:repaired',
     'state:verify', 'review:recovered', 'note', 'state:closed', 'review:report', 'review:read']
-  check('處理歷程 rows in time order: 派工 → 前往中 → 執行中 → 完成 → 維修完成 → 驗證 → 已恢復正常 → 結案 → 異常報告已產生 → 主管已讀報告', JSON.stringify(seqd) === JSON.stringify(want), seqd.join(' '))
+  check('處理歷程 rows in time order: 現場工作（一列）→ 維修完成 → 驗證 → 已恢復正常 → 結案 → 異常報告 → 主管已讀報告', JSON.stringify(seqd) === JSON.stringify(want), seqd.join(' '))
+  const task = items.find((i) => i.k === 'task')
+  check('… the merged task row keeps when the worker was sent, started and finished', task?.times.assigned === at(11) && task?.times.started === at(12) && task?.times.done === at(14),
+    JSON.stringify(task?.times))
+  check('… a task made after the decision is not 「核准後才派人」', task?.held === false)
   const rep = items.find((i) => i.k === 'review' && i.phase === 'repaired')
-  check('… 維修完成 names the machine', rep?.text === '維修完成，故障排除・B 線開煉機', rep?.text)
+  check('… 維修完成 names the machine', rep?.text === 'B 線開煉機維修完成', rep?.text)
   const rec = items.find((i) => i.k === 'review' && i.phase === 'recovered')
-  check('… 已恢復正常 with the machine and the value in the event\'s channel', rec?.text === '已恢復正常・B 線開煉機 101.2°C', rec?.text)
+  check('… 已恢復正常 with the machine and the value in the event\'s channel', rec?.text === 'B 線開煉機已恢復正常（101.2°C）', rec?.text)
   check('… 主管已讀報告 keeps the note', items.at(-1)?.text === '主管已讀報告' && items.at(-1)?.note === '現場確認正常')
   const older = fromAudit([a('system', 'state_machine', { msg: '請主管覆核' }, at(15)), a('system', 'supervisor', { msg: '主管覆核' }, at(30))], base)
-  check('… an older audit file (請主管覆核 / 主管覆核) reads as 異常報告已產生 / 主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(',') === 'report:異常報告已產生,read:主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(','))
+  check('… an older audit file (請主管覆核 / 主管覆核) reads as 異常報告已送到主管手機 / 主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(',') === 'report:Agent Nemo 異常報告已送到主管手機,read:主管已讀報告', older.map((i) => `${i.phase}:${i.text}`).join(','))
   // the world assigns at once, so its 前往中 row is written before the state machine's 派工 row
   const swapped = fromAudit([rows[3], rows[2], rows[4]].map((r, i) => ({ ...r, seq: 500 + i })), base)
-  check('派工 shown before 前往中 even when the audit wrote 前往中 first', swapped.map((i) => i.phase).join(',') === 'created,assigned,started', swapped.map((i) => i.phase).join(','))
+  check('派工 first even when the audit wrote 前往中 first: one row, sent and started', swapped.length === 1 && swapped[0].phase === 'started' &&
+    swapped[0].times.assigned === at(11) && swapped[0].times.started === at(12), swapped.map((i) => `${i.phase}${JSON.stringify(i.times)}`).join(','))
   check('… 派工 text does not repeat the machine already in the title', swapped[0].text === '檢修 B 線開煉機', swapped[0].text)
   const old = fromAudit([a('system', 'world', { msg: '現場處置完成，故障排除', machine_id: 'B-OPEN' }, at(14))], base)
   check('… the runtime\'s older wording counts as 維修完成 too', old[0]?.k === 'review' && old[0].phase === 'repaired')
