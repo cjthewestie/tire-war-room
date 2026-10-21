@@ -62,6 +62,7 @@ const TEAM: Record<TeamId, Tri> = {
   bead_nylon: { zh: '鋼絲／尼龍組', vi: 'tổ tanh thép/nylon', id: 'tim kawat/nilon' },
   bigopen: { zh: '大開煉機組', vi: 'tổ máy cán hở lớn', id: 'tim mesin giling besar' },
   bond: { zh: '貼合組', vi: 'tổ ép dán', id: 'tim perekatan' },
+  trim: { zh: '修邊組', vi: 'tổ cắt bavia', id: 'tim perapian' },
   maintenance: { zh: '維修組', vi: 'tổ bảo trì', id: 'tim perawatan' },
   qc: { zh: '品管', vi: 'tổ QC', id: 'tim QC' },
   supervisor: { zh: '主管', vi: 'quản lý', id: 'supervisor' },
