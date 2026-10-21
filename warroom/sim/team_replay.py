@@ -181,3 +181,8 @@ class TeamReplayFactory(Factory):
     @property
     def replay_active(self) -> bool:
         return self._replay_pos < len(self._replay_times)
+
+    def replayed_machines(self) -> set[str]:
+        """The machines the dataset window still overwrites: a fault injected on them never shows in their readings
+        (模擬事件 picks another one)."""
+        return {r.machine_id for ts in self._replay_times[self._replay_pos:] for r in self._replay[ts]}

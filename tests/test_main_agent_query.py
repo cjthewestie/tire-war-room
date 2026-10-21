@@ -356,3 +356,77 @@ async def test_rule_mode_summarises_by_code():
                          run_tool=f.run_tool, propose=f.propose, discuss=None)
     s = agent.notes["summary"]
     assert s and len(s) <= 300 and "CURE-07" in s
+
+
+
+async def test_a_question_about_the_conversation_is_answered_from_its_record():
+    """Real run 10-22: 「我剛剛說哪台不要動？」 after 20 temperature questions re-answered the temperature."""
+    agent = MainAgent(_settings(), client=Model(*[("say", "好的。") for _ in range(12)]))
+    f = Floor()
+    for q in ("#A-311 優先，不要動 9 號機", "7號機現在溫度多少", "7號機現在溫度多少"):
+        await agent.turn(q, context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool, propose=f.propose,
+                         discuss=None, read_plant=Reader())
+    agent.client = m = Model(("say", "你說 9 號機不要動，#A-311 優先。"))
+    n = 0
+    out = await agent.turn("我剛剛說哪台不要動？", context={"abnormal": []}, waiting_plan=None, run_tool=f.run_tool,
+                           propose=f.propose, discuss=None, read_plant=Reader())
+    sent = json.loads(m.calls[n]["messages"][1]["content"])
+    assert "tools" not in m.calls[n] and "previous_turn" not in sent and "instruction" in sent
+    assert sent["pinned_constraints"] == ["#A-311 優先，不要動 9 號機"] and m.calls[n]["temperature"] == 0.0
+    assert "9 號機" in out["reply"]
+
+
+async def test_a_constraint_said_in_chat_is_confirmed_not_answered_with_a_status_dump():
+    from warroom.agent.main_agent import PIN_ACK
+    m = Model(("say", "今天運轉 5 台、待機 6 台，在班 10 人。"))
+    out, _ = await _turn(m, "#A-311 優先，不要動 9 號機")
+    assert out["reply"] == PIN_ACK.format(pin="#A-311 優先，不要動 9 號機")
+
+
+async def test_query_plant_numbers_that_do_not_match_give_an_honest_line_not_raw_json():
+    from warroom.agent.main_agent import NUMBERS_OFF
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("say", "有 7 張遲交。"), ("say", "還是 7 張遲交。"))
+    out, _ = await _turn(m, "之前有哪些訂單遲交", Reader({"late": []}))
+    assert out["reply"] == NUMBERS_OFF and "completed_or_shipped" not in out["reply"]
+
+
+
+async def test_query_plant_is_capped_at_two_topics_per_turn():
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
+              ("tool", QUERY, {"topic": "overview"}), ("say", "之前沒有遲交的訂單。"))
+    reader = Reader({"late": []})
+    out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
+    assert reader.topics == ["orders_history", "orders"] and "已經查了兩項" in _tool_texts(m)[-1]
+    assert out["reply"] == "之前沒有遲交的訂單。" and "先只查最相關的一個 topic" in SYSTEM
+
+
+def _tool_texts(m):
+    return [x["content"] for c in m.calls for x in c["messages"] if x.get("role") == "tool"]
+
+
+# ---------------------------------------------------------------- every model call on the audit chain (admin-audit, PR #111)
+async def test_every_chat_and_summary_model_call_is_an_llm_call_row():
+    from warroom.contracts import AuditKind
+
+    class Audit:
+        def __init__(self):
+            self.rows = []
+
+        def append(self, kind, actor, payload, event_id=None):
+            self.rows.append((kind, actor, payload, event_id))
+    audit = Audit()
+    m = Model(("tool", QUERY, {"topic": "shipments"}), *[("say", f"第 {i} 句。") for i in range(40)])
+    agent = MainAgent(_settings(), client=m, audit=audit)
+    f = Floor()
+    for i in range(22):
+        await agent.turn("明天要出幾台車" if i == 0 else f"嗯 {i}", context={"abnormal": []}, waiting_plan=None,
+                         run_tool=f.run_tool, propose=f.propose, discuss=None, read_plant=Reader(), conversation="sup|c1")
+    await asyncio.sleep(0.05)
+    rows = [r for r in audit.rows if r[0] is AuditKind.LLM_CALL]
+    assert len(rows) == len(m.calls)                                     # one row per model call, summary included
+    first = rows[0]
+    assert first[1] == "main_agent" and first[3] == "MAIN-0001" and first[2]["phase"] == "chat" and first[2]["step"] == 0
+    assert {"model", "prompt_tokens", "completion_tokens", "total_ms", "plant_sha256", "conversation"} <= set(first[2])
+    assert first[2]["conversation"] != "sup|c1" and len(first[2]["conversation"]) == 16      # hashed
+    assert first[2]["tool_calls"] == [QUERY]
+    assert any(r[2]["phase"] == "summary" for r in rows)

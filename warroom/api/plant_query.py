@@ -130,21 +130,17 @@ def open_events(r: Any) -> dict[str, Any]:
 
 
 def handled_today(r: Any) -> dict[str, Any]:
-    from warroom.api import daylog
-    sources = {ev.id: ("command" if ev.source == "supervisor" else ev.source if ev.source == "plant" else "event")
-               for ev in r.events()}
-    days = daylog.build(r.audit.tail(0, 1_000_000), sources)
-    if not days:
-        return {"total": 0, "items": []}
-    d = max(days.values(), key=lambda x: x["last_seq"])
-    runs = [x for x in d["runs"] if x["type"] != "main"]          # the chat turns themselves are not work done
-    outcomes: dict[str, int] = {}
-    for x in runs:
-        outcomes[STATE.get(x["outcome"], x["outcome"])] = outcomes.get(STATE.get(x["outcome"], x["outcome"]), 0) + 1
-    return {"day": d.get("label") or d["key"], "total": len(runs), "by_outcome": outcomes,
-            "items": [{"id": x["id"], "type": daylog.TYPE_LABEL.get(x["type"], x["type"]), "title": x.get("title"),
-                       "opened": _hm(x["opened_at"]) if x.get("opened_at") else None,
-                       "outcome": STATE.get(x["outcome"], x["outcome"])} for x in runs][-15:]}
+    """The same durable list the Agent page shows (warroom/api/tasklog.py): chat and page agree."""
+    day = r.tasklog.today()
+    rows = [x for g in day["groups"] for x in g["rows"]]
+    finals: dict[str, int] = {}
+    for x in rows:
+        finals[x["final"]] = finals.get(x["final"], 0) + 1
+    return {"day": day["date"], "total": len(rows), "by_final": finals,
+            "items": [{"id": x["id"], "opened": _hm(x["opened_at"]), "closed": _hm(x["closed_at"]),
+                       "what": (x["title"] or "")[:40], "machine": x["machine_id"], "order": x["order_id"],
+                       "final": x["final"], "loop": x["loop"], "scenario": x["scenario"],
+                       "approvals": [f"v{a['version']} {a['decision']}" for a in x["approvals"]][-2:]} for x in rows][-12:]}
 
 
 def audit_recent(r: Any) -> dict[str, Any]:
@@ -287,9 +283,10 @@ def orders_history(r: Any) -> dict[str, Any]:
              for x in _dataset("history_daily")][-7:]
     return {"completed_or_shipped": items[:12], "late": [i["id"] for i in items if i["late"]],
             "recent_feed": shipped,
-            "team_dataset_plan": {"note": "團隊資料集：每張訂單的交期和預估完工（原始日期）", "orders": plan[:10],
+            # the dataset plan as a count and its late ids only: the full list made the answer slow and long
+            "team_dataset_plan": {"note": "團隊資料集的訂單計畫（原始日期）", "orders": len(plan),
                                   "late": [p["id"] for p in plan if p["late"]]},
-            "daily_output": daily}
+            "daily_output": daily[-3:]}
 
 
 def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
@@ -341,10 +338,42 @@ def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
     return out
 
 
+def tasks(r: Any) -> dict[str, Any]:
+    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long."""
+    now = r.clock.now()
+    subs = {x["id"]: x for x in r.orch.subagents()}
+    pending = {a.event_id: a for a in r.approvals.pending()} if r.approvals is not None else {}
+    pre = getattr(r.orch, "preplan_ids", set())
+    items = []
+    for e in sorted(_open_events(r), key=lambda e: e.opened_at):
+        sa = subs.get(e.id, {})
+        card = pending.get(e.id)
+        st = e.state.value
+        if card is not None:
+            label, waits = f"待核准 v{card.version}", "等主管核准"
+        elif st in ("execute", "verify") and sa.get("tasks_total"):
+            label = f"執行中 {sa['tasks_done']}/{sa['tasks_total']}" if st == "execute" else "驗證中"
+            waits = "等現場完成" if st == "execute" else "等讀值驗證"
+        elif st == "verify":
+            label, waits = "驗證中", "等讀值驗證"
+        elif st == "execute":
+            label, waits = "執行中", "執行核准的步驟"
+        elif st in ("detected", "classify", "plan", "simulate", "gate", "replan"):
+            label, waits = "規劃中", "等 AI 擬計劃" + ("（模型排隊中）" if sa.get("status") == "waiting_model" else "")
+        else:
+            label, waits = STATE.get(st, st), ""
+        last = e.timeline[-1].ts if e.timeline else e.opened_at
+        items.append({"id": e.id, "what": (e.command or (e.alert_card.title if e.alert_card else e.anomaly.message))[:40],
+                      "machine": e.machine_id, "state": label, "waits_on": waits, "preplan": e.id in pre,
+                      "open_min": round((now - e.opened_at).total_seconds() / 60, 1),
+                      "in_state_min": round((now - last).total_seconds() / 60, 1), "round": len(e.prior_rounds) + 1})
+    return {"count": len(items), "tasks": items}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
-          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup}
+          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks}
 
 
 def _shrink(d: Any, n: int) -> Any:

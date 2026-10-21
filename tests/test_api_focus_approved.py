@@ -37,7 +37,9 @@ async def test_page2_approved_slow_feed_stays_checked(tmp_path):
 
 
 async def test_page11_round1_steps_kept_and_overtime_shown(tmp_path):
-    rt = _real_runtime(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value)
+    # the page-11 story needs round 2: with the demo's fast repair (wall-clock 3 s) the machine was fixed before it
+    # whenever the box was busy, so the test failed or passed by load (main a20416b too). Real repair durations here.
+    rt = _real_runtime(tmp_path, ScenarioName.PRESS7_TEMP_DROP.value, repair_fast_s=0.0)
     await rt.start()
     try:
         await _run(rt, 25, pick=lambda req: next((o for o in req.options if "夜班" in o.label), None))

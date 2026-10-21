@@ -80,18 +80,24 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   const tl = await (p.locator('[data-testid=focus-timeline]').innerText())
   check('timeline rows', ['02:14:00', '02:14:01', '02:14:11', '02:16:40', '02:31:00', '02:31:04'].every((x) => tl.includes(x)))
   check('timeline numbers', tl.includes('28.5 h') && tl.includes('+4.5 h') && tl.includes('119.5°C') && tl.includes('#A-311'))
+  // 人力排程 (Kyle 10-22 draft): the answer, today's shifts, the schedule in force in one sentence, the lead time in one line
   await p.click('text=人力排程')
-  await p.waitForSelector('.gantt svg')
-  await p.evaluate(() => { const d = document.querySelector('details.plan-panel'); if (d) d.open = true })   // ⑥ is folded by default
+  await p.waitForSelector('[data-testid=sched-answer]')
   await p.waitForTimeout(400)
   const s = await text(p)
-  check('schedule versions', s.includes('第 1 版') && s.includes('第 2 版') && s.includes('第 3 版'))
-  check('schedule steps', s.includes('solve_schedule') && s.includes('sop_search') && s.includes('換假設'))
-  check('labor chart', s.includes('硫化機（運轉）') && s.includes('胎體／胎面膠組'))
-  check('capacity', s.includes('13.3 → 9.3 週') && s.includes('4.9'))
-  check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.g-job.hot title')].some((t) => t.textContent?.includes('9 號硫化機'))))
+  check('schedule answer', s.includes('今晚夜班缺 1 人') && s.includes('從 2 線調 1 人'))
+  check('schedule version sentence', /現在用第 \d 版排程/.test(s))
+  check('labor chart', s.includes('胎體／胎面膠組') && s.includes('要有人在場'))
+  check('capacity', s.includes('13.3 → 9.3 週'))
   await p.screenshot({ path: `${OUT}/schedule-p11-1440.png`, fullPage: true })
-  // rollback
+  // 硫化機排程 (the Gantt) moved to 產線監控
+  await p.click('.tabs button:has-text("產線監控")')
+  await p.waitForSelector('.gantt svg')
+  check('gantt A-311 on CURE-09', await p.evaluate(() => [...document.querySelectorAll('.cs-job.moved title')].some((t) => t.textContent?.includes('9 號硫化機'))))
+  // rollback (人力排程)
+  await p.click('.tabs button:has-text("人力排程")')
+  await p.waitForSelector('[data-testid=sched-version]')
+  p.once('dialog', (d) => d.accept())   // 回復上一版 asks the supervisor to confirm first
   await p.click('text=回復上一版')
   await p.waitForTimeout(500)
   check('rollback', (await text(p)).includes('已回復到第'))

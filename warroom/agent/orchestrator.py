@@ -50,8 +50,8 @@ _DECISION = {"approve": "核准", "reject": "駁回", "modify": "修改", "super
 TYPES: dict[str, str] = {"machine": "機台處理", "order": "訂單處理", "material": "原料處理", "staff": "人力調度",
                          "shift": "早班開工", "task": "主管任務"}
 PRIORITY: dict[str, int] = {"safety": 0, "machine": 1, "order": 2, "material": 2, "staff": 3, "shift": 3, "task": 2,
-                            "question": 4, "preplan": 4, "smalltalk": 5}
-PRIORITY_LABEL = {0: "安全", 1: "機台故障", 2: "訂單／原料", 3: "人力", 4: "提問", 5: "閒聊"}
+                            "question": 4, "preplan": 4, "smalltalk": 5, "report": 6}
+PRIORITY_LABEL = {0: "安全", 1: "機台故障", 2: "訂單／原料", 3: "人力", 4: "提問", 5: "閒聊", 6: "報告"}
 
 # code routing: anomaly kind -> subagent type (machine faults, orders, staffing, the shift start)
 ROUTES: dict[str, str] = {
@@ -281,7 +281,7 @@ class Orchestrator:
 
     def __init__(self, sm: Any, audit: Any, *, approvals: Any = None, bus: Any = None, clock: Any = None,
                  queue: ModelQueue | None = None, tasks: Callable[[], dict[str, asyncio.Task]] | None = None,
-                 board: Callable[[], Any] | None = None, dispatcher: Dispatcher | None = None):
+                 board: Callable[[], Any] | None = None, dispatcher: Dispatcher | None = None, reporter: Any = None):
         self.sm, self.audit, self.approvals, self.bus, self.clock = sm, audit, approvals, bus, clock
         self.queue = queue or ModelQueue(audit=audit, clock=clock)
         self._tasks = tasks or dict
@@ -289,7 +289,11 @@ class Orchestrator:
         self.dispatcher = dispatcher or Dispatcher()
         self.subs: dict[str, SubAgent] = {}
         self.preplan_ids: set[str] = set()      # events the runtime pre-plans: they wait behind incidents
+        # #104: the report line for a pre-plan that found nothing to change (Runtime.precheck_line), or None
+        self.precheck: Callable[[Event], str | None] | None = None
         self._pending_dispatch: list[dict[str, Any]] = []      # supervisor dispatch decided, event not open yet
+        from warroom.agent.reporter import ReportDesk  # Agent Nemo 異常報告 (Kyle 10-21, option A)
+        self.reports = ReportDesk(self, reporter)
         if hasattr(sm, "on_open"):
             sm.on_open = self._opened
         if hasattr(sm, "on_end"):
@@ -406,11 +410,13 @@ class Orchestrator:
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
                      "type_label": TYPES.get(t, t), "by": "supervisor", "decision": kind, "option": d.option_id,
                      "approval_id": req.id, "text": text}, ev_id)
+        self.reports.on_decided(req)                              # Agent Nemo starts the incident report now
         self.publish()
 
     # ---------------------------------------------------------------- report back
     def _ended(self, ev: Event) -> None:
         """StateMachine hook: a run ended. The main agent reports a code-built summary once."""
+        self.reports.on_ended(ev)                                 # CLOSED: the Agent Nemo report gets its result line
         sub = self.subs.get(ev.id)
         if sub is None:
             self._opened(ev)
@@ -419,8 +425,10 @@ class Orchestrator:
             return
         sub.reported = True
         text, facts = self.summary(ev, sub)
+        # the durable task log (warroom/api/tasklog.py) reads this row: what it was and where, with the outcome
+        title = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
         self._audit({"orch": "report", "type": sub.type, "type_label": TYPES[sub.type], "state": ev.state.value,
-                     "text": text, **facts}, ev.id)
+                     "text": text, "title": title, "machine_id": ev.machine_id, **facts}, ev.id)
         self.publish()
 
     def summary(self, ev: Event, sub: SubAgent) -> tuple[str, dict[str, Any]]:
@@ -443,6 +451,11 @@ class Orchestrator:
                 if r.decision is not None:
                     decided.append(f"{_DECISION.get(r.decision.decision.value, r.decision.decision.value)}"
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
+        if self.precheck is not None and ev.id in self.preplan_ids and ev.state is EventState.CLOSED and not ev.approvals:
+            line = self.precheck(ev)     # 「已預先檢查：SO-012 明天無法交齊（…），建議…」 instead of 「沒有可執行的動作」
+            if line:
+                return line, {"writes": [], "approvals": [], "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
+                              "interrupted": sub.interrupted, "prechecked": True}
         repaired = ev.source == "detector" and ev.state is EventState.CLOSED and not sub.interrupted
         head = "已中斷" if sub.interrupted else "已修復" if repaired else "完成" if ev.state is EventState.CLOSED else "已停止"
         outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」

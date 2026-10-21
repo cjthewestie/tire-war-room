@@ -348,8 +348,8 @@ async def test_crashing_state_machine_does_not_kill_loop(tmp_path):
 REAL_NEEDED = ("sim", "detector", "safety", "approvals", "audit", "tools", "gate", "commander", "state_machine")
 
 
-def _real_runtime(tmp_path, scenario_name) -> Runtime:
-    rt = Runtime(_settings(tmp_path, scenario=scenario_name), run_loop=False)
+def _real_runtime(tmp_path, scenario_name, **over) -> Runtime:
+    rt = Runtime(_settings(tmp_path, scenario=scenario_name, **over), run_loop=False)
     missing = {k: v for k, v in rt.degraded.items() if k in REAL_NEEDED}
     if missing:
         pytest.skip(f"sibling modules not ready: {missing}")
@@ -429,6 +429,9 @@ async def test_real_open_mill_page2_focus(tmp_path):
 async def test_runtime_drives_real_state_machine_page11(tmp_path, monkeypatch):
     """Real sim/detector/safety/agent/store through Runtime; while warroom.tools is still a stub the
     registry is the agent builder's page-11 FakeRegistry (reads come from the real sim)."""
+    # page 11's story (H1 rejected → 7 號機停用) at the real repair durations; with the demo's fast repair VERIFY
+    # waits for the crew's 檢修 and the event closes 「已修復」 instead (tests/test_fast_repair.py)
+    monkeypatch.setenv("REPAIR_FAST_S", "0")
     import warroom.tools as tools_mod
     try:
         tools_mod.build_registry(tools_mod.ToolContext())

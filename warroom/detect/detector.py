@@ -32,6 +32,7 @@ from warroom.contracts import (
     CompoundStage,
     DataQuality,
     MachineKind,
+    MachineStatus,
     Prediction,
     SensorReading,
     Severity,
@@ -615,6 +616,8 @@ class StreamDetector:
                 if d.steam_header else None
             _, per, expected = self._check(tr, r, neigh)
             self._commit(tr, r, per, expected)
+            if self._stopped(r.machine_id):
+                continue          # stopped / out of service: it cools because it is off, not a 溫度下降 (baseline kept)
             t = _t(r.ts)
             for ch, q in per.items():
                 if q is DataQuality.OK:
@@ -627,6 +630,20 @@ class StreamDetector:
             out += self.check_plan(max(r.ts for r in readings))
         self.anomalies.extend(out)
         return out
+
+    _OFF = frozenset({MachineStatus.STOPPED, MachineStatus.OUT_OF_SERVICE})
+
+    def _stopped(self, machine_id: str) -> bool:
+        """The machine is stopped (Safety Core stop, 扣模) or out of service in the attached sim. Its readings still go
+        through validation, but neither move its baseline nor raise anomalies: a stopped mill cooling to room temperature
+        is not a 溫度下降 (the Safety Core keeps watching its limits on the red path)."""
+        status_of = getattr(self._plan_sim, "status_of", None)
+        if not callable(status_of):
+            return False
+        try:
+            return status_of(machine_id) in self._OFF
+        except KeyError:
+            return False
 
     def _merge_headers(self, found: list[Anomaly]) -> list[Anomaly]:
         """Two or more presses on one steam header deviating together = one MULTI_MACHINE event."""
