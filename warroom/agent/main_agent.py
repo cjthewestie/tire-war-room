@@ -98,7 +98,7 @@ OFFERS = ("要我幫你看哪一塊？", "要查什麼直接說。", "需要的�
 IDENTITY_REPLY = IDENTITY_REPLIES[0]
 HELLO_REPLY = HELLO_REPLIES[0]
 THANKS_REPLY = THANKS_REPLIES[0]
-CASUAL_TEMPERATURE = 0.7   # small talk and general answers vary (「可以多種回應」); plant reads, plans and discussions stay at 0.0
+CASUAL_TEMPERATURE = 0.5   # small talk and general answers vary (「可以多種回應」); plant reads, plans and discussions stay at 0.0
 GIBBERISH_REPLY = "這句我看不懂，可以再說一次嗎？例如：「#A-311 會不會晚交？」"
 UNCLEAR_REPLY = "我不太確定你要我做什麼。你是想查狀況，還是要我安排一件事？例如：「7 號機現在怎樣？」"
 NO_OBJECT = "要安排事情，我需要知道是哪台機台、哪張訂單、哪種原料或哪個班。"
@@ -150,6 +150,11 @@ _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛�
 # 「為什麼」「真的嗎」「所以呢」: a question about the agent's own last answer, so that answer rides along
 _ABOUT_LAST_RX = re.compile(r"^(?:為什麼|為何|怎麼會|真的嗎|確定嗎|所以呢|然後呢|什麼意思|怎麼說)")
 # small talk (今天好累喔、午餐吃什麼、講個笑話): one warm sentence, one plant fact, an offer — lowest queue priority
+# weather / news: data the plant does not have. Checked AFTER the model (CJ 2026-10-21: 「程式檢查就好了」): a reply that
+# does not admit it has no such data (「今天天氣是晴天」, or a plant dump instead) is replaced by an honest line
+_NO_DATA_TOPIC_RX = re.compile(r"天氣|氣溫|下雨|颱風|新聞|股價|股市|匯率|油價|比分|彩券")
+NO_DATA_REPLIES = ("我這邊沒有天氣、新聞這類外部資料，這題沒辦法回答。", "這個我查不到，我只接了工廠裡的資料。",
+                   "外面的資料我沒有接進來，這題答不了。")
 SMALLTALK_LINES = ("辛苦了，先喝口水喘口氣！", "撐著點，今天也快過一半了！", "累了就先放鬆一下肩膀！", "好好吃頓飯，下午才有力氣！")
 _PLANT_WORD_RX = re.compile(r"機|爐|溫度|訂單|排程|出貨|產線|硫化|天氣|\d")
 _PLANT_STAT_RX = re.compile(r"在班|上班人員|運轉|待機|出貨|機台|號機|工單|訂單|事件")
@@ -817,6 +822,9 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not re.search(r"沒有|查不到|無法|沒辦法|答不了", words):
+                out["intent"] = "no_data"
+                words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
             if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
                 # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
                 words = INJECT_REPLY

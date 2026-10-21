@@ -151,13 +151,17 @@ async def test_a_poem_is_written_not_refused():
     assert "爐火映夜長" in out["reply"] and "遠方" in out["reply"] and not f.tools and not f.proposed
 
 
-async def test_weather_goes_to_the_model_and_its_words_stay():
-    """CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」: no code no-data line; the prompt asks the model to
-    say plainly that it has no weather data."""
+async def test_weather_goes_to_the_model_and_a_made_up_answer_is_replaced_after_it():
+    """CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」: the model answers first; only a reply that does not
+    admit it has no weather data (「今天天氣是晴天」, or a plant dump) is replaced after it."""
     m = Model(("say", "我沒有天氣資料。"))
     out, f = await _turn(m, "今天天氣怎樣")
     assert out["reply"] == "我沒有天氣資料。" and len(m.calls) == 1 and not f.tools and out["by"] == "model"
-    assert "天氣" in SYSTEM and "我沒有這份資料" in SYSTEM
+    for said in ("今天天氣是晴天。", "主管早上好。今天值班 10 人。"):
+        m = Model(("say", said))
+        out, _ = await _turn(m, "今天天氣怎樣")
+        assert len(m.calls) == 1 and out["intent"] == "no_data" and "晴" not in out["reply"]
+        assert ("沒有" in out["reply"] or "查不到" in out["reply"] or "答不了" in out["reply"])
 
 
 def test_prompt_and_reply_length():
@@ -232,7 +236,7 @@ async def test_small_talk_is_warm_varied_lowest_priority_and_ends_on_work():
         assert any(x in r["reply"] for x in ("16:00", "1 件事件", "7 號", "在班 10 人")), r["reply"]   # one plant fact
         assert "專心上班" not in r["reply"] and "只能回答" not in r["reply"]
     assert len(set(out)) == 5 and all(lows)                        # all different, all at the lowest priority
-    assert all(c["temperature"] == 0.7 for c in m.calls)
+    assert all(c["temperature"] == 0.5 for c in m.calls)
 
 
 async def test_plant_questions_stay_at_temperature_zero_and_normal_priority():
