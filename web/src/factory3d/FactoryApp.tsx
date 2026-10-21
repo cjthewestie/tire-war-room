@@ -449,9 +449,9 @@ export function FactoryApp() {
       </Canvas>
 
       {/* first person: a small aim dot, and what F does right here */}
-      {fp && !overlay && <div className="f3-cross" aria-hidden />}
+      {fp && !overlay && !demoOn && <div className="f3-cross" aria-hidden />}
       {fp && prompt && <div className="f3-aim" data-testid="f3-prompt">{!TOUCH_DEVICE && <kbd>F</kbd>} {prompt}</div>}
-      {fp && !overlay && !locked && (TOUCH_DEVICE
+      {fp && !overlay && !locked && !demoOn && (TOUCH_DEVICE
         ? <div className="f3-look-hint">拖曳畫面看四周</div>
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
