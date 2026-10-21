@@ -297,7 +297,12 @@ class StreamDetector:
             dt = (t - tr.last_t) if tr.last_t is not None else 0.0
             if tr.expected_temp is not None and 0 < dt <= 5.0:
                 expected = approach(tr.expected_temp, implied_press_temp(r.steam_kgf_cm2), dt, THERMAL_TAU_S)
-                if per.get(Channel.TEMP) is DataQuality.OK and abs(r.temp_c - expected) > REDUNDANT_TOL_C:
+                if tr.recovering:
+                    # repaired (reset(repaired=True)): the way back is the repair's ramp (回溫中, a few wall seconds),
+                    # faster than the platen follows its steam; the model follows the reading until the press is back
+                    if per.get(Channel.TEMP) is DataQuality.OK:
+                        expected = r.temp_c
+                elif per.get(Channel.TEMP) is DataQuality.OK and abs(r.temp_c - expected) > REDUNDANT_TOL_C:
                     per[Channel.TEMP] = DataQuality.NEIGHBOR_MISMATCH
         if neighbours and per.get(Channel.TEMP) is DataQuality.OK and validate_reading(r.model_copy(update={"pressure_kgf_cm2": None, "water_flow_lpm": None,
                                                      "steam_kgf_cm2": None}),

@@ -127,6 +127,31 @@ def test_press7_debounced_until_reset_then_leak_detected():
     assert "持續下降" in leak[0].message
 
 
+@pytest.mark.parametrize("ramp_s", [4, 40, 240])           # RECOVER_FAST_S=4 wall s at 1x, 10x, 60x
+def test_the_ramp_back_after_a_fast_repair_is_not_bad_data(ramp_s):
+    """回溫中 (Settings.recover_fast_s): the repaired press's readings ramp to nominal faster than the platen follows its
+    steam, so the steam model read them as 與比對值不符 (concurrent_3 at 10x: 9 readings of 10 號 擋下 after its repair).
+    A repaired machine on its way back is not checked against the steam model; once back it is again."""
+    f, d = setup(ScenarioName.PRESS7_TEMP_DROP)
+    assert [a.machine_id for a in drive(f, d, 600)] == ["CURE-07"]       # 02:22, stable at 122 °C
+    assert sum(d.quality_counts.values()) == 0
+    f.clear_faults("CURE-07")                                            # 維修完成 (runtime._apply_repairs)
+    d.reset("CURE-07", repaired=True)
+    f.begin_recovery("CURE-07")
+    found = []
+    for k in range(1, ramp_s + 1):
+        f.recover("CURE-07", k / ramp_s)
+        found += d.ingest(f.step(1))
+    found += drive(f, d, 600)
+    assert found == [] and sum(d.quality_counts.values()) == 0, dict(d.quality_counts)
+    assert abs(f.machine("CURE-07").last_reading.temp_c - 128.0) < 0.5
+    assert not d._tracks["CURE-07"].recovering                          # back: watched again
+    f.inject_fault(FaultSpec(id="dr", machine_id="CURE-07", kind=FaultKind.SENSOR_DRIFT,
+                             params={"rate_c_per_min": -0.3}))
+    assert drive(f, d, 600) == []
+    assert d.last_quality["CURE-07"] is DataQuality.NEIGHBOR_MISMATCH    # the steam model checks it again
+
+
 def test_predict_api():
     f, d = setup(ScenarioName.PRESS7_TEMP_DROP)
     drive(f, d, 150)
