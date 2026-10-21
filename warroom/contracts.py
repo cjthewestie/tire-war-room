@@ -1092,6 +1092,7 @@ class WsType(StrEnum):
     CLOCK = "clock"                     # data: {"factory_time": iso, "speed": float, "paused": bool}
     WORLD = "world"                     # data: {"full": bool, "rev": int, "factory_time": iso, <changed WorldSnapshot sections>}
     SUBAGENTS = "subagents"             # issue #54: {"items": subagent rows, "queue": model queue} (warroom/agent/orchestrator.py)
+    DEMO = "demo"                       # the guided demo's shared cue state (warroom/api/demo.py, GET /api/demo/state)
 
 
 class WsMessage(_M):

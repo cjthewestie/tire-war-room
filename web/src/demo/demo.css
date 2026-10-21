@@ -1,0 +1,61 @@
+/* The war room's demo mode (demo/DemoOverlay.tsx): the bar on top, the spotlight and the pitch card. */
+.app.demo-on { padding-top: 64px; }
+.dm-bar {
+  position: fixed; inset: 0 0 auto 0; z-index: 90; display: flex; align-items: center; gap: 12px;
+  min-height: 56px; padding: 8px 16px; background: var(--panel); border-bottom: 2px solid var(--accent);
+  box-shadow: 0 4px 18px rgb(0 0 0 / .35);
+}
+.dm-badge { flex: none; padding: 4px 10px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); font-weight: 700; font-size: 13px; }
+.dm-time { flex: none; font-variant-numeric: tabular-nums; color: var(--ink-dim); font-size: 13px; }
+.dm-cue { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.dm-cue b { font-size: 18px; white-space: nowrap; }
+.dm-body { color: var(--ink-dim); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dm-wait { flex: none; font-size: 13px; padding: 3px 9px; border-radius: 8px; background: var(--panel-2); color: var(--ink-dim); }
+.dm-wait.w-approval { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+.dm-wait.w-paused { background: var(--panel-3); color: var(--ink); }
+.dm-err { flex: none; color: var(--alarm); font-size: 13px; max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dm-ctl { flex: none; display: flex; gap: 6px; }
+.dm-ctl button { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink); font: inherit; font-size: 13px; cursor: pointer; }
+.dm-ctl button:first-child { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 700; }
+.dm-ctl button:disabled { opacity: .45; cursor: not-allowed; }
+.dm-ctl .dm-exit { color: var(--ink-dim); }
+
+/* the spotlight: one box whose huge shadow dims the rest; it takes no clicks, so 核准 under it still works */
+.dm-spot {
+  position: fixed; z-index: 80; pointer-events: none; border-radius: 14px;
+  box-shadow: 0 0 0 3px var(--accent), 0 0 28px 6px rgb(118 185 0 / .55), 0 0 0 200vmax rgb(0 0 0 / .58);
+  transition: left .35s ease, top .35s ease, width .35s ease, height .35s ease;
+  animation: dm-glow 2.4s ease-in-out infinite;
+}
+@keyframes dm-glow {
+  50% { box-shadow: 0 0 0 3px var(--accent), 0 0 40px 12px rgb(118 185 0 / .7), 0 0 0 200vmax rgb(0 0 0 / .58); }
+}
+@media (prefers-reduced-motion: reduce) { .dm-spot { animation: none; transition: none; } }
+.dm-cap {
+  position: fixed; z-index: 85; pointer-events: none; max-width: 400px; padding: 10px 16px; border-radius: 12px;
+  background: var(--accent); color: var(--accent-ink); font-size: 20px; font-weight: 700; line-height: 1.35;
+  box-shadow: 0 6px 24px rgb(0 0 0 / .45);
+}
+.dm-cap.above { transform: translateY(-100%); }
+.dm-cap.only { left: 50%; top: 80px; transform: translateX(-50%); }
+
+/* the pitch: a calm card, nothing moving */
+.dm-pitch { position: fixed; inset: 56px 0 0 0; z-index: 88; display: grid; place-items: center; background: var(--bg); }
+.dm-pitch-in { display: grid; gap: 14px; text-align: center; }
+.dm-pitch-k { color: var(--accent); font-size: 22px; font-weight: 700; letter-spacing: .1em; }
+.dm-pitch-in b { font-size: 40px; color: var(--ink); }
+.dm-pitch-s { color: var(--ink-faint); font-size: 16px; }
+
+/* the 「▶ Demo」 button in the demo strip */
+.demo .demo-go { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 8px; padding: 5px 12px; font-weight: 700; cursor: pointer; font: inherit; font-weight: 700; }
+.demo .demo-go.on { background: var(--panel-2); color: var(--accent); }
+
+@media (max-width: 700px) {
+  .dm-bar { flex-wrap: wrap; gap: 6px 10px; padding: 6px 10px; }
+  .dm-cue { flex-basis: 100%; order: 3; }
+  .dm-body { display: none; }
+  .app.demo-on { padding-top: 104px; }
+  .dm-pitch { inset: 96px 0 0 0; }
+  .dm-pitch-in b { font-size: 26px; }
+  .dm-cap { font-size: 16px; max-width: calc(100vw - 24px); }
+}

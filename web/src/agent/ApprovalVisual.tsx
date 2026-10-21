@@ -234,7 +234,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           </div>
         )}
 
-      <footer className="apv-act">
+      <footer className="apv-act" data-demo-anchor="approve-bar">
         {done ? <p className="apv-done" role="status">{done}・執行中；決定已寫入稽核日誌</p> : <>
           {err && <p className="err">{err}</p>}
           <div className="apv-btns">

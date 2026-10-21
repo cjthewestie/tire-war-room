@@ -859,7 +859,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
     # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
     from warroom.api.admin import install_admin
+    from warroom.api.demo import install_demo
     install_admin(app, rt, supervisor)
+    demo_state = install_demo(app, rt, demo)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
@@ -1183,6 +1185,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         try:
             await _send(sock, WsType.SNAPSHOT, r.snapshot().model_dump(mode="json"), r.now())
             await _send(sock, WsType.CLOCK, r.clock_info(), r.now())
+            if demo_state.running:            # a screen opened mid-demo joins the current cue
+                await _send(sock, WsType.DEMO, demo_state.view(), r.now())
             while True:
                 done, _ = await asyncio.wait({nxt, drain}, timeout=buf.wait_s(loop.time()),
                                              return_when=asyncio.FIRST_COMPLETED)

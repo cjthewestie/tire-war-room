@@ -4,6 +4,7 @@ import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
 import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
+import { useDemoCtx } from '../demo/useDemo'
 
 const SPEEDS = [1, 5, 10, 60]
 const Q = new URLSearchParams(location.search)
@@ -33,6 +34,7 @@ export function DemoStrip() {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
   const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
+  const guided = useDemoCtx()      // the war room's guided demo, shared with the 3D factory (null inside the 3D page)
   if (!transport) return null
   const clock = state.clock
   const net = state.snapshot?.header.network ?? 'online'
@@ -61,6 +63,11 @@ export function DemoStrip() {
   return (
     <div className="demo" aria-label="展示控制">
       <span className="demo-k">展示</span>
+      {guided && transport.demo && (
+        <button className={`demo-go ${guided.running ? 'on' : ''}`} data-testid="demo-start"
+          title="和 3D 工廠同一套導覽：主控台 → 事件 → 手機核准 → 員工完成 → Agent 頁面 → Pitch"
+          onClick={() => void (guided.running ? guided.exit() : guided.start())}>{guided.running ? '■ 結束 Demo' : '▶ Demo'}</button>
+      )}
       <div className="seg" role="group" aria-label="情境（注入故障）">
         {SCENARIOS.filter((s) => ALL_SCENARIOS || DEFAULT_SCENARIOS.includes(s.name)).map((s) => (
           <button key={s.name} disabled={busy} className={current === s.name ? 'on' : ''} onClick={() => pick(s)}>{s.label}</button>
