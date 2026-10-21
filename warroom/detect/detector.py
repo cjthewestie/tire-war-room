@@ -218,7 +218,7 @@ class _Track:
     normal_since: float | None = None
     recovering: bool = False                 # repaired: on its way back to normal, nothing to report
     recover_since: float | None = None
-    ramp_done: bool = False                  # the recovery ramp ended: the next reading is the last checked on it
+    ramp_left: int = 0                       # the recovery ramp ended: readings still checked on it
 
 
 class StreamDetector:
@@ -363,11 +363,13 @@ class StreamDetector:
                 tr.expected_temp = r.temp_c          # (re)initialise after start or a gap
             elif per.get(Channel.STEAM) is not DataQuality.OK:
                 tr.expected_temp = None
-        # 回溫中: the next reading is checked against the ramp from where it is now on (after its end: as before)
+        # 回溫中: the next reading is checked against the ramp from where it is now on; after its end two more readings
+        # (the sim may have made one before the end landed) and then as before, the steam model from a reading at the end
+        end = tr.ramp_left == 1
+        tr.ramp_left = max(0, tr.ramp_left - 1)
         for c in tr.chans.values():
             if c.ramp is not None:
-                c.ramp = None if tr.ramp_done else (c.ramp[2],) * 3
-        tr.ramp_done = False
+                c.ramp = None if end else (c.ramp[2],) * 3
         tr.last_t = t
         tr.last_reading = r
         self.last_quality[tr.mid] = per.get(Channel.TEMP, DataQuality.MISSING) if any(
@@ -706,7 +708,7 @@ class StreamDetector:
         tr.onset_t, tr.onset_sign, tr.alarm_since, tr.calm_since = None, 0, None, None
         tr.flow_low_since = tr.pressure_low_since = None
         tr.emitted, tr.normal_since = False, None
-        tr.recovering, tr.recover_since, tr.ramp_done = repaired, None, False
+        tr.recovering, tr.recover_since, tr.ramp_left = repaired, None, 0
 
     def follow_recovery(self, machine_id: str, ramp: SensorReading | None, *, done: bool = False) -> None:
         """回溫中 (Runtime._advance_recoveries, after reset(repaired=True)): where the runtime's ramp has put the repaired
@@ -714,8 +716,9 @@ class StreamDetector:
         clock may stand still meanwhile, so a whole ramp can land between two readings: the next reading is checked
         against every value the ramp passed since the last one. On it (a press's temperature within REDUNDANT_TOL_C,
         any channel within a second's physics) the step is no jump and the ramp stands in for the steam model; off it
-        (a drifting thermometer, a spike) the reading is bad data as before. done: the ramp ended (the reading after
-        it is the last one checked this way)."""
+        (a drifting thermometer, a spike) the reading is bad data as before. done: the ramp ended; the next two readings
+        are still checked on it (Runtime.tick moves the ramp after sim.step, so the first one may come from before its
+        end)."""
         tr = self._tracks.get(machine_id)
         if tr is None:
             return
@@ -725,4 +728,5 @@ class StreamDetector:
                 continue
             c = tr.chans[ch]
             c.ramp = (v, v, v) if c.ramp is None else (min(c.ramp[0], v), max(c.ramp[1], v), v)
-        tr.ramp_done = tr.ramp_done or done
+        if done and not tr.ramp_left:
+            tr.ramp_left = 2

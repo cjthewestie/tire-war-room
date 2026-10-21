@@ -129,26 +129,33 @@ def test_press7_debounced_until_reset_then_leak_detected():
 
 def _ramp_back(f: Factory, d: StreamDetector, mid: str, ramp_s: int, glitch=None) -> list:
     """維修完成 then 回溫中 the way the runtime runs it (_apply_repairs, _begin_recovery, _advance_recoveries): the fault
-    cleared, the detector reset, the ramp started and moved to nominal over ramp_s readings, validation told where it
-    is. glitch(k, readings) may change the sensor readings of step k (the ramp itself stays as the sim runs it)."""
+    cleared, the detector reset, the ramp started and moved to nominal over ramp_s readings in Runtime.tick's order
+    (sim.step, then the ramp moves and validation is told, then the readings are checked: a reading comes from the ramp
+    one step back); ramp_s=1: the whole ramp ran while the plant clock stood still (another event's model call), the
+    next reading comes from its end. glitch(k, readings) may change the sensor readings of step k (the ramp itself
+    stays as the sim runs it)."""
     f.clear_faults(mid)
     d.reset(mid, repaired=True)
     f.begin_recovery(mid)
     d.follow_recovery(mid, f.recover(mid, 0.0))
+    if ramp_s == 1:
+        d.follow_recovery(mid, f.recover(mid, 1.0), done=True)
     found = []
     for k in range(1, ramp_s + 1):
-        d.follow_recovery(mid, f.recover(mid, k / ramp_s), done=k == ramp_s)
         readings = f.step(1)
+        if ramp_s > 1:
+            d.follow_recovery(mid, f.recover(mid, k / ramp_s), done=k == ramp_s)
         found += d.ingest(glitch(k, readings) if glitch else readings)
     return found
 
 
-@pytest.mark.parametrize("scenario,mid,settle_s,nominal", [
-    (ScenarioName.PRESS7_TEMP_DROP, "CURE-07", 600, 128.0),          # 02:22, stable at 122 °C
-    (ScenarioName.OPEN_MILL_OVERHEAT, "A-BIGOPEN", 720, 100.0),      # cooling water failed: well over 100 °C
+@pytest.mark.parametrize("scenario,mid,settle_s,nominal,deep", [
+    (ScenarioName.PRESS7_TEMP_DROP, "CURE-07", 600, 128.0, None),    # 02:22, stable at 122 °C
+    (ScenarioName.NORMAL, "CURE-02", 520, 128.0, 114.0),             # a deep steam drop: 14 °C back
+    (ScenarioName.OPEN_MILL_OVERHEAT, "A-BIGOPEN", 720, 100.0, None),  # cooling water failed: well over 100 °C
 ])
-@pytest.mark.parametrize("ramp_s", [1, 4, 40, 240])
-def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_s, nominal, ramp_s):
+@pytest.mark.parametrize("ramp_s", [1, 2, 4, 40, 240])
+def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_s, nominal, deep, ramp_s):
     """回溫中 (Settings.recover_fast_s): the repaired machine's readings are moved to nominal over 4 WALL seconds, i.e. 4, 40
     and 240 sim seconds at 1x, 10x and 60x, or at once (1: another event's model call held the sim clock for the whole
     ramp, concurrent_3 at 60x). Validation read that as bad data: faster than a platen follows its steam (與比對值不符;
@@ -156,7 +163,10 @@ def test_the_way_back_after_a_fast_repair_is_not_bad_data(scenario, mid, settle_
     60x). The runtime tells validation where its ramp is (follow_recovery): a reading on it is the repair, not a
     sensor; once the ramp ended it is checked as before."""
     f, d = setup(scenario)
-    assert mid in [a.machine_id for a in drive(f, d, settle_s)]
+    if deep is not None:
+        drive(f, d, 120)
+        f.inject_fault(FaultSpec(id="deep", machine_id=mid, kind=FaultKind.STEAM_PRESSURE_DROP, params={"target_c": deep}))
+    assert mid in [a.machine_id for a in drive(f, d, settle_s - (120 if deep is not None else 0))]
     assert not [k for k in d.quality_counts if k[0] == mid]
     found = _ramp_back(f, d, mid, ramp_s)
     found += drive(f, d, 600)
