@@ -443,6 +443,52 @@ def is_gibberish(text: str) -> bool:
     return not words or not any(w.lower() in known for w in words)
 
 
+# a short statement or a vague remark (「現在沒有人」「人手不夠」「等一下」「那個怎麼辦」「好累」): no question word (「怎麼辦」
+# is vague, so it counts), no machine or order named. CJ 2026-10-22: 「這樣子的狀況他就不會回了」 (「現在沒有人」 got 「您今天有什麼
+# 指示或想查詢的事？」, a plant status dump, or 「您還想聊聊其他的事嗎」)
+_REMARK_Q_RX = re.compile(r"[?？]|嗎|什麼|哪|多少|幾|怎樣|如何|是否|有沒有|是誰|為什麼|為何")
+_FEELING_RX = re.compile(r"累|睏|好煩|好熱|好冷|好無聊|頭痛|壓力")
+REMARK_INSTRUCTION = (
+    "主管說了一句很短或含糊的話。像同事一樣用一兩句自然地回：先接住他的意思（是心情就先體諒一句），再連到 tasks 裡最相關的一件，"
+    "說是哪台機或哪張訂單、現在在等什麼，從那件的 can_do 裡挑一兩個讓他選（中斷、重新規劃這些要他回「好」才做；核准和解除停機只能按按鈕）。"
+    "看不出他指哪件或什麼意思，就只問一個簡短的確認問題。不要重複或引用主管的原話，不要說「tasks」「can_do」這些字，不要列工廠概況、"
+    "不要列出每一件，不要問「還想聊聊其他的事嗎」。回應要跟他這句話的意思有關，不要照抄下面的例子。"
+    "例（格式參考）：主管說「機台怪怪的」→「你是說 10 號機那件嗎？它還在等你核准，要我先中斷，還是你改個條件再送？」")
+_DUMP_TAIL_RX = re.compile(r"[，,。]?\s*(?:您|你)?還想聊聊其他的事嗎[？?]?|[，,。]?\s*(?:是否|要不要)(?:要)?(?:我)?幫(?:忙|你)?看一件工作(?:的事)?[？?]?")
+
+# the model quoting the supervisor back or naming the context keys (「主管說「等一下」，」「這句話我就接了。」「open_tasks 裡」)
+_ECHO_RX = re.compile(r"(?:主管|您|你)(?:剛剛)?說[：:]?\s*[「『][^」』]{1,14}[」』][，,。、]?\s*|[^。！？]*(?:接這句話|這句話我就接了|我接著您|體諒一下|他的心情|接住)[^。！？]*[。！？]\s*"
+                      r"|(?:現在的?\s*)?(?:open_)?tasks\s*裡(?:的|面)?[，,]?\s*")
+
+
+def is_remark(text: str) -> bool:
+    """「現在沒有人」「人手不夠」「等一下」「那個怎麼辦」「好累」: a short statement or vague remark to engage with."""
+    from warroom.agent.ask import machines_in, orders_in
+    t = text.strip()
+    return (0 < len(t) <= 12 and not _REMARK_Q_RX.search(t) and not _HELLO_RX.match(t) and not _THANKS_RX.match(t)
+            and not _IDENTITY_RX.search(t) and not _ENTERTAIN_RX.search(t) and not wants_task(t)
+            and not machines_in(t) and not orders_in(t) and bool(_CJK_RX.search(t)))
+
+
+# what the supervisor can do next per state: only existing chat controls (confirmed with 「好」) and the buttons
+CAN_DO: dict[str, list[str]] = {
+    "await_approval": ["說要改什麼條件（例如不要加班），我改計劃再送", "中斷這件", "在核准卡上按核准（只能按按鈕）"],
+    "execute": ["中斷這件"], "verify": ["中斷這件"],
+    "safe_stop": ["重新規劃", "交給現場人工處理", "確認結案（按鈕）"],
+}
+
+
+def open_tasks(context: dict[str, Any], selected: str | None = None) -> list[dict[str, Any]]:
+    """The open events in the context, in words (machine, goal, state, what can be done next) for a remark's reply;
+    the selected one first."""
+    from warroom.agent.narrate import machine_label
+    words = {"await_approval": "等主管核准", "execute": "執行中", "verify": "驗證中", "safe_stop": "安全停止"}
+    evs = sorted((context or {}).get("open_events") or [], key=lambda e: e.get("id") != selected)
+    return [{"machine": machine_label(e.get("machine_id") or ""), "goal": (e.get("goal") or "")[:40],
+             "state": words.get(e.get("state"), "AI 規劃中"), "can_do": CAN_DO.get(e.get("state"), ["等 AI 擬好計劃", "中斷這件"])}
+            for e in evs][:5]
+
+
 def has_object(text: str) -> bool:
     return bool(machines_in(text) or _ORDER_RX.search(text) or _MATERIAL_RX.search(text) or _PEOPLE_RX.search(text)
                 or re.search(r"\d{1,2}\s*號", text))
@@ -1242,7 +1288,18 @@ class MainAgent:
                   and not has_object(t))
         # a greeting or a thanks is small talk too: the model's line, then code's plant fact and offer
         small = casual and bool(_SMALLTALK_RX.search(t) or _HELLO_RX.match(t) or _THANKS_RX.match(t))
-        out["intent"] = "smalltalk" if small else "general" if casual else out["intent"]
+        # a short statement or vague remark gets a reply that engages with it and ties it to the open tasks, not small
+        # talk's fact + offer or a status dump (CJ 2026-10-22: 「這樣子的狀況他就不會回了」); a feeling (「好累」) too
+        remark = (not inject and not recall and not about_last and is_remark(t)
+                  and (not small or bool(_FEELING_RX.search(t))))
+        if remark:
+            small = False
+            # only the open tasks ride along: with 今日工廠概況 beside them the model listed it (「7 台機，2 台異常…」)
+            sel = ((context or {}).get("selected_task") or {}).get("id")
+            ctx = {**ctx, "context": {"factory_time": (context or {}).get("factory_time")},
+                   "tasks": open_tasks(context, sel), "instruction": REMARK_INSTRUCTION}
+            msgs[-1]["content"] = json.dumps(ctx, ensure_ascii=False, default=str)
+        out["intent"] = "remark" if remark else "smalltalk" if small else "general" if casual else out["intent"]
         if small:
             # the model writes the warm line only; code adds one plant fact and the offer (the model's own facts were
             # made up: 「1 號機正在硫化中，3 號機待機」, preview run 10-21)
@@ -1261,7 +1318,7 @@ class MainAgent:
         regenerated = False                             # one retry after a degenerate repetition
         edits = discuss is not None and not fresh and plan_edit(t)
         editing = vague or edits                      # the message is about changing the selected plan
-        howto = (bool(_HOWTO_RX.search(t)) and not small and not recall and not inject and waiting_plan is None
+        howto = (bool(_HOWTO_RX.search(t)) and not small and not remark and not recall and not inject and waiting_plan is None
                  and not wants_task(t) and not out["event_id"])
         sop_asked = False
         if howto:
@@ -1277,7 +1334,7 @@ class MainAgent:
             last = i >= MAX_STEPS or guard.forced
             tools = guard.offered(tools)
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
-            loose = casual and not out["steps"]
+            loose = casual and not out["steps"] and not remark
             async with (_slot(slot, small) if slot else contextlib.nullcontext()):
                 r = await self._llm("casual" if loose else "chat", i, self._key, tid,
                     model=self.settings.model, temperature=CASUAL_TEMPERATURE if loose else 0.0, max_tokens=MAX_TOKENS, messages=msgs,
@@ -1464,7 +1521,9 @@ class MainAgent:
                 out["reply"] = self._with_fact(line, context)
                 return
             words = tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
-            if code is None and casual and not out["steps"]:
+            if remark and code is None:
+                words = _ECHO_RX.sub("", _DUMP_TAIL_RX.sub("", tidy(reply, keep_intro=False, limit=3))).strip() or words
+            elif code is None and casual and not out["steps"]:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
