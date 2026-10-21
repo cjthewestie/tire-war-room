@@ -74,3 +74,13 @@
   .dm-pitch-in b { font-size: 26px; }
   .dm-cap { font-size: 16px; max-width: calc(100vw - 24px); }
 }
+
+/* the Agent beat (H1 → 不成立 → H2 in one view at 1440×900): while it is up, the trace keeps only the H1 plan the
+   readings overturned, the verifier's 不成立 row and the H2 plan after it; the steps in between fold into one line */
+html[data-demo="agent"] :has(> [data-demo-anchor="hyp-rejected"]) > :not([data-hyp-status="rejected"]):not([data-demo-anchor="hyp-rejected"]):not([data-demo-anchor="hyp-rejected"] ~ [data-testid="think-block"]) { display: none; }
+html[data-demo="agent"] :has(> [data-demo-anchor="hyp-rejected"]) > [data-demo-anchor="hyp-rejected"] ~ [data-testid="think-block"] ~ * { display: none; }
+html[data-demo="agent"] :has(> [data-demo-anchor="hyp-rejected"]) > [data-testid="think-block"][data-hyp-status="rejected"] ~ [data-testid="think-block"][data-hyp-status="rejected"] { display: none; }
+html[data-demo="agent"] [data-demo-anchor="hyp-rejected"]::before {
+  content: "⋯ 中間的執行與驗證步驟（Demo 中收起）"; display: block; width: 100%; margin: 0 0 6px; color: var(--ink-faint); font-size: 12px;
+}
+html[data-demo="agent"] [data-demo-anchor="hyp-rejected"] { flex-wrap: wrap; }

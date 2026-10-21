@@ -54,16 +54,27 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
   useLayoutEffect(() => {
     if (!anchors.length) { setRects([]); setHit(null); return }
     let scrolled: HTMLElement | null = null
+    let settleAt = 0
     const tick = () => {
       const els = findAnchor(anchors)
       if (!els.length) { setRects([]); setHit(null); return }
       const el = els[0]
+      // several parts (the Agent beat's H1 → 不成立 → H2): frame them together when they fit under the bar, and keep
+      // them framed (the beat's compact layout lands a moment after the first scroll)
+      const boxes = els.map((e) => e.getBoundingClientRect())
+      const top = Math.min(...boxes.map((b) => b.top)), bottom = Math.max(...boxes.map((b) => b.bottom))
+      const avail = window.innerHeight - barH()
+      const fits = els.length > 1 && bottom - top <= avail - 24
       if (el !== scrolled) {
         // a tall element starts at the top (under the bar), a short one is centred
-        scrolled = el
-        const tall = el.getBoundingClientRect().height > window.innerHeight - barH() - 40
-        if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - barH() - 12, behavior: 'smooth' })
+        scrolled = el; settleAt = performance.now() + 900
+        const tall = el.getBoundingClientRect().height > avail - 40
+        if (fits) window.scrollBy({ top: top - barH() - (avail - (bottom - top)) / 2, behavior: 'smooth' })
+        else if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - barH() - 12, behavior: 'smooth' })
         else el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      } else if (fits && performance.now() > settleAt && (top < barH() || bottom > window.innerHeight)) {
+        settleAt = performance.now() + 900
+        window.scrollBy({ top: top - barH() - (avail - (bottom - top)) / 2, behavior: 'smooth' })
       }
       setHit(els.map((e) => e.dataset.testid ?? e.dataset.demoAnchor ?? e.className).join(' & '))
       const next = els.map((e) => clip(e)).filter((r): r is Rect => !!r)
@@ -83,8 +94,12 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
   }, [demo?.cue_id, demo?.paused, demo?.waiting_for, caption, anchors, hit, rects, beat?.pitch])
 
   if (!demo?.running) return null
-  const r = rects[0] ?? null
-  const below = r ? r.y + r.h + 64 < window.innerHeight || r.y - 64 < barH() : true
+  // the caption sits by the whole lit area (below it, else above it), never over one of its parts
+  const r = rects.length ? rects.reduce((u, h) => {
+    const x = Math.min(u.x, h.x), y = Math.min(u.y, h.y)
+    return { x, y, w: Math.max(u.x + u.w, h.x + h.w) - x, h: Math.max(u.y + u.h, h.y + h.h) - y }
+  }) : null
+  const below = r ? r.y + r.h + 64 < window.innerHeight || r.y - 52 < barH() : true
   const wait = demo.waiting_for ? WAIT_TEXT[demo.waiting_for] : null
   return (
     <>
