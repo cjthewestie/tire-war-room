@@ -948,7 +948,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     def _main_agent(r: Runtime):
         if "main" not in holder:
             from warroom.agent.main_agent import MainAgent
-            holder["main"] = MainAgent(r.settings)
+            holder["main"] = MainAgent(r.settings, audit=r.audit)
             r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
 

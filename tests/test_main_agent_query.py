@@ -402,3 +402,31 @@ async def test_query_plant_is_capped_at_two_topics_per_turn():
 
 def _tool_texts(m):
     return [x["content"] for c in m.calls for x in c["messages"] if x.get("role") == "tool"]
+
+
+# ---------------------------------------------------------------- every model call on the audit chain (admin-audit, PR #111)
+async def test_every_chat_and_summary_model_call_is_an_llm_call_row():
+    from warroom.contracts import AuditKind
+
+    class Audit:
+        def __init__(self):
+            self.rows = []
+
+        def append(self, kind, actor, payload, event_id=None):
+            self.rows.append((kind, actor, payload, event_id))
+    audit = Audit()
+    m = Model(("tool", QUERY, {"topic": "shipments"}), *[("say", f"第 {i} 句。") for i in range(40)])
+    agent = MainAgent(_settings(), client=m, audit=audit)
+    f = Floor()
+    for i in range(22):
+        await agent.turn("明天要出幾台車" if i == 0 else f"嗯 {i}", context={"abnormal": []}, waiting_plan=None,
+                         run_tool=f.run_tool, propose=f.propose, discuss=None, read_plant=Reader(), conversation="sup|c1")
+    await asyncio.sleep(0.05)
+    rows = [r for r in audit.rows if r[0] is AuditKind.LLM_CALL]
+    assert len(rows) == len(m.calls)                                     # one row per model call, summary included
+    first = rows[0]
+    assert first[1] == "main_agent" and first[3] == "MAIN-0001" and first[2]["phase"] == "chat" and first[2]["step"] == 0
+    assert {"model", "prompt_tokens", "completion_tokens", "total_ms", "plant_sha256", "conversation"} <= set(first[2])
+    assert first[2]["conversation"] != "sup|c1" and len(first[2]["conversation"]) == 16      # hashed
+    assert first[2]["tool_calls"] == [QUERY]
+    assert any(r[2]["phase"] == "summary" for r in rows)

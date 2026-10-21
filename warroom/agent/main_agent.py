@@ -473,7 +473,7 @@ class MainAgent:
     `propose(task)` opens a supervisor-command event and returns {"event_id"}; `discuss(text)` talks about the
     selected plan."""
 
-    def __init__(self, settings: Any = None, client: Any = None):
+    def __init__(self, settings: Any = None, client: Any = None, audit: Any = None):
         self.settings = settings
         self.client = client
         self.server_kind = "openai"
@@ -493,6 +493,7 @@ class MainAgent:
         self._slot_fn: Any = None
         self._tasks: set[asyncio.Task] = set()
         self._control: Any = None
+        self.audit = audit                  # the audit chain: one llm_call row per model call
         self.memory: deque[tuple[str, str]] = self._mem(None)
         self._ids = itertools.count(1)
         self._turns = -1                   # rotation index of the canned replies (the first call picks variant 0)
@@ -552,6 +553,39 @@ class MainAgent:
         await self._rule_turn(text, context, waiting_plan, out, run_tool, propose, discuss, tid)
         return self._done(out, text, t0)
 
+    async def _llm(self, phase: str, step: int, conversation: str, turn: str | None, **kw: Any) -> Any:
+        """One model call, written to the audit chain as an llm_call row (actor main_agent): phase chat / casual /
+        summary, model, tokens in and out, wall ms, the PLANT.md sha256, the conversation (hashed) and the step.
+        Found missing by admin-audit (PR #111): the pitch says every step is on the chain."""
+        import hashlib
+        t0 = time.perf_counter()
+        row: dict[str, Any] = {"phase": phase, "model": kw.get("model"), "step": step,
+                               "conversation": hashlib.sha256(conversation.encode("utf-8")).hexdigest()[:16],
+                               "plant_sha256": plant.active_sha(), "temperature": kw.get("temperature")}
+        try:
+            r = await self.client.chat.completions.create(**kw)
+        except Exception as e:
+            row.update(error=f"{type(e).__name__}: {e}"[:300], total_ms=round((time.perf_counter() - t0) * 1000, 1))
+            self._audit_llm(row, turn)
+            raise
+        usage = getattr(r, "usage", None)
+        msg = r.choices[0].message if getattr(r, "choices", None) else None
+        row.update(total_ms=round((time.perf_counter() - t0) * 1000, 1),
+                   prompt_tokens=getattr(usage, "prompt_tokens", None), completion_tokens=getattr(usage, "completion_tokens", None),
+                   tool_calls=[c.function.name for c in (getattr(msg, "tool_calls", None) or [])],
+                   reply_chars=len(getattr(msg, "content", None) or ""))
+        self._audit_llm(row, turn)
+        return r
+
+    def _audit_llm(self, row: dict[str, Any], turn: str | None) -> None:
+        if self.audit is None:
+            return
+        try:
+            from warroom.contracts import AuditKind
+            self.audit.append(AuditKind.LLM_CALL, "main_agent", row, event_id=turn)
+        except Exception:  # noqa: BLE001, S110 - a failed audit write never breaks the chat
+            pass
+
     def _rot(self, options: tuple[str, ...]) -> str:
         self._turns += 1
         return options[self._turns % len(options)]
@@ -593,7 +627,7 @@ class MainAgent:
                 self._memories.pop(old)
                 self._notes.pop(old, None)
             self._memories[key] = deque(maxlen=MEMORY_TURNS)
-            self._notes[key] = {"summary": "", "pins": [], "overflow": []}
+            self._notes[key] = {"summary": "", "pins": [], "overflow": [], "_conv": key}
         self._key = key
         return self._memories[key]
 
@@ -640,7 +674,7 @@ class MainAgent:
             body = "\n".join(f"主管：{q}\nAgent Nemo：{a}" for q, a in turns)
             try:
                 async with (_slot(slot, True) if slot else contextlib.nullcontext()):
-                    r = await self.client.chat.completions.create(
+                    r = await self._llm("summary", 0, notes.get("_conv", ""), None,
                         model=self.settings.model, temperature=0.0, max_tokens=400,
                         messages=[{"role": "system", "content": SUMMARY_SYSTEM},
                                   {"role": "user", "content": (f"之前的摘要：{notes['summary']}\n" if notes["summary"] else "") + body}],
@@ -935,7 +969,7 @@ class MainAgent:
             # one model slot per call (never across a tool: a discussion calls the commander, which needs a slot too)
             loose = casual and not out["steps"]
             async with (_slot(slot, small) if slot else contextlib.nullcontext()):
-                r = await self.client.chat.completions.create(
+                r = await self._llm("casual" if loose else "chat", i, self._key, tid,
                     model=self.settings.model, temperature=CASUAL_TEMPERATURE if loose else 0.0, max_tokens=MAX_TOKENS, messages=msgs,
                     **({} if last or not tools else {"tools": tools, "tool_choice": "auto"}),
                     **({"extra_body": extra} if extra else {}))
