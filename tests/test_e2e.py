@@ -68,9 +68,9 @@ async def test_page11_press7_full_timeline(tmp_path):
         text = " | ".join(t["text"] for t in ev["timeline"])
         assert "H1" in text and "蒸汽壓不足" in text
         assert "S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）" in text
-        assert "總需 36.5 h（+8.5 h）" in text
+        assert "總需 28.5 h（+4.5 h）" in text
         assert "下一模 #A-311 交期 3 天後" in text and "10/03 夜班缺 1 人" in text
-        assert "#A-311 移到 9 號機" in text and "交期全部滿足" in text
+        assert "交期全部滿足" in text and "移到 9 號機" not in text
         assert "動作把關" in text and "模擬可行" in text
         beats = [(t["actor"], t["ts"][11:19]) for t in ev["timeline"]]
         assert ("安全核心", "02:14:01") in beats and ("求解器", "02:14:25") in beats, beats

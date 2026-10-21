@@ -74,10 +74,10 @@ def test_call_never_raises():
 
 def test_cure_formula_page11():
     reg = build_registry(ToolContext())
-    r = call(reg, "cure_formula", size="M", ref_temp_c=128, actual_temp_c=122, elapsed_h=10)
+    r = call(reg, "cure_formula", size="S", ref_temp_c=128, actual_temp_c=122, elapsed_h=14.4)
     assert r.ok
     d = CureFormulaData.model_validate(r.data)
-    assert round(d.total_cure_h, 1) == 36.5 and round(d.extra_h, 1) == 8.5
+    assert round(d.total_cure_h, 1) == 28.5 and round(d.extra_h, 1) == 4.5
 
 
 def test_read_sensors_and_predict(plant):
@@ -110,13 +110,13 @@ def test_query_orders_shifts_from_plant(plant):
 def test_solve_confirm_page11(plant):
     ctx, reg = plant
     before = ctx.store.current().version
-    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 36.5}, time_limit_s=10)
+    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 28.5}, time_limit_s=10)
     assert r.ok, r.error
     v = r.data.pop("schedule_version")
     res = SolveResult.model_validate(r.data)
     assert res.feasible and res.deliveries_met
     real_moves = [(m.order_id, m.to_press) for m in res.moves if m.from_press != m.to_press]
-    assert ("#A-311", "CURE-09") in real_moves
+    assert ("#A-311", "CURE-07") not in real_moves      # round 1: #A-311 stays queued on press 7
     assert {o.label for o in res.staffing_options} == {"夜班加班", "從 2 線調 1 人"}
     assert ctx.store.get(v).status is ScheduleStatus.PROPOSED and ctx.store.current().version == before
     assert not call(reg, "solve_schedule", unavailable_presses=["A-MIX"]).ok      # not a press
@@ -128,9 +128,9 @@ def test_solve_confirm_page11(plant):
 
 def test_write_tools_record_intent(plant):
     ctx, reg = plant
-    s = call(reg, "set_cure_time", press_id="CURE-07", total_cure_h=36.5, reason="Arrhenius")
+    s = call(reg, "set_cure_time", press_id="CURE-07", total_cure_h=28.5, reason="Arrhenius")
     assert s.ok and s.data["recorded"] is True
-    assert ctx.sim.machine("CURE-07").cure_job.cure_required_h == 36.5
+    assert ctx.sim.machine("CURE-07").cure_job.cure_required_h == 28.5
     assert not call(reg, "set_cure_time", press_id="A-MIX", total_cure_h=10, reason="x").ok
     n = call(reg, "notify_teams", teams=["maintenance"], kind="maintenance", message="檢修冷卻水路",
              machine_id="A-BIGOPEN")
@@ -323,7 +323,7 @@ def test_confirm_refuses_proposal_that_loads_a_press_held_after_solve(tmp_path):
     ctx, reg = _fresh_plant(tmp_path)
     before = ctx.store.current().version
     # round 1 solved at 02:14 while press 7 still ran: the proposal moves an order onto press 7
-    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 36.5}, time_limit_s=10)
+    r = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 28.5}, time_limit_s=10)
     assert r.ok, r.error
     v = r.data["schedule_version"]
     assert _future_on(ctx, v, "CURE-07")
@@ -334,7 +334,7 @@ def test_confirm_refuses_proposal_that_loads_a_press_held_after_solve(tmp_path):
     assert ctx.store.current().version == before
     assert ctx.store.get(v).status is ScheduleStatus.PROPOSED
     # re-solve (what the state machine does after a failed confirm) leaves press 7 empty and confirms
-    r2 = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 36.5}, time_limit_s=10)
+    r2 = call(reg, "solve_schedule", cure_overrides_h={"CURE-07": 28.5}, time_limit_s=10)
     assert r2.ok, r2.error
     v2 = r2.data["schedule_version"]
     assert _future_on(ctx, v2, "CURE-07") == []

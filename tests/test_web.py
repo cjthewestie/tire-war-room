@@ -24,8 +24,8 @@ def test_machine_names_match_python():
             continue
         pat = rf"id: '{re.escape(m.id)}', line: '{m.line.value}', name: '{m.name}', short: '{m.short_name}'"
         assert re.search(pat, FACTORY_TS), m.id
-    assert "ML_PRESSES = ['CURE-07', 'CURE-08', 'CURE-09', 'CURE-10']" in FACTORY_TS
-    assert list(F.ML_PRESSES) == ["CURE-07", "CURE-08", "CURE-09", "CURE-10"]
+    assert "ML_PRESSES = ['CURE-08', 'CURE-09', 'CURE-10', 'CURE-11']" in FACTORY_TS
+    assert list(F.ML_PRESSES) == ["CURE-08", "CURE-09", "CURE-10", "CURE-11"]
     for h in ("H1", "H2", "H3"):
         ids = F.presses_on_header(h)
         assert f"{h}: [{', '.join(repr(i) for i in ids)}]" in FACTORY_TS, h
@@ -61,7 +61,7 @@ def test_shifts_capacity_orders_match_python():
 
 
 def test_mock_page11_numbers():
-    for s in ("36.5 h（+8.5 h）", "#A-311 移到 9 號機", "119.5°C → H1 不成立", "夜班加班", "從 2 線調 1 人",
+    for s in ("28.5 h（+4.5 h）", "#A-311 仍排 7 號機", "119.5°C → H1 不成立", "夜班加班", "從 2 線調 1 人",
               "硫化中斷處置", "對照 6、8 號同管線", "夜班缺 1"):
         assert s in SCRIPTS_TS, s
     for t in ("2026-10-03T02:14:00+08:00",):

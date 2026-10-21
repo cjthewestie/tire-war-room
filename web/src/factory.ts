@@ -32,7 +32,7 @@ export const LINE_SHORT: Record<Line, string> = { A: 'A', B: 'B', C: 'C', D: 'D'
 
 export const CURE_PRESS_IDS = MACHINES.filter((m) => m.line === 'CURE').map((m) => m.id)
 /** Architect decision: CURE-07..10 are the 4 shared medium/large presses (page 11 wins over page 3). */
-export const ML_PRESSES = ['CURE-07', 'CURE-08', 'CURE-09', 'CURE-10']
+export const ML_PRESSES = ['CURE-08', 'CURE-09', 'CURE-10', 'CURE-11']
 export const STEAM_HEADERS: Record<string, string[]> = {
   H1: ['CURE-01', 'CURE-02', 'CURE-03', 'CURE-04', 'CURE-05'],
   H2: ['CURE-06', 'CURE-07', 'CURE-08'],

@@ -163,7 +163,7 @@ def test_workbook_orders_match_the_plant(tmp_path):
     in_press = {m.cure_job.order_id for m in rt.sim.machines() if m.cure_job is not None}
     assert in_press <= booked, in_press - booked
     a311 = next(o for o in rt.sim.orders() if o.id == "#A-311")
-    assert a311.size.value == "L" and a311.qty == 1
+    assert a311.size.value == "S" and a311.qty == 1
 
 
 async def test_page11_with_excel_reaches_round1_card_and_moves_a311_to_press9(tmp_path):
@@ -179,7 +179,7 @@ async def test_page11_with_excel_reaches_round1_card_and_moves_a311_to_press9(tm
         labels = [o.label for o in reqs[0].options]
         assert "夜班加班" in labels and "從 2 線調 1 人" in labels, labels
         texts = _texts(rt)
-        assert "#A-311 移到 9 號機" in texts and "安全中止" not in texts and "不可行" not in texts, texts[:3000]
+        assert "交期全部滿足" in texts and "安全中止" not in texts and "不可行" not in texts, texts[:3000]
     finally:
         await rt.stop()
 
@@ -192,16 +192,16 @@ async def test_page11_rollback_progress_and_revoked_staffing(tmp_path):
         # round 1: supervisor takes the solver's cross-team move (B)
         await _ticks(rt, 600, _pick(rt, "調"))
         assert rt.c.store.current().version == 2
-        # 3. one-click rollback to v1 would plan press 7's tire at 28 h while the formula says 36.5 h
+        # 3. one-click rollback to v1 would plan press 7's tire at 24 h while the formula says 28.5 h
         pv = rt.rollback_preview(None)
         assert pv["to_version"] == 1 and pv["feasible"] is False, pv
         assert pv["cure_conflicts"] and pv["cure_conflicts"][0]["press_id"] == "CURE-07"
-        assert any("36.5 h" in r and "28 h" in r for r in pv["reasons"]), pv["reasons"]
+        assert any("28.5 h" in r and "24 h" in r for r in pv["reasons"]), pv["reasons"]
         assert pv["staffing_revoked"] and "從 2 線調 1 人" in pv["staffing_revoked"][0]
         assert all(m["from_press"] != m["to_press"] for m in pv["moved"])
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(rt)), base_url="http://test") as c:
             r = await c.post("/api/schedule/rollback", json={"confirm": True})     # ASGI client = loopback seat
-            assert r.status_code == 409 and "36.5" in r.json()["detail"]["message"], r.text
+            assert r.status_code == 409 and "28.5" in r.json()["detail"]["message"], r.text
         assert rt.c.store.current().version == 2
 
         # 4. 02:28:50 safety core holds press 7; the round-2 card is not decided yet
@@ -211,16 +211,17 @@ async def test_page11_rollback_progress_and_revoked_staffing(tmp_path):
         assert rt.approvals.pending(), "round-2 card should be waiting"
         panel = {o.label: o for o in rt.snapshot().orders}
         assert panel["中胎"].remaining_h == 1241 and panel["大胎"].remaining_h == 2162, panel
-        assert "安全核心扣模" in (panel["中胎"].note or "") and "停用：" not in (panel["中胎"].note or "")
+        small_before = panel["小胎"].remaining_h
+        assert "安全核心扣模" in (panel["小胎"].note or "") and "停用：" not in (panel["小胎"].note or "")   # press 7 cures a small tire
 
         # round 2: supervisor rejects the cross-team move and picks night overtime (A), page 11
         await _ticks(rt, 120, _pick(rt, "夜班加班", DecisionKind.MODIFY, "不跨組調人，改夜班加班"))
         await rt.wait_events(5)
         assert rt.sim.machine("CURE-07").status is MachineStatus.OUT_OF_SERVICE
         panel = {o.label: o for o in rt.snapshot().orders}
-        note = panel["中胎"].note or ""
+        note = panel["小胎"].note or ""
         assert "依生效排程 v3" in note and "機時" in note and "×" not in note, note
-        assert "本週已排訂單交期不受影響" in note and panel["中胎"].remaining_h > 1241
+        assert "本週已排訂單交期不受影響" in note and panel["小胎"].remaining_h > small_before   # press 7 is a small-tire press
 
         # 5. the withdrawal is a consequence, not an approval
         focus = rt.snapshot().focus

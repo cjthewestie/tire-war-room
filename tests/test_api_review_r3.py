@@ -76,7 +76,7 @@ async def _run_p11(rt: Runtime, seconds: int = 1500, decide=None) -> None:
 def _assert_page11(rt: Runtime) -> None:
     texts = " ".join(_texts(rt))
     assert "#A-311 交期 3 天後" in texts, texts[:2000]               # S2
-    assert "#A-311 移到 9 號機" in texts, texts[:2000]                # S3: #A-311 -> press 9
+    assert "交期全部滿足" in texts, texts[:2000]                      # S3: round 1 keeps #A-311 on press 7
     assert any(a.machine_id == "CURE-07" and a.action is SafetyActionKind.CURE_HOLD for a in rt.safety_log)
 
 
@@ -152,7 +152,7 @@ def test_excel_orders_and_shifts_reach_sim_tools_panel_and_schedule(tmp_path):
     by_id = {o.id: o for o in rt.sim.orders()}
     # the workbook names the plant's own orders (data/make_orders_seed.py) with its own customers
     assert {"#M-201", "#L-301", "#A-311"} <= set(by_id) and by_id["#M-201"].customer == "高雄港機具"
-    assert by_id["#A-311"].size.value == "L" and by_id["#A-311"].qty == 1
+    assert by_id["#A-311"].size.value == "S" and by_id["#A-311"].qty == 1
     assert any(s.id == "1003-body-夜班" for s in rt.sim.shifts())
     res = rt.c.tools.call(ToolCall(id="t1", tool=ToolName.QUERY_ORDERS_SHIFTS, args={}))
     assert res.ok and "高雄港機具" in [o["customer"] for o in res.data["orders"]], res
@@ -203,7 +203,7 @@ async def test_impact_matches_phone_in_round2_and_shows_kept_version_after_safe_
         v_kept = activated[-1]
         assert rt.c.store.current().version == v_kept
         kept_moves = moves_text(dict(solves)[v_kept].get("moves"))
-        assert "#A-311 改 9 號" in kept_moves
+        assert "#A-311 改 9 號" not in kept_moves        # round 1 never moves #A-311 (dataset EV-2)
         assert "待核准" not in final and f"v{v_kept}" in final, final
         for phrase in kept_moves:
             assert phrase in final, (phrase, final)
