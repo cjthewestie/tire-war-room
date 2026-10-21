@@ -12,7 +12,7 @@ import * as THREE from 'three'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
 import { OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
-import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, player, stick, view } from './pose'
+import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, director, player, stick, view } from './pose'
 import { SPACES } from './spaces'
 import { lock, releaseLook, requestLook } from './look'
 
@@ -247,20 +247,23 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
 
     // orbit camera pose: ease toward the targets (snap after a teleport)
     const vw = orbit.current
-    const targetDist = !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist
-    const yawT = cam.yaw + (phoneUp ? 0.85 : 0)
-    const tx = started ? player.x : OVERVIEW_CENTER.x, tz = started ? player.z : OVERVIEW_CENTER.z
+    const dir = director.on
+    const targetDist = dir ? director.dist : !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist
+    const yawT = dir ? director.yaw : cam.yaw + (phoneUp ? 0.85 : 0)
+    const pitchT = dir ? director.pitch : cam.pitch
+    const tx = dir ? director.x : started ? player.x : OVERVIEW_CENTER.x, tz = dir ? director.z : started ? player.z : OVERVIEW_CENTER.z
     if (cam.snap) {
-      vw.yaw = yawT; vw.pitch = cam.pitch; vw.dist = targetDist; vw.tx = tx; vw.tz = tz
+      vw.yaw = yawT; vw.pitch = pitchT; vw.dist = targetDist; vw.tx = tx; vw.tz = tz
     } else {
-      const e = 1 - Math.exp(-dt * 6)
+      // the demo director flies (about 2 s); otherwise the camera follows the lead closely
+      const e = 1 - Math.exp(-dt * (dir ? 1.6 : 6))
       vw.yaw += wrap(yawT - vw.yaw) * e
-      vw.pitch += (cam.pitch - vw.pitch) * (1 - Math.exp(-dt * 3))
-      vw.dist += (targetDist - vw.dist) * (1 - Math.exp(-dt * (started ? 4 : 1)))
-      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
-      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * (started ? 10 : 1.5)))
+      vw.pitch += (pitchT - vw.pitch) * (1 - Math.exp(-dt * (dir ? 1.6 : 3)))
+      vw.dist += (targetDist - vw.dist) * (1 - Math.exp(-dt * (dir ? 1.6 : started ? 4 : 1)))
+      vw.tx += (tx - vw.tx) * (1 - Math.exp(-dt * (dir ? 1.6 : started ? 10 : 1.5)))
+      vw.tz += (tz - vw.tz) * (1 - Math.exp(-dt * (dir ? 1.6 : started ? 10 : 1.5)))
     }
-    const ty = 0.55
+    const ty = dir ? director.y : 0.55
     const hr = Math.cos(vw.pitch) * vw.dist
     tmp.op.set(vw.tx + Math.sin(vw.yaw) * hr, ty + Math.sin(vw.pitch) * vw.dist, vw.tz + Math.cos(vw.yaw) * hr)
     tmp.m.lookAt(tmp.op, tmp.tg.set(vw.tx, ty, vw.tz), tmp.up)
@@ -275,7 +278,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     tmp.eq.setFromEuler(tmp.e)
 
     // blend between the two (a teleport snaps it)
-    const want = started && first ? 1 : 0
+    const want = started && first && !dir ? 1 : 0
     if (cam.snap) { blend.current = want; cam.snap = false }
     else blend.current += Math.sign(want - blend.current) * Math.min(Math.abs(want - blend.current), Math.min(dtRaw, 0.25) / 1.1)   // real time, even at a low frame rate
     const b = ease(blend.current)
