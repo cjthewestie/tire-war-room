@@ -151,6 +151,13 @@ class LoopFactory(TeamReplayFactory):
             out[i] = new
         return out
 
+    def replayed_machines(self) -> set[str]:
+        """一日循環: the dataset machines read the recorded day all day, so a fault injected on them never shows in their
+        readings (模擬事件 picks another one)."""
+        if self.day0 is None:
+            return super().replayed_machines()
+        return set(next(iter(self._replay.values()), {}))
+
     # ------------------------------------------------------------------ the loop
     @property
     def day_end(self) -> datetime | None:
