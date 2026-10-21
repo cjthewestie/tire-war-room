@@ -79,7 +79,7 @@ export function OrdersTab() {
                 <span className="ot-id"><b>{v.o.id}</b>{v.o.rush && <em className="tag rush">急單</em>}<small className="muted">{v.o.customer}・{SIZE_LABEL[v.o.size]} {v.o.qty} 條</small></span>
                 <span className="ot-st">{v.success ? <span className="ok-mark" aria-hidden>✓</span> : <i className={`risk-dot r-${v.risk}`} aria-hidden />}{RISK_TEXT[v.risk]}{v.lateH != null && <small> {v.lateH} h</small>}<small className="muted">{v.o.status}</small></span>
                 <Progress v={v} />
-                <span className="ot-eta">{v.projected ? `預估 ${v.projected}` : isFinite(v.eta) ? `${fmtMD(v.eta)} ${fmtHM(v.eta)}` : v.o.status === '已出貨' && v.o.shipped_at ? `出貨 ${fmtMD(v.o.shipped_at)}` : v.risk === 'unsched' ? '未排程' : '—'}</span>
+                <span className="ot-eta">{v.projected ? `預估 ${v.projected}` : isFinite(v.eta) ? <>{fmtMD(v.eta)} {fmtHM(v.eta)}{v.unscheduled > 0 && <small className="muted">已排程部分</small>}</> : v.o.status === '已出貨' && v.o.shipped_at ? `出貨 ${fmtMD(v.o.shipped_at)}` : v.risk === 'unsched' ? '未排程' : '—'}</span>
                 <span className={`ot-due ${v.risk === 'late' ? 'late' : ''}`}>{fmtMD(v.o.due)}</span>
                 {v.why.length > 0 && !v.success && <span className="ot-why">{v.why.join('；')}</span>}
                 {v.success && <span className="ot-why ok" data-testid="order-success">{successLine(v)}</span>}
