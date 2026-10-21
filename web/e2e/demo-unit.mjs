@@ -205,9 +205,13 @@ function story(times) {
   check('follow: same cue, nothing new', f.tick(1000, st('start')) === null && D.CUES[f.tl.index].id === 'start')
   check('follow: the war room moves on → the 3D enters that beat', f.tick(1250, st('rush')) === 'cue' && D.CUES[f.tl.index].id === 'rush')
   check('follow: jumps straight to a later beat too', f.tick(1500, st('worker')) === 'cue' && D.CUES[f.tl.index].id === 'worker')
-  f.tick(1750, st('pitch')); f.tick(2000, st('pitch', 'event'))
+  f.tick(1600, st('robot'))
+  check('follow: a brief step back (the driver re-posting) is ignored', f.tick(1700, st('worker')) === null && D.CUES[f.tl.index].id === 'robot' && f.tick(1800, st('robot')) === null)
+  f.tick(1900, st('worker')); f.tick(3500, st('worker'))
+  check('follow: a step back that lasts is followed', D.CUES[f.tl.index].id === 'worker')
+  f.tick(3750, st('pitch')); f.tick(4000, st('pitch', 'event'))
   check('follow: the pitch released (deck started) when the driver waits for the next event', f.tl.released && f.tl.pitchAt != null)
-  check('follow: demo ended elsewhere → stopped', f.tick(2250, st('pitch', null, false)) === 'stopped')
+  check('follow: demo ended elsewhere → stopped', f.tick(4250, st('pitch', null, false)) === 'stopped')
 }
 
 // deck manifest

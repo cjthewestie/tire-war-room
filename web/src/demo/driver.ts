@@ -127,8 +127,14 @@ export class DemoRun {
     this.latched = latch(this.latched, live)
     const sig = this.arrived === undefined ? this.latched : { ...this.latched, arrived: this.arrived }
     const before = this.tl
-    const r = advance(before, t, sig, this.contReq)
+    let r = advance(before, t, sig, this.contReq)
     this.contReq = false
+    // a continue that ends a hold whose next beat starts right away: take that step in the same tick, so the server
+    // never sees the old beat again in between (every screen would flash back to it)
+    if (r.tl.released && !before.released && r.tl.index === before.index) {
+      const r2 = advance(r.tl, t, sig, false)
+      if (r2.tl.index !== r.tl.index) r = r2
+    }
     // refused (an approval, or a live event still to come): post the cue again, so a server that moved ahead comes back
     if (r.refused) { this.refusedAt = now; this.posted = '' }
     this.tl = r.tl
@@ -179,6 +185,7 @@ export class DemoFollow {
   arrived: boolean | undefined = undefined
   private io: DemoIO
   private base = { t: 0, at: 0 }
+  private backSince: number | null = null
   constructor(io: DemoIO) { this.io = io }
 
   async continue(): Promise<'ok' | 'approval'> {
@@ -199,8 +206,14 @@ export class DemoFollow {
     const live = signals(state, this.seen)
     for (const [k, v] of Object.entries(live)) if (v && this.firstSeen[k] == null) this.firstSeen[k] = Math.round(t * 10) / 10
     this.latched = latch(this.latched, live)
-    const i = Math.max(0, CUES.findIndex((c) => c.id === d.cue_id))
+    let i = Math.max(0, CUES.findIndex((c) => c.id === d.cue_id))
     const released = d.waiting_for === 'event'
+    // the driver may pull the pointer back one beat for a moment after a continue (it still waits for that beat's
+    // next event): a step back only counts once it has lasted 1.5 s, so the 3D does not walk back and forth
+    if (i < this.tl.index) {
+      this.backSince ??= now
+      if (now - this.backSince < 1500) i = this.tl.index
+    } else this.backSince = null
     if (i !== this.tl.index) {
       const c = CUES[i]
       this.tl = {
