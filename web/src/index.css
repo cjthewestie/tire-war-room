@@ -498,26 +498,35 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
 .ph-banner { background: var(--alarm-soft); color: var(--c-ffd0cb, #ffd0cb); border-radius: 12px; padding: 10px 12px; font-size: 15px; }
 .ph-card { background: var(--panel); border-radius: 22px; padding: 18px 16px 16px; border: 1px solid var(--border); }
 .ph-card.idle h2 { font-size: 19px; margin: 0 0 8px; }
-.ph-approval { border-color: rgb(var(--warn-rgb, 245 184 61) / .45); box-shadow: 0 20px 44px -28px rgb(var(--warn-rgb, 245 184 61) / .5); }
 .ph-approval .trend { margin: 0 0 12px; }
 .ph-hist { font-size: 14px; color: var(--ink-dim); margin: 6px 0 0; }
 .ph-ask { margin-top: 4px; }
 .ph-ask .ph-opts { flex-wrap: wrap; }
 .ph-answer { border-top: 1px solid var(--border); margin-top: 12px; padding-top: 10px; font-size: 15px; line-height: 1.6; }
 .ph-answer p { margin: 4px 0; }
-.ph-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px; }
-.ph-risk { font-size: 13px; color: var(--warn); background: var(--warn-soft); padding: 2px 10px; border-radius: 999px; font-weight: 600; }
 .ph-round { font-size: 13px; color: var(--c-ffd0cb, #ffd0cb); background: var(--c-5a1f1a, #5a1f1a); padding: 2px 10px; border-radius: 999px; font-weight: 700; }
 .ph-ver { background: var(--c-4a3a10, #4a3a10); color: var(--c-f5d27a, #f5d27a); }
 .ph-changed { margin: 6px 0 8px; padding: 8px 10px; border-radius: 8px; background: rgb(var(--warn-rgb, 245 184 61) / .12); font-size: 14px; line-height: 1.5; }
 .ph-changed b { color: var(--c-f5b83d, #f5b83d); }
-.ph-title { font-size: 23px; line-height: 1.3; margin: 6px 0 12px; }
-.ph-info { display: grid; grid-template-columns: 52px 1fr; gap: 8px 10px; background: var(--panel-2); border-radius: 14px; padding: 14px; margin: 0 0 14px; font-size: 15px; }
-.ph-info dt { color: var(--ink-dim); }
-.ph-info dd { margin: 0; min-width: 0; }
-.ph-acts-list { margin: 0; padding-left: 1.1em; }
-.ph-acts-list li + li { margin-top: 4px; }
-.ph-q { font-size: 14px; color: var(--ink-dim); margin: 0 0 8px; }
+.ph-title { font-size: 23px; line-height: 1.3; margin: 6px 0 12px; text-wrap: balance; }
+.ph-approval .ph-meta, .ph-approval .ph-title { margin: 0; }
+.ph-card.idle > .ph-none:first-child { margin-top: 0; }
+.ph-card.idle .ph-title { margin: 4px 0 8px; }
+.ph-card.idle .ph-why { margin: 12px 0 4px; }
+.ph-lead { margin: 0; font-size: 16px; line-height: 1.6; }
+.ph-do { background: var(--panel-2); border-radius: 12px; padding: 10px 14px; font-size: 15px; line-height: 1.55; }
+.ph-do ul { margin: 4px 0 0; padding-left: 1.2em; }
+.ph-do li { overflow-wrap: break-word; }
+.ph-do li + li { margin-top: 2px; }
+.ph-gap { margin: 0; font-size: 14px; color: var(--warn); }
+.ph-line { margin: 8px 0 0; font-size: 17px; line-height: 1.45; }
+.ph-big { margin: 0 0 6px; font-size: 30px; font-weight: 700; line-height: 1.2; }
+.ph-did { margin: 10px 0 0; font-size: 14px; }
+.ph-flash { margin: 0; padding: 10px 12px; border-radius: 12px; background: var(--accent-soft); color: var(--accent); font-weight: 700; animation: ph-flash 3s ease-in forwards; }
+@keyframes ph-flash { 0%, 75% { opacity: 1; } 100% { opacity: 0; } }
+.ph-bell { display: inline-grid; place-items: center; width: 32px; height: 28px; padding: 0; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--accent); }
+.ph-bell svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ph-q { font-size: 15px; font-weight: 700; color: var(--ink); margin: 0 0 8px; }
 .ph-hint { grid-column: 1 / -1; font-size: 14px; color: var(--warn); margin: 0; text-align: center; }
 .ph-opts { display: flex; flex-direction: column; gap: 10px; }
 .ph-opt { min-height: 54px; border-radius: 14px; border: 1px solid var(--c-4a4f58, #4a4f58); background: transparent; font-size: 17px; font-weight: 700; padding: 10px 14px; text-align: left; }
@@ -622,7 +631,6 @@ select { background: var(--panel-2); color: var(--ink); border: 1px solid var(--
   .monitor { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "focus focus" "mach left"; }
   .ph-approval { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); column-gap: 18px; align-items: start; }
   .ph-col-b { position: sticky; top: 12px; }
-  .ph-approval .ph-info { margin-bottom: 0; }
   .phone { max-width: 760px; }
   .ph-approval .ph-bar { position: static; margin: 12px 0 0; padding: 0; background: none; border: 0; }
 }
@@ -773,8 +781,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 /* ---------- phone: notification → one decision card (核准 / 討論) → 問一句 ---------- */
 .ph-tog { width: 32px; height: 28px; border-radius: 8px; }
 .ph-tog svg { width: 16px; height: 16px; }
-.ph-notif { display: grid; gap: 2px; background: var(--warn-soft); color: var(--ink); border: 1px solid rgb(var(--warn-rgb, 245 184 61) / .45); border-radius: 12px; padding: 10px 12px; font-size: 15px; }
-.ph-notif b { color: var(--warn); font-size: 13px; }
 .ph-why { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 12px; padding: 8px 12px; font-size: 14.5px; }
 .ph-why summary { cursor: pointer; font-weight: 600; color: var(--ink-dim); }
 .ph-why p { margin: 8px 0 0; }
@@ -785,7 +791,6 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 
 .ph-opt.on small { color: inherit; opacity: .9; }
 .early-more > summary { cursor: pointer; font-size: 13.5px; color: var(--ink-dim); padding: 6px 0 0; }
-.ph-problem { margin: -4px 0 12px; font-size: 15px; color: var(--ink-dim); }
 .early > .early-list .early-what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 
 /* ---------- issue #37: 產線監控 now holds the whole plant; 訂單 list; 人力排程 explainer ---------- */
@@ -937,11 +942,9 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .br-more { border-top: 1px solid var(--border); padding-top: 8px; font-size: 14px; }
 .br-more summary { cursor: pointer; color: var(--ink-dim); font-weight: 600; }
 .br-more .br-ul { margin-top: 6px; }
-.ph-meta { margin: 0 0 10px; font-size: 13px; color: var(--ink-dim); }
-.ph-meta .ph-risk { background: none; padding: 0; color: inherit; font-weight: 400; }
+.ph-meta { margin: 0 0 6px; font-size: 14px; font-weight: 700; color: var(--alarm); }
 .ph-meta b { font-weight: 600; }
 .ph-bar { position: sticky; bottom: 0; z-index: 2; margin: 14px -16px 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--border); }
-.ph-bar .ph-scope { margin: 0 0 8px; }
 .ph-bar .ph-acts { position: static; margin: 0; padding: 0; background: none; border: 0; }
 .br-lead { margin: 0; color: var(--ink); }
 .br-sec { display: grid; gap: 4px; min-width: 0; }
@@ -951,17 +954,14 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .br-ul li, .br-p { overflow-wrap: break-word; font-weight: 400; }
 .br-p { margin: 0; }
 .br-hint { color: var(--ink-dim); font-size: 14px; }
-.br-tag { display: inline-block; background: #FFF3CD; color: #8A5700; border-radius: 8px; padding: 4px 10px; font-weight: 700; line-height: 1.3; }
+.br-tag { display: inline-block; background: var(--warn-soft); color: var(--warn); border-radius: 8px; padding: 4px 10px; font-weight: 700; line-height: 1.3; }
 .br-dl { overflow-wrap: anywhere; }
 .ph-optc { display: grid; gap: 2px; min-height: 0; padding: 10px 14px; font-size: 16px; font-weight: 400; border-color: var(--border); }
 .ph-optc .ph-opt-t { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-weight: 700; }
 .ph-optc .ph-opt-t b { margin-right: 0; flex: none; }
 .ph-optc .ph-opt-e { display: block; font-size: 14px; line-height: 1.5; color: var(--ink-dim); padding-left: 34px; }
 .ph-optc.on .ph-opt-e { color: inherit; opacity: .92; }
-.ph-optc .ph-opt-risk { color: var(--warn); font-weight: 600; }
-.ph-optc.on .ph-opt-risk { color: inherit; }
-.ph-scope { margin: 10px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink); overflow-wrap: break-word; }
-.ph-scope b { font-weight: 700; }
+.ph-optc .ph-opt-why { color: var(--ink); }
 .ph-approval .ph-approve { white-space: normal; line-height: 1.3; }
 .ph-approval .br { margin-bottom: 12px; }
 /* the sticky 核准 bar must read as a bar: solid, with an edge, and a one-line label so it hides little */
@@ -1001,21 +1001,18 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 /* 公版 AI 處理狀態 (aiStatus.tsx): 偵測到什麼｜交由誰｜階段｜預計完成, each part on its own line on narrow boxes */
 .ai-status { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 10px; align-items: baseline; line-height: 1.45; }
 .ai-status > span::before { content: "｜"; margin-right: 10px; opacity: .45; }
-.ph-ai { padding: 10px 12px; margin: 8px 0; border-radius: 10px; background: rgba(46, 158, 91, .08); border-left: 3px solid #2e9e5b; font-size: 14px; }
+.ph-ai { display: block; padding: 2px 0 2px 10px; border-left: 3px solid var(--border); font-size: 13.5px; color: var(--ink-dim); }
+.ph-ai > span::before { margin: 0 6px; }
+.ph-ai > b { font-weight: 600; }
 /* fast repair: 維修完成 / 已恢復正常・異常報告已產生 notices (RepairNotice) */
-.ph-review { border-color: rgb(var(--accent-rgb, 118 185 0) / .5); box-shadow: 0 20px 44px -28px rgb(var(--accent-rgb, 118 185 0) / .55); margin-bottom: 12px; }
-.ph-ok { color: var(--accent); background: var(--accent-soft); }
+.ph-review { border-color: var(--accent); }
 .ph-report-acts { grid-template-columns: 1fr auto; }
 .ph-report-acts a { min-height: 54px; border-radius: 14px; font-weight: 700; font-size: 18px; display: flex; align-items: center; justify-content: center; text-decoration: none; }
 .ph-report-acts button { min-height: 54px; padding: 0 18px; font-size: 14px; font-weight: 600; }
-.ph-notif-ok { background: var(--accent-soft); border-color: rgb(var(--accent-rgb, 118 185 0) / .45); }
-.ph-notif-ok b { color: var(--accent); }
-.ph-ai > span::before { content: none; }
-.ph-ai > b, .ph-ai > span { flex-basis: 100%; }
 .f3-ai { display: inline-flex; color: inherit; }
 
 /* 核准卡「怎麼選」(OptionGuideNote) */
-.opt-guide { margin: 6px 0 10px; padding: 10px 12px; border-radius: 10px; background: rgba(240, 163, 58, .1); border-left: 3px solid #f0a33a; font-size: 14px; line-height: 1.5; display: grid; gap: 4px; }
+.opt-guide { margin: 6px 0 10px; padding: 10px 12px; border-radius: 10px; background: var(--warn-soft); border-left: 3px solid var(--warn); font-size: 14px; line-height: 1.5; display: grid; gap: 4px; }
 .opt-guide p { margin: 0; }
 .opt-guide ul { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 2px; }
 .opt-guide-rec { font-weight: 700; }

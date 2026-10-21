@@ -27,9 +27,9 @@ const num = (s: number) => String(Math.round(s * 10) / 10)
 /** 「約 N 秒」, rounded up and never below 1 while something is still left. */
 export const secText = (s: number) => `約 ${Math.max(1, Math.ceil(s - 1e-6))} 秒`
 
-/** 多久修好: 「約 16 秒（維修 12 秒＋回溫 4 秒）」 (no 回溫 part when the server has none). */
+/** 多久修好: 「約 16 秒（維修 12 秒＋回溫 4 秒）」, just 「約 3 秒」 when the server has no 回溫. */
 export function fastWindowText(f: FastRepair): string {
-  return `約 ${num(f.repair_s + f.recover_s)} 秒（維修 ${num(f.repair_s)} 秒${f.recover_s > 0 ? `＋回溫 ${num(f.recover_s)} 秒` : ''}）`
+  return f.recover_s > 0 ? `約 ${num(f.repair_s + f.recover_s)} 秒（維修 ${num(f.repair_s)} 秒＋回溫 ${num(f.recover_s)} 秒）` : `約 ${num(f.repair_s)} 秒`
 }
 
 export const isRepairTask = (t: Pick<WorkTask, 'kind'>) => REPAIR_KINDS.has(t.kind)
@@ -50,16 +50,16 @@ export function taskLeftS(t: TaskLike, f: FastRepair): number {
   return (1 - p) * f.repair_s
 }
 
-/** 預計完成, in wall seconds from now. `lead` goes before the bold `text`:
- *  - nobody on it yet: the whole formula, 「現在核准的話，約 16 秒後」 before the decision, 「約 16 秒後」 after it
+/** 預計完成, in wall seconds from now (the phone shows it once approved; before that 多久修好 says it, veteran 10-22):
+ *  - nobody on it yet: the whole formula, 「約 16 秒後」
  *  - the crew repairing: the slowest open repair task's remaining seconds + 回溫, 「約 9 秒後」
  *  - every repair done (or Event.repaired_at): 「維修已完成，回溫中（約 4 秒）」 */
-export function fastDoneText(repair: TaskLike[], f: FastRepair, decided: boolean, repaired = false): { lead: string; text: string } {
+export function fastDoneText(repair: TaskLike[], f: FastRepair, repaired = false): string {
   const open = repair.filter((t) => t.status !== '完成')
   const started = repair.some((t) => t.status !== '待派')
   if (repaired || (started && !open.length)) {
-    return { lead: '', text: f.recover_s > 0 ? `維修已完成，回溫中（${secText(f.recover_s)}）` : '維修已完成，確認恢復中' }
+    return f.recover_s > 0 ? `維修已完成，回溫中（${secText(f.recover_s)}）` : '維修已完成，確認恢復中'
   }
-  if (started) return { lead: '', text: `${secText(Math.max(...open.map((t) => taskLeftS(t, f))) + f.recover_s)}後` }
-  return { lead: decided ? '' : '現在核准的話，', text: `約 ${num(f.repair_s + f.recover_s)} 秒後` }
+  if (started) return `${secText(Math.max(...open.map((t) => taskLeftS(t, f))) + f.recover_s)}後`
+  return `約 ${num(f.repair_s + f.recover_s)} 秒後`
 }

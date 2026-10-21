@@ -89,7 +89,9 @@ try {
   await ph.setViewportSize({ width: 390, height: 844 })
   await ph.goto(BASE + '/phone', { waitUntil: 'networkidle' })
   const phOk = await until(ph, async () => (await ph.locator('[data-testid=phone-version]').count()) > 0, 20)
-  check('phone shows the newest card v2 and what changed', phOk && (await ph.locator('[data-testid=phone-changes]').innerText()).includes('#A-311'))
+  // what changed is the server's own diff (the first order it moves), not a fixed order id: the solver's moves follow the data
+  const moved = (v2?.changes ?? [])[0]?.split('：')[0] ?? '#A-311'
+  check('phone shows the newest card v2 and what changed', phOk && (await ph.locator('[data-testid=phone-changes]').innerText()).includes(moved), moved)
   await ph.screenshot({ path: `${OUT}/plan-talk-phone-390.png`, fullPage: true })
   await ph.close()
   await d.setViewportSize({ width: 390, height: 844 })
