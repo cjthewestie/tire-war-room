@@ -61,7 +61,9 @@ async def test_every_topic_returns_compact_data_and_writes_nothing(tmp_path):
         version = p.rt.c.store.current().version
         before = len(p.rt.audit.tail(0, 1_000_000))
         for topic in PLANT_TOPICS:
-            d = plant_query.query(p.rt, topic, "#W-0391" if topic == "order_lookup" else None)
+            d = plant_query.query(p.rt, topic, "#W-0391" if topic == "order_lookup" else None,
+                                  "CURE-03" if topic == "machine_history" else None,
+                                  q="7 號機" if topic == "memory_search" else None)
             text = json.dumps(d, ensure_ascii=False, default=str)
             assert d and "error" not in d, (topic, d)
             assert len(text) <= plant_query.MAX_CHARS + 60, (topic, len(text))

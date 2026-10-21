@@ -360,7 +360,7 @@ def health(st: dict[str, Any]) -> list[dict[str, Any]]:
          ["、".join(rules)], "有動作是正常保護：到該機台看原因並排除；沒有規則上膛請立刻通知系統負責人。")
 
     card("memory", "記憶", "ok", f"機台筆記 {st.get('memory_notes', 0)} 則",
-         "主管寫的機台筆記（Agent 目前不讀）和進行中的對話。",
+         "主管寫的機台筆記（Agent 規劃時會參考）和進行中的對話。",
          [f"進行中對話 {st.get('conversations', 0)} 個"], "對話在換情境或一日循環換日時會清空，這是正常的。")
 
     deg = st.get("degraded") or {}

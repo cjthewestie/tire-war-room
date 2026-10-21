@@ -3,6 +3,7 @@ Every admin write must land in the audit log; no response may carry an API key."
 from __future__ import annotations
 
 import base64
+import re
 import time
 
 import pytest
@@ -143,7 +144,8 @@ def test_reindex_runs_in_thread_and_search(local, rt):
 def test_memory_lists_incidents_and_adds_audited_note(local, rt, tmp_path):
     m = local.get("/api/admin/memory").json()
     assert len(m["incidents"]) == 8
-    assert m["agent_reads_notes"] is False
+    assert m["agent_reads_notes"] is True              # 「接記憶」: the commander and Agent Nemo read them now
+    assert m["agent_uses"] == "Agent 規劃時會參考：機台筆記、最近 3 件過去事件"
     assert local.post("/api/admin/memory/notes", json={"machine_id": "NOPE-1", "text": "x"}).status_code == 400
     r = local.post("/api/admin/memory/notes", json={"machine_id": "CURE-07", "text": "上次 7 號機蒸汽閥卡住，先看閥"})
     assert r.status_code == 200, r.text
@@ -154,11 +156,27 @@ def test_memory_lists_incidents_and_adds_audited_note(local, rt, tmp_path):
     assert a.payload["admin"] == "memory_note_add" and a.payload["machine_id"] == "CURE-07"
 
 
-def test_agent_code_does_not_read_memory_notes():
+def test_agent_code_reads_memory_notes_but_never_writes_them():
+    """The agents read notes through Runtime.machine_memory / query_plant; only the 後台 POST (audited) writes."""
     import pathlib
-    root = pathlib.Path(__file__).resolve().parent.parent / "warroom" / "agent"
-    for f in root.rglob("*.py"):
-        assert "memory_notes" not in f.read_text(encoding="utf-8"), f
+    root = pathlib.Path(__file__).resolve().parent.parent / "warroom"
+    readers = [*(root / "agent").rglob("*.py"), root / "api" / "plant_query.py", root / "data" / "machine_memory.py"]
+    for f in readers:
+        src = f.read_text(encoding="utf-8")
+        assert "MemoryNotes" not in src and not re.search(r"notes(?:\(\))?\.add\(", src), f
+
+
+def test_memory_preview_is_what_the_commander_would_get(local, rt):
+    assert local.get("/api/admin/memory/preview", params={"machine_id": "NOPE-1"}).status_code == 400
+    assert local.get("/api/admin/memory/preview", params={"machine_id": "CURE-07"}).json()["machine_memory"] is None
+    local.post("/api/admin/memory/notes", json={"machine_id": "CURE-07", "text": "7 號機蒸汽閥上週換過，疏水閥易卡"})
+    local.post("/api/admin/memory/notes", json={"machine_id": "CURE-08", "text": "8 號機的事"})
+    p = local.get("/api/admin/memory/preview", params={"machine_id": "CURE-07"}).json()["machine_memory"]
+    assert p == rt.machine_memory("CURE-07")
+    assert [n["text"] for n in p["notes"]] == ["7 號機蒸汽閥上週換過，疏水閥易卡"] and p["use"].startswith("機台筆記與過去事件")
+    # CURE-03 has a team-dataset incident: past events come with no note written
+    p3 = local.get("/api/admin/memory/preview", params={"machine_id": "CURE-03"}).json()["machine_memory"]
+    assert [x["id"] for x in p3["past"]] == ["INC-003"] and p3["notes"] == []
 
 
 # ---------------------------------------------------------------- runs

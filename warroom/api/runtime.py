@@ -891,6 +891,7 @@ class Runtime:
         self._advance_fast_repairs()
         self._apply_repairs()
         self.ticks += 1
+        self.memory_desk.on_tick()              # a real date boundary writes the day's summary (in the background)
         self.safety_pass(readings)              # RED path first: nothing below can delay it
         self._random_event()                    # issue #36: off by default
         self._plant_inputs()                    # issue #17: a scripted shift start / rush order / sick call
@@ -1022,7 +1023,8 @@ class Runtime:
         w._success_audited = True
 
         def on_event(ev: Any) -> None:
-            if ev.kind in ("order_completed", "shipment_departed"):
+            # 「接記憶」: new and rush orders and late deliveries too, so the memory's observations rebuild from the audit
+            if ev.kind in ("order_completed", "shipment_departed", "order_new", "order_rush", "delivery_late"):
                 self.audit.append(AuditKind.SYSTEM, "world",
                                   {"msg": ev.text, "kind": ev.kind, "order_ids": ev.order_ids, "qty": ev.qty,
                                    "on_time": ev.on_time, "at": ev.ts.isoformat()})
@@ -1358,6 +1360,8 @@ class Runtime:
             self._orch.queue.on_change = self._orch.publish
             self._orch.precheck = lambda ev: self.precheck_line(self._preplan_order(ev))
             self._orch_c = self.c
+            if hasattr(self.c.state_machine, "memory"):   # 「接記憶」: plans and replans read the machine's memory
+                self.c.state_machine.memory = self.machine_memory
         return self._orch
 
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
@@ -1674,6 +1678,8 @@ class Runtime:
         self.audit.append(AuditKind.SYSTEM, "day_loop", {"msg": f"新的一天（循環 {n}）", "loop": n,
                                                          "ended_at": ended.isoformat(),
                                                          "factory_time": self.clock.now().isoformat()})
+        day0 = getattr(self.sim, "day0", None) or ended
+        self.memory_desk.on_wrap(day0.astimezone(F.TZ).date().isoformat(), n - 1)   # 循環 n-1's daily summary
         self._publish_periodic(force=True)
         self._publish_schedule()
 
@@ -1910,6 +1916,30 @@ class Runtime:
             return list(self.state_machine.events())
         except Exception:  # noqa: BLE001
             return []
+
+    @property
+    def memory_notes(self) -> Any:
+        """The supervisor's per-machine notes from 後台 (warroom/data/memory_notes.py), next to the audit log."""
+        mn = self.__dict__.get("_memory_notes")
+        if mn is None:
+            from warroom.data.memory_notes import MemoryNotes
+            mn = self.__dict__["_memory_notes"] = MemoryNotes(Path(self.settings.audit_path).parent / "memory_notes.json")
+        return mn
+
+    def machine_memory(self, machine_id: str, exclude: str | None = None) -> dict[str, Any] | None:
+        """One machine's notes and last past events, compact (warroom/data/machine_memory.py), or None. Read-only."""
+        from warroom.data import machine_memory as MM
+        return MM.for_machine(machine_id, self.memory_notes, self.audit, self.events(), exclude,
+                              files=self.memory_desk.files)
+
+    @property
+    def memory_desk(self) -> Any:
+        """Daily / weekly / monthly summaries and observations (warroom/api/memory_desk.py), all derived from the audit."""
+        d = self.__dict__.get("_memory_desk")
+        if d is None:
+            from warroom.api.memory_desk import MemoryDesk
+            d = self.__dict__["_memory_desk"] = MemoryDesk(self)
+        return d
 
     @property
     def tasklog(self) -> Any:

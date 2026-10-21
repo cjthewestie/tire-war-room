@@ -404,11 +404,62 @@ def questionable(r: Any) -> dict[str, Any]:
     return {"count": len(items), "questionable": items}
 
 
+# ---------------------------------------------------------------------------------- memory (CJ 2026-10-22: 「接記憶」)
+def machine_history(r: Any, machine_id: str | None = None) -> dict[str, Any]:
+    """One machine's 後台 notes and its last past events: the same block the commander gets (context.machine_memory)."""
+    if not machine_id:
+        return {"error": "要給 machine_id"}
+    if machine_id not in F.MACHINE_BY_ID:
+        return {"error": f"沒有這台機台：{machine_id}"}
+    from warroom.data import machine_memory as MM
+    desk = getattr(r, "memory_desk", None)
+    block = MM.for_machine(machine_id, getattr(r, "memory_notes", None), r.audit, r.events(),
+                           files=desk.files if desk is not None else None, levels=("daily", "weekly", "monthly"))
+    return block or {"machine_id": machine_id, "notes": [], "past": [], "note": "這台機台沒有筆記，也沒有過去事件紀錄"}
+
+
+def memory_notes(r: Any) -> dict[str, Any]:
+    """Every note the supervisor wrote in 後台 記憶, newest first (「我在後台寫了什麼」)."""
+    from warroom.agent.narrate import machine_label
+    notes = getattr(r, "memory_notes", None)
+    rows = sorted(notes.all(), key=lambda n: n.created_at, reverse=True) if notes is not None else []
+    return {"count": len(rows), "notes": [{"machine": machine_label(n.machine_id), "machine_id": n.machine_id,
+                                           "at": _hm(n.created_at), "by": n.author, "text": n.text} for n in rows]}
+
+
+def daily_summary(r: Any, day: str | None = None) -> dict[str, Any]:
+    """每日摘要 (「昨天發生什麼事」): a date (YYYY-MM-DD) or a day name; none = the latest day that ended."""
+    desk = r.memory_desk
+    if day:
+        doc = desk.daily(day)
+    else:
+        today, loop = desk.today_key()
+        from warroom.data.memory_log import day_name
+        doc = desk.daily(before=day_name(today, loop))
+    if doc is None:
+        have = [d["name"] for d in desk.files.all("daily")][-5:]
+        return {"found": False, "note": "還沒有這一天的每日摘要" + (f"；有的：{'、'.join(have)}" if have else "（還沒有任何每日摘要）")}
+    f = doc["facts"]
+    return {"found": True, "day": doc["label"], "summary": "".join(doc["sentences"]), "source": doc["source"],
+            "tasks": f["tasks"], "by_final": f["by_final"], "carried_over": f["carried_over"],
+            "safety_actions": len(f["safety"]), "orders": {k: v[:8] for k, v in f["orders"].items()},
+            "machines": doc["machines"]}
+
+
+def memory_search(r: Any, q: str | None = None) -> dict[str, Any]:
+    """Search the summaries and observations (no-answer gate: a weak match says nothing was found)."""
+    if not (q or "").strip():
+        return {"error": "要給 q（要找什麼）"}
+    return r.memory_desk.search(q)
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
           "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
-          "safety_stops": safety_stops, "questionable": questionable}
+          "safety_stops": safety_stops, "questionable": questionable,
+          "machine_history": machine_history, "memory_notes": memory_notes, "daily_summary": daily_summary,
+          "memory_search": memory_search}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -419,9 +470,19 @@ def _shrink(d: Any, n: int) -> Any:
     return d
 
 
-def query(r: Any, topic: str, order_id: str | None = None) -> dict[str, Any]:
+def query(r: Any, topic: str, order_id: str | None = None, machine_id: str | None = None, date: str | None = None,
+          q: str | None = None) -> dict[str, Any]:
     """{topic: data} for one topic, at most MAX_CHARS as JSON; KeyError for an unknown topic."""
-    data = TOPICS[topic](r, order_id) if topic == "order_lookup" else TOPICS[topic](r)
+    if topic == "order_lookup":
+        data = TOPICS[topic](r, order_id)
+    elif topic == "machine_history":
+        data = TOPICS[topic](r, machine_id)
+    elif topic == "daily_summary":
+        data = TOPICS[topic](r, date)
+    elif topic == "memory_search":
+        data = TOPICS[topic](r, q)
+    else:
+        data = TOPICS[topic](r)
     n = 20
     while len(json.dumps(data, ensure_ascii=False, default=str)) > MAX_CHARS and n > 1:
         n //= 2

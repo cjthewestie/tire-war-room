@@ -53,6 +53,7 @@ from warroom import factory as F
 from warroom.api.runtime import Runtime
 from warroom.config import ROOT
 from warroom.api.tasks import install_tasks
+from warroom.data import machine_memory as MM
 from warroom.contracts import (
     Anomaly,
     AskAnswer,
@@ -907,6 +908,21 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         Read-only; there is no route that deletes a row."""
         return {"days": await asyncio.to_thread(rt().tasklog.days)}
 
+    @app.get("/api/memory/daily")
+    async def memory_daily(limit: int = 7) -> dict[str, Any]:
+        """每日摘要 (「加每日摘要」), newest first: derived from the audit, read-only (/handover, 後台 記憶)."""
+        desk = rt().memory_desk
+
+        def run() -> list[dict[str, Any]]:
+            docs = desk.files.all("daily")
+            docs.sort(key=lambda d: (d["day"], d.get("loop") or 0), reverse=True)
+            return [{k: d.get(k) for k in ("name", "label", "day", "loop", "sentences", "source", "machines", "written_at")}
+                    | {"tasks": d["facts"]["tasks"], "by_final": d["facts"]["by_final"],
+                       "carried_over": d["facts"]["carried_over"]} for d in docs[:max(1, min(limit, 31))]]
+        return {"daily": await asyncio.to_thread(run),
+                "weekly": [w["name"] for w in await asyncio.to_thread(desk.files.all, "weekly")],
+                "monthly": [m["name"] for m in await asyncio.to_thread(desk.files.all, "monthly")]}
+
     @app.get("/api/daylog")
     async def daylog_days() -> dict[str, Any]:
         """Days (or demo loops) with their run counts, newest first."""
@@ -1080,23 +1096,27 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
                                      "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
-        async def read_plant(topic: str, call_id: str, order_id: str | None = None) -> dict[str, Any]:
+        async def read_plant(topic: str, call_id: str, order_id: str | None = None,
+                             machine_id: str | None = None, date: str | None = None, q: str | None = None) -> dict[str, Any]:
             # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
             # refuses it); audited here like an ask read (tool_call / tool_result, R0), read-only by construction.
             # Called on the loop, not in a thread: it walks live runtime state the loop also changes
             eid, step = call_id.split(":")[0], call_id.split(":")[-1]
             row = {"call_id": f"{eid}:Q{step[1:]}", "step_id": f"Q{step[1:]}", "attempt": 1, "risk": "R0"}
-            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic, **({"order_id": order_id} if order_id else {})},
-                                                                 "state": "ASK"},
-                           event_id=eid)
+            qargs = {"topic": topic, **{k: v for k, v in (("order_id", order_id), ("machine_id", machine_id),
+                                                            ("date", date), ("q", q)) if v}}
+            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": qargs, "state": "ASK"}, event_id=eid)
             t0 = time.perf_counter()
             try:
-                data, err = plant_query.query(r, topic, order_id), None
+                data, err = plant_query.query(r, topic, order_id, machine_id, date, q), None
             except Exception as e:  # noqa: BLE001 - a failed read is said in the reply, never a 500
                 data, err = None, f"{type(e).__name__}: {e}"[:200]
             r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",
                            {**row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
-                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
+                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else [],
+                                     # which notes / past events went to the model (「接記憶」)
+                                     **(MM.attached(data) if topic == "machine_history" and isinstance(data, dict) else {})}},
+                           event_id=eid)
             reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
 
@@ -1327,10 +1347,49 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 context["selected_task"] = {"id": ev_sel.id, "state": ev_sel.state.value, "machine": ev_sel.machine_id,
                                             "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
                                                                         else ev_sel.anomaly.message))[:60]}
+        memory = None
+        if overview_mode or not body.event_id:
+            # the overview chat only (總覽, or no task selected): claude-mem style memory (CJ 2026-10-22: 「只有在Agent Nemo 對話統整區
+            # 有這個功能(非單一任務區)」). Today's observations as a compact index, the last daily summary, and two reads.
+            desk = r.memory_desk
+            index = await asyncio.to_thread(desk.day_index)
+            context["today_index"] = index or "（今天還沒有紀錄）"
+            day, loop = desk.today_key()
+            from warroom.data.memory_log import day_name
+            last = desk.daily(before=day_name(day, loop))
+            if last is not None:
+                context["earlier_days"] = [{"day": last["label"], "summary": "".join(last["sentences"])}]
+
+            class ChatMemory:
+                """memory_search / memory_get for the chat: R0 reads, audited like query_plant."""
+
+                @staticmethod
+                def _audited(tool: str, args: dict[str, Any], call_id: str, fn) -> Any:
+                    eid, step = call_id.split(":")[0], call_id.split(":")[-1]
+                    row = {"call_id": f"{eid}:M{step[1:]}", "step_id": f"M{step[1:]}", "attempt": 1, "risk": "R0"}
+                    r.audit.append(AuditKind.TOOL_CALL, f"tool:{tool}", {**row, "args": args, "state": "ASK"}, event_id=eid)
+                    t0 = time.perf_counter()
+                    try:
+                        data, err = fn(), None
+                    except Exception as e:  # noqa: BLE001 - said in the reply, never a 500
+                        data, err = None, f"{type(e).__name__}: {e}"[:200]
+                    r.audit.append(AuditKind.TOOL_RESULT, f"tool:{tool}", {
+                        **row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                        "data": {"ids": [h["id"] for h in (data.get("hits", []) if isinstance(data, dict) else data or [])]}},
+                        event_id=eid)
+                    return data if err is None else ({"found": False, "hits": []} if tool == "memory_search" else [])
+
+                def search(self, q: str, date: str | None, type_: str | None, call_id: str) -> dict[str, Any]:
+                    return self._audited("memory_search", {"q": q, "date": date, "type": type_}, call_id,
+                                         lambda: desk.search(q, day=date, type_=type_))
+
+                def get(self, ids: list[str], call_id: str) -> list[dict[str, Any]]:
+                    return self._audited("memory_get", {"ids": ids}, call_id, lambda: desk.obs.get(ids))
+            memory = ChatMemory()
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
                                         read_plant=read_plant, conversation=f"{'overview|' if overview_mode else ''}{session.actor}|{body.conversation_id or ''}",
-                                        control=Control(), mode=body.mode)
+                                        control=Control(), mode=body.mode, memory=memory)
         if overview_mode:
             from warroom.api import overview
             acted = [str(s["args"]["event_id"]) for s in res["steps"] if isinstance(s.get("args"), dict) and s["args"].get("event_id")]
@@ -1345,7 +1404,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
                                                   "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"],
-                                                  **({"mode": "overview", "links": res.get("links", [])} if overview_mode else {})})
+                                                  **({"mode": "overview", "links": res.get("links", [])} if overview_mode else {}),
+                                                  # a constraint said in chat (「不要動 9 號機」): an observation (📌)
+                                                  **({"pinned": p} if (p := _main_agent(r)._pin_of(text)) else {})})
         return res
 
     # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)

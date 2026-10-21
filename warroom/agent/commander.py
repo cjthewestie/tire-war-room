@@ -251,7 +251,10 @@ def build_messages(req: CommanderRequest, plant_text: str | None = None) -> list
 # largest part everywhere. The system prompt is never cut (prefix cache), nor are the anomaly, allowed_tools,
 # rejected hypotheses, supervisor constraints and text, commands or plant events: the plan depends on them,
 # and a model that cannot see a rejected hypothesis may propose it again.
-TRIM_STEPS = ("context.sop.text", "context.neighbours", "context.materials", "context.orders",
+# context.machine_memory (the machine's 後台 notes and last past events, 「接記憶」) goes second: by its own rule it only
+# suggests a hypothesis, while neighbours, materials and orders are live state the plan's tool args and expectation
+# are checked against. It is small (≤5 notes of ≤120 chars, ≤3 past events), so it rarely decides whether a request fits.
+TRIM_STEPS = ("context.sop.text", "context.machine_memory", "context.neighbours", "context.materials", "context.orders",
               "context.supervisor_discussion.detail")
 TRIM_KEEP_ITEMS = 10
 
@@ -264,6 +267,10 @@ def _trimmed_context(ctx: dict[str, Any], step: str) -> dict[str, Any] | None:
             return None
         return {**ctx, "sop": [{k: v for k, v in h.items() if k != "text"} if isinstance(h, dict) else h
                                for h in sop]}
+    if step == "context.machine_memory":     # reference only: the whole block goes (the audit says it was trimmed)
+        if not ctx.get("machine_memory"):
+            return None
+        return {k: v for k, v in ctx.items() if k != "machine_memory"}
     if step == "context.neighbours":         # keep the *_now readings, drop min / max / trend
         nb = ctx.get("neighbours")
         if not isinstance(nb, dict):

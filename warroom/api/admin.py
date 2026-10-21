@@ -33,8 +33,6 @@ from warroom.contracts import AuditKind
 ALLOWED_EXT = (".md", ".txt", ".pdf")
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 _NAME_RE = re.compile(r"^[0-9A-Za-z一-鿿][0-9A-Za-z一-鿿._-]{0,80}$")
-_EV_MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
-TERMINAL = ("closed", "safe_stop")
 
 
 class UploadBody(BaseModel):
@@ -74,11 +72,6 @@ def safe_doc_name(name: str) -> str:
     if Path(base).suffix.lower() not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail=f"只接受 {'、'.join(ALLOWED_EXT)}")
     return base
-
-
-def machine_of_event(event_id: str | None) -> str | None:
-    m = _EV_MACHINE_RE.search(event_id or "")
-    return m.group(1) if m else None
 
 
 class ReindexJob:
@@ -129,9 +122,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         return supervisor(request, response)
 
     def notes():
+        r = rt()
+        if hasattr(r, "memory_notes"):            # the same notes the agents read (Runtime.memory_notes)
+            return r.memory_notes
         if "n" not in notes_holder:
             from warroom.data.memory_notes import MemoryNotes
-            notes_holder["n"] = MemoryNotes(Path(rt().settings.audit_path).parent / "memory_notes.json")
+            notes_holder["n"] = MemoryNotes(Path(r.settings.audit_path).parent / "memory_notes.json")
         return notes_holder["n"]
 
     def sop_dir() -> Path:
@@ -411,6 +407,17 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         r = rt()
         return await asyncio.to_thread(_memory, r, notes())
 
+    @app.get(P + "/memory/preview")
+    async def memory_preview(machine_id: str = Query(..., max_length=20), _: Any = ADMIN) -> dict[str, Any]:
+        """What the commander would get as context.machine_memory for this machine right now (read-only)."""
+        if machine_id not in F.MACHINE_IDS:
+            raise HTTPException(status_code=400, detail=f"沒有這台機台：{machine_id}")
+        from warroom.data import machine_memory as MM
+        r = rt()
+        block = await asyncio.to_thread(r.machine_memory, machine_id) if hasattr(r, "machine_memory") else \
+            await asyncio.to_thread(MM.for_machine, machine_id, notes(), r.audit, r.events())
+        return {"machine_id": machine_id, "machine_memory": block}
+
     @app.post(P + "/memory/notes")
     async def add_note(body: NoteBody, session: Any = ADMIN) -> dict[str, Any]:
         if body.machine_id not in F.MACHINE_IDS:
@@ -521,31 +528,12 @@ def _runs(r: Any, limit: int) -> dict[str, Any]:
 
 
 def _memory(r: Any, notes: Any) -> dict[str, Any]:
-    from warroom.data.team_dataset import IncidentStore
-    incidents = [{"id": i.incident_id, "date": i.date.isoformat(), "machine_id": i.machine_id, "equipment": i.equipment,
-                  "symptom": i.symptom, "action": i.action, "downtime_min": i.downtime_min, "outcome": i.outcome,
-                  "source": "team_dataset"} for i in _safe(lambda: IncidentStore().all(), [])]
-    # closed events: the audit log is the record (it outlives a scenario restart); the live event adds the outcome
-    live = {ev.id: ev for ev in r.events()}
-    closed: dict[str, dict[str, Any]] = {}
-    anomaly: dict[str, str] = {}
-    for e in r.audit.tail(0, 100_000):
-        p = e.payload or {}
-        if not e.event_id or e.event_id.startswith("ASK-"):
-            continue
-        if e.kind == AuditKind.ANOMALY and p.get("message"):
-            anomaly[e.event_id] = str(p["message"])
-        if e.kind == AuditKind.STATE_TRANSITION and p.get("to") in TERMINAL:
-            ev = live.get(e.event_id)
-            closed[e.event_id] = {"id": e.event_id, "machine_id": ev.machine_id if ev else machine_of_event(e.event_id),
-                                  "closed_at": e.ts.isoformat(), "state": p.get("to"),
-                                  "what": (ev.command or (ev.alert_card.title if ev.alert_card else None)) if ev else None,
-                                  "outcome": ev.outcome if ev else None, "source": "audit"}
-    for cid, c in closed.items():
-        c["what"] = c["what"] or anomaly.get(cid)
-    return {"incidents": incidents, "closed_events": sorted(closed.values(), key=lambda c: c["closed_at"], reverse=True),
+    from warroom.data import machine_memory as MM
+    return {"incidents": MM.incidents(), "closed_events": MM.closed_events(r.audit, r.events()),
             "notes": [n.__dict__ for n in sorted(notes.all(), key=lambda n: n.created_at, reverse=True)],
-            "agent_reads_notes": False}
+            # the commander gets context.machine_memory on every plan / replan, Agent Nemo query_plant machine_history
+            "agent_reads_notes": True,
+            "agent_uses": f"Agent 規劃時會參考：機台筆記、最近 {MM.PAST_LIMIT} 件過去事件"}
 
 
 def _line_diff(a: str, b: str) -> list[dict[str, str]]:
