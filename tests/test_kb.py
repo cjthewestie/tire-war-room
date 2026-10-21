@@ -64,7 +64,7 @@ def test_thresholds_match_proposal():
     corpus = "\n".join(p.read_text(encoding="utf-8") for p in DEFAULT_SOP_DIR.glob("*.md"))
     assert "120～130°C" in corpus and "20 kgf/cm²" in corpus
     assert "≥120°C" in corpus and "≥110°C" in corpus
-    assert "36.5" in corpus and "8.5" in corpus and "85 kJ/mol" in corpus
+    assert "28.5" in corpus and "4.5" in corpus and "85 kJ/mol" in corpus
     assert "06:00–15:00" in corpus and "14:00–23:00" in corpus and "20:00–05:00" in corpus
     assert "T−1 時 30 分" in corpus and "8 小時" in corpus
     ids = [parse_sop(p)[0].sop_id for p in DEFAULT_SOP_DIR.glob("*.md")]
@@ -161,18 +161,18 @@ def test_page11_query_press7(db):
     data = db.query(QueryOrdersShiftsArgs(press_ids=[F.press_id(7)]))
     assert isinstance(data, QueryOrdersShiftsData)
     nxt = [j for j in data.next_jobs if j.order_id == "#A-311"]
-    assert nxt and nxt[0].press_id == "CURE-07" and nxt[0].size is TireSize.M
+    assert nxt and nxt[0].press_id == "CURE-07" and nxt[0].size is TireSize.S
     a311 = next(o for o in data.orders if o.id == "#A-311")
     assert (a311.due - DEMO_NOW.date()).days == 3          # 交期 3 天後
     assert data.gaps == ["10/03 夜班缺 1 人"]               # 夜班缺 1 人
-    running = next(j for j in data.next_jobs if j.order_id == "#A-309")
-    assert (DEMO_NOW - running.mold_in).total_seconds() / 3600 == pytest.approx(10.0)   # 10 h in
-    assert running.cure_h == 28.0
+    running = next(j for j in data.next_jobs if j.order_id == "#S-101")
+    assert (DEMO_NOW - running.mold_in).total_seconds() / 3600 == pytest.approx(14.4)   # 14.4 h in
+    assert running.cure_h == 24.0
 
 
 def test_backprop_page6(db):
     jobs = {j.id: j for j in db.jobs()}
-    for job_id, size in (("J-07-02", TireSize.M), ("J-10-07", TireSize.L), ("J-01-02", TireSize.S)):
+    for job_id, size in (("J-11-01", TireSize.M), ("J-10-07", TireSize.L), ("J-01-02", TireSize.S)):
         j = jobs[job_id]
         bp = F.BACKPROP[size]
         assert (j.mold_in - j.bond_start).total_seconds() / 60 == bp["bond_start_min"]
@@ -301,7 +301,7 @@ def test_quiz_set():
 def test_quiz_numbers_agree_with_factory():
     q = {i["question"]: i for i in load_quiz()}
     item = next(v for k, v in q.items() if "總硫化時間" in k)
-    assert item["choices"][item["answer"]].startswith("36.5")
+    assert item["choices"][item["answer"]].startswith("28.5")
     item = next(v for k, v in q.items() if "每週可做幾顆大胎" in k)
     assert float(item["choices"][item["answer"]]) == F.CAPACITY_TARGETS[2].large
 

@@ -1,0 +1,40 @@
+/* /worker (issue #46): one column for a phone held in one hand; big text, status as a coloured edge and pill. Colours
+   come from the war-room tokens in index.css, so light and dark follow the same theme switch. */
+.wk { max-width: 560px; margin: 0 auto; padding: max(12px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 12px; }
+.wk-top { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 8px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+.wk-row { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.wk-row h1 { margin: 0; font-size: 22px; font-weight: 800; margin-right: auto; }
+.wk-conn { font-size: 13px; color: var(--warn); }
+.wk-conn.ok { color: var(--accent); }
+.wk-clock { font-size: 13px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.wk-langs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; padding: 3px; background: var(--panel); border: 1px solid var(--border); border-radius: 12px; }
+.wk-langs button { min-height: 44px; border: 0; border-radius: 9px; background: transparent; color: var(--ink-dim); font-weight: 600; font-size: 14px; padding: 0 4px; }
+.wk-langs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
+.wk-who { display: flex; align-items: center; gap: 10px; font-size: 15px; color: var(--ink-dim); }
+.wk-who select { flex: 1; min-width: 0; min-height: 44px; font-size: 16px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); }
+.wk-empty { background: var(--panel); border: 1px dashed var(--border); border-radius: var(--radius); padding: 20px 16px; display: flex; flex-direction: column; gap: 6px; color: var(--ink-dim); }
+.wk-empty b { color: var(--ink); font-size: 17px; }
+.wk-empty p { margin: 0; }
+.wk-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.wk-h2 { margin: 8px 0 0; font-size: 15px; color: var(--ink-faint); font-weight: 600; }
+.wk-card { background: var(--panel); border: 1px solid var(--border); border-left: 5px solid var(--ink-faint); border-radius: var(--radius); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.wk-card.s-wait { border-left-color: var(--ink-faint); }
+.wk-card.s-go { border-left-color: var(--info); }
+.wk-card.s-work { border-left-color: var(--accent); }
+.wk-card.s-done { border-left-color: var(--border); opacity: .75; }
+.wk-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.wk-kind { font-size: 13px; font-weight: 700; color: var(--ink-dim); }
+.wk-status { font-size: 13px; font-weight: 700; padding: 1px 10px; border-radius: 999px; background: var(--panel-2); color: var(--ink-dim); white-space: nowrap; }
+.s-go .wk-status { color: var(--info); }
+.s-work .wk-status { background: var(--accent-soft); color: var(--accent); }
+.wk-text { margin: 0; font-size: 19px; line-height: 1.45; font-weight: 600; color: var(--ink); overflow-wrap: anywhere; }
+.wk-bar { height: 6px; border-radius: 3px; background: var(--panel-2); overflow: hidden; }
+.wk-bar i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.s-go .wk-bar i { background: var(--info); }
+.wk-meta { margin: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+.wk-meta div { display: flex; gap: 6px; min-width: 0; }
+.wk-meta dt { color: var(--ink-faint); }
+.wk-meta dd { margin: 0; color: var(--ink); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.wk-orig { margin: 0; font-size: 13px; color: var(--ink-faint); border-top: 1px solid var(--border); padding-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; }
+.wk-orig span { font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { .wk-bar i { transition: none; } }

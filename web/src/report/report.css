@@ -1,0 +1,44 @@
+/* /report (issue #59): an A4-shaped document on screen, printable as-is (controls hidden, black on white). */
+.rp { max-width: 820px; margin: 0 auto; padding: max(12px, env(safe-area-inset-top)) 16px max(28px, env(safe-area-inset-bottom)); display: flex; flex-direction: column; gap: 14px; }
+.rp-top { position: sticky; top: 0; z-index: 2; background: var(--bg); padding-block: 8px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--border); }
+.rp-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.rp-row h1 { margin: 0 auto 0 0; font-size: 22px; font-weight: 800; }
+.rp-row button { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); font-weight: 700; }
+.rp-row button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.rp-pick { display: flex; align-items: center; gap: 10px; color: var(--ink-dim); font-size: 15px; }
+.rp-pick select { flex: 1; min-width: 0; min-height: 42px; font-size: 15px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); }
+.rp-note, .rp-empty { margin: 0; color: var(--ink-dim); font-size: 14px; }
+.rp-doc { background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px 24px; display: flex; flex-direction: column; gap: 18px; }
+.rp-title { margin: 0; font-size: 22px; line-height: 1.35; text-wrap: balance; }
+.rp-head { margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px 16px; padding: 12px 14px; background: var(--panel-2); border-radius: 10px; }
+.rp-head div { display: flex; flex-direction: column; min-width: 0; }
+.rp-head dt { font-size: 12.5px; color: var(--ink-faint); }
+.rp-head dd { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.rp-head .t-ok dd { color: var(--accent); } .rp-head .t-warn dd { color: var(--warn); } .rp-head .t-bad dd { color: var(--alarm); }
+.rp-part { display: flex; flex-direction: column; gap: 8px; }
+.rp-part h3 { margin: 0; font-size: 17px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.rp-part ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.rp-part li { display: grid; grid-template-columns: 48px minmax(0, 1fr); gap: 8px; font-size: 15px; line-height: 1.55; border-left: 3px solid var(--border); padding-left: 8px; }
+.rp-part li time { color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.rp-part li span { grid-column: 2; overflow-wrap: anywhere; }
+.rp-part li b { font-weight: 700; margin-right: 6px; }
+.rp-part li.t-ok { border-left-color: var(--accent); } .rp-part li.t-warn { border-left-color: var(--warn); } .rp-part li.t-bad { border-left-color: var(--alarm); }
+.rp-none { margin: 0; color: var(--ink-faint); font-size: 14px; }
+.rp-prevent textarea { width: 100%; min-height: 96px; font: inherit; font-size: 15px; padding: 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--panel-2); color: var(--ink); }
+.rp-raw summary { cursor: pointer; color: var(--ink-dim); font-size: 14px; }
+.rp-raw textarea { width: 100%; min-height: 220px; margin-top: 8px; font: 13px/1.6 ui-monospace, Menlo, monospace; background: var(--panel); color: var(--ink); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
+.print-only { display: none; }
+@media print {
+  .no-print { display: none !important; }
+  .print-only { display: block; margin: 0; white-space: pre-wrap; }
+  body { background: #fff !important; color: #000 !important; }
+  .rp { max-width: none; padding: 0; }
+  .rp-doc { border: 0; padding: 0; background: #fff; color: #000; }
+  .rp-head { background: #f2f2f2; }
+  /* flex columns do not fragment across pages in Chrome: print them as plain blocks */
+  .rp, .rp-doc, .rp-part, .rp-part ul { display: block; }
+  .rp-doc > * + *, .rp-part > * + * { margin-top: 10px; }
+  .rp-part ul li + li { margin-top: 5px; }
+  .rp-part li { break-inside: avoid; }
+  .rp-part h3 { break-after: avoid; }
+}

@@ -132,3 +132,9 @@ html, body, #root { height: 100%; overflow: hidden; }
 .field-sop-go { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 10px; border: 0; background: #2e9e5b; color: #fff; cursor: pointer; }
 .field-sop-go:disabled { background: rgba(127, 127, 127, .35); cursor: default; }
 .field-sop-ok { margin: 0; font-weight: 700; color: #2e9e5b; }
+/* raw-material plate above the loading-area pallet (issue #48): same chip as a machine tag, one row per low material */
+.f3-stock { gap: 1px; }
+.f3-stock b { font-size: 14px; }
+.f3-stock.green { border-top-color: #3fcf5a; }
+.f3-stock.amber { border-top-color: #f5a623; } .f3-stock.amber b { color: var(--c-amber); }
+.f3-stock.red { border-top-color: #ff3b30; background: #ffe9e4; } .f3-stock.red b { color: var(--c-red); }

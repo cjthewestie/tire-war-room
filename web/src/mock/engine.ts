@@ -13,6 +13,9 @@ import { isAbnormal } from '../store'
 import { HOUR, MIN, baseJobs, makeSchedule, pressSize, shiftInstances, version } from './schedule'
 import { type Ctx, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, press7Script, r1 } from './scripts'
 
+/** Tyres already de-molded at the page-11 start (dataset 10/28 02:12 shifted to 10/03): S 21, M 9, L 7 of 100. */
+const MOCK_ORDER_DONE: Record<'S' | 'M' | 'L', number> = { S: 21, M: 9, L: 7 }
+
 export type Network = HeaderStatus['network']
 
 interface Base { temp: number; pressure: number | null; flow: number | null; steam: number | null; stage: CompoundStage }
@@ -217,7 +220,12 @@ export class MockEngine {
     const midnight = Date.parse(isoTaipei(this.now).slice(0, 10) + 'T17:00:00+08:00')
     return {
       header: { normal_count: tiles.length - abnormal, abnormal_count: abnormal, factory_time: isoTaipei(this.now), llm_mode: 'mock', network: this.network },
-      orders: (['S', 'M', 'L'] as const).map((sz) => ({ size: sz, label: SIZE_LABEL[sz], done: DEMO_ORDER_PROGRESS[sz][0], total: DEMO_ORDER_PROGRESS[sz][1], remaining_h: DEMO_ORDER_PROGRESS[sz][2] })),
+      orders: (['S', 'M', 'L'] as const).map((sz) => {
+        // the team dataset's tyres de-molded by 02:12 (issue #20), the page-2 hours scaled by tyres left (as Factory.order_progress)
+        const [d0, total, hours] = DEMO_ORDER_PROGRESS[sz]
+        const done = MOCK_ORDER_DONE[sz]
+        return { size: sz, label: SIZE_LABEL[sz], done, total, remaining_h: Math.round((hours * (total - done) / (total - d0)) * 10) / 10 }
+      }),
       semi_finished: {
         tire_label: '大胎 #07', order_id: '#L-307', size: 'L', planned_mold_in_at: isoTaipei(midnight),
         parts: [

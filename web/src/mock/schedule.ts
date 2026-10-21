@@ -13,8 +13,8 @@ const BACKPROP: Record<TireSize, { bond: number; feed: number; pieces: number }>
 }
 
 export function pressSize(id: string): TireSize {
-  if (id === 'CURE-07' || id === 'CURE-08') return 'M'
-  if (id === 'CURE-09' || id === 'CURE-10') return 'L'
+  if (id === 'CURE-08' || id === 'CURE-09') return 'M'
+  if (id === 'CURE-10' || id === 'CURE-11') return 'L'
   return 'S'
 }
 
@@ -74,7 +74,7 @@ const SIZE_PREFIX: Record<TireSize, string> = { S: 'S-1', M: 'M-2', L: 'L-3' }
 
 /**
  * Base plan around `now`. `anchors` pins the job running at `now` on a press (mold-in time),
- * e.g. CURE-07's medium tire molded in at 16:14 the day before (page 11: 10 h into a 28 h cure).
+ * e.g. CURE-07's small tire molded in at 11:50 the day before (page 11: 14.4 h into a 24 h cure).
  */
 export function baseJobs(now: number, anchors: Record<string, { moldIn: number; orderId: string; moldId: string }> = {}, nextOrder: Record<string, { orderId: string; moldId: string }> = {}): ScheduleJob[] {
   const jobs: ScheduleJob[] = []
