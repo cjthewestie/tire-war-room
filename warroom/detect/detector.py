@@ -65,6 +65,7 @@ FLOW_ONLY_HOLD_S = 45.0
 PRESSURE_LOW_FRAC = 0.8
 PRESSURE_HOLD_S = 20.0
 REARM_NORMAL_S = 300.0
+RECOVER_MAX_S = 1800.0          # after a repair: at most 30 min to come back before watching again
 MAX_FIT_S = 600.0
 TAUS = np.geomspace(3.0, 3600.0, 48)
 
@@ -184,6 +185,7 @@ def fit_series(ts: np.ndarray, vs: np.ndarray) -> Fit:
 class _Chan:
     buf: deque = field(default_factory=deque)          # (t, v) validated
     baseline: float | None = None
+    normal: float | None = None                        # the first baseline: the machine before any fault
     init: list = field(default_factory=list)
     diffs: deque = field(default_factory=lambda: deque(maxlen=60))
     sigma: float = 0.05
@@ -208,6 +210,8 @@ class _Track:
     pressure_low_since: float | None = None
     emitted: bool = False
     normal_since: float | None = None
+    recovering: bool = False                 # repaired: on its way back to normal, nothing to report
+    recover_since: float | None = None
 
 
 class StreamDetector:
@@ -352,9 +356,9 @@ class StreamDetector:
         if c.baseline is None:
             c.init.append(v)
             if len(c.init) >= BASELINE_INIT_N:
-                c.baseline = float(np.median(c.init))
+                c.baseline = c.normal = float(np.median(c.init))
             return
-        frozen = ch is Channel.TEMP and tr.onset_t is not None
+        frozen = (ch is Channel.TEMP and tr.onset_t is not None) or tr.recovering
         frozen = frozen or (ch is Channel.WATER_FLOW and tr.flow_low_since is not None)
         frozen = frozen or (ch is Channel.PRESSURE and tr.pressure_low_since is not None)
         if tr.emitted:
@@ -441,6 +445,12 @@ class StreamDetector:
             return None
         v = temp.last_valid[1]
         dev = v - temp.baseline
+        if tr.recovering:
+            # repaired: the way back to normal is not an anomaly; watch again once it is back (or after 30 min)
+            tr.recover_since = tr.recover_since or t
+            if abs(dev) < max(1.0, 5.0 * temp.sigma) or t - tr.recover_since >= RECOVER_MAX_S:
+                tr.recovering, tr.recover_since = False, None
+            return None
         onset_thr = max(1.0, 5.0 * temp.sigma)
         dev_thr = PRESS_DEV_C if is_press else OTHER_DEV_C
         # --- onset / alarm bookkeeping
@@ -620,9 +630,11 @@ class StreamDetector:
             result.append(a)
         return result
 
-    def reset(self, machine_id: str | None = None) -> None:
+    def reset(self, machine_id: str | None = None, *, repaired: bool = False) -> None:
         """Close the episode. With a machine id the baseline restarts from the last 30 s of
-        valid data (the new normal); with None every track starts fresh."""
+        valid data (the new normal); with None every track starts fresh. repaired=True (the fault was
+        fixed): the baseline goes back to the machine's normal, so the way back is not a new 驟降 / 驟升
+        (Kyle 10-21: 回報處置完成 → 「A 線大開煉機溫度驟降」)."""
         if machine_id is None:
             self._tracks.clear()
             self.plan_watcher.reset()
@@ -631,10 +643,13 @@ class StreamDetector:
         if tr is None:
             return
         for c in tr.chans.values():
-            if c.buf:
+            if repaired and c.normal is not None:
+                c.baseline = c.normal
+            elif c.buf:
                 t_now = c.buf[-1][0]
                 recent = [v for t, v in c.buf if t >= t_now - 30.0]
                 c.baseline = float(np.median(recent)) if recent else c.baseline
         tr.onset_t, tr.onset_sign, tr.alarm_since, tr.calm_since = None, 0, None, None
         tr.flow_low_since = tr.pressure_low_since = None
         tr.emitted, tr.normal_since = False, None
+        tr.recovering, tr.recover_since = repaired, None

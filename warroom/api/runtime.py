@@ -80,6 +80,10 @@ KIND_TEXT = {"overheat": "溫度過高", "temp_drop": "溫度下降", "pressure_
              "multi_machine": "多機同時異常", "schedule_slip": "排程延誤"}
 
 
+# worker tasks that fix the machine itself (warroom/sim/work.py plan_tasks); 換模準備 / 設定硫化時間 do not
+REPAIR_KINDS = frozenset({"檢修", "停用檢修", "放慢投料", "暫停投料"})
+
+
 @dataclass
 class Components:
     """Everything the Runtime drives. Built by ComponentBuilder; tests may inject their own."""
@@ -492,6 +496,7 @@ class Runtime:
                                                               fresh_store=not want_resume)
         from warroom.api.ingest import IngestPipeline
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
+        self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
         self.speed = float(self.settings.sim_speed)
         self.paused = False
         self.network = "online"
@@ -807,6 +812,7 @@ class Runtime:
         readings: list[SensorReading] = self.sim.step(dt_s)
         if self.clock.now() == before:          # sim did not move the clock itself
             self.clock.advance(dt_s)
+        self._apply_repairs()
         self.ticks += 1
         self.safety_pass(readings)              # RED path first: nothing below can delay it
         self._random_event()                    # issue #36: off by default
@@ -948,7 +954,23 @@ class Runtime:
                               {"task_id": t.id, "status": t.status, "change": what, "kind": t.kind, "title": t.title,
                                "worker_id": t.worker_id, "worker": t.worker_name, "where": t.where,
                                "at": now.isoformat()}, t.event_id)
+            # Kyle 10-21: 「已經兩個人去修理…但沒有修好，這樣不行」. The crew finished every repair task of this
+            # event on this machine: the fault is fixed (applied after this sim step, see _apply_repairs).
+            if t.status == "完成" and t.kind in REPAIR_KINDS and t.machine_id and t.event_id:
+                same = [x for x in board.for_event(t.event_id) if x.kind in REPAIR_KINDS and x.machine_id == t.machine_id]
+                if same and all(x.status == "完成" for x in same):
+                    self._repaired[t.machine_id] = t.event_id
         board.add_listener(on_task)
+
+    def _apply_repairs(self) -> None:
+        """Clear the faults of machines whose repair tasks all finished (once per machine and event)."""
+        while self._repaired:
+            mid, eid = self._repaired.popitem()
+            if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
+                continue                        # nothing injected on it (a replayed or already-cleared fault)
+            self.sim.clear_faults(mid)
+            self.c.detector.reset(mid, repaired=True)
+            self.audit.append(AuditKind.SYSTEM, "world", {"msg": "現場處置完成，故障排除", "machine_id": mid}, eid)
 
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
         """Issue #10: open a supervisor-command event now and run it as a tracked task (cancelled on a
@@ -1233,7 +1255,7 @@ class Runtime:
 
     def clear_faults(self, machine_id: str | None = None) -> None:
         self.sim.clear_faults(machine_id)
-        self.c.detector.reset(machine_id)
+        self.c.detector.reset(machine_id, repaired=machine_id is not None)
         self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "faults cleared", "machine_id": machine_id})
 
     def clock_info(self) -> dict[str, Any]:

@@ -488,7 +488,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         r = rt()
         return HealthStatus(ok=True, llm_mode=r.llm_mode, model=r.settings.model, strict=getattr(r, "strict", False),
                             llm_reachable=await r.llm_reachable(), qdrant_ok=r.kb_ok(),
-                            sim_running=r.running and not r.paused, factory_time=r.now(), uptime_s=r.uptime_s())
+                            sim_running=r.running and not r.paused, factory_time=r.now(), uptime_s=r.uptime_s(),
+                            agent_runtime=os.environ.get("WARROOM_AGENT_RUNTIME") or None)
 
     @app.get("/api/health/components")
     async def health_components() -> dict[str, Any]:
