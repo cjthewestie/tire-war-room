@@ -1497,6 +1497,7 @@ class StateMachine:
         ev, plan = run.ev, run.plan
         assert plan is not None
         run.feasible = True
+        self._press_maintenance(run)
         by_id = {sr.step.id: sr for sr in ev.steps}
         reads = [sr for sr in ev.steps if sr.step.tool not in WRITE_TOOLS]
         line_bits: list[str] = []
@@ -1557,6 +1558,53 @@ class StateMachine:
         if line_bits:
             self._note(ev, "工具", "　".join(line_bits), "tool")
         return None
+
+    PRESS_FAULT_KINDS = frozenset({AnomalyKind.TEMP_DROP, AnomalyKind.STEAM_LOW, AnomalyKind.PRESSURE_LOW})
+
+    def _press_maintenance(self, run: _Run) -> None:
+        """A press temperature drop gets a maintenance notice (R1, auto), so a 檢修 task exists and the steam fault
+        is repaired when it is done (the runtime clears a machine's fault once every repair task of the event on
+        it is finished). Without it the H1 plan (延長硫化、重排) closed the event while presses 3 and 10 of
+        concurrent_3 stayed at 122–123 °C 「注意」 for good. Code adds it when the plan has none (the rule plan
+        and a real model's alike), once per event. A plan that takes the press out creates 停用檢修 itself: the
+        earlier round's 檢修 task still open is withdrawn, so it cannot clear the fault while the press-out card
+        waits (page 11: H1 檢修 → H2 7 號機停用)."""
+        ev, plan = run.ev, run.plan
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        if plan is None or plan.safe_stop or run.sop_handoff or ev.source != "detector" or mdef is None \
+                or mdef.line is not Line.CURE or ev.anomaly.kind not in self.PRESS_FAULT_KINDS:
+            return
+        mid = ev.machine_id
+        earlier = [sr for r in ev.prior_rounds for sr in r.steps if sr.step.tool is ToolName.NOTIFY_TEAMS
+                   and sr.step.args.get("kind") == NotifyKind.MAINTENANCE.value
+                   and sr.step.args.get("machine_id") in (None, mid) and sr.state == "ok"]
+        if self._takes_machine_out(ev, plan):
+            board = self._board()
+            for sr in earlier:
+                gone = board.cancel(ev.id, sr.step.id, self._now()) if board is not None else []
+                if gone:
+                    self.audit.append(AuditKind.TASK, "state_machine",
+                                      {"cancelled": gone, "superseded_step": sr.step.id,
+                                       "reason": "press taken out: 停用檢修 replaces the earlier 檢修"}, event_id=ev.id)
+                    self._note(ev, "系統", f"{machine_label(mid)}改為停用檢修：收回前一輪「檢查蒸汽供應」的檢修任務", "info")
+            return
+        if earlier or any(sr.step.tool is ToolName.NOTIFY_TEAMS and sr.step.args.get("kind") == NotifyKind.MAINTENANCE.value
+                          and sr.step.args.get("machine_id") in (None, mid) for sr in ev.steps):
+            return
+        used = {sr.step.id for sr in ev.steps}
+        n = 1 + max((int(m.group(1)) for x in used if (m := re.fullmatch(r"S(\d+)[a-z]?", x))), default=0)
+        while f"S{n}" in used:
+            n += 1
+        step = PlanStep(id=f"S{n}", tool=ToolName.NOTIFY_TEAMS, purpose="通知維修檢查蒸汽供應（自動）",
+                        args={"teams": [TeamId.MAINTENANCE.value], "kind": NotifyKind.MAINTENANCE.value, "machine_id": mid,
+                              "message": f"{machine_label(mid)}溫度下降，請檢查蒸汽供應與溫度計"})
+        # a step of this round only (not of run.plan): a discussion replan that reuses the plan's steps does not
+        # send the notice twice
+        ev.steps.append(StepRun(step=step, state="pending"))
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"maintenance_notice_added": step.id, "machine_id": mid,
+                           "reason": "press temperature drop: maintenance must check the steam supply (R1)"},
+                          event_id=ev.id)
 
     def _log_reject(self, run: _Run, step: PlanStep, gd: GateDecision) -> None:
         kind = AuditKind.INTERCEPTED if gd.risk is None else AuditKind.GATE
