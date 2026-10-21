@@ -54,6 +54,7 @@ button.mon-m:hover { text-decoration: underline; text-underline-offset: 3px; }
 
 /* 3. machines: the 11 presses first (one row when the panel is wide), the other 17 one line per production line */
 .mon .machines { container-type: inline-size; }
+.mon .machines .presses-h { margin: 0 0 8px; color: var(--ink-dim); font-size: 13.5px; font-weight: 700; letter-spacing: .02em; line-height: 1.4; }
 .mon .machines .presses { gap: 8px; margin-bottom: 16px; }
 .mon .machines .mlines { gap: 4px; }
 .mon .machines .dq-note { margin: 14px 0 0; }

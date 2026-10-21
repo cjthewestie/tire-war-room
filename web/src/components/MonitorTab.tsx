@@ -346,6 +346,7 @@ function MachinesPanel({ machines, bad, onMachine, focusId }: { machines: Machin
     <Panel title="機台現況" className="machines" fold="phone"
       summary={off.length ? <span className="late">需要注意：{off.map((m) => machineLabel(m.machine_id)).join('、')}</span> : `${machines.length} 台・全部正常`}>
       <p className="mon-sub">{ML_RANGE} 號硫化機可做中、大胎。點機台看溫度、壓力、水流。</p>
+      <h3 className="presses-h">硫化機｜即時溫度（°C）</h3>
       <div className="presses" data-line="CURE">
         {presses.map((m) => (
           <button key={m.machine_id} className={`mdot press st-${m.status}${m.repaired ? ' repaired' : ''}${badBy.has(m.machine_id) ? ' dq' : ''}${m.machine_id === focusId ? ' is-focus' : ''}`}
