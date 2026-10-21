@@ -423,8 +423,10 @@ class Orchestrator:
             return
         sub.reported = True
         text, facts = self.summary(ev, sub)
+        # the durable task log (warroom/api/tasklog.py) reads this row: what it was and where, with the outcome
+        title = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
         self._audit({"orch": "report", "type": sub.type, "type_label": TYPES[sub.type], "state": ev.state.value,
-                     "text": text, **facts}, ev.id)
+                     "text": text, "title": title, "machine_id": ev.machine_id, **facts}, ev.id)
         self.publish()
 
     def summary(self, ev: Event, sub: SubAgent) -> tuple[str, dict[str, Any]]:

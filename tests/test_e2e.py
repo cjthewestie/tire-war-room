@@ -17,9 +17,9 @@ from warroom.contracts import AuditKind, EventState, MachineStatus
 pytestmark = pytest.mark.timeout(300)
 
 
-def _settings(tmp_path, scenario: str) -> Settings:
+def _settings(tmp_path, scenario: str, **over) -> Settings:
     return Settings(audit_path=tmp_path / "audit.jsonl", schedule_dir=tmp_path / "sched",
-                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock")
+                    qdrant_path=tmp_path / "qdrant", scenario=scenario, llm_mode="mock", **over)
 
 
 def _at(rt: Runtime, hms: str) -> datetime:
@@ -33,8 +33,8 @@ async def _run_until(rt: Runtime, hms: str) -> None:
         await rt.tick(1.0, publish=False)
 
 
-async def _start(tmp_path, scenario: str):
-    rt = Runtime(_settings(tmp_path, scenario), allow_fallback=False, run_loop=False)
+async def _start(tmp_path, scenario: str, **over):
+    rt = Runtime(_settings(tmp_path, scenario, **over), allow_fallback=False, run_loop=False)
     assert rt.degraded == {}, rt.degraded               # nothing stubbed or faked in the live path
     await rt.start()
     rt._ingest_kb()                                      # deterministic: index SOPs before the event

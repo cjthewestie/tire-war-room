@@ -54,7 +54,8 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent }: {
     setBusy(true)
     setAsks((xs) => [...xs, chat('me', 'command', text, keys[0], n, ts, true, about), chat('agent', 'reply', 'Agent Nemo 思考中…', keys[1], n + 0.5, ts, true, about)])
     try {
-      const r: MainReply = await transport.message(text, about)
+      // the selected task rides along even when it has no waiting card: the chat talks about it (CJ 2026-10-22: 「A」)
+      const r: MainReply = await transport.message(text, ev?.id ?? about)
       // the reply (with its tool line) stays here until the server's audit row of this turn replaces it
       setAsks((xs) => xs.map((x) => (x.key === keys[0] && x.k === 'chat' ? { ...x, pending: false, turn: r.id }
         : x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply, turn: r.id, steps: r.steps, fellBack: r.fell_back, error: r.error } : x)))
