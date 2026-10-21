@@ -14,8 +14,9 @@ export function useRingRecoveries(events: Event[] | undefined, now: number, spee
   const keys = useMemo(() => (events ?? []).flatMap((e) => { const ph = recoveryPhase(e); return ph ? [recoveryKey(e, ph)] : [] }), [events])
   const keysRef = useRef(keys)
   useEffect(() => { keysRef.current = keys }, [keys])
-  // a phase not recorded yet counts as seen now (ringRecoveries); the next tick records it
-  const live = keys.some((k) => clock.seen[k] == null || clock.wall - clock.seen[k] < TICK_FOR_MS)
+  // a phase not recorded yet counts as seen now (ringRecoveries); the next tick records it. A ramp ticks for its whole
+  // length too (RECOVER_FAST_S may be over TICK_FOR_MS: the ring would stop filling half way)
+  const live = keys.some((k) => clock.seen[k] == null || clock.wall - clock.seen[k] < TICK_FOR_MS + (k.endsWith('|recovering') ? recoverS * 1000 : 0))
   useEffect(() => {
     if (!live) return
     const t = window.setInterval(() => setClock((c) => {

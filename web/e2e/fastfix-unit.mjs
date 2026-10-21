@@ -115,7 +115,14 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const tiles = [{ machine_id: 'B-OPEN', temp_c: 124.26 }]
   const items = repairNotices(evs, tiles)
   check('repaired (3 concurrent) → 3 維修完成 notices, oldest repair first', items.length === 3 && items.every((a) => a.notice === 'repaired') && items[0].title === 'B 線開煉機', items.map((a) => a.title).join('、'))
-  check('… the text carries the live reading and the target: 溫度回降中 124.3°C → ≤118°C', items[0].reason === '溫度回降中 124.3°C → ≤118°C', items[0].reason)
+  check('… the text carries the live reading and the normal value (the anomaly\'s baseline 94°C): 溫度回降中 124.3°C → 94°C', items[0].reason === '溫度回降中 124.3°C → 94°C', items[0].reason)
+  // p.11 / steam_low: 128 → 122°C meets 「≥121°C」 already; the notice heads for the normal 128°C, not the expectation
+  const drop = { ...evs[0], id: 'EV-CURE-07', machine_id: 'CURE-07', anomaly: { ...base.anomaly, machine_id: 'CURE-07', value: 122.07, baseline: 127.98 },
+    plan: { ...base.plan, hypothesis: { ...base.plan.hypothesis, expectation: { ...base.plan.hypothesis.expectation, machine_id: 'CURE-07', op: '>=', value: 121 } } } }
+  const dn = repairNotices([drop], [{ machine_id: 'CURE-07', temp_c: 125.94 }])[0]
+  check('… a temperature drop (≥121°C) heads for the normal value: 溫度回升中 125.9°C → 128°C', dn?.reason === '溫度回升中 125.9°C → 128°C', dn?.reason)
+  const sup = repairNotices([{ ...drop, anomaly: { ...drop.anomaly, baseline: 0 } }], [{ machine_id: 'CURE-07', temp_c: 125.94 }])[0]
+  check('… no baseline (supervisor / plant event): the expectation\'s target, 溫度回升中 125.9°C → ≥121°C', sup?.reason === '溫度回升中 125.9°C → ≥121°C', sup?.reason)
   const st = { seen: new Set(), held: [] }
   const first = diffPending(st, items.slice(0, 1), true)
   check('one notice → rings once: 維修完成：B 線開煉機', first.fire.length === 1 && alertText(first.fire, false).title === '維修完成：B 線開煉機', alertText(first.fire, false).title)

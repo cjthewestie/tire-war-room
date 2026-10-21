@@ -7,7 +7,7 @@
 // re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Event, MachineTile } from '../contracts'
-import { expectationOf, recoverText } from '../aiStatus'
+import { expectationOf, normalOf, recoverText } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { plain } from '../plain'
 
@@ -36,7 +36,7 @@ export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] 
     if (e.state !== 'closed' && e.state !== 'safe_stop') {
       const x = expectationOf(e)
       const now = x?.channel === 'temp_c' ? tiles.find((t) => t.machine_id === e.machine_id)?.temp_c ?? null : null
-      out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now), notice: 'repaired' })
+      out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now, normalOf(e, x)), notice: 'repaired' })
     } else if (e.state === 'closed' && e.review?.status === 'pending') {
       out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: plain(e.outcome) || '異常報告已產生', notice: 'report' })
     }
