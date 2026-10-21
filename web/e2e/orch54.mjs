@@ -52,7 +52,7 @@ await p.locator('[data-testid="chat-input"]').press('Enter')
 check('gibberish → 「這句我看不懂」, no subagent', await until(async () => (await lastAgent()).includes('看不懂'), 30) &&
   ((await api('/api/subagents')).j?.items ?? []).length === subsBefore, (await lastAgent()).slice(0, 60))
 
-// 1b. a delivery-risk item: the 主 agent drafts the plan by itself → 核准並派發 → executes → reports back
+// 1b. a delivery-risk item: the 主 agent drafts the plan by itself → 核准 → executes → reports back
 const risk = p.locator('[data-testid^="home-item-order:"]').first()
 await risk.click()
 check('opening a ② item: 主 agent 規劃中… (no 請 AI 重排 button)', await until(async () => (await p.locator('[data-testid="replan-status"]').innerText().catch(() => '')).includes('主 agent') || (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0, 20) &&
@@ -62,8 +62,8 @@ for (let i = 0; i < 40 && !cardUp; i++) {
   cardUp = (await p.locator('[data-testid="plan-area"] [data-testid="approval-visual"]').count()) > 0
   if (!cardUp) { await step(30); await p.waitForTimeout(llm ? 1500 : 400) }
 }
-check('the plan arrives and is selected: 主 agent 的計劃 + 核准並派發', cardUp && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1 &&
-  (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').innerText()).includes('核准並派發'))
+check('the plan arrives and is selected: 主 agent 的計劃 + 核准', cardUp && (await p.locator('[data-testid="plan-area"] [data-testid="main-plan-tag"]').count()) === 1 &&
+  (await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').innerText()).includes('核准'))
 const disp = String(((await api('/api/audit?kind=system&limit=5000')).j ?? []).filter((e) => e.actor === 'main_agent' && e.payload.orch === 'dispatch' && e.payload.phase === 'plan' && e.payload.type === 'order').map((e) => `${e.payload.text} ${e.payload.by}`).pop() ?? '')
 check('主 agent asked the 訂單處理 subagent to plan it (audit)', disp.includes('已請子 agent 規劃：訂單處理') && /(model|rules)$/.test(disp), disp.slice(0, 120))
 await p.screenshot({ path: `${OUT}/home-plan-1440.png` })
@@ -71,7 +71,7 @@ const subs = async () => (await api('/api/subagents')).j
 const me = (await subs()).items.find((x) => x.type === 'order' && x.source === 'supervisor')
 await p.locator('[data-testid="plan-area"] [data-testid="visual-approve"]').click()
 await p.locator('[data-testid="agent-switch"]').selectOption('main')      // opening the item followed its subagent; back to the 主 agent
-check('核准並派發 → 主 agent dispatches the subagent to execute', await until(async () => (await tr.locator('[data-testid="sc-agent"]', { hasText: '派發子 agent 執行' }).count()) >= 1, 40),
+check('核准 → 主 agent dispatches the subagent to execute', await until(async () => (await tr.locator('[data-testid="sc-agent"]', { hasText: '派發子 agent 執行' }).count()) >= 1, 40),
   (await tr.locator('[data-testid="sc-agent"]').last().innerText().catch(() => '')).replace(/\n/g, ' ').slice(0, 100))
 await p.screenshot({ path: `${OUT}/home-dispatched-1440.png` })
 for (let i = 0; i < 60; i++) {

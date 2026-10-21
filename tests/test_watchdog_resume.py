@@ -82,6 +82,9 @@ def _serve(tmp: Path, port: int, log_name: str) -> subprocess.Popen:
     env = {k: v for k, v in os.environ.items() if not k.startswith("WARROOM_")}
     env.update({"AUDIT_PATH": str(tmp / "audit.jsonl"), "SCHEDULE_DIR": str(tmp / "sched"),
                 "LLM_MODE": "mock", "WARROOM_INGEST": "direct", "WARROOM_DEMO_CONTROLS": "1",
+                # the press-7 safety hold needs the temperature to keep falling: the demo's fast repair (3 s wall)
+                # fixed the machine first and the hold never came (failing on main a20416b too)
+                "REPAIR_FAST_S": "0",
                 "QDRANT_PATH": str(tmp / "qdrant")})
     env.pop("WARROOM_SUPERVISOR_PIN", None)
     log = open(tmp / log_name, "w")  # noqa: SIM115 - closed with the process

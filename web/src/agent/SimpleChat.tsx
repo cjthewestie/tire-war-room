@@ -36,7 +36,7 @@ function BubbleRow({ b }: { b: Bubble }) {
   return (
     <div className={`sc-row ${b.who}`} data-testid={b.who === 'me' ? 'sc-me' : 'sc-agent'}>
       <div className={`sc-b ${b.pending ? 'pending' : ''}`}>
-        {b.pending && b.who === 'agent' ? <><i className="spin" />NemoClaw 思考中…</> : plain(b.text)}
+        {b.pending && b.who === 'agent' ? <><i className="spin" />Agent Nemo 思考中…</> : plain(b.text)}
       </div>
       {steps.length > 0 && (
         <button type="button" className="sc-tools" onClick={() => setOpen((o) => !o)} aria-expanded={open} data-testid="sc-tools">
@@ -60,7 +60,7 @@ export function SubProgress({ ev, talk = [] }: { ev: Event; talk?: Bubble[] }) {
   const open = ev.state !== 'closed' && ev.state !== 'safe_stop'
   const [busy, setBusy] = useState(false)
   const stop = async () => {
-    if (!transport?.interrupt || !window.confirm('中斷 NemoClaw 處理這件事？不會再呼叫工具，待核准的卡作廢、還沒做完的人員任務取消，排程不變。')) return
+    if (!transport?.interrupt || !window.confirm('中斷 Agent Nemo 處理這件事？不會再呼叫工具，待核准的卡作廢、還沒做完的人員任務取消，排程不變。')) return
     setBusy(true)
     try { await transport.interrupt(ev.id) } catch { /* the status shows what happened */ } finally { setBusy(false) }
   }
@@ -71,7 +71,7 @@ export function SubProgress({ ev, talk = [] }: { ev: Event; talk?: Bubble[] }) {
         {open && transport?.interrupt && <button className="btn-ghost danger sp-stop" disabled={busy} onClick={() => void stop()} data-testid="sp-interrupt">中斷</button>}
       </p>
       {ev.outcome && <p className="small">{plain(ev.outcome)}</p>}
-      <ul className="sp-tools" aria-label="NemoClaw 用過的工具">
+      <ul className="sp-tools" aria-label="Agent Nemo 用過的工具">
         {tools.map((t) => {
           let line = ''
           if (t.status === 'ok' && t.data) { try { line = resultText(t.tool, t.args, t.data) } catch { line = '' } }

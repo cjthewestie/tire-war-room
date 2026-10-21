@@ -11,6 +11,9 @@ import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
 import { shiftInstances } from './mock/schedule'
 
+/** Agent Nemo's conversation for this page load (POST /api/main/message conversation_id). */
+const CONVERSATION_ID = `c-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+
 export type Mode = 'live' | 'mock'
 
 /** GET /api/schedule/rollback/preview: what a rollback would do and whether the gate allows it. */
@@ -194,7 +197,8 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
-  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId }) }
+  // one conversation per page load (like #99's ask): Agent Nemo's memory is kept per conversation, never shared
+  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId, conversation_id: CONVERSATION_ID }) }
   interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {

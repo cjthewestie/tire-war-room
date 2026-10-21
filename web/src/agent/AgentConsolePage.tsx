@@ -25,6 +25,7 @@ import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import { ReportBlock } from './ReportBlock'
+import { TaskLog } from './TaskLog'
 import './agent.css'
 
 type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 'talk'
@@ -81,9 +82,9 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
     <>
     <ModelQueueBar />
     <div className="trace" data-testid="agent-page">
-      <aside className="trace-side panel" aria-label="NemoClaw 與處理中的事件">
+      <aside className="trace-side panel" aria-label="Agent Nemo 與處理中的事件">
         <button type="button" className={`tree-root ${main ? 'on' : ''}`} onClick={() => pick(MAIN)} data-testid="tree-root" aria-pressed={main}>
-          <span className="tree-title"><span className="tree-dot" aria-hidden />NemoClaw ▸ 處理中的事件</span>
+          <span className="tree-title"><span className="tree-dot" aria-hidden />Agent Nemo ▸ 處理中的事件</span>
           <span className="muted small">事件 {events.length}・進行中 {events.filter(openOf).length}</span>
         </button>
         <div className="seg sm" role="group" aria-label="事件範圍">
@@ -91,8 +92,8 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
             <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'all' ? '全部' : s === 'open' ? '處理中' : '已結案'}</button>
           ))}
         </div>
-        <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="NemoClaw 或事件">
-          <option value={MAIN}>NemoClaw 對話</option>
+        <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
+          <option value={MAIN}>Agent Nemo 對話</option>
           {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}：${plainStatus(sa)}` : evName(e)}</option> })}
         </select>
         <ul className="trace-list tree" role="listbox" aria-label="處理中的事件">
@@ -109,11 +110,12 @@ export function AgentConsolePage({ asks, setAsks, initial }: {
           })}
           {!listed.length && <li className="muted small">{scope === 'open' ? '目前沒有進行中的事件。' : '沒有。'}</li>}
         </ul>
+        <TaskLog onPick={pick} />
       </aside>
       {main ? (
-        <section className="panel trace-main main-thread" aria-label="NemoClaw" data-testid="main-thread">
-          <h2 className="trace-h">NemoClaw</h2>
-          <Bubbles items={thread} empty="跟NemoClaw 說要做的事，或問工廠現在的狀況。" />
+        <section className="panel trace-main main-thread" aria-label="Agent Nemo" data-testid="main-thread">
+          <h2 className="trace-h">Agent Nemo</h2>
+          <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
           <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={null} /></div>
         </section>
       ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} /> : (
@@ -142,8 +144,8 @@ function ModelQueueBar() {
   )
 }
 
-/** The selected subagent: how it was dispatched, what it waits on, its workers' tasks, and 「中斷」. */
-function SubagentHead({ ev }: { ev: Event }) {
+/** The selected event: where it stands, its workers' tasks, and 「中斷」 (no dispatch or typed agent: CJ 2026-10-21). */
+function EventHead({ ev }: { ev: Event }) {
   const { state, transport } = useWarRoom()
   const sa = state.subagents?.items.find((x) => x.id === ev.id)
   const [busy, setBusy] = useState(false)
@@ -152,17 +154,15 @@ function SubagentHead({ ev }: { ev: Event }) {
   const open = ev.state !== 'closed' && ev.state !== 'safe_stop'
   const stop = async () => {
     if (!transport?.interrupt) return
-    if (!window.confirm(`中斷 NemoClaw 處理這件事（${sa?.type_label ?? ''}・${ev.id}）？\n不會再呼叫工具；待核准的卡作廢、還沒做完的人員任務取消；排程維持現狀。這個動作會寫進稽核紀錄。`)) return
+    if (!window.confirm(`中斷這件事（${ev.id}）？\n不會再呼叫工具；待核准的卡作廢、還沒做完的人員任務取消；排程維持現狀。這個動作會寫進稽核紀錄。`)) return
     setBusy(true); setMsg(null)
-    try { await transport.interrupt(ev.id); setMsg('已中斷：NemoClaw 已回報') } catch (e) { setMsg(`中斷失敗：${String(e).replace(/^Error: /, '')}`) } finally { setBusy(false) }
+    try { await transport.interrupt(ev.id); setMsg('已中斷') } catch (e) { setMsg(`中斷失敗：${String(e).replace(/^Error: /, '')}`) } finally { setBusy(false) }
   }
   return (
-    <section className="sub-head" aria-label="NemoClaw" data-testid="sub-head">
+    <section className="sub-head" aria-label="事件狀態" data-testid="sub-head">
       <div className="sub-head-row">
-        <span className="tree-from">NemoClaw →</span>
-        <b>{sa?.type_label ?? 'NemoClaw'}</b>
+        <b>{evName(ev)}</b>
         {sa && <span className={`sub-pill t-${SUB_TONE[sa.status]}`}>{SUB_STATUS[sa.status]}</span>}
-        {sa && <small className="muted">{sa.via === 'code' ? '程式依偵測種類派發' : sa.via === 'model' ? 'Nemotron 選派' : '關鍵字規則派發'}・優先 {sa.priority_label}{sa.reason ? `・${sa.reason}` : ''}</small>}
         {open && transport?.interrupt && <button className="btn-ghost danger sub-stop" onClick={() => void stop()} disabled={busy} data-testid="interrupt">{busy ? '中斷中…' : '中斷'}</button>}
       </div>
       {msg && <p className="muted small">{msg}</p>}
@@ -208,7 +208,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
           <span className={`state-pill st-${ev.state}`}>{STATE_LABEL[ev.state]}</span>
         </span>}
       </header>
-      {ev && <SubagentHead ev={ev} />}
+      {ev && <EventHead ev={ev} />}
       {ev && <StateDiagram ev={ev} path={path} pick={pick} onPick={setPick} />}
       <dl className="trace-stats">
         <div><dt>步驟</dt><dd>{items.length}</dd></div>

@@ -19,7 +19,7 @@ from warroom.contracts import AuditEntry, AuditKind
 
 TERMINAL = ("closed", "safe_stop")
 _MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
-TYPE_LABEL = {"event": "機台異常", "command": "主管任務", "plant": "工廠事件", "ask": "問戰情室", "main": "NemoClaw 對話"}
+TYPE_LABEL = {"event": "機台異常", "command": "主管任務", "plant": "工廠事件", "ask": "問戰情室", "main": "Agent Nemo 對話"}
 
 
 def _day(ts: datetime) -> str:

@@ -1,4 +1,4 @@
-// Home 主控台: the 核准區 list, the plan of the selected item (核准並派發 / 討論), and the conversation with the 主 agent
+// Home 主控台: the 核准區 list, the plan of the selected item (核准 / 討論), and the conversation with the 主 agent
 // (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
 // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
 import { useEffect, useMemo, useState } from 'react'
@@ -80,7 +80,7 @@ function Console({ planEv, asks, setAsks, focus, onFull }: {
   const brief = useEventBriefing(talkEv)
 
   return (
-    <section className="console panel" aria-label="NemoClaw 對話">
+    <section className="console panel" aria-label="Agent Nemo 對話">
       <header className="con-h">
         <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
       </header>
@@ -91,7 +91,7 @@ function Console({ planEv, asks, setAsks, focus, onFull }: {
           ) : null} />
         </div>
       )}
-      <Bubbles items={thread} empty="跟NemoClaw 說要做的事，或問工廠現在的狀況。" />
+      <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
       <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
   )

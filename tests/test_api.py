@@ -342,8 +342,8 @@ async def test_crashing_state_machine_does_not_kill_loop(tmp_path):
 REAL_NEEDED = ("sim", "detector", "safety", "approvals", "audit", "tools", "gate", "commander", "state_machine")
 
 
-def _real_runtime(tmp_path, scenario_name) -> Runtime:
-    rt = Runtime(_settings(tmp_path, scenario=scenario_name), run_loop=False)
+def _real_runtime(tmp_path, scenario_name, **over) -> Runtime:
+    rt = Runtime(_settings(tmp_path, scenario=scenario_name, **over), run_loop=False)
     missing = {k: v for k, v in rt.degraded.items() if k in REAL_NEEDED}
     if missing:
         pytest.skip(f"sibling modules not ready: {missing}")
