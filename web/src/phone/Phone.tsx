@@ -6,7 +6,7 @@ import type { ApprovalRequest, AskAnswer } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
 import { RISK_PLAIN, plain } from '../plain'
-import { machineLabel } from '../factory'
+import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
@@ -180,7 +180,8 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
       <details className="ph-why">
         <summary>為什麼</summary>
         {a.done.length > 0 && <p className="muted small">已做：{a.done.map(plain).join('；')}</p>}
-        {ev && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
+        {/* plant events and supervisor commands are about the whole plant (machine PLANT): no sensor trend to draw */}
+        {ev && ev.machine_id in MACHINE_META && <TemperatureTrend machineId={ev.machine_id} hypotheses={ev.hypotheses} compact />}
       </details>
       </div>
       <div className="ph-col-b">

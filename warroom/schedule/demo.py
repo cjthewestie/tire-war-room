@@ -3,17 +3,16 @@
     orders, shifts, seed = demo_inputs(now)          # page-11 factory state at 10/03 02:14
     store = FileScheduleStore(root, initial=seed)
     res, ver = reschedule(store, FallbackScheduler(), now, orders, shifts,
-                          cure_overrides_h={"CURE-07": 36.5})   # S3 after S1 (H1: temp holds at 122 °C)
-    # -> #A-311 moves CURE-07 -> CURE-09, deliveries met, gap "10/03 夜班缺 1 人",
+                          cure_overrides_h={"CURE-07": 28.5})   # S3 after S1 (H1: temp holds at 122 °C)
+    # -> #A-311 moves off CURE-07 to another small press, deliveries met, gap "10/03 夜班缺 1 人",
     #    options 夜班加班 / 從 2 線調 1 人, solver's pick = transfer
     res, ver = reschedule(store, ..., unavailable_presses=["CURE-07"])   # 02:31 H2: press 7 out
 
 Page-11 layout (demo day D = now's date; the proposal's demo day 10/03/2026 is a Saturday):
-- CURE-07 cures #A-307 (M) since D-1 16:14 — 10 h done at 02:14 — next mold #A-311 (due D+3).
-- CURE-08 / CURE-09 cure #L-07 (L), ending D 22:00 / 14:00; CURE-10 cures #A-307 ending D+1 00:00.
-  CURE-09 is free early enough for its 8 h mold change (principle 4) to land #A-311 on the
-  Saturday night, de-molding Monday 清晨 — the page-11 move 7 -> 9.
-- Small presses cure #S-38. The Saturday night BODY crew has 1 of 2 people (one on leave); night
+- CURE-07 (small-only, dataset EV-2 tire S-027) cures #S-38 (S, 24 h) since D-1 11:50 — 14.4 h done at
+  02:14 — next mold #A-311 (small, due D+3).
+- CURE-08 / CURE-09 cure #L-07 (L), ending D 22:00 / 14:00; CURE-10 and CURE-11 cure #A-307 (M).
+- CURE-01..06 and CURE-07 are the small presses and cure #S-38. The Saturday night BODY crew has 1 of 2 people (one on leave); night
   ops need ≥2 people (SOP-HR-01 §4) -> "10/03 夜班缺 1 人".
 """
 from __future__ import annotations
@@ -45,7 +44,7 @@ DEMO_ORDER = "#A-311"
 
 def demo_orders(day: date) -> list[Order]:
     return [
-        Order(id="#A-311", size=TireSize.M, qty=20, done=0, due=day + timedelta(days=3), mold_id="A-311", priority=1),
+        Order(id="#A-311", size=TireSize.S, qty=20, done=0, due=day + timedelta(days=3), mold_id="A-311", priority=1),
         Order(id="#A-307", size=TireSize.M, qty=40, done=12, due=day + timedelta(days=20), mold_id="A-307"),
         Order(id="#L-07", size=TireSize.L, qty=100, done=8, due=day + timedelta(days=60), mold_id="L-07"),
         Order(id="#S-38", size=TireSize.S, qty=100, done=38, due=day + timedelta(days=10), mold_id="S-38"),
@@ -74,21 +73,24 @@ def demo_inputs(now: datetime) -> tuple[list[Order], list[Shift], Schedule]:
     day = now.astimezone(F.TZ).date()
     orders, shifts = demo_orders(day), demo_shifts(day)
     frozen = [
-        ("CURE-07", "#A-307", TireSize.M, _at(day, -1, 16, 14), "J-0307"),
+        ("CURE-11", "#A-307", TireSize.M, _at(day, -1, 16, 14), "J-0307"),
         ("CURE-08", "#L-07", TireSize.L, _at(day, -1, 12, 0), "J-L07-A"),
         ("CURE-09", "#L-07", TireSize.L, _at(day, -1, 4, 0), "J-L07-B"),
         ("CURE-10", "#A-307", TireSize.M, _at(day, -1, 20, 0), "J-0307-B"),
     ]
     for i, p in enumerate(F.SMALL_ONLY_PRESSES):
-        frozen.append((p, "#S-38", TireSize.S, _at(day, -1, 8 + i, 0), f"J-S38-{i + 1:02d}"))
+        # CURE-07: dataset EV-2 (S-027) mold-in D-1 11:50 -> 14.4 h of 24 h at 02:14
+        mi = _at(day, -1, 11, 50) if p == "CURE-07" else _at(day, -1, 8 + i, 0)
+        frozen.append((p, "#S-38", TireSize.S, mi, f"J-S38-{i + 1:02d}"))
     jobs: list[ScheduleJob] = []
     mold = {o.id: o.mold_id for o in orders}
     for p, oid, size, mi, jid in frozen:
         jobs.append(back_propagate(jid, oid, size, p, mi, mold_id=mold[oid], shifts=shifts, frozen=True))
     # next jobs, provisional times (the solver places them on staffed slots)
-    nxt = [("CURE-07", "#A-311", TireSize.M, "J-A311-01"), ("CURE-08", "#L-07", TireSize.L, "J-L07-C"),
-           ("CURE-10", "#A-307", TireSize.M, "J-0307-C")]
-    nxt += [(p, "#S-38", TireSize.S, f"J-S38-{i + 8:02d}") for i, p in enumerate(F.SMALL_ONLY_PRESSES)]
+    nxt = [("CURE-07", "#A-311", TireSize.S, "J-A311-01"), ("CURE-08", "#L-07", TireSize.L, "J-L07-C"),
+           ("CURE-11", "#A-307", TireSize.M, "J-0307-C")]
+    nxt += [(p, "#S-38", TireSize.S, f"J-S38-{i + 8:02d}")
+            for i, p in enumerate(F.SMALL_ONLY_PRESSES) if p != "CURE-07"]
     ends = {j.press_id: j.demold for j in jobs}
     t0 = now.astimezone(F.TZ).replace(second=0, microsecond=0)
 
@@ -99,7 +101,7 @@ def demo_inputs(now: datetime) -> tuple[list[Order], list[Shift], Schedule]:
     base = SolveRequest(now=now, orders=orders, shifts=shifts, previous=draft(list(jobs)))
     for p, oid, size, jid in nxt:
         j = back_propagate(jid, oid, size, p, ends[p], mold_id=mold[oid], shifts=shifts)
-        if oid == DEMO_ORDER:   # 下一模 #A-311 on press 7, at its first valid slot (8 h mold change)
+        if oid == DEMO_ORDER:   # 下一模 #A-311 on press 7, at its first valid slot (mold change)
             j = back_propagate(jid, oid, size, p, _first_valid_mold_in(base, p, j), mold_id=mold[oid], shifts=shifts)
         jobs.append(j)
     pin = [j.id for j in jobs if j.order_id == DEMO_ORDER]

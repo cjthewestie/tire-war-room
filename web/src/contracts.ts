@@ -8,7 +8,7 @@ export type ISODate = string
 // ---------------- enums ----------------
 export type Line = "A" | "B" | "C" | "D" | "BOND" | "CURE"
 export type TireSize = "S" | "M" | "L"
-export type TeamId = "curing" | "body" | "side" | "bead_nylon" | "bigopen" | "bond" | "maintenance" | "qc" | "supervisor"
+export type TeamId = "curing" | "body" | "side" | "bead_nylon" | "bigopen" | "bond" | "maintenance" | "qc" | "trim" | "supervisor"
 export type MachineStatus = "running" | "idle" | "warning" | "alarm" | "stopped" | "out_of_service" | "offline"
 export type CompoundStage = "none" | "unvulcanized" | "curative_added"
 export type Channel = "temp_c" | "pressure_kgf_cm2" | "water_flow_lpm" | "steam_kgf_cm2"

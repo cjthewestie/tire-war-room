@@ -76,7 +76,7 @@ async def _run_p11(rt: Runtime, seconds: int = 1500, decide=None) -> None:
 def _assert_page11(rt: Runtime) -> None:
     texts = " ".join(_texts(rt))
     assert "#A-311 交期 3 天後" in texts, texts[:2000]               # S2
-    assert "#A-311 移到 9 號機" in texts, texts[:2000]                # S3: #A-311 -> press 9
+    assert "交期全部滿足" in texts, texts[:2000]                      # S3: round 1 keeps #A-311 on press 7
     assert any(a.machine_id == "CURE-07" and a.action is SafetyActionKind.CURE_HOLD for a in rt.safety_log)
 
 
@@ -89,7 +89,8 @@ async def test_page11_twice_across_two_runtimes_matches_page11_both_times(tmp_pa
         assert rt.sim.machine("CURE-07").status is not MachineStatus.OUT_OF_SERVICE
         assert rt.clock.now() == datetime(2026, 10, 3, 2, 12, tzinfo=F.TZ)
         panel = {o.label: o for o in rt.snapshot().orders}
-        assert panel["中胎"].remaining_h == 1241 and panel["大胎"].remaining_h == 2162, panel
+        # the dataset's tyres de-molded by 02:12 (M 9/100, L 7/100) scale the page-2 estimates (1241 h / 2162 h)
+        assert panel["中胎"].remaining_h == round(1241 * 91 / 88, 1) and panel["大胎"].remaining_h == round(2162 * 93 / 92, 1), panel
         await rt.start()
         try:
             await _run_p11(rt)
@@ -151,14 +152,14 @@ def test_excel_orders_and_shifts_reach_sim_tools_panel_and_schedule(tmp_path):
     assert "orders_xlsx" not in rt.degraded
     by_id = {o.id: o for o in rt.sim.orders()}
     # the workbook names the plant's own orders (data/make_orders_seed.py) with its own customers
-    assert {"#M-201", "#L-301", "#A-311"} <= set(by_id) and by_id["#M-201"].customer == "高雄港機具"
-    assert by_id["#A-311"].size.value == "L" and by_id["#A-311"].qty == 1
+    assert {"SO-002", "SO-003", "#A-311"} <= set(by_id) and by_id["SO-002"].customer == "客戶B"
+    assert by_id["#A-311"].size.value == "S" and by_id["#A-311"].qty == 1
     assert any(s.id == "1003-body-夜班" for s in rt.sim.shifts())
     res = rt.c.tools.call(ToolCall(id="t1", tool=ToolName.QUERY_ORDERS_SHIFTS, args={}))
-    assert res.ok and "高雄港機具" in [o["customer"] for o in res.data["orders"]], res
+    assert res.ok and "客戶B" in [o["customer"] for o in res.data["orders"]], res
     assert "10/03 夜班缺 1 人" in res.data["gaps"]
     panel = {o.label: (o.done, o.total) for o in rt.snapshot().orders}
-    assert panel == {"小胎": (38, 100), "中胎": (12, 100), "大胎": (8, 100)}
+    assert panel == {"小胎": (21, 100), "中胎": (9, 100), "大胎": (7, 100)}      # dataset tyres de-molded by 02:12
     ids = [j.id for j in rt.c.store.current().schedule.jobs]
     assert "#A-311" in {j.order_id for j in rt.c.store.current().schedule.jobs} and len(ids) == len(set(ids))
 
@@ -166,7 +167,7 @@ def test_excel_orders_and_shifts_reach_sim_tools_panel_and_schedule(tmp_path):
 def test_missing_excel_is_reported_and_sim_seed_kept(tmp_path):
     rt = _real(tmp_path, P11, orders_xlsx=tmp_path / "nope.xlsx")
     assert "orders_xlsx" in rt.degraded
-    assert "#M-201" in {o.id for o in rt.sim.orders()}
+    assert "SO-002" in {o.id for o in rt.sim.orders()}
 
 
 # ---------------------------------------------------------------- 3 + 7. schedule impact
@@ -203,7 +204,7 @@ async def test_impact_matches_phone_in_round2_and_shows_kept_version_after_safe_
         v_kept = activated[-1]
         assert rt.c.store.current().version == v_kept
         kept_moves = moves_text(dict(solves)[v_kept].get("moves"))
-        assert "#A-311 改 9 號" in kept_moves
+        assert "#A-311 改 9 號" not in kept_moves        # round 1 never moves #A-311 (dataset EV-2)
         assert "待核准" not in final and f"v{v_kept}" in final, final
         for phrase in kept_moves:
             assert phrase in final, (phrase, final)

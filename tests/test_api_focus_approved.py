@@ -52,6 +52,6 @@ async def test_page11_round1_steps_kept_and_overtime_shown(tmp_path):
         labels = [a.label for a in f.approved]
         assert "夜班加班" in labels, labels
         assert not any("從 2 線" in x for x in labels), labels
-        assert any("36.5" in x for x in labels), labels
+        assert any("28.5" in x for x in labels), labels
     finally:
         await rt.stop()

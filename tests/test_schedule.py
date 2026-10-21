@@ -57,6 +57,20 @@ def test_arrhenius_page11_numbers():
     assert "36.5" in d.formula
 
 
+def test_arrhenius_dataset_ev2_numbers():
+    """Team dataset EV-2 (audit_cure.csv): S-027 on V07, 864 min elapsed of a 24 h cure."""
+    at122 = arrhenius_cure(CureFormulaArgs(size=TireSize.S, ref_temp_c=128.0, actual_temp_c=122.0, elapsed_h=14.4,
+                                           activation_energy_kj_mol=85.0))
+    assert at122.rate_ratio == pytest.approx(0.679, abs=0.001)
+    assert at122.remaining_ref_h == pytest.approx(9.6)
+    assert at122.total_cure_h * 60 == pytest.approx(1712.2, abs=0.5)      # dataset: total_equiv_min
+    assert round(at122.total_cure_h, 1) == 28.5 and round(at122.extra_h, 1) == 4.5
+    at1195 = arrhenius_cure(CureFormulaArgs(size=TireSize.S, ref_temp_c=128.0, actual_temp_c=119.5, elapsed_h=14.4,
+                                            activation_energy_kj_mol=85.0))
+    assert at1195.total_cure_h * 60 == pytest.approx(1864.1, abs=0.5)
+    assert round(at1195.total_cure_h, 1) == 31.1
+
+
 def test_arrhenius_constants_pinned():
     assert F.ACTIVATION_ENERGY_KJ_MOL == 85.0 and F.GAS_CONSTANT_J_MOL_K == 8.314
     assert F.CURE_HOURS[TireSize.M] == 28.0 and F.CURE_TEMP_NOMINAL_C == 128.0
@@ -213,34 +227,38 @@ def test_rollback_refuses_unapproved_proposed_version(tmp_path):
 
 
 # ---------------------------------------------------------------- page-11 demo
-def test_page11_reschedule_moves_A311_to_press9(tmp_path):
+def test_page11_reschedule_keeps_A311_on_press7_then_moves_it(tmp_path):
+    """Dataset EV-2 layout (issue #20): press 7 is small-only and cures a small tire (14.4 h of 24 h at 02:14).
+    A 122 °C hold stretches it to 28.5 h; the next mold #A-311 (small) still fits on press 7, so nothing moves.
+    Only when press 7 is taken out of service (02:31) does #A-311 go to another small press."""
     orders, shifts, seed = demo_inputs(NOW)
     a311 = next(j for j in seed.jobs if j.order_id == "#A-311")
     assert a311.press_id == "CURE-07" and not a311.frozen      # next mold on press 7
+    assert a311.size is TireSize.S and a311.press_id in F.SMALL_ONLY_PRESSES
     store = FileScheduleStore(tmp_path / "s", initial=seed)
-    # S1 says 36.5 h total for CURE-07 -> S3 solve
-    res, ver = reschedule(store, FallbackScheduler(), NOW, orders, shifts, cure_overrides_h={"CURE-07": 36.5},
+    # S1 says 28.5 h total for CURE-07 -> S3 solve
+    res, ver = reschedule(store, FallbackScheduler(), NOW, orders, shifts, cure_overrides_h={"CURE-07": 28.5},
                           event_id="EV-20261003-021400-CURE-07")
     assert res.solver is SolverName.CP_SAT and not res.fell_back
     assert res.feasible and res.deliveries_met and res.late_orders == []
-    mv = next(m for m in res.moves if m.order_id == "#A-311")
-    assert (mv.from_press, mv.to_press) == ("CURE-07", "CURE-09")
-    assert [m.order_id for m in res.moves if m.from_press != m.to_press] == ["#A-311"]   # only #A-311 changes press
+    assert [m.order_id for m in res.moves if m.from_press != m.to_press] == []           # nothing changes press
+    assert next(j for j in res.schedule.jobs if j.order_id == "#A-311").press_id == "CURE-07"
     assert res.gaps == ["10/03 夜班缺 1 人"]
     assert [o.label for o in res.staffing_options] == ["夜班加班", "從 2 線調 1 人"]
     assert [o.kind for o in res.staffing_options] == ["overtime", "transfer"]
     assert res.schedule.staffing_changes[0].label == "從 2 線調 1 人"        # solver's pick (page 11 02:14:25)
-    assert ver is not None and ver.status is ScheduleStatus.PROPOSED and "CURE-09" in ver.reason
+    assert ver is not None and ver.status is ScheduleStatus.PROPOSED and "從 2 線調 1 人" in ver.reason
     cure07 = next(j for j in res.schedule.jobs if j.press_id == "CURE-07" and j.frozen)
-    assert cure07.cure_h == pytest.approx(36.5)
+    assert cure07.cure_h == pytest.approx(28.5)
     assert res.solve_ms < 10_000
     store.activate(ver.version)
     # 02:31 H1 rejected -> CURE-07 out of service; supervisor rejects the cross-team move
     res2, ver2 = reschedule(store, FallbackScheduler(), VERIFY, orders, shifts, unavailable_presses=["CURE-07"],
-                            cure_overrides_h={"CURE-07": 36.5}, allow_cross_team=False)
+                            cure_overrides_h={"CURE-07": 28.5}, allow_cross_team=False)
     assert res2.feasible and res2.deliveries_met
     assert not any(j.press_id == "CURE-07" and not j.frozen for j in res2.schedule.jobs)
-    assert next(j for j in res2.schedule.jobs if j.order_id == "#A-311").press_id == "CURE-09"
+    moved = next(j for j in res2.schedule.jobs if j.order_id == "#A-311")
+    assert moved.press_id != "CURE-07" and moved.press_id in F.SMALL_ONLY_PRESSES      # a small press takes it
     assert [c.label for c in res2.schedule.staffing_changes] == ["夜班加班"]
     assert any("CURE-07 停用" in w for w in res2.schedule.warnings)
     store.activate(ver2.version)
@@ -322,10 +340,10 @@ def test_page11_against_factory_sim(tmp_path):
     assert nxt.order_id == "#A-311"
     store = FileScheduleStore(tmp_path / "s", initial=seed)
     res, ver = reschedule(store, FallbackScheduler(), now + timedelta(seconds=145), sim.orders(), sim.shifts(),
-                          cure_overrides_h={"CURE-07": 36.5})
+                          cure_overrides_h={"CURE-07": 28.5})
     assert res.feasible and res.deliveries_met and ver is not None
     a311 = next(m for m in res.moves if m.order_id == "#A-311")
-    assert (a311.from_press, a311.to_press) == ("CURE-07", "CURE-09")      # not CURE-08: same steam pipe
+    assert a311.from_press == "CURE-07" and a311.to_press in F.SMALL_ONLY_PRESSES   # a small press takes it (dataset layout)
     assert "10/03 夜班缺 1 人" in res.gaps
     assert {o.label for o in res.staffing_options} >= {"夜班加班", "從 2 線調 1 人"}
     assert res.solve_ms < 10_000
@@ -407,8 +425,8 @@ def test_seed_counts_curing_tires_and_has_no_baseline_warnings():
     phantom #S-101 delay) and prep done ahead (one blank per press, p.6 principle 5) is not a
     warning; every mold-in has a staffed slot for its prep."""
     _, sim, seed = _sim_seed()
-    s101 = next(o for o in sim.orders() if o.id == "#S-101")
-    assert sum(1 for j in seed.jobs if j.order_id == "#S-101") == s101.qty - s101.done
+    s101 = next(o for o in sim.orders() if o.id == "SO-001")        # the dataset's first small order
+    assert sum(1 for j in seed.jobs if j.order_id == "SO-001") == s101.qty - s101.done
     assert not any("既有延遲" in w or "備料" in w for w in seed.warnings), seed.warnings
     from warroom.schedule.backprop import labor_conflicts
     from warroom.schedule.staffing import complete_shifts
@@ -456,10 +474,10 @@ def test_mold_change_stops_press_8h_in_seed_and_page11_reschedules(tmp_path):
     assert _mold_gap_errors(seed) == []
     store = FileScheduleStore(tmp_path, initial=seed)
     res, ver = reschedule(store, FallbackScheduler(), clock.now(), sim.orders(), sim.shifts(),
-                          cure_overrides_h={"CURE-07": 36.5})
+                          cure_overrides_h={"CURE-07": 28.5})
     assert res.feasible and ver is not None and _mold_gap_errors(res.schedule) == []
     a311 = next(j for j in res.schedule.jobs if j.order_id == "#A-311")
-    assert a311.press_id == "CURE-09"
+    assert a311.press_id in F.SMALL_ONLY_PRESSES
     store.activate(ver.version)
     res2, _ = reschedule(store, FallbackScheduler(), clock.now() + timedelta(minutes=17), sim.orders(), sim.shifts(),
                          unavailable_presses=["CURE-07"])
@@ -502,6 +520,8 @@ def test_weekend_no_fire_out_in_baseline():
     mon_5 = sun_5 + timedelta(days=1)
     for p in F.CURE_PRESS_IDS:
         js = sorted((j for j in seed.jobs if j.press_id == p), key=lambda j: j.mold_in)
+        if not any(j.frozen for j in js):
+            continue          # idle in the dataset at the scenario start (V01/V02): loads at its first staffed slot
         # when the Saturday night shift ends (last staffed op until Monday) every press holds a cure
         assert any(j.mold_in <= sun_5 < j.demold for j in js), f"{p} fired out over the weekend"
         for a, b in zip(js, js[1:]):
@@ -509,8 +529,8 @@ def test_weekend_no_fire_out_in_baseline():
                 continue      # in-progress tire loaded before now, cure ends in the unstaffed Sunday
             if a.demold < mon_5 and b.mold_in > a.demold:
                 idle = (b.mold_in - a.demold).total_seconds() / 3600
-                # 21 h: a small tire de-molded Sat 05:12 must wait for Sun 00:00 (24 h cure -> Mon 00:00)
-                assert idle <= 21, f"{p} idle {idle:.1f} h {a.demold:%a %H:%M} -> {b.mold_in:%a %H:%M}"
+                # 22 h: a small tire de-molded Sat 03:20 (dataset CURE-03) must wait for Sun 01:00 (24 h cure -> Mon 01:00)
+                assert idle <= 22, f"{p} idle {idle:.1f} h {a.demold:%a %H:%M} -> {b.mold_in:%a %H:%M}"
     # small presses de-mold in the Monday 00–05 window
     early = [j for j in seed.jobs if j.size is TireSize.S and j.demold.weekday() == 0 and j.demold.hour < 5]
     assert len(early) >= 5
@@ -544,48 +564,50 @@ def test_delivery_claims_scoped_to_this_plan():
     from warroom.schedule.demo import describe
     clock, sim, seed = _sim_seed()
     store_res = FallbackScheduler().solve(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(),
-                                                       previous=seed, cure_overrides_h={"CURE-07": 36.5}))
+                                                       previous=seed, cure_overrides_h={"CURE-07": 28.5}))
     text = describe(store_res)
     assert "交期全數達成" not in text and ("本週排程訂單交期滿足" in text or "延遲" in text)
     outlook = [w for w in store_res.schedule.warnings if w.startswith("本週排程外")]
-    assert len(outlook) == 1 and "#L-301" in outlook[0]
+    assert len(outlook) == 1 and "SO-007" in outlook[0]
 
 
 # ---------------------------------------------------------------- review r4: slow press under H1
 @pytest.mark.parametrize("solver", ["cpsat", "heuristic"])
 def test_extended_cure_press_gets_no_tires_from_other_presses(tmp_path, solver):
-    """While H1 says CURE-07 runs at 122 °C (S1: 28 h -> 36.5 h), no tire planned on another press
-    is moved onto it (round 1 once showed '#M-201 由 CURE-09 改到 CURE-07' at 28 h); only #A-311
-    moves off it, to CURE-09. Tires already planned on CURE-07 may stay, and the plan says on what
-    premise."""
+    """While H1 says CURE-07 runs at 122 °C (S1: 24 h -> 28.5 h), no tire planned on another press
+    is moved onto it (round 1 once showed '#M-201 由 CURE-09 改到 CURE-07'); only #A-311 (small) may
+    move off it, and only to another small press, never the same-pipe press 6. Tires already planned
+    on CURE-07 may stay, and the plan says on what premise."""
     from warroom.schedule.demo import describe
     clock, sim, seed = _sim_seed()
     prev = {j.id: j.press_id for j in seed.jobs}
     sched = CpSatScheduler() if solver == "cpsat" else HeuristicScheduler()
     store = FileScheduleStore(tmp_path / "s", initial=seed)
     res, ver = reschedule(store, sched, clock.now(), sim.orders(), sim.shifts(),
-                          cure_overrides_h={"CURE-07": 36.5})
+                          cure_overrides_h={"CURE-07": 28.5})
     assert res.feasible and res.deliveries_met and ver is not None
     on7 = [j for j in res.schedule.jobs if j.press_id == "CURE-07" and not j.frozen]
     assert all(prev.get(j.id) == "CURE-07" for j in on7), [(j.id, prev.get(j.id)) for j in on7]
     assert not [m for m in res.moves if m.to_press == "CURE-07" and m.from_press != "CURE-07"]
     a311 = next(m for m in res.moves if m.order_id == "#A-311")
-    assert (a311.from_press, a311.to_press) == ("CURE-07", "CURE-09")
+    assert a311.from_press == "CURE-07" and a311.to_press in F.SMALL_ONLY_PRESSES
     assert any(w.startswith("CURE-07 硫化延長中") for w in res.schedule.warnings)
     text = describe(res)
-    assert "改到 CURE-07" not in text and "#A-311 由 CURE-07 改到 CURE-09" in text
+    assert "改到 CURE-07" not in text
+    if a311.to_press != "CURE-07":
+        assert f"#A-311 由 CURE-07 改到 {a311.to_press}" in text
 
 
 def test_shortened_or_unchanged_cure_does_not_close_the_press(tmp_path):
     """Only a LONGER cure marks the press slow; an override at the recipe value changes nothing."""
     from warroom.schedule import solver as S
     clock, sim, seed = _sim_seed()
-    for h in (28.0, 20.0):
+    for h in (24.0, 20.0):                                   # press 7 is a small press: recipe 24 h
         ctx = S._prepare(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
                                       cure_overrides_h={"CURE-07": h}))
         assert not ctx.slow
     ctx = S._prepare(SolveRequest(now=clock.now(), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
-                                  cure_overrides_h={"CURE-07": 36.5}))
+                                  cure_overrides_h={"CURE-07": 28.5}))
     assert ctx.slow == {"CURE-07"}
     assert all("CURE-07" not in j.eligible for j in ctx.free if j.orig_press not in (None, "CURE-07"))
 

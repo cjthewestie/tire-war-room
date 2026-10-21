@@ -110,7 +110,7 @@ curl -s 127.0.0.1:8000/api/health
 1. 戰情室在展示列點 **7 號硫化機溫降（p.11）**，速度 **10×**。用真模型時先暖機（第一次載入約 82 秒），見 DEMO-SCRIPT。
 2. [02:14:00] 事件偵測：7 號 128→122°C，預測穩定 122±1 → 喚醒指揮官。[02:14:01] 安全核心：仍在 120–130，不停機。
 3. 指揮官假設 H1 蒸汽壓不足；拆 S1 硫化公式、S2 訂單班表 → S3 排程 → S4 確認（需核准）→ S5 通知；預期 30 分內 ≥121°C。
-4. S1：122°C 總需 **36.5 h（+8.5 h）**；S2：#A-311 交期 3 天後、10/03 夜班缺 1 人；S3：**#A-311 移到 9 號機**、夜班從 2 線調 1 人，交期全部滿足。
+4. S1：122°C 總需 **28.5 h（+4.5 h）**（7 號機正在做小胎，已硫化 14.4 h）；S2：#A-311 交期 3 天後、10/03 夜班缺 1 人；S3：**#A-311 移到 6 號機**（小胎機）、夜班從 2 線調 1 人，交期全部滿足。
 5. 手機跳出第一輪核准（R3）→ 選 **B 從 2 線調 1 人** → 核准，寫入稽核日誌。
 6. 切 **60×**。[02:28:50] 掉破 120°C，安全核心直接扣模（不等 AI）。[02:31:00] 程式驗證 119.5°C → **H1 不成立**。
 7. 指揮官換 **H2 持續洩壓或感測器漂移**，對照同管線 6、8 號機，查 SOP〈硫化中斷處置〉→ 7 號機停用、重排。
@@ -188,7 +188,7 @@ Only numbers actually measured are listed. Mac rows are an Apple M4 Max 64 GB ru
 | Metric | Target | Measured | Where | Verdict |
 |---|---|---|---|---|
 | Test suite | green | 582 passed, 3 skipped (13 min) | Mac | pass |
-| Page-11 event end to end, real model | closes, numbers match p.11 | closed; 36.5 h (+8.5 h), #A-311 → 9, night short 1, verify 119.5 °C → H2 | Mac, Ollama | pass |
+| Page-11 event end to end, real model | closes, numbers match p.11 | closed; 36.5 h (+8.5 h), #A-311 → 9, night short 1, verify 119.5 °C → H2 (measured 2026-10-03 on the pre-#20 order book; the book is now the team dataset: 28.5 h (+4.5 h), #A-311 → 6; re-measure pending) | Mac, Ollama | pass |
 | Page-6 weekly output per press S/M/L (DES check of the proposal table) | 6/5/3 · 6/5.9/4.5 · 7/6/4.9 | 6/5/3 · 6/6/4.82 · 7/6/4.89 | `warroom/schedule/capacity.py` | within ±0.1 except M "extend shifts" (6 vs 5.9) |
 | Page-6 lead time M&L / small | 13.3 → 9.3 wk / 2.4 → 2.0 wk | 13.2 → 9.4 wk / 2.5 → 2.1 wk (DES) | same | close; table shows the proposal values |
 | Safety core decision time (28 machines per tick) | < 0.2 s | p99 0.058 ms, max 0.104 ms (n=1500) | Mac, compute only, not sensor→PLC | pass |
@@ -211,7 +211,7 @@ Only numbers actually measured are listed. Mac rows are an Apple M4 Max 64 GB ru
 - OpenShell/NemoClaw sandboxing (`deploy/openshell/`) needs the OpenShell CLI and gateway on the Spark; on the Mac the offline proof is a process-level `sandbox-exec` block.
 - On the Mac the 3-concurrent and 32k-TTFT targets fail: Ollama on MLX does not batch concurrent requests and its prefix cache is less consistent than vLLM's. These are judged again on the Spark.
 - The first run needs internet once to download the SOP embedding model (fastembed); the Spark installer pre-fetches it.
-- Page 11 round 1: the solver moves #A-311 to press 9 and, as a knock-on, one later #M-201 tire from press 9 to press 8, so the timeline and the round-2 已做 row also name 「#M-201 改 8 號」. #A-311 is a large (L) tire in the seed and the Excel workbook; its 34 h cure pushes press 9's own queue. Seeding it as a medium tire removes the knock-on but breaks the page-2 100/100/100 totals and makes round 2 move #A-311 again, so the seed is left as is.
+- Page 11 round 1 (order book = `data/team_dataset/`, #20): press 7 is a small-tire press (24 h cure, 14.4 h done), so the 122 °C drop costs +4.5 h (28.5 h). The solver moves #A-311 (a small tire) to press 6 and nudges one more mold on the same press; presses 8–11 are the only M/L presses. Press 6 is on the same steam header (H2) as press 7, the machine whose temperature just dropped; whether the solver should avoid same-header presses for a moved mold is still an open question for CJ (#64). Round 2 (press 7 out of service) ends with a delay on SO-001 in the default book; the card says so.
 - Activation energy 85 kJ/mol is the proposal's assumed value, not a measured compound property.
 
 ### Layout
