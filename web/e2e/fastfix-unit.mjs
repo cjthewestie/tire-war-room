@@ -143,10 +143,13 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const rep = repairNotices(closed, tiles)
   const ring = diffPending(st, rep, true)
   check('closed with its report → 已恢復正常，報告已產生：B 線開煉機 rings once', ring.fire.length === 1 && ring.fire[0].notice === 'report' && alertText(ring.fire, false).title === '已恢復正常，報告已產生：B 線開煉機', alertText(ring.fire, false).title)
+  check('… its text: 溫度回到 94°C（10:32 維修完成）, no 「已修復：」 and no machine twice', alertText(ring.fire, false).body === '溫度回到 94°C（10:32 維修完成）', alertText(ring.fire, false).body)
   const read = repairNotices(closed.map((e, i) => (i === 0 ? { ...e, review: { ...e.review, status: 'done' } } : e)))
   check('a read report leaves the list', read.length === 2 && read.every((a) => a.notice === 'repaired'))
   const mixed = alertText([{ id: 'AP-1', title: '7 號機溫降', reason: 'x', risk: 'R2' }, items[0]], false)
   check('approval + notice together → 2 件待核准與通知', mixed.title === '2 件待核准與通知', mixed.title)
+  const card = alertText([{ id: 'AP-1', title: '7 號機溫度下降 128→122.3°C', reason: '假設 H1：蒸汽壓不足，溫度會穩定', risk: 'R3' }], false)
+  check('approval alert (phone push, 3D notice): no 「R3・」, 判斷一 for 假設 H1', card.title === '待核准：7 號機溫度下降 128→122.3°C' && card.body.replace(/\u2060/g, '') === '判斷一：蒸汽壓不足，溫度會穩定', `${card.title} / ${card.body}`)
 }
 
 // ---------------------------------------------------------------- Agent page 處理歷程

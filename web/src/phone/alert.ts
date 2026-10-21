@@ -7,8 +7,9 @@
 // re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Event, MachineTile } from '../contracts'
-import { expectationOf, normalOf, recoverText } from '../aiStatus'
+import { CH_LABEL, expectationOf, normalOf, readingText, recoverText } from '../aiStatus'
 import { machineLabel } from '../factory'
+import { fmtHM } from '../format'
 import { plain } from '../plain'
 
 export type AlertPermission = 'granted' | 'denied' | 'default' | 'unsupported'
@@ -20,8 +21,9 @@ export interface PushEnv {
   setTitle(t: string): void
 }
 
-/** What rings: a pending approval card (ApprovalRequest fits), or a fast-repair notice (notice set). */
-export interface AlertItem { id: string; title: string; reason: string; risk?: string; notice?: 'repaired' | 'report' }
+/** What rings: a pending approval card (ApprovalRequest fits; its R0–R3 code stays off the supervisor's notice), or a
+ *  fast-repair notice (notice set). */
+export interface AlertItem { id: string; title: string; reason: string; notice?: 'repaired' | 'report' }
 
 const NOTICE_HEAD: Record<NonNullable<AlertItem['notice']>, string> = { repaired: '維修完成', report: '已恢復正常，報告已產生' }
 
@@ -38,10 +40,19 @@ export function repairNotices(events: Event[] | undefined, tiles: MachineTile[] 
       const now = x?.channel === 'temp_c' ? tiles.find((t) => t.machine_id === e.machine_id)?.temp_c ?? null : null
       out.push({ id: `repaired:${e.id}:${e.repaired_at}`, title, reason: recoverText(x, now, normalOf(e, x)), notice: 'repaired' })
     } else if (e.state === 'closed' && e.review?.status === 'pending') {
-      out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: plain(e.outcome) || '異常報告已產生', notice: 'report' })
+      out.push({ id: `report:${e.id}:${e.review.requested_at}`, title, reason: backText(e), notice: 'report' })
     }
   }
   return out
+}
+
+/** The report notice's text under its title (the machine): 「溫度回到 128°C（02:16 維修完成）」, the reading the ramp
+ *  ended at (the anomaly's baseline, as the status line's 已恢復正常（128°C）); the outcome without 「已修復：」 when unknown. */
+function backText(e: Event): string {
+  const x = expectationOf(e)
+  const normal = normalOf(e, x)
+  if (!x || normal == null) return plain(e.outcome).replace(/^已修復[：:]\s*/, '') || '異常報告已產生'
+  return `${CH_LABEL[x.channel]}回到 ${readingText(x.channel, normal)}${e.repaired_at ? `（${fmtHM(e.repaired_at)} 維修完成）` : ''}`
 }
 
 /** 「待核准」 or what the notices say, for the multi-item alert. */
@@ -73,7 +84,8 @@ export function diffPending(st: PushState, pending: AlertItem[], online: boolean
 export function alertText(fire: AlertItem[], flushed: boolean): { title: string; body: string } {
   const first = fire[0]
   const title = fire.length === 1 ? `${first.notice ? NOTICE_HEAD[first.notice] : '待核准'}：${first.title}` : `${fire.length} 件${waitLabel(fire)}`
-  const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? `${first.risk ? `${first.risk}・` : ''}${first.reason}` : fire.map((a) => a.title).join('；'))
+  // the card's reason in plain words (假設 H1 → 判斷一); no R0–R3 on a supervisor's screen
+  const body = (flushed ? '（網路恢復後補推）' : '') + (fire.length === 1 ? plain(first.reason) : fire.map((a) => a.title).join('；'))
   return { title, body }
 }
 
@@ -184,7 +196,7 @@ export function useApprovalAlerts(pending: AlertItem[], online: boolean, env: Pu
       try { perm = (await Notification.requestPermission()) as AlertPermission } catch { /* ignore */ }
     }
     setPermission(perm)
-    setBlocked(perm === 'denied' ? '瀏覽器已封鎖通知：請到瀏覽器的網站設定允許通知（聲音與震動仍會提醒）'
+    setBlocked(perm === 'denied' ? '系統通知被瀏覽器擋住，聲音和震動照常提醒'
       : !sound ? '瀏覽器未允許播放聲音：再點一下畫面試試，或檢查手機靜音' : null)
     setArmed(sound)
     setTries((n) => n + 1)
