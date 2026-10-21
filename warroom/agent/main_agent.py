@@ -449,15 +449,39 @@ def is_gibberish(text: str) -> bool:
 _REMARK_Q_RX = re.compile(r"[?？]|嗎|什麼|哪|多少|幾|怎樣|如何|是否|有沒有|是誰|為什麼|為何")
 _FEELING_RX = re.compile(r"累|睏|好煩|好熱|好冷|好無聊|頭痛|壓力")
 REMARK_INSTRUCTION = (
-    "主管說了一句很短或含糊的話。像同事一樣用一兩句自然地回：先接住他的意思（是心情就先體諒一句），再連到 tasks 裡最相關的一件，"
-    "說是哪台機或哪張訂單、現在在等什麼，從那件的 can_do 裡挑一兩個讓他選（中斷、重新規劃這些要他回「好」才做；核准和解除停機只能按按鈕）。"
-    "看不出他指哪件或什麼意思，就只問一個簡短的確認問題。不要重複或引用主管的原話，不要說「tasks」「can_do」這些字，不要列工廠概況、"
-    "不要列出每一件，不要問「還想聊聊其他的事嗎」。回應要跟他這句話的意思有關，不要照抄下面的例子。"
-    "例（格式參考）：主管說「機台怪怪的」→「你是說 10 號機那件嗎？它還在等你核准，要我先中斷，還是你改個條件再送？」")
-_DUMP_TAIL_RX = re.compile(r"[，,。]?\s*(?:您|你)?還想聊聊其他的事嗎[？?]?|[，,。]?\s*(?:是否|要不要)(?:要)?(?:我)?幫(?:忙|你)?看一件工作(?:的事)?[？?]?")
+    "主管說了一句很短或含糊的話。先讀懂他的意思（meaning 是程式的判讀，照它的提示回），像同事一樣用一兩句自然地回，"
+    "需要時連到 tasks 裡最相關的一件（選中的排第一），說它現在在等什麼，從它的 can_do 挑一兩個讓他選（中斷、重新規劃這些要他回「好」才做；"
+    "核准和解除停機只能按按鈕）。看不出意思就只問一個簡短的確認問題。不要重複或引用主管的原話，不要說「tasks」「can_do」「meaning」這些字，"
+    "不要列工廠概況、不要列出每一件，不要問「還想聊聊其他的事嗎」。不要用 avoid_opening 裡的字開頭，也不要用「好，聽起來」開頭。")
+# what a remark most likely means, by code (team-lead 10-22: 「現在沒有人」 is nobody on site, not 「你是說 3 號機那件嗎」)
+REMARK_MEANINGS: list[tuple[str, re.Pattern[str], str]] = [
+    ("nobody_on_site", re.compile(r"沒有?人|人不在|沒人在|都走了|現場空"),
+     "現場沒有人：說待核准或要執行的那件先不急著執行（沒人能做現場的事），問他要不要我擬一件通知值班主管的任務送他核准，還是先維持等核准。"),
+    ("short_staffed", re.compile(r"人手|人不夠|缺人|人力不足|少人|人太少"),
+     "人手不夠：說哪件需要現場人力，問要不要改條件（例如不加班、不跨組調人）再送，或先中斷那件。"),
+    ("tired", _FEELING_RX, "主管累了或心情不好：先體貼地回一句，再輕輕提一件還在等他的事，說不急、可以晚點再看。"),
+    ("unclear_that", re.compile(r"那個|這個|那件|這件|怎麼辦|那怎麼|然後呢"),
+     "指的東西不清楚：只問一個簡短的確認問題，用選中的那件或最相關的一件來問（例如「是 10 號機那件嗎？」），不要列清單。"),
+]
+# 「等一下」「稍等」: acknowledge and stop pushing (no task list); rotated, code's words
+_WAIT_RX = re.compile(r"^\s*(?:等一下|等等|稍等(?:一下)?|等我一下|先等等?|待會再說|晚點再說|先不要|先這樣)\s*[。！!～~]?\s*$")
+WAIT_REPLIES = ("好，我先不動，你需要再叫我。", "沒問題，先放著，要繼續再跟我說。", "好，我等你，有需要隨時叫我。")
+
+
+def remark_meaning(text: str) -> tuple[str, str] | None:
+    """(kind, hint) of a remark, first match; None when no hint fits."""
+    return next(((k, h) for k, rx, h in REMARK_MEANINGS if rx.search(text)), None)
+
+
+def opener(reply: str) -> str:
+    """The first words of a reply (up to the first comma or stop, at most 5 chars): 「你是說」「聽起來」「現場沒人的話」."""
+    return re.split(r"[，,。！？!?、]", reply.strip(), maxsplit=1)[0][:3]
+
+
+_DUMP_TAIL_RX = re.compile(r"[，,]?\s*還是(?:想)?先看看其他的?工廠狀況[？?]?|[，,。]?\s*(?:您|你)?還想聊聊其他的事嗎[？?]?|[，,。]?\s*(?:是否|要不要)(?:要)?(?:我)?幫(?:忙|你)?看一件工作(?:的事)?[？?]?")
 
 # the model quoting the supervisor back or naming the context keys (「主管說「等一下」，」「這句話我就接了。」「open_tasks 裡」)
-_ECHO_RX = re.compile(r"(?:主管|您|你)(?:剛剛)?說[：:]?\s*[「『][^」』]{1,14}[」』][，,。、]?\s*|[^。！？]*(?:接這句話|這句話我就接了|我接著您|體諒一下|他的心情|接住)[^。！？]*[。！？]\s*"
+_ECHO_RX = re.compile(r"(?:主管|您|你)(?:剛剛|是)?說[：:]?\s*[「『][^」』]{1,14}[」』](?:嗎[？?]?)?[，,。、]?\s*|^主管(?:是)?說(?=[^「『])|[^。！？]*(?:接這句話|這句話我就接了|我接著您|體諒一下|他的心情|接住)[^。！？]*[。！？]\s*"
                       r"|(?:現在的?\s*)?(?:open_)?tasks\s*裡(?:的|面)?[，,]?\s*")
 
 
@@ -733,6 +757,10 @@ class MainAgent:
             out.update(reply=("記憶裡找到：" + "；".join(f"{o['id']} {o['title']}" for o in got) + "。" if got
                               else "記憶裡找不到相關內容。") if q else "要查什麼？例如「查記憶 7 號機 溫度」。",
                        intent="memory_search", by="memory")
+            return self._done(out, text, t0)
+        if _WAIT_RX.match(text):
+            # 「等一下」: acknowledge and stop (team-lead 10-22: 「好，我先不動，你需要再叫我。」), no task list, no model call
+            out.update(reply=self._rot(WAIT_REPLIES), intent="remark:wait")
             return self._done(out, text, t0)
         # with a model every message goes to it (CJ 2026-10-21: 「應該是直接詢問大模型並且請他回答跟操作」 — 「?」 got the
         # canned 「這句我看不懂」); the canned line is only for rule mode
@@ -1298,6 +1326,14 @@ class MainAgent:
             sel = ((context or {}).get("selected_task") or {}).get("id")
             ctx = {**ctx, "context": {"factory_time": (context or {}).get("factory_time")},
                    "tasks": open_tasks(context, sel), "instruction": REMARK_INSTRUCTION}
+            # the remark stands alone: with the last turn alongside, 「那個怎麼辦」 after 「好累」 got 「聽起來主管很累…」
+            ctx.pop("previous_turn", None)
+            ctx["earlier_messages"] = []
+            meaning = remark_meaning(t)
+            if meaning:
+                ctx["meaning"] = meaning[1]
+            last_open = notes.get("last_opener")
+            ctx["avoid_opening"] = [x for x in (last_open, "你是說", "聽起來") if x]
             msgs[-1]["content"] = json.dumps(ctx, ensure_ascii=False, default=str)
         out["intent"] = "remark" if remark else "smalltalk" if small else "general" if casual else out["intent"]
         if small:
@@ -1314,6 +1350,8 @@ class MainAgent:
         called: set[tuple[str, str]] = set()
         guard = budget.LoopGuard(tid)                   # no-progress tool loops (Rule A / B, warroom/agent/budget.py)
         regrounded = False
+        fffd_retried = False                            # a reply with U+FFFD (「等您��准」) is asked for once more
+        reopened = False                                # a remark that opened like the last one is asked once more
         worded = False                                  # asked once for words after the tools
         regenerated = False                             # one retry after a degenerate repetition
         edits = discuss is not None and not fresh and plan_edit(t)
@@ -1394,6 +1432,17 @@ class MainAgent:
                 guard.end_round()                       # Rule B: two dry rounds → the next one is text only
                 continue
             reply = (m.content or "").strip()
+            if "\ufffd" in reply and not fffd_retried and not last:
+                fffd_retried = True                     # a broken character in the model's text: generate once more
+                continue
+            reply = reply.replace("\ufffd", "")
+            if (remark and reply and not reopened and not last and not calls
+                    and (opener(reply) == notes.get("last_opener") or re.match(r"好[，,]\s*聽起來", reply))):
+                # the same opening as last time (「你是說…」 every turn): once more, told which words to avoid
+                reopened = True
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": f"換一種說法回同一句話，不要用「{opener(reply)}」開頭。"}]
+                continue
             if not reply and out["steps"] and not worded and not last and not out["event_id"]:
                 # no words after the tools: ask once more for them (query_plant JSON pasted back read as noise,
                 # 「查到：工廠資料（之前的訂單）：completed_or_shipped: id:…」, real run 10-22)
@@ -1523,6 +1572,10 @@ class MainAgent:
             words = tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
             if remark and code is None:
                 words = _ECHO_RX.sub("", _DUMP_TAIL_RX.sub("", tidy(reply, keep_intro=False, limit=3))).strip() or words
+                words = re.sub(r"^好[，,]\s*(?=聽起來)", "", words)
+                if words and words[-1] not in "。！？!?～~":
+                    words += "？" if re.search(r"哪|嗎|要不要|還是|是不是", words.split("。")[-1]) else "。"
+                notes["last_opener"] = opener(words)
             elif code is None and casual and not out["steps"]:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
