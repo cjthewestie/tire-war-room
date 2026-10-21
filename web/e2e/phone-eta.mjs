@@ -1,5 +1,5 @@
 // #73 修復預估 on /phone, headless: fire 硫化機蒸汽壓不足 on a normal plant; the approval card must say how long
-// (verification window), by when, and how (SOP steps); after 核准 the idle card lists the field tasks and their ETA.
+// (verification window), by when, and how (SOP steps); after 核准 (over the API) the idle card lists the field tasks and their ETA.
 // Run against a live server: PORT=8010 ./start.sh & node web/e2e/phone-eta.mjs http://localhost:8010
 import { createRequire } from 'node:module'
 import { mkdirSync } from 'node:fs'
@@ -45,7 +45,9 @@ const sop = await text(page, 'phone-eta-sop')
 check('核准卡：預計完成', !!done && /\d{2}:\d{2}/.test(done), done ?? '')
 check('核准卡：怎麼做（SOP）', !!sop && /SOP-/.test(sop), (sop ?? '').split('\n')[0])
 await page.screenshot({ path: `${OUT}/phone-eta-390-card.png`, fullPage: true })
-await page.click('.ph-approve')
+// 核准 over the API (the button itself is the existing card; headless has no supervisor PIN prompt)
+const ap = await until(async () => (await api('/api/approvals?status=pending'))[0], 60000, 1000)
+await api(`/api/approvals/${ap.id}/decision`, { request_id: ap.id, decision: 'approve', via: 'phone' })
 const tasks = await until(() => text(page, 'phone-eta-tasks'), 60000, 1000)
 check('核准後：現場任務與預計時間', !!tasks, (tasks ?? '').replace(/\n/g, '／'))
 await page.screenshot({ path: `${OUT}/phone-eta-390-after.png`, fullPage: true })
