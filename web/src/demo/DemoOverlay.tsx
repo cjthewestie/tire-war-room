@@ -99,7 +99,7 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
         {demo.paused && <span className="dm-wait w-paused">已暫停</span>}
         {d.err && <span className="dm-err" role="alert" data-testid="demo-err">{d.err}</span>}
         <div className="dm-ctl">
-          <button onClick={() => void d.cont()} disabled={demo.waiting_for === 'approval'} title="Space／N" data-testid="demo-continue">繼續 ▶</button>
+          <button onClick={() => void d.cont()} disabled={demo.waiting_for === 'approval' || demo.waiting_for === 'event'} title="Space／N" data-testid="demo-continue">繼續 ▶</button>
           <button onClick={() => void d.togglePause()} title="P" data-testid="demo-pause">{demo.paused ? '▶ 恢復' : '❚❚ 暫停'}</button>
           <button onClick={() => void d.exit()} title="Esc" className="dm-exit" data-testid="demo-exit">✕ 結束</button>
         </div>

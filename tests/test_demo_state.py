@@ -71,6 +71,10 @@ def test_continue_wait_and_driver_cue():
     assert st.cue_index == 1 and st.waiting_for == "continue"
     st.apply(cmd("continue"), 0)                       # 按 A 繼續
     assert st.cue_id == "event"
+    st.apply(cmd("cue", cue_id="event", waiting_for="event"), 0)
+    with pytest.raises(ValueError, match="event"):
+        st.apply(cmd("continue"), 0)                   # the incident has not happened yet: no flash to the next beat
+    assert st.cue_id == "event"
     st.apply(cmd("cue", cue_index=8), 0)
     with pytest.raises(ValueError):
         st.apply(cmd("continue"), 0)                   # past the last cue
@@ -118,7 +122,7 @@ def test_presentation_only_pause_is_the_one_plant_effect(tmp_path):
         before = c.get("/api/snapshot").json()
         clock0 = rt.clock_info()
         c.post("/api/demo/state", json={"action": "start", "cues": CUES})
-        c.post("/api/demo/state", json={"action": "cue", "cue_index": 2, "waiting_for": "event"})
+        c.post("/api/demo/state", json={"action": "cue", "cue_index": 2, "waiting_for": "continue"})
         c.post("/api/demo/state", json={"action": "continue"})
         after = c.get("/api/snapshot").json()
         # cues never touch the plant: same scenario, same events, same approvals, same machines, same clock

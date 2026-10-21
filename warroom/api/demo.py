@@ -6,7 +6,8 @@ exit can come from any screen (3D, war room, phone, gamepad). The only plant eff
 the same thing POST /api/sim/control does. Every change is pushed on the WebSocket bus as {"type": "demo"}.
 
 An approval checkpoint cannot be skipped: while waiting_for == "approval", continue is refused until an approval has
-been granted since the cue started waiting (the R2 rule the demo is showing)."""
+been granted since the cue started waiting (the R2 rule the demo is showing). Nor can a cue waiting for a plant event
+(waiting_for == "event"): the story would run ahead of the plant."""
 from __future__ import annotations
 
 import time
@@ -96,6 +97,10 @@ class DemoState:
         elif a == "continue":
             if self.waiting_for == "approval" and approved <= self.approved_mark:
                 raise ValueError("waiting for the approval: approve on the phone or the 核准 card first")
+            # the driver refuses to move on before the plant event its cue waits for (and re-posts its cue), so moving
+            # the pointer here only made every screen flash to the next beat and back
+            if self.waiting_for == "event":
+                raise ValueError("waiting for the plant event (the detector has not seen it yet)")
             if self.cue_index + 1 >= len(self.cues) and self.cues:
                 raise ValueError("already at the last cue")
             self.cue_index += 1
