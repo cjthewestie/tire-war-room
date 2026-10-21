@@ -71,20 +71,15 @@ export function OrdersTab() {
       <section className="panel order-table" aria-label="訂單清單">
         <header className="panel-h"><h2>{query || show !== 'all' ? `符合的訂單 ${list.length} 張` : `訂單 ${views.length} 張`}</h2><span className="muted small">會晚交的排最前，點一列看明細</span></header>
         {query && !list.length && <p className="note">找不到「{q}」。請確認訂單號，或清空搜尋看全部訂單。</p>}
-        <div className="ot-head" aria-hidden><span>訂單</span><span>狀態</span><span>各站進度（投料・貼合・入模・出模・完成・出貨）</span><span>預估完成</span><span>交期</span></div>
+        <div className="ot-head" aria-hidden><span>訂單</span><span>狀態</span><span>進度</span><span>預估完成</span><span>交期</span></div>
         <ul className="ot-list" role="list" data-testid="order-list">
           {list.map((v) => (
             <li key={v.o.id}>
               <button className={`ot-row r-${v.risk} ${sel?.o.id === v.o.id ? 'on' : ''}`} onClick={() => setPicked(sel?.o.id === v.o.id ? null : v.o.id)} aria-expanded={sel?.o.id === v.o.id} data-order={v.o.id}>
                 <span className="ot-id"><b>{v.o.id}</b>{v.o.rush && <em className="tag rush">急單</em>}<small className="muted">{v.o.customer}・{SIZE_LABEL[v.o.size]} {v.o.qty} 條</small></span>
-                <span className="ot-st">{v.success ? <span className="ok-mark" aria-hidden>✓</span> : <i className={`risk-dot r-${v.risk}`} aria-hidden />}{RISK_TEXT[v.risk]}{v.lateH != null && <small> {v.lateH} h</small>}<small className="muted">{v.o.status}・{v.o.done}/{v.o.qty}</small></span>
-                <span className="ot-stages" aria-label={v.stages.map((s) => `${s.k} ${s.v}/${s.of}`).join('，')}>
-                  {v.stages.map((s) => {
-                    const pct = s.of ? Math.round((100 * s.v) / s.of) : 0
-                    return <i key={s.k} className={pct >= 100 ? 'done' : pct > 0 ? 'part' : ''} title={`${s.k} ${s.of ? `${s.v}/${s.of}` : '—'}`}><b style={{ width: `${pct}%` }} /></i>
-                  })}
-                </span>
-                <span className="ot-eta">{v.projected ? `預估 ${v.projected}` : isFinite(v.eta) ? `${fmtMD(v.eta)} ${fmtHM(v.eta)}` : v.o.status === '已出貨' && v.o.shipped_at ? `出貨 ${fmtMD(v.o.shipped_at)}` : '—'}</span>
+                <span className="ot-st">{v.success ? <span className="ok-mark" aria-hidden>✓</span> : <i className={`risk-dot r-${v.risk}`} aria-hidden />}{RISK_TEXT[v.risk]}{v.lateH != null && <small> {v.lateH} h</small>}<small className="muted">{v.o.status}</small></span>
+                <Progress v={v} />
+                <span className="ot-eta">{v.projected ? `預估 ${v.projected}` : isFinite(v.eta) ? `${fmtMD(v.eta)} ${fmtHM(v.eta)}` : v.o.status === '已出貨' && v.o.shipped_at ? `出貨 ${fmtMD(v.o.shipped_at)}` : v.risk === 'unsched' ? '未排程' : '—'}</span>
                 <span className={`ot-due ${v.risk === 'late' ? 'late' : ''}`}>{fmtMD(v.o.due)}</span>
                 {v.why.length > 0 && !v.success && <span className="ot-why">{v.why.join('；')}</span>}
                 {v.success && <span className="ot-why ok" data-testid="order-success">{successLine(v)}</span>}
@@ -92,9 +87,26 @@ export function OrdersTab() {
             </li>
           ))}
         </ul>
-        <p className="muted small">預估完成＝目前生效排程裡這張單最後一條出模的時間；超出排程視窗的部分用排程器依產能估的日期（「預估 10/16」）；各站進度依排程時間與工廠時鐘計算，完成與出貨依工廠紀錄。</p>
+        <p className="muted small">預估完成＝排程裡這張單最後一條出模的時間；寫「預估」的是依產能推算。</p>
       </section>
     </div>
+  )
+}
+
+/** One sentence and one bar instead of six unlabelled stage bars (veteran 10-22 for HY): 「完成 19/30・硫化中 5 條」;
+ *  the per-stage detail stays on the order card. */
+function Progress({ v }: { v: OrderView }) {
+  const { o } = v
+  const inMold = Math.max(0, v.stages[2].v - v.stages[3].v)       // 入模硫化 minus 出模: tyres in a press now
+  const pct = (n: number) => (o.qty ? Math.min(100, (100 * n) / o.qty) : 0)
+  const text = o.status === '已出貨' ? `已出貨 ${o.qty} 條` : `完成 ${o.done}/${o.qty}${inMold ? `・硫化中 ${inMold} 條` : ''}`
+  return (
+    <span className="ot-prog">
+      <span className="ot-pt">{text}</span>
+      <span className="bar" role="progressbar" aria-valuemin={0} aria-valuemax={o.qty} aria-valuenow={o.done} aria-label={text}>
+        <i style={{ width: `${pct(o.done)}%` }} /><i className="mold" style={{ width: `${pct(inMold)}%` }} />
+      </span>
+    </span>
   )
 }
 

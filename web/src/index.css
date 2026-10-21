@@ -871,10 +871,10 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ot-st small.muted { flex-basis: 100%; }
 .r-late .ot-st { color: var(--alarm); } .r-unsched .ot-st { color: var(--ink-dim); } .r-ok .ot-st { color: var(--accent); } .r-done .ot-st { color: var(--ink-dim); }
 .risk-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
-.ot-stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
-.ot-stages i { height: 8px; border-radius: 3px; background: var(--panel-3); overflow: hidden; display: block; }
-.ot-stages i b { display: block; height: 100%; background: var(--info); }
-.ot-stages i.done b { background: var(--accent); }
+.ot-prog { display: grid; gap: 4px; min-width: 0; font-size: 13.5px; }
+.ot-prog .bar { display: flex; }
+.ot-prog .bar i { border-radius: 0; }
+.ot-prog .bar i.mold { background: var(--info); }
 .ot-eta, .ot-due { font-size: 13.5px; white-space: nowrap; }
 .ot-due.late { color: var(--alarm); font-weight: 700; }
 .ot-why { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-dim); }
@@ -882,7 +882,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 @media (max-width: 899px) {
   .ot-head { display: none; }
   .ot-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .ot-stages { grid-column: 1 / -1; }
+  .ot-prog { grid-column: 1 / -1; }
   .ot-eta::before { content: "預估 "; color: var(--ink-faint); }
   .ot-due::before { content: "交期 "; color: var(--ink-faint); font-weight: 400; }
   .ot-due { text-align: right; }

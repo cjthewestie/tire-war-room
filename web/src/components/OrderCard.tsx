@@ -31,7 +31,7 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
       <h2 className="order-title">{o.id}・{o.customer}・{SIZE_LABEL[o.size]} {o.qty} 條{o.rush && <em className="tag rush">急單</em>}</h2>
       <p className="order-eta">
         交期 <b>{fmtMD(o.due)}</b>
-        {isFinite(eta) && <>・已排程 {n} 條最後一條出模 <b>{fmtMD(eta)} {fmtHM(eta)}</b>・<b className={late || warnings.length ? 'late' : 'ontime'}>{late ? `會晚 ${lateH} h` : warnings.length ? (n < o.qty - o.done ? `其餘 ${o.qty - o.done - n} 條預估晚交` : '預估晚交') : '準時'}</b></>}
+        {isFinite(eta) && <>・最後一條預計 <b>{fmtMD(eta)} {fmtHM(eta)}</b> 出模・<b className={late || warnings.length ? 'late' : 'ontime'}>{late ? `會晚 ${lateH} h` : warnings.length ? (n < o.qty - o.done ? `其餘 ${o.qty - o.done - n} 條預估晚交` : '預估晚交') : '準時'}</b></>}
         {!isFinite(eta) && <>・{o.status}</>}
       </p>
       <ol className="order-stages" aria-label="各站進度">
@@ -46,7 +46,6 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
           )
         })}
       </ol>
-      <p className="muted small">投料到出模依目前生效排程第 {state.schedule?.version ?? '—'} 版中這張單的 {n} 條計算；完成與出貨依工廠紀錄。</p>
       <div className="order-grid">
         <div>
           <h3 className="sub">現在在哪</h3>
@@ -54,7 +53,7 @@ export function OrderCard({ o, jobs, now, warnings }: { o: WorldOrder; jobs: Sch
             : <p className="muted">{nextUp ? `下一條 ${fmtMD(nextUp.mold_in)} ${fmtHM(nextUp.mold_in)} 入 ${machineLabel(nextUp.press_id)}` : o.status}</p>}
         </div>
         <div>
-          <h3 className="sub">卡點</h3>
+          <h3 className="sub">卡在哪</h3>
           {blockers.length ? <ul className="w-list">{blockers.map((b, i) => <li key={i} className="warn">{b}</li>)}</ul> : <p className="muted">無</p>}
         </div>
       </div>
