@@ -1,15 +1,18 @@
 """Kyle 10-21 (3D factory): the crew finished the repair, or 回報處置完成 was pressed, and the machine stayed 異常 —
 the way back to normal was read as a new 「溫度驟降」, because the detector's baseline restarted from the faulty
-readings. A repaired machine goes back to its normal baseline; finished repair tasks clear the fault."""
+readings. A repaired machine goes back to its normal baseline; finished repair tasks clear the fault. A clear also drops
+the machine's not-yet-started scripted faults of the same kind (#76), never a later fault of another kind (p.11's leak)."""
 from __future__ import annotations
 
 from datetime import timedelta
 
 from tests.agent_fakes import T0
 from tests.test_plan_talk import _rt
+from tests.test_sim import run_until
 from warroom.api.runtime import REPAIR_KINDS
-from warroom.contracts import AuditKind, SensorReading
+from warroom.contracts import AuditKind, FaultKind, FaultSpec, ScenarioName, ScenarioStep, SensorReading
 from warroom.detect.detector import StreamDetector
+from warroom.sim import Factory
 
 
 def _feed(det, start, minutes, temp_at):
@@ -65,3 +68,41 @@ async def test_clear_after_page2_overheat_raises_no_new_anomaly(tmp_path):
         assert len(anomalies()) == before, [a.payload.get("message") for a in anomalies()[before:]]
     finally:
         await rt.stop()
+
+
+# ------------------------------------------------------------------ which scripted faults a clear takes (#76, p.11)
+def _p11_at(hhmmss: str) -> Factory:
+    f = Factory(scenario=ScenarioName.PRESS7_TEMP_DROP, backfill_min=0)
+    run_until(f, hhmmss)
+    return f
+
+
+def _pending_ids(f, mid):
+    return [st.fault.id for _, st in f._pending if st.fault is not None and st.fault.machine_id == mid]
+
+
+def test_p11_clear_at_0216_keeps_the_0222_leak():
+    # 3D 回報處置完成 on 7 號 at 02:16 (FieldSop -> /api/sim/clear -> runtime.clear_faults): 蒸汽壓不足 is fixed, but the
+    # 02:22:55 持續洩壓 is another failure and still comes, or p.11's whole round 2 disappears
+    f = _p11_at("02:16:00")
+    assert [x.id for x in f.faults() if x.machine_id == "CURE-07"] == ["F-P11-STEAM"]
+    f.clear_faults("CURE-07")
+    assert [x.id for x in f.faults(active_only=False) if x.machine_id == "CURE-07"] == []
+    assert _pending_ids(f, "CURE-07") == ["F-P11-LEAK"]
+    run_until(f, "02:23:00")
+    assert [x.id for x in f.faults() if x.machine_id == "CURE-07"] == ["F-P11-LEAK"]
+
+
+def test_clear_drops_a_scripted_fault_of_the_same_kind():
+    # #76: a not-yet-started scripted fault of the kind just fixed would re-break the machine right after the repair
+    f = _p11_at("02:16:00")
+    again = FaultSpec(id="F-AGAIN", machine_id="CURE-07", kind=FaultKind.STEAM_PRESSURE_DROP, params={"target_c": 122.0})
+    other = FaultSpec(id="F-OTHER", machine_id="CURE-03", kind=FaultKind.STEAM_PRESSURE_DROP, params={"target_c": 123.0})
+    at = f.clock.now() + timedelta(minutes=2)
+    f._pending = sorted([*f._pending, (at, ScenarioStep(at_offset_s=0, fault=again)),
+                         (at, ScenarioStep(at_offset_s=0, fault=other))], key=lambda x: x[0])
+    f.clear_faults("CURE-07")
+    assert _pending_ids(f, "CURE-07") == ["F-P11-LEAK"]          # same kind gone, the other kind kept
+    assert _pending_ids(f, "CURE-03") == ["F-OTHER"]             # another machine's script is untouched
+    f.clear_faults()
+    assert f._pending == [] and f.faults(active_only=False) == []
