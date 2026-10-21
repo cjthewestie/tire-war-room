@@ -3,7 +3,7 @@
 import {
   API, apiPath,
   type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
-  type MachineDetail, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
+  type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
   type SimEventsView, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
@@ -33,6 +33,8 @@ export interface Transport {
   start(onMsg: (m: WsMessage) => void, onConn: (c: boolean) => void): () => void
   decide(d: ApprovalDecision): Promise<ApprovalRequest | null>
   control(c: SimControl): Promise<void>
+  /** 情境疊加: apply an overlayable scenario on top of the running one from now ({action:'overlay'}); what it added. */
+  overlay(scenario: ScenarioName): Promise<OverlayResult>
   /** confirm=true is the supervisor's explicit confirmation (the R2/R3 approval); live only checks it. */
   rollback(version?: number, confirm?: boolean): Promise<ScheduleVersion | null>
   /** Live only: the gate's preview of a rollback (diff + block reasons). */
@@ -171,6 +173,9 @@ export class LiveTransport implements Transport {
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
+  async overlay(scenario: ScenarioName) {
+    return (await postJSON<{ overlay: OverlayResult }>(API.simControl, { action: 'overlay', scenario } satisfies SimControl)).overlay
+  }
   simEvents() { return getJSON<SimEventsView>(API.simEvents) }
   setSimEvents(b: SimEventsBody) { return postJSON<SimEventsView>(API.simEvents, b) }
   async fireEvent(kind: string) { return (await postJSON<{ ok: boolean; fired: SimEventFired }>(API.simEventsFire, { kind })).fired }
@@ -268,6 +273,7 @@ export class MockTransport implements Transport {
     switch (op) {
       case 'decide': return e.decide(args[0] as ApprovalDecision)
       case 'control': e.control(args[0] as SimControl); return null
+      case 'overlay': return e.overlay(args[0] as ScenarioName)
       case 'rollback': return e.rollback(args[0] as number | undefined)
       case 'machineDetail': return e.machineDetail(args[0] as string)
       case 'scheduleVersions': return e.versions()
@@ -292,6 +298,7 @@ export class MockTransport implements Transport {
   }
   decide(d: ApprovalDecision) { return this.call<ApprovalRequest | null>('decide', d) }
   control(c: SimControl) { return this.call<void>('control', c) }
+  overlay(scenario: ScenarioName) { return this.call<OverlayResult>('overlay', scenario) }
   rollback(v?: number) { return this.call<ScheduleVersion | null>('rollback', v) }
   machineDetail(id: string) { return this.call<MachineDetail>('machineDetail', id) }
   scheduleVersions() { return this.call<ScheduleVersion[]>('scheduleVersions') }

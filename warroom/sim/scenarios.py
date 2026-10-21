@@ -46,6 +46,13 @@ _DEFAULT_START: dict[ScenarioName, datetime] = {
 }
 DAY_LOOP_SHIFT_START_S = 8 * 3600.0     # 08:00 開工 every loop
 PLANT_SCENARIOS = frozenset({ScenarioName.SHIFT_START, ScenarioName.STAFFING, ScenarioName.RUSH_ORDER})
+# 情境疊加 (scenario overlay): scenarios whose steps are pure FaultSpec / PlantInput with no story-bound world
+# setup, so they can be applied on top of a running scenario relative to now (Runtime.overlay_scenario) instead of
+# rebuilding the plant. The story scenarios always reload: page 11 seeds its night-shift gap and the schedule
+# around press 7, 一日循環 replays the dataset day from 00:00, 早班開工 is the start of the day's plan, and 正常運轉
+# has no steps. web/src/components/scenarioOverlay.ts mirrors this set.
+OVERLAY_SCENARIOS = frozenset({ScenarioName.CONCURRENT_3, ScenarioName.OPEN_MILL_OVERHEAT, ScenarioName.BAD_DATA,
+                               ScenarioName.RUSH_ORDER, ScenarioName.STAFFING})
 
 # issue #17 timing: each plant event lands 10 min after the scenario start, so the dashboard shows the
 # plant running normally first.

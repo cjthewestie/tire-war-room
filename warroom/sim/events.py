@@ -123,7 +123,7 @@ class SimEvents:
         self.n += 1
         tag = f"{now:%H%M%S}-{self.n:02d}"
         if kind in ("steam_low", "steam_leak"):
-            free = [p for p in CURE_PRESS_IDS if p not in busy] or list(CURE_PRESS_IDS)
+            free = free_machines(CURE_PRESS_IDS, busy) or list(CURE_PRESS_IDS)
             mid = rng.choice(free)
             if kind == "steam_low":
                 return FaultSpec(id=f"F-SIM-{tag}-{mid}", machine_id=mid, kind=FaultKind.STEAM_PRESSURE_DROP,
@@ -132,7 +132,7 @@ class SimEvents:
                              params={"rate_c_per_min": round(rng.uniform(0.25, 0.4), 2), "floor_kgf_cm2": 2.0,
                                      "header_drop": 0.1})
         if kind == "water_low":
-            free = [m for m in WATER_MILLS if m not in busy] or list(WATER_MILLS)
+            free = free_machines(WATER_MILLS, busy) or list(WATER_MILLS)
             mid = rng.choice(free)
             return FaultSpec(id=f"F-SIM-{tag}-{mid}", machine_id=mid, kind=FaultKind.WATER_FLOW_DROP,
                              params={"target_lpm": round(rng.uniform(15.0, 20.0), 1), "ramp_s": 10.0})
@@ -211,11 +211,51 @@ def _material_name(key: str) -> str:
     return m.name if m else key
 
 
+def free_machines(pool: tuple[str, ...] | list[str], busy: set[str]) -> list[str]:
+    """The machines of `pool` with no open event and no active fault (never stacked)."""
+    return [m for m in pool if m not in busy]
+
+
+def same_kind_pool(machine_id: str, fault_kind: FaultKind | None = None) -> tuple[str, ...]:
+    """Machines that can stand in for `machine_id` under the same fault: a cooling-water fault only on the water
+    cooled mills, a curing press only on a press of the same class (small-only 1–7 / shared M+L 8–11, so the cure
+    and its setpoint stay alike), anything else on a machine of the same kind."""
+    d = MACHINE_BY_ID[machine_id]
+    if fault_kind is FaultKind.WATER_FLOW_DROP:
+        return WATER_MILLS
+    if d.kind is MachineKind.CURING_PRESS:
+        return tuple(p for p in CURE_PRESS_IDS if MACHINE_BY_ID[p].small_only == d.small_only)
+    return tuple(m for m, x in MACHINE_BY_ID.items() if x.kind is d.kind)
+
+
+def substitute_machine(machine_id: str, busy: set[str], fault_kind: FaultKind | None = None) -> str | None:
+    """情境疊加: an idle machine of the same kind for a step whose target is busy, or None. Nearest first; a press
+    on a steam header that a busy press shares comes last (page 11 reads 6 and 8 against 7 as the same pipe)."""
+    pool = free_machines([m for m in same_kind_pool(machine_id, fault_kind) if m != machine_id], busy)
+    if not pool:
+        return None
+    d = MACHINE_BY_ID[machine_id]
+    busy_headers = {MACHINE_BY_ID[m].steam_header for m in busy if m in MACHINE_BY_ID} - {None}
+    return min(pool, key=lambda m: (MACHINE_BY_ID[m].steam_header in busy_headers,
+                                    abs(MACHINE_BY_ID[m].order - d.order), m))
+
+
+def machine_label(machine_id: str) -> str:
+    """「7 號硫化機」, 「B 線開煉機」, 「貼合油壓機」 (the dashboard's machineLabel)."""
+    d = MACHINE_BY_ID[machine_id]
+    return f"{int(d.short_name)} 號{d.name}" if d.kind is MachineKind.CURING_PRESS else \
+        f"{d.line.value} 線{d.name}" if d.line.value in ("A", "B", "C", "D") else f"{LINE_LABELS[d.line]}{d.name}"
+
+
+def machine_short(machine_id: str) -> str:
+    """「7 號機」 for a press, the full label otherwise (the 「改用 …（7 號機處理中）」 note)."""
+    d = MACHINE_BY_ID[machine_id]
+    return f"{int(d.short_name)} 號機" if d.kind is MachineKind.CURING_PRESS else machine_label(machine_id)
+
+
 def fault_text(spec: FaultSpec) -> str:
     """One line for the fired-events log."""
-    d = MACHINE_BY_ID[spec.machine_id]
-    where = f"{int(d.short_name)} 號{d.name}" if d.kind is MachineKind.CURING_PRESS else \
-        f"{d.line.value} 線{d.name}" if d.line.value in ("A", "B", "C", "D") else f"{LINE_LABELS[d.line]}{d.name}"
+    where = machine_label(spec.machine_id)
     p = spec.params
     return {
         FaultKind.STEAM_PRESSURE_DROP: f"{where}蒸汽壓不足，溫度降向 {p.get('target_c', 0):g}°C",
