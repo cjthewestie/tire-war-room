@@ -51,9 +51,9 @@ export function DemoOverlay({ demo, deck, onPhone, pad }: {
           <i>{mss(t)}{demo.checkpoint >= 0 && ` ・ ${CIRCLED[demo.checkpoint]}`}</i>
           <b>{cue.title}</b>
           <span>{cue.body}</span>
-          {(links.length > 0 || cue.id === 'phone') && (
+          {(links.length > 0 || cue.id === 'h1' || cue.id === 'h2') && (
             <div className="f3-cue-links">
-              {cue.id === 'phone' && <button onClick={onPhone} data-testid="demo-raise-phone">拿起手機（P{pad ? '／X' : ''}）</button>}
+              {(cue.id === 'h1' || cue.id === 'h2') && <button onClick={onPhone} data-testid="demo-raise-phone">拿起手機（P{pad ? '／X' : ''}）</button>}
               {links.map((l) => (
                 <button key={l} data-testid={`demo-open-${l}`} onClick={() => window.open(href(l, demo.incidentEventId), LINK[l].win)}>開啟・{LINK[l].label}</button>
               ))}

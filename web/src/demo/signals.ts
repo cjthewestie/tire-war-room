@@ -37,10 +37,15 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
   const workers = state.world?.people.workers ?? []
   const onTask = !!seen.machine && workers.some((w) => w.machine_id === seen.machine && (w.state === '前往中' || w.state === '執行中'))
   // the story follows the incident: its own approval card, its own approval (an order plan approved meanwhile is not it)
-  const approved = !!seen.id && fresh.some((r) => r.event_id === seen.id)
+  const mine = fresh.filter((r) => r.event_id === seen.id)
+  const approved = !!seen.id && mine.length > 0
+  // H1 → H2 (CJ, 2026-10-22: the demo shows 「AI 猜錯換假設」): the program's check rejects H1, then a second card
+  const rejected = !!followed && (followed.hypotheses ?? []).some((h) => h.status === 'rejected')
+  const pendingHere = !!seen.id && state.pending.some((p) => p.event_id === seen.id)
   const tasks = seen.id ? (state.world?.tasks.items ?? []).filter((k) => k.event_id === seen.id) : []
   const closed = !!seen.id && (!followed || followed.state === 'closed')
   const cmd = events.filter((e) => isCmd(e.id))
+  const tile = seen.machine ? (state.snapshot?.machines ?? []).find((m) => m.machine_id === seen.machine) : undefined
   return {
     orders: (state.world?.orders.items.length ?? 0) > 0,
     rushCard: state.pending.some((p) => isRush(p.event_id)) || fresh.some((r) => isRush(r.event_id)),
@@ -48,11 +53,16 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     // the SO-012 pre-plan (a supervisor command event): in and done
     preplan: cmd.length > 0 && cmd.every((e) => e.state === 'closed' || e.state === 'safe_stop'),
     event: !!ev,
-    approval: !!seen.id && state.pending.some((p) => p.event_id === seen.id),
+    approval: pendingHere,
     approved,
+    rejected,
+    approval2: rejected && pendingHere,
+    approved2: rejected && mine.length >= 2,
     worker: approved && (onTask || (!!followed && (followed.state === 'execute' || followed.state === 'verify'))),
-    // the crew's task for this incident is done (or the event closed after its approval): the camera goes to look
-    workerDone: approved && ((tasks.length > 0 && tasks.every((k) => k.status === '完成')) || closed),
+    // the crew finished the last repair for this incident: the machine's tile says repaired (「檢修完成・待恢復運轉」),
+    // or the event closed with every task done and one task per approved card (H1's 檢修 is done long before H2's
+    // 停用檢修, so 「all done」 alone would fire early). Never on status running: 7 號機 stays 停用 until 恢復運轉.
+    workerDone: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))),
     closed,
   }
 }

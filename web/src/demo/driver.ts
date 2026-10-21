@@ -40,6 +40,9 @@ export class DemoRun {
   private contReq = false
   private ack = 0
   private posted = ''
+  /** the server rev of this driver's own last cue post, and posts still on the way (their echo is not a continue) */
+  private myRev = -1
+  private inflight = 0
   private serverRunning = false
 
   private io: DemoIO
@@ -61,14 +64,15 @@ export class DemoRun {
   async start(now: number): Promise<string | null> {
     this.tl = startTimeline(); this.clock = clockStart(now); this.t = 0
     this.firstSeen = {}; this.log = [{ id: CUES[0].id, title: CUES[0].title, planned: 0, t: 0, reason: 'time', wall: new Date().toISOString() }]
-    this.loaded = new Set([0]); this.ack = 0; this.posted = ''; this.simHeld = false; this.serverRunning = false
+    this.loaded = new Set([0]); this.ack = 0; this.posted = ''; this.simHeld = false; this.serverRunning = false; this.myRev = -1; this.inflight = 0
     let known = this.io.mode !== 'live'
     if (this.io.mode === 'live') {
       try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { known = true }
     } else known = false
     this.loads = known ? MAIN_LOADS : FALLBACK_LOADS
     this.fallback = !known
-    await this.send({ action: 'start', cues: CUES.map((c) => c.id), cue_id: CUES[0].id, cue_index: 0, driver: this.driver, story_target_s: PITCH_AT })
+    const st = await this.send({ action: 'start', cues: CUES.map((c) => c.id), cue_id: CUES[0].id, cue_index: 0, driver: this.driver, story_target_s: PITCH_AT })
+    if (st) this.myRev = st.rev
     try { await this.load(this.loads[0]) } catch (e) { console.warn('[demo] load', e); return '情境載入沒有成功' }
     return known ? null : '「一早訂單湧入」情境還沒上線，改用 7 號機溫降'
   }
@@ -77,8 +81,9 @@ export class DemoRun {
   async continue(): Promise<'ok' | 'approval'> {
     if (this.io.demo) {
       try { await this.io.demo({ action: 'continue' }); return 'ok' } catch (e) {
-        if (/approval|409/.test(String((e as Error).message ?? e))) { this.refusedAt = performance.now(); return 'approval' }
-        this.contReq = true; return 'ok'
+        if (/approval/.test(String((e as Error).message ?? e))) { this.refusedAt = performance.now(); return 'approval' }
+        // any other refusal (the server's pointer ran past the end, …): this driver's timeline decides; post it again
+        this.contReq = true; this.posted = ''; return 'ok'
       }
     }
     this.contReq = true
@@ -107,7 +112,9 @@ export class DemoRun {
       if (d.paused && this.clock.since != null) this.clock = clockPause(this.clock, now)
       if (!d.paused && this.clock.since == null) this.clock = clockResume(this.clock, now)
       // continue pressed anywhere: the server moved the pointer past what this driver has handled
-      if (d.cue_index > this.ack) { this.ack = d.cue_index; this.contReq = true }
+      // (several continues in one burst still move one step: each tick re-posts this driver's cue, which pulls the
+      // server's pointer back to it, and `ack` follows what was posted, so the next real continue is seen again)
+      if (this.inflight === 0 && d.rev > this.myRev && d.cue_index > this.ack) { this.ack = d.cue_index; this.myRev = d.rev; this.contReq = true; this.posted = '' }
     }
     const t = this.t = clockRead(this.clock, now)
     this.loads.forEach((l, i) => {
@@ -144,8 +151,11 @@ export class DemoRun {
     const key = `${r.tl.index}|${w}`
     if (key !== this.posted) {
       this.posted = key
-      this.ack = Math.max(this.ack, r.tl.index)
+      this.ack = r.tl.index
+      this.inflight++
       void this.send({ action: 'cue', cue_id: CUES[r.tl.index].id, cue_index: r.tl.index, waiting_for: w })
+        .then((out) => { if (out) this.myRev = Math.max(this.myRev, out.rev) })
+        .finally(() => { this.inflight-- })
     }
     return changed ? 'cue' : null
   }

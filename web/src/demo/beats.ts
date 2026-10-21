@@ -103,10 +103,13 @@ export function anchorsFor(beat: Beat, ev: Event | null): string[] {
   })
 }
 
+/** The beats that wait for a real approval (cues.ts hold 'approval'): continue is refused there. */
+export const APPROVAL_CUES = new Set(['phone', 'rush', 'h1', 'h2'])
+
 /** What the beat waits for before the next one: the phone beat needs the real approval (never skippable), a beat
  *  whose next cue follows a plant fact waits for the event, the rest go on the presenter's 繼續 or the clock. */
 export function waitingFor(cueId: string, nextOn: string | undefined): DemoWaiting {
-  if (cueId === 'phone') return 'approval'
+  if (APPROVAL_CUES.has(cueId)) return 'approval'
   if (nextOn) return 'event'
   return null
 }
