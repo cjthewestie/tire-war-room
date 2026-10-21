@@ -6,6 +6,7 @@ import type {
   Hypothesis, MachineStatus, PlanStep, RiskLevel, SafetyAction, ScheduleVersion, StepRun, TimelineItem, ToolName,
   ToolResult,
 } from '../contracts'
+import { machineLabel } from '../factory'
 import { isoTaipei } from '../format'
 import { HOUR, MIN, baseJobs, makeJob, makeSchedule, reflow, version } from './schedule'
 
@@ -347,11 +348,13 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
 // =====================================================================================
 // Page 2 — A 線大開煉機 溫度過高 (cooling insufficient)
 // =====================================================================================
-export function openMillScript(A: number): Script {
+/** tag: suffix for the approval / safety ids when the script is overlaid (情境疊加) beside an earlier copy. */
+export function openMillScript(A: number, tag = ''): Script {
   const EV = `EV-${isoTaipei(A).slice(0, 10).replace(/-/g, '')}-${isoTaipei(A).slice(11, 19).replace(/:/g, '')}-A-BIGOPEN`
   const F = A - 60 * SEC                         // fault start; detected within 1 minute (page 1)
   const at = (s: number) => A + s * SEC
   const CREATED = at(13)
+  const APR = `APR-OM-1${tag}`
   const rising = (t: number) => {
     const rel = (t - F) / SEC
     if (rel < 0) return 98
@@ -359,7 +362,7 @@ export function openMillScript(A: number): Script {
     return 112 + (0.25 * (rel - 840)) / 60
   }
   const STOP_T = F + (840 + ((120 - 112) / 0.25) * 60) * SEC   // reaches 120 °C if nobody acts
-  const dec = (now: number, ctx: Ctx) => resolve(ctx, 'APR-OM-1', CREATED, now, null, { decision: 'approve' })
+  const dec = (now: number, ctx: Ctx) => resolve(ctx, APR, CREATED, now, null, { decision: 'approve' })
   const effect = (ctx: Ctx, now: number) => {
     const r = dec(now, ctx)
     return r && r.d.decision !== 'reject' && r.at < STOP_T ? r.at + 60 * SEC : null
@@ -424,7 +427,7 @@ export function openMillScript(A: number): Script {
       expectation: { machine_id: 'A-BIGOPEN', channel: 'temp_c', op: '<=', value: 108, value_hi: null, within_min: 15 }, evidence: ['水流 40 → 22 L/min', 'SOP-OM-01'],
     }
     const approvals: ApprovalRequest[] = now >= CREATED ? [approval({
-      id: 'APR-OM-1', event: EV, step: 'S5', round: 1, created: CREATED, risk: 'R3', title: '放慢生料投入（A 線大開煉機）',
+      id: APR, event: EV, step: 'S5', round: 1, created: CREATED, risk: 'R3', title: '放慢生料投入（A 線大開煉機）',
       reason: `膠溫 ${tA}°C 持續上升，預測 30 分後約 124°C`, done: ['已自動通知維修冷卻水路'], gaps: [],
       impact: '無，大胎 #07 仍 17:00 入硫化機',
       options: [{ id: 'A', label: '放慢生料投入', tool: 'notify_teams', args: { kind: 'slow_feed', teams: ['bigopen'] }, recommended: true }], res,
@@ -447,7 +450,7 @@ export function openMillScript(A: number): Script {
       schedule_impact: '無，大胎 #07 仍 17:00 入硫化機', state, timeline: T,
     }
     const safety: SafetyAction[] = now >= STOP_T && !(ok && d < STOP_T) ? [{
-      id: 'SA-A-BIGOPEN-1', ts: isoTaipei(STOP_T), machine_id: 'A-BIGOPEN', rule_id: 'COMPOUND_UNVULC_120', action: 'stop_machine',
+      id: `SA-A-BIGOPEN-1${tag}`, ts: isoTaipei(STOP_T), machine_id: 'A-BIGOPEN', rule_id: 'COMPOUND_UNVULC_120', action: 'stop_machine',
       value: 120, threshold: 120, message: '未加硫膠 ≥120°C：停機', latency_ms: 2,
     }] : []
     const event: Event = {
@@ -517,6 +520,110 @@ export function bmixScript(A: number): Script {
         consecutive_failures: 0, replans: 0, closed_at: state === 'closed' ? isoTaipei(at(270)) : null, outcome: state === 'closed' ? '自行回穩' : null,
       }
       return { event, approvals: [], safety: [], focus: null, machine: { 'B-MIX': { status: state === 'closed' ? 'running' : 'warning', active_event_id: state === 'closed' ? null : EV } } }
+    },
+  }
+}
+
+// =====================================================================================
+// 情境疊加 (scenario overlay) — one fault on any machine of a kind
+// =====================================================================================
+export type OverlayFault = 'steam' | 'water' | 'heat'
+
+/** A fault for an overlay step that cannot reuse its story script: its machine is busy and an idle one of the same
+ *  kind stands in, or the script cannot be stacked (press 7's also drives the schedule versions). The fault starts
+ *  30 s before A and is detected at A. steam (a press) and water (a cooled mill) raise an R3 card that waits for the
+ *  supervisor and close 2 minutes after the approval; heat (a mixer) closes itself on an R1 notification, like bmix.
+ *  base: the machine's normal temperature; tag: keeps ids apart from an earlier copy on the same machine. */
+export function overlayFaultScript(A: number, mid: string, kind: OverlayFault, base: number, tag = ''): Script {
+  const EV = `EV-${isoTaipei(A).slice(0, 10).replace(/-/g, '')}-${isoTaipei(A).slice(11, 19).replace(/:/g, '')}-${mid}`
+  const F = A - 30 * SEC
+  const at = (s: number) => A + s * SEC
+  const CREATED = at(13)
+  const APR = `APR-OV-${mid}${tag}`
+  const label = machineLabel(mid)
+  const card = kind !== 'heat'
+  const drop = base >= 128 ? 6 : 4                // a small-tire press runs at 125.5 °C: stay above the 120 °C hold
+  const low = r1(base - drop)
+  const T: Record<OverlayFault, { title: string; detect: string; cause: string; ask: string; goal: string; kind: Event['anomaly']['kind'] }> = {
+    steam: { title: `${label}溫度下降`, detect: `${label} ${base} → ${low}°C、蒸汽壓偏低`, cause: '蒸汽壓不足',
+      ask: `${label}延長硫化，通知硫化機組`, goal: `${label}溫降，訂單不得延誤`, kind: 'temp_drop' },
+    water: { title: `${label}溫度過高`, detect: `${label}冷卻水流 40 → 18 L/min、膠溫上升`, cause: '冷卻能力不足',
+      ask: `放慢生料投入（${label}）`, goal: `${label}膠溫回穩，不整批報廢`, kind: 'overheat' },
+    heat: { title: `${label}溫度偏高`, detect: `${label} ${base} → ${r1(base + 7)}°C 上升`, cause: '投料偏熱',
+      ask: '', goal: '密煉溫度回穩', kind: 'overheat' },
+  }
+  const txt = T[kind]
+  const dec = (now: number, ctx: Ctx) => (card ? resolve(ctx, APR, CREATED, now, null, { decision: 'approve' }) : null)
+  /** 1 while the fault holds, falling to 0 over ~5 min once the approved action takes effect (a minute after it). */
+  const hold = (t: number, ctx: Ctx) => {
+    const r = dec(t, ctx)
+    const e = r && r.d.decision !== 'reject' ? r.at + 60 * SEC : null
+    return e != null && t > e ? Math.exp(-(t - e) / (300 * SEC)) : 1
+  }
+  return {
+    id: `overlay-${mid}${tag}`, machine: mid,
+    signal(id, t, ctx) {
+      if (id !== mid || t < F) return null
+      const f = Math.min(1, (t - F) / (30 * SEC)) * hold(t, ctx)
+      if (kind === 'steam') return { temp_c: base - drop * f + noise(id, t, 0.05), steam_kgf_cm2: 6.5 - 1.3 * f + noise('s' + id, t, 0.03) }
+      if (kind === 'water') return { temp_c: base + 12 * Math.min(1, (t - F) / (600 * SEC)) * hold(t, ctx) + noise(id, t, 0.12), water_flow_lpm: 40 - 22 * f + noise('f' + id, t, 0.3) }
+      const rel = (t - A) / SEC
+      return { temp_c: base + (rel < 30 ? lerp(0, 7, (rel + 30) / 60) : lerp(7, 0, (rel - 30) / 240)) + noise(id, t) }
+    },
+    world(now, ctx): ScriptWorld {
+      if (now < A) return { event: null, approvals: [], safety: [], focus: null, machine: {} }
+      const res = dec(now, ctx)
+      const d = res?.at ?? Infinity
+      const ok = !!res && res.d.decision !== 'reject'
+      const closedAt = card ? (ok ? d + 120 * SEC : d + 3 * SEC) : at(270)
+      const marks: [number, EventState][] = card
+        ? [[A, 'detected'], [at(1), 'classify'], [at(6), 'plan'], [at(8), 'simulate'], [at(12), 'gate'], [CREATED, 'await_approval'],
+            [d, 'execute'], [d + 2 * SEC, 'verify'], [closedAt, 'closed']]
+        : [[A, 'detected'], [at(1), 'classify'], [at(3), 'plan'], [at(4), 'simulate'], [at(5), 'gate'], [at(6), 'execute'], [at(8), 'verify'], [closedAt, 'closed']]
+      const state = stateAt(now, marks)
+      const closed = state === 'closed'
+      const TL: TimelineItem[] = []
+      const push = (t: number, a: TimelineItem['actor'], text: string, tg: TimelineItem['tag']) => { if (now >= t) TL.push(tl(t, a, text, tg)) }
+      push(A, '事件偵測', `[工具] ${txt.detect} → 喚醒指揮官`, 'tool')
+      push(at(1), '安全核心', '仍在安全範圍內，不停機', 'safety')
+      if (card) {
+        push(at(4), '指揮官', `[工具] 讀 30 分鐘讀數、[工具] 查 SOP → 假設 H1：${txt.cause}`, 'decision')
+        push(at(12), '系統', `動作把關：通知維修 R1 自動執行；${txt.ask} R3 送主管核准`, 'info')
+        if (res) push(d, '主管', ok ? `[人工] 核准${txt.ask}；寫入稽核日誌` : '[人工] 主管駁回；持續監控', 'human')
+        if (ok) push(closedAt, '驗證（程式）', '比對預期：讀數回穩 → H1 成立，事件結案', 'dynamic')
+      } else {
+        push(at(6), '系統', '動作把關：通知胎側膠組檢查投料 R1 自動執行', 'info')
+        push(closedAt, '驗證（程式）', '比對預期：溫度回穩，事件結案', 'dynamic')
+      }
+      const s1 = step('S1', 'notify_teams', { teams: ['maintenance'], kind: 'maintenance', machine_id: mid, message: txt.cause }, [], '通知維修')
+      const s2 = step('S2', 'notify_teams', { teams: kind === 'steam' ? ['curing'] : ['body'], kind: kind === 'steam' ? 'cure_extend' : 'slow_feed', machine_id: mid, message: txt.ask }, ['S1'], txt.ask)
+      const steps: StepRun[] = card ? [
+        run(s1, now >= at(12) ? 'ok' : 'pending', now >= at(12) ? result('notify_teams', { sent: 1 }, 5) : null, now >= at(12) ? gate('S1', 'notify_teams', 'R1', 'allow') : null),
+        run(s2, res ? (ok ? 'ok' : 'rejected') : now >= CREATED ? 'awaiting_approval' : 'pending', ok ? result('notify_teams', { sent: 1 }, 5) : null, now >= at(12) ? gate('S2', 'notify_teams', 'R3') : null),
+      ] : [run(s1, now >= at(6) ? 'ok' : 'pending', null, gate('S1', 'notify_teams', 'R1', 'allow'))]
+      const H1: Hypothesis = {
+        id: 'H1', statement: txt.cause, cause_code: kind === 'steam' ? 'steam_pressure_low' : 'cooling_insufficient',
+        status: closed && ok ? 'confirmed' : 'active', expectation: null, evidence: [txt.detect],
+      }
+      const approvals: ApprovalRequest[] = card && now >= CREATED ? [approval({
+        id: APR, event: EV, step: 'S2', round: 1, created: CREATED, risk: 'R3', title: txt.ask, reason: txt.detect,
+        done: ['已自動通知維修'], gaps: [], impact: '交期不受影響',
+        options: [{ id: 'A', label: txt.ask, tool: 'notify_teams', args: { kind: kind === 'steam' ? 'cure_extend' : 'slow_feed' }, recommended: true }], res,
+      })] : []
+      const alert = { title: txt.title, summary: card ? `${txt.cause}；已通知維修，待核准${txt.ask}` : '已自動通知胎側膠組' }
+      const event: Event = {
+        id: EV, opened_at: isoTaipei(A), machine_id: mid,
+        anomaly: {
+          id: `AN-${EV.slice(3)}`, ts: isoTaipei(A), machine_id: mid, kind: txt.kind, channel: 'temp_c', value: kind === 'steam' ? low : r1(base + 7), baseline: base,
+          prediction: null, severity: card ? 'critical' : 'warn', message: txt.detect, related_machines: [], detection_latency_s: 30,
+        },
+        state, goal: txt.goal, hypotheses: card && now >= at(4) ? [H1] : [],
+        plan: card && now >= at(6) ? { goal: txt.goal, hypothesis: H1, rejected_hypothesis_ids: [], steps: [s1, s2], alert_card: alert, safe_stop: false, rationale: `${txt.cause}；先通知維修，${txt.ask}由主管決定` } : null,
+        steps, approvals: approvals.map((a) => a.id), safety_actions: [], timeline: TL, alert_card: alert,
+        consecutive_failures: 0, replans: 0, closed_at: closed ? isoTaipei(closedAt) : null,
+        outcome: closed ? (card ? (ok ? 'H1 成立，讀數回穩' : '主管駁回；持續監控') : '自行回穩') : null,
+      }
+      return { event, approvals, safety: [], focus: null, machine: { [mid]: { status: closed ? 'running' : card ? 'alarm' : 'warning', active_event_id: closed ? null : EV } } }
     },
   }
 }

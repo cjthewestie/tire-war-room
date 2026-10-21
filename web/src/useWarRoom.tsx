@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useReducer, useState, type ReactNode } from 'react'
+import { useHistoryRecorder } from './history'
 import { initialState, reduce, type WarRoomState } from './store'
 import { pickTransport, type Transport } from './transport'
 
@@ -19,6 +20,7 @@ export function WarRoomProvider({ children }: { children: ReactNode }) {
     })
     return () => { cancelled = true; stop?.() }
   }, [])
+  useHistoryRecorder(state, transport)   // 主控台 今天處理過的事: kept across tab and scenario switches (history.ts)
   return <WarRoomCtx.Provider value={{ state, transport, connected }}>{children}</WarRoomCtx.Provider>
 }
 
