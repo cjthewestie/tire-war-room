@@ -70,11 +70,11 @@ try {
   // home (UX brief v12): 核准區 list | 計劃板 | Agent 對話. The plan shows the board, delivery impact, who does what,
   // the option picker and only 核准 / 討論; the evidence (Gantt compare, tools, conclusion) is on 產線監控's card.
   const apv = d.locator('[data-testid=plan-area] [data-testid=approval-visual]').first()
-  const flow = await apv.locator('[data-testid=plan-board] svg').getAttribute('aria-label')
-  check('plan board shows S1…S5 with status', !!flow && /S1/.test(flow) && /S5/.test(flow) && flow.includes('等主管核准'), flow?.slice(0, 120))
+  // CJ, 2026-10-22: the S1–S5 board is not shown on the 主控台 (component and data stay); no empty gap is left behind
+  check('主控台 center shows no S1–S5 board', (await apv.locator('[data-testid=plan-board]').count()) === 0 && (await apv.locator('svg[aria-label*=S1]').count()) === 0)
   const impact = await apv.locator('[data-testid=impact-table]').innerText().catch(() => '')
   check('delivery-impact table names #A-311', impact.includes('#A-311'), impact.replace(/\n/g, ' | ').slice(0, 160))
-  check('核准後誰去做 lists the actions', (await apv.locator('[data-testid=who-does-what] li').count()) >= 2)
+  check('核准後的執行事項 lists the actions (2 columns)', (await apv.locator('[data-testid=who-does-what] tbody tr').count()) >= 2)
   check('staffing options A and B', (await apv.locator('[data-testid=option-A]').count()) === 1 && (await apv.locator('[data-testid=option-B]').count()) === 1)
   check('one option carries the 系統建議 badge', (await apv.locator('.opt-rec').count()) === 1)
   check('plan actions are only 核准 and 討論', (await apv.locator('[data-testid=visual-discuss]').count()) === 1 && (await apv.locator('.apv-act button', { hasText: /修改|駁回/ }).count()) === 0)

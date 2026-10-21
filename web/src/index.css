@@ -1005,3 +1005,18 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 @media (max-width: 700px) { .user-name { display: none; } .clock-full { display: none; } .clock-short { display: inline; } }
 
 /* 核准區「接下來」：一件事一行，照時間排 (issue #100) */
+
+/* phone header (CJ, 2026-10-22): row 1 = title + 主管 + 深色; row 2 = 系統時間 + 連線狀態. Nothing removed. */
+@media (max-width: 599px) {
+  .topbar { flex-wrap: wrap; gap: 4px 8px; padding: 8px 14px; background: rgb(var(--bar-rgb, 11 13 16) / 1); }
+  .top-right { display: contents; }
+  .brand { flex: 1 1 calc(100% - 100px); min-width: 0; order: 1; }
+  .brand h1 { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+  .topbar .usermenu { order: 2; }
+  .topbar .user-caret { display: none; }
+  .topbar .user-btn { padding: 3px; }
+  .topbar .theme-tog { order: 3; }
+  .top-right > .clock-wrap { order: 4; flex-direction: row; align-items: baseline; gap: 6px; flex: 1 1 auto; justify-content: flex-start; }
+  .top-right > .mode { order: 5; margin-left: auto; }
+  .top-right > .chip, .top-right > .clock-loop { order: 6; }
+}

@@ -31,8 +31,10 @@ export function PendingApproval({ req, onAgent }: { req: ApprovalRequest; onAgen
  *  does what after approval, the option picker when there is a choice, and only two actions — 核准 and 討論
  *  (CJ: 「agent 計劃就只有核准跟討論」; changing or rejecting a plan happens by talking to the agent).
  *  `wide` = 產線監控: the same decision plus the evidence (plan diagram, schedule before/after, tools). */
-export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide' }: {
+export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide', showBoard = false }: {
   req: ApprovalRequest; ev: Event | null; items: Item[]; onAgent?: () => void; onDiscuss?: () => void; layout?: 'wide' | 'plan'
+  /** the S1–S5 計劃板 inside the plan layout: off on the 主控台 (CJ, 2026-10-22), the code and data stay */
+  showBoard?: boolean
 }) {
   const { transport, state } = useWarRoom()
   const versions = useVersions()
@@ -54,6 +56,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [done, setDone] = useState<string | null>(null)
+  const [more, setMore] = useState<'chg' | 'why' | null>(null)
 
   // 核准 only: the chosen option (or the system's) executes; a different option than the system's is recorded as such.
   // Changing or rejecting the plan is done by talking (討論 → POST /api/events/{id}/discuss replans and issues v2).
@@ -92,29 +95,31 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
       {!diff && cure && <p className="apv-chips"><span className="chg cure">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</span></p>}
     </Block>
   )
-  const options = (n: number) => opts.length > 0 && (
+  // 人力方案: a real choice (the chosen id is sent with 核准, 核准 stays off until one is chosen) — kept as a compact
+  // radio list. With a single option there is nothing to choose: it only appears in the 執行事項 table (same default pick).
+  const options = (n: number) => opts.length > 1 && (
     <Block key="opts" n={n} title="人力方案" hint="點選一個方案">
-      <div className="apv-opts" role="group" aria-label="人力方案">
+      <div className="apv-opts apv-opts-c" role="group" aria-label="人力方案">
         {opts.map((o) => {
           const on = chosen === o.opt.id
+          const brief = [o.who, o.shift, o.people != null ? `${o.people} 人` : null].filter(Boolean).join('・')
           return (
             <button key={o.opt.id} aria-pressed={on} className={`opt ${on ? 'on' : ''}`} disabled={busy || !!done}
               onClick={() => setPick(o.opt.id)} data-testid={`option-${o.opt.id}`}>
-              <span className="opt-h"><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
-                {o.opt.recommended && <span className="opt-rec">系統建議</span>}</span>
-              <dl className="opt-dl">
-                {o.who && <><dt>人員</dt><dd>{o.who}</dd></>}
-                {o.shift && <><dt>班別</dt><dd>{o.shift}</dd></>}
-                {o.people != null && <><dt>人數</dt><dd>{o.people} 人</dd></>}
-                {o.teams.length > 0 && <><dt>通知</dt><dd>{o.kind && NOTIFY_LABEL[o.kind] ? `${NOTIFY_LABEL[o.kind]} → ` : ''}{o.teams.join('、')}</dd></>}
-                {!o.who && o.message && <><dt>內容</dt><dd>{plain(o.message)}</dd></>}
-              </dl>
-              <span className="opt-pick" aria-hidden>{on ? '● 已選' : '○ 選這個'}</span>
+              <span className="opt-h"><span className="opt-pick" aria-hidden>{on ? '●' : '○'}</span><b className="opt-id">{o.opt.id}</b><span className="opt-l">{o.opt.label}</span>
+                {o.opt.recommended && <span className="opt-rec">系統建議</span>}
+                {brief && <span className="opt-brief">{brief}</span>}</span>
+              {on && (o.teams.length > 0 || (!o.who && o.message)) && (
+                <dl className="opt-dl">
+                  {o.teams.length > 0 && <><dt>通知</dt><dd>{o.kind && NOTIFY_LABEL[o.kind] ? `${NOTIFY_LABEL[o.kind]} → ` : ''}{o.teams.join('、')}</dd></>}
+                  {!o.who && o.message && <><dt>內容</dt><dd>{plain(o.message)}</dd></>}
+                </dl>
+              )}
             </button>
           )
         })}
       </div>
-      {dLine !== '—' && <p className="opt-shared" data-testid="option-delivery">交期（求解器結果，{opts.length > 1 ? '各方案相同' : '此方案'}）：{dLine}</p>}
+      {dLine !== '—' && <p className="opt-shared" data-testid="option-delivery">交期（求解器結果，各方案相同）：{dLine}</p>}
     </Block>
   )
   const toolsUsed = (n: number) => (
@@ -149,17 +154,18 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
   // 對交期的影響: one row per order the proposed schedule changes (code-built diff of the two schedule versions)
   const impactRows = diff ? impactTable(diff, facts) : []
   const impact = (n: number) => (
-    <Block key="impact" n={n} title="對交期的影響" className="apv-impact">
+    <Block key="impact" n={n} title="對交期的影響" hint="時間以模擬工廠時間顯示" className="apv-impact">
       {impactRows.length > 0 && (
         <table className="impact-t apv-impact-t" data-testid="impact-table">
-          <thead><tr><th>訂單</th><th>原排程</th><th>調整後</th><th>出模時間變化</th><th>交期</th></tr></thead>
+          <thead><tr><th>訂單</th><th>原排程</th><th>調整後</th><th>時間變化</th><th>交期</th></tr></thead>
           <tbody>{impactRows.map((r) => (
-            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={`chg chg-${r.dir}`} data-testid="demold-change">{r.change}</td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
+            <tr key={r.order}><td><b>{r.order}</b></td><td>{r.before}</td><td>{r.after}</td><td className={`dm dm-${r.dir}`} data-testid="demold-change"><span className="dm-tag">{r.change}</span></td><td className={r.late ? 'late' : r.ok ? 'ontime' : ''}>{r.verdict}</td></tr>
           ))}</tbody>
         </table>
       )}
       {!impactRows.length && cure && <p className="impact-line">{machineLabel(cure.press)}硫化 {cure.from} h → {round1(cure.to)} h</p>}
-      <p className="impact-line">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>
+      {impactRows.length > 0 && <p className="impact-note">「時間變化」是出模時間的差，不等於客戶交期延誤。</p>}
+      {!planLayout && <p className="impact-line impact-sub">{dLine}{req.gaps.length > 0 && <span className="concl-sub">缺口：{req.gaps.map(plain).join('；')}</span>}</p>}
     </Block>
   )
   // 核准後的執行事項: what happens on approval (the card's actions, the chosen staffing option, the R1 steps after).
@@ -170,12 +176,12 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
     ...afterSteps.map((n) => ({ item: TOOL_LABEL[n.tool], how: `系統自動・${plain(n.purpose)}` })),
   ])
   const who = (n: number) => (
-    <Block key="who" n={n} title="核准後的執行事項" className="apv-who">
+    <Block key="who" n={n} title="核准後誰去做" className="apv-who">
       {execRows.length
         ? (
           <table className="exec-t" data-testid="who-does-what">
             <thead><tr><th>執行項目</th><th>執行方式</th></tr></thead>
-            <tbody>{execRows.map((r, i) => <tr key={i}><td><b>{r.item}</b></td><td>{r.how}</td></tr>)}</tbody>
+            <tbody>{execRows.map((r, i) => <tr key={i}><td><b>{r.item}</b></td><td><Clamp text={r.how} /></td></tr>)}</tbody>
           </table>
         )
         : <p className="muted small">這張卡沒有列出要執行的動作</p>}
@@ -194,31 +200,39 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
     </Block>
   )
   // plan: impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
-  const order = planLayout ? [boardBlock, impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
+  const order = planLayout ? [...(showBoard ? [boardBlock] : []), impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
   let k = 0
   const blocks = order.map((f) => { const el = f(k + 1); if (el) k++; return el })
 
   return (
-    <section className="apv" data-testid="approval-visual" data-layout={layout} aria-label={`核准：${plain(req.title)}`}>
+    <section className="apv" data-testid="approval-visual" data-layout={layout} data-version={req.version ?? 1} data-round={req.round} aria-label={`核准：${plain(req.title)}`}>
       <header className="apv-h">
         <div className="apv-tags">
-          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{RISK_PLAIN[req.risk]}</span>
-          <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>
-          {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
-          {ev && <span className="apv-round">{machineLabel(ev.machine_id)}</span>}
-          {onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
+          <span className={`apv-risk r-${req.risk}`}>{req.risk}・{planLayout ? ({ R3: '高風險', R2: '中風險' } as Record<string, string>)[req.risk] ?? RISK_PLAIN[req.risk] : RISK_PLAIN[req.risk]}</span>
+          {!planLayout && <span className="apv-round">{ROUND[req.round] ?? `第 ${req.round} 輪`}核准</span>}
+          {!planLayout && (req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
+          {!planLayout && onAgent && <button className="btn-ghost apv-link" onClick={onAgent}>看 AI 怎麼想 →</button>}
         </div>
         <h3 className="apv-title">{plain(req.title)}</h3>
-        <p className="apv-reason">{plain(req.reason)}</p>
-        {(req.version ?? 1) > 1 && (
-          <div className="apv-changed" data-testid="card-changes">
-            <b>與 v{(req.version ?? 2) - 1} 相比</b>
-            {(req.changes ?? []).length ? <ul>{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul> : <span>排程內容相同</span>}
-          </div>
-        )}
-        {(req.constraints ?? []).length > 0 && (
-          <p className="apv-chips" data-testid="card-constraints"><small>主管條件：</small>{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</p>
-        )}
+        {/* secondary facts are folded by default (nothing removed): 判斷依據, 與 v(n-1) 相比, 主管條件 */}
+        {!planLayout && <div data-testid="card-changes"><div className="apv-meta">
+          {(req.version ?? 1) > 1 && (
+            <button type="button" className="apv-tog" aria-expanded={more === 'chg'} onClick={() => setMore(more === 'chg' ? null : 'chg')} data-testid="changes-toggle">
+              與 v{(req.version ?? 2) - 1} 相比：{(req.changes ?? []).length ? `${(req.changes ?? []).length} 項異動` : '排程內容相同'} {more === 'chg' ? '▾' : '›'}
+            </button>
+          )}
+          {req.reason && (
+            <button type="button" className="apv-tog" aria-expanded={more === 'why'} onClick={() => setMore(more === 'why' ? null : 'why')} data-testid="why-toggle">
+              判斷依據 {more === 'why' ? '▾' : '›'}
+            </button>
+          )}
+          {(req.constraints ?? []).length > 0 && (
+            <span className="apv-chips" data-testid="card-constraints">{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</span>
+          )}
+        </div>
+        {more === 'chg' && (req.changes ?? []).length > 0 && <ul className="apv-fold" data-testid="changes-list">{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul>}
+        {more === 'why' && <p className="apv-fold apv-reason" data-testid="why-text">{plain(req.reason)}</p>}
+        </div>}
       </header>
 
       {planLayout
@@ -240,7 +254,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
             {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
             {deadline && <span className="apv-deadline" data-testid="approve-deadline" title="期限依模擬工廠時間計算">{deadline}<small>模擬工廠時間</small></span>}
           </div>
-          <p className="apv-hint">要改或不同意，按「討論」跟 AI 說</p>
+          {!planLayout && <p className="apv-hint">要改或不同意，按「討論」跟 AI 說</p>}
         </>}
       </footer>
     </section>
@@ -271,8 +285,9 @@ export function demoldChange(before: string | null | undefined, after: string | 
   if (isNaN(a) || isNaN(b)) return { text: '—', dir: 'none' }
   const mins = Math.round((b - a) / 60000)
   if (mins === 0) return { text: '無變化', dir: 'same' }
-  const abs = Math.abs(mins), h = Math.floor(abs / 60), m = abs % 60
-  const span = `${h ? `${h} 小時` : ''}${m ? `${h ? ' ' : ''}${m} 分` : ''}`
+  const abs = Math.abs(mins)
+  const d = Math.floor(abs / 1440), h = Math.floor((abs % 1440) / 60), m = abs % 60
+  const span = `${d ? `${d}d ` : ''}${h || d ? `${h}h ` : ''}${String(m).padStart(2, '0')}m`.trim()
   return mins > 0 ? { text: `延後 ${span}`, dir: 'later' } : { text: `提前 ${span}`, dir: 'earlier' }
 }
 function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: string[] }): ImpactRow[] {
@@ -282,11 +297,15 @@ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: str
     const cur = byOrder.get(c.job.order_id)
     if (!cur || ms(c.job.demold) > ms(cur.after.demold)) byOrder.set(c.job.order_id, { before: c.before, after: c.job })
   }
-  const at = (j: ScheduleJob) => `${Number(j.press_id.slice(5))} 號・${fmtMD(j.demold)} ${fmtHM(j.demold)} 出模`
+  // short stamp "10/04 08:04 AM"; the machine only when it changed, the year only when the two times differ in year
+  const at = (j: ScheduleJob, other: ScheduleJob | null, press: boolean) => {
+    const yr = other && fmtMD(other.demold).slice(0, 4) !== fmtMD(j.demold).slice(0, 4) ? `${fmtMD(j.demold).slice(0, 4)}/` : ''
+    return `${press ? `${Number(j.press_id.slice(5))} 號・` : ''}${yr}${fmtMD(j.demold).slice(5)} ${fmtHM(j.demold).replace(' ', '\u00a0')}`
+  }
   return [...byOrder.entries()].map(([order, { before, after }]) => {
     const late = facts.late.some((l) => l.includes(order))
     const ch = demoldChange(before?.demold, after.demold)
-    return { order, before: before ? at(before) : '—', after: at(after), change: ch.text, dir: ch.dir, late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
+    return { order, before: before ? at(before, after, before.press_id !== after.press_id) : '—', after: at(after, before, !!before && before.press_id !== after.press_id), change: ch.text, dir: ch.dir, late, ok: !late && facts.met === true, verdict: late ? '延誤' : facts.met === true ? '準時' : '—' }
   })
 }
 
@@ -294,21 +313,41 @@ function impactTable(diff: ScheduleDiff, facts: { met: boolean | null; late: str
  *  No who-does-it guess: the text is shown as the card wrote it. */
 function actionRow(a: string): { item: string; how: string } {
   const m = /^([^：:（(]{1,8})[：:]\s*(.+)$/.exec(a)
-  if (m) return { item: m[1], how: m[2] }
+  if (m) return { item: m[1] === '人力' ? '人力安排' : m[1], how: m[2] }
   if (a.includes('排程')) return { item: '排程調整', how: a }
   if (a.includes('硫化')) return { item: '硫化時間', how: a }
   return { item: '執行事項', how: a }
 }
 
-/** Merge repeats: the same text twice, or one text that only restates another row. */
+/** Merge repeats: the same text twice; one row whose text only restates another row of the same item; a 硫化時間 row
+ *  whose hours are already written in another row (e.g. the 排程 line). Nothing else is dropped. */
 function mergeExec(rows: { item: string; how: string }[]): { item: string; how: string }[] {
+  const norm = (t: string) => t.replace(/\s+/g, '')
   const out: { item: string; how: string }[] = []
   for (const r of rows) {
-    const key = r.how.replace(/\s+/g, '')
-    if (out.some((o) => o.how.replace(/\s+/g, '') === key)) continue
+    const k = norm(r.how)
+    const dup = out.findIndex((o) => norm(o.how) === k || (o.item === r.item && (norm(o.how).includes(k) || k.includes(norm(o.how)))))
+    if (dup >= 0) { if (norm(out[dup].how).length < k.length) out[dup] = r; continue }
     out.push(r)
   }
-  return out
+  return out.filter((r, i) => {
+    if (r.item !== '硫化時間') return true
+    const h = /(\d+(?:\.\d+)?)\s*h/.exec(r.how)?.[0]
+    return !(h && out.some((o, j) => j !== i && o.how.replace(/\s+/g, '').includes(h.replace(/\s+/g, ''))))
+  })
+}
+
+/** Long cell text: first part shown, the rest one click away (never cut off for good). */
+function Clamp({ text, max = 34 }: { text: string; max?: number }) {
+  const [open, setOpen] = useState(false)
+  const chars = Array.from(text)
+  if (chars.length <= max + 6) return <>{text}</>
+  return (
+    <>
+      {open ? text : `${chars.slice(0, max).join('')}…`}{' '}
+      <button type="button" className="apv-tog sm" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? '收合' : '詳情'}</button>
+    </>
+  )
 }
 
 function deliveryLine(impact: string, facts: { met: boolean | null; late: string[] }): string {

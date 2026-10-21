@@ -150,10 +150,13 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
       <div className="con-body" ref={scroller} onScroll={onScroll} data-testid="transcript">
         {allView && events.slice().reverse().map((e) => <EventFeed key={e.id} ev={e} onPick={onPick} />)}
         {allView && !events.length && <p className="muted con-empty">目前沒有事件。下方可直接提問。</p>}
-        {!allView && ev && steps > 0 && (
-          <p className="con-steps small"><a href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-analysis">查看分析過程</a></p>
+        {!allView && ev && (steps > 0 || talk.length > 0 || !!brief) && (
+          <p className="con-steps con-order small">
+            舊訊息在上 ↓ 新訊息在下
+            {steps > 0 && <a href={`#console?event=${encodeURIComponent(ev.id)}`} onClick={full(ev.id)} data-testid="see-analysis">查看分析過程</a>}
+          </p>
         )}
-        {!allView && !talk.length && (ev
+        {!allView && !talk.length && !brief && (ev
           ? <p className="muted con-empty">這件事還沒有對話。下方可以討論計劃或提問。</p>
           : (
             <div className="con-guide" data-testid="con-guide">
@@ -171,7 +174,7 @@ function Console({ ev, events, onPick, items, asks, setAsks, all: allView, setAl
             <>
               {before.map((it) => <Row key={it.key} it={it} ev={ev} nth={0} brief />)}
               {ev && brief && (brief.state === 'pending' && req
-                ? <PendingNotice ev={ev} req={req} onPlan={() => { onPick(ev.id); document.querySelector('[data-testid=plan-area]')?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
+                ? <PendingNotice ev={ev} req={req} onPlan={() => { onPick(ev.id); (document.querySelector('[data-testid=plan-area] [data-testid=approval-visual]') ?? document.querySelector('[data-testid=plan-area]'))?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }} />
                 : (
                   <div className="con-brief" data-testid="con-brief" ref={briefBox}>
                     <BriefingView b={brief} footer={brief.state !== 'pending' ? (

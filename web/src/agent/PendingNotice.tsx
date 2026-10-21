@@ -21,10 +21,10 @@ export function PendingNotice({ ev, req, onPlan }: { ev: Event; req: ApprovalReq
   const v = req.version ?? 1
   return (
     <div className="con-notice" data-testid="con-brief" data-kind="pending-notice" data-event={ev.id} data-version={v}>
-      <p className="cn-head"><i className="br-dot" aria-hidden="true" /><b>{eventName(ev)}</b><span aria-hidden="true">｜</span><b className="cn-st">待核准{v > 1 ? `（v${v}）` : ''}</b></p>
+      <p className="cn-head"><i className="br-dot" aria-hidden="true" /><b>{eventName(ev)}</b><span aria-hidden="true">｜</span><b className="cn-st">待核准</b></p>
       <p className="cn-line">{anomalyLine(ev, req)}{/[。.]$/.test(anomalyLine(ev, req)) ? '' : '。'}</p>
-      <p className="cn-line">{ver != null ? `已完成影響分析，替代排程（第 ${ver} 版）等待主管核准。` : '已完成處置分析，等待主管核准。'}</p>
-      <button type="button" className="cn-link" onClick={onPlan} data-testid="see-plan">查看中央計劃板 →</button>
+      <p className="cn-line">{ver != null ? '已完成影響分析，替代排程等待主管核准。' : '已完成處置分析，等待主管核准。'}</p>
+      <button type="button" className="cn-link" onClick={onPlan} data-testid="see-plan">查看處置方案 →</button>
       <small className="cn-ts">Agent・{fmtHM(req.created_at)}</small>
     </div>
   )

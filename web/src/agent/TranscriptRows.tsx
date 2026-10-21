@@ -1,7 +1,8 @@
 // Transcript rows of the agent console (issue #8), shared by the home 主控台 (final dialogue only) and the
 // full Agent page (issue #37: every state change, plan, tool call, gate and approval).
+import { useEffect, useRef, useState } from 'react'
 import type { Event } from '../contracts'
-import { fmtHMS, fmtMs } from '../format'
+import { fmtHM, fmtHMS, fmtMs } from '../format'
 import { hypName, plain } from '../plain'
 import { TOOL_LABEL, resultText, stepLabel } from '../stepText'
 import { STATE_LABEL } from '../components/common'
@@ -38,17 +39,28 @@ export function Row({ it, ev, nth, open = false, brief = false }: { it: Item; ev
     case 'note':
       return <div className={`r-line r-note ${it.tone}`} data-kind="note"><span className="r-dot" /><span>{plain(it.text)}</span><time>{fmtHMS(it.ts)}</time></div>
     case 'ask': return <AskRow it={it} brief={brief} />
-    case 'chat': return <ChatRow it={it} />
+    case 'chat': return <ChatRow it={it} compact={brief} />
     case 'chips': return <ChipsRow it={it} />
     case 'version': return <VersionRow it={it} />
   }
 }
 
-function ChatRow({ it }: { it: ChatItem }) {
+function ChatRow({ it, compact = false }: { it: ChatItem; compact?: boolean }) {
   if (it.role === 'me') {
     return (
       <div className={`r-chat me ${it.pending ? 'pending' : ''}`} data-kind="chat" data-role="me" data-testid="chat-me">
-        <div className="r-q"><span>{it.text}</span><small>{it.kind === 'command' ? '主管・下新任務' : '主管・討論計劃'}・{fmtHMS(it.ts)}</small></div>
+        <div className="r-q"><span>{it.text}</span><small>{compact ? `主管・${fmtHM(it.ts)}` : `${it.kind === 'command' ? '主管・下新任務' : '主管・討論計劃'}・${fmtHMS(it.ts)}`}</small></div>
+      </div>
+    )
+  }
+  if (compact) {
+    // chat look (target mock): a short 「Agent」 label, the answer, the time inside the bubble — no icon / method tags
+    return (
+      <div className={`r-chat agent compact k-${it.kind}`} data-kind="chat" data-role="agent" data-testid={it.kind === 'reply' ? 'chat-reply' : it.kind === 'summary' ? 'chat-summary' : 'chat-agent'}>
+        <b className="r-ag">Agent</b>
+        {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <ReplyText text={plain(it.text)} fold={it.kind === 'reply'} />}
+        {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
+        <time className="r-time">{fmtHM(it.ts)}</time>
       </div>
     )
   }
@@ -58,9 +70,38 @@ function ChatRow({ it }: { it: ChatItem }) {
       <header><ToolIcon name="think" /><b>{head}</b>
         {it.classifiedBy && <small>{it.classifiedBy === 'model' ? 'Nemotron 判讀' : '規則判讀'}{it.fellBack ? '（模型失敗改用規則）' : ''}</small>}
         <time>{fmtHMS(it.ts)}</time></header>
-      {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <p className="r-answer">{plain(it.text)}</p>}
+      {it.pending ? <p className="muted"><i className="spin" />{it.text}</p> : <ReplyText text={plain(it.text)} fold={it.kind === 'reply'} />}
       {it.constraints.length > 0 && <p className="r-chips">{it.constraints.map((c) => <span key={c} className="chip-c">{c}</span>)}</p>}
     </div>
+  )
+}
+
+/** The first sentences that carry the answer (at least ~24 characters, so never just 「好」「收到」), at most ~90. */
+export function leadOf(text: string): { lead: string; rest: boolean } {
+  const parts = text.split(/(?<=[。！？!?；;\n])/).map((x) => x.trim()).filter(Boolean)
+  let lead = ''
+  for (const sent of parts) {
+    if (lead && Array.from(lead + sent).length > 90) break
+    lead += sent
+    if (Array.from(lead).length >= 24) break
+  }
+  lead = lead.replace(/[；;\s]+$/, '')
+  return { lead, rest: lead.length < text.trim().length }
+}
+
+/** A long Agent reply: conclusion first, 「展開詳細」 shows the whole original text (unchanged). */
+function ReplyText({ text, fold }: { text: string; fold: boolean }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLParagraphElement>(null)
+  // keep the opened reply readable: bring it into view inside the chat scroller
+  useEffect(() => { if (open) box.current?.scrollIntoView({ block: 'nearest' }) }, [open])
+  const { lead, rest } = leadOf(text)
+  if (!fold || !rest || Array.from(text).length <= 90) return <p className="r-answer">{text}</p>
+  return (
+    <>
+      <p ref={box} className="r-answer r-lead" data-testid="reply-text">{open ? text : lead}</p>
+      <button type="button" className="r-more" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="reply-more">{open ? '收合 ▴' : '展開詳細 ▾'}</button>
+    </>
   )
 }
 
@@ -175,9 +216,10 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
   const a = it.answer
   return (
     <div className="r-ask" data-kind="ask">
-      <div className="r-q"><span>{it.question}</span><small>主管・{fmtHMS(it.ts)}</small></div>
-      <div className="r-a" data-testid={a ? 'ask-answer' : undefined}>
-        <header><ToolIcon name="think" /><b>問戰情室</b><span className="ro">只查不改</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>
+      <div className="r-q"><span>{it.question}</span><small>主管・{brief ? fmtHM(it.ts) : fmtHMS(it.ts)}</small></div>
+      <div className={`r-a ${brief ? 'compact' : ''}`} data-testid={a ? 'ask-answer' : undefined}>
+        {brief && <b className="r-ag">Agent</b>}
+        {!brief && <header><ToolIcon name="think" /><b>問戰情室</b><span className="ro">只查不改</span>{a && <small>{a.id}・{Math.round(a.total_ms)} ms{a.mode === 'mock' || a.fell_back_to_mock ? '・規則模式' : ''}</small>}</header>}
         {!a && !it.error && <p className="muted"><i className="spin" />查詢中…</p>}
         {it.error && <p className="err">{it.error}</p>}
         {a && !brief && a.steps.map((s, i) => (
@@ -188,6 +230,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
         ))}
         {a && !brief && a.intercepted.map((x, i) => <div key={`x${i}`} className="r-line r-blocked"><ToolIcon name="blocked" /><span><b>已攔下</b> {x.tool}：{x.reason}</span></div>)}
         {a && <p className="r-answer">{a.answer}</p>}
+        {brief && a && <span className="r-time"><span className="ro">只查不改</span>・<time>{fmtHM(it.ts)}</time></span>}
       </div>
     </div>
   )

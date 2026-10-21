@@ -46,7 +46,7 @@ function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: st
       {i.req ? (
         <>
           <span className="hl-top">
-            <span className="hl-pill-row"><span className="hl-pill tone-wait">待核准</span><span className={`hl-risk r-${i.req.risk}`}>{i.req.risk}</span>{(i.req.version ?? 1) > 1 && <span className="hl-pill">v{i.req.version}</span>}</span>
+            <span className="hl-pill-row"><span className="hl-pill tone-wait">待核准</span><span className={`hl-risk r-${i.req.risk}`}>{i.req.risk}</span></span>
             <span className="hl-t">{i.machine ?? i.title}</span>
           </span>
           <span className="hl-s hl-desc">{i.desc || i.title}</span>
