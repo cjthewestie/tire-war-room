@@ -768,8 +768,11 @@ export interface WorkTask {
   zone: string; where: string; status: TaskStatus; created_at: ISODate; assigned_at: ISODate | null
   started_at: ISODate | null; done_at: ISODate | null; eta: ISODate | null; walk_min: number; work_min: number
   progress: number; after: string | null; order_ids: string[]; source: "code"
+  /** 人員回報 (WORKER_REPORT): people report 開始 / 完成 themselves; absent from older servers = auto */
+  mode?: "auto" | "report"; reported_by?: string | null; report_note?: string | null; photo_sha256?: string | null
+  override_reason?: string | null; overdue?: boolean
 }
-export interface TasksView { items: WorkTask[]; counts: Record<TaskStatus, number>; open: number }
+export interface TasksView { items: WorkTask[]; counts: Record<TaskStatus, number>; open: number; mode?: "auto" | "report" }
 export interface GoodsItem {
   id: string; order_id: string; size: TireSize; status: GoodsStatus; progress: number; machine_id: string | null
   press_id: string | null; zone: string; mold_in: ISODate | null; stage_end: ISODate | null; note: string | null

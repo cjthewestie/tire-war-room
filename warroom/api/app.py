@@ -51,6 +51,7 @@ from pydantic import BaseModel, Field
 from warroom import factory as F
 from warroom.api.runtime import Runtime
 from warroom.config import ROOT
+from warroom.api.tasks import install_tasks
 from warroom.contracts import (
     Anomaly,
     AskAnswer,
@@ -941,6 +942,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     from warroom.api.demo import install_demo
     install_admin(app, rt, supervisor)
     demo_state = install_demo(app, rt, demo)
+    install_tasks(app, rt, supervisor, on_site, guard, _audit_pin)   # 人員回報 (/worker 開始・完成)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)

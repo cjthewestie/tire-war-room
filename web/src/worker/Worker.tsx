@@ -1,11 +1,14 @@
 // Issue #46: /worker, the floor worker's phone. Pick yourself (or see every task), read what to do in 中文 /
-// Tiếng Việt / Bahasa Indonesia. Read-only: the tasks come from the approved plan (warroom/sim/work.py) through
-// the same world feed the dashboard uses; nothing here changes the plant.
-import { useEffect, useMemo, useState } from 'react'
-import type { TaskStatus, WorkTask, WorldWorker } from '../contracts'
+// Tiếng Việt / Bahasa Indonesia. The tasks come from the approved plan (warroom/sim/work.py) through the same world
+// feed the dashboard uses. In 人員回報 mode (CJ 2026-10-22: 「加回報」) the assigned worker taps 到達・開始 and 完成
+// (optional note and photo); code then checks the reading (VERIFY) before the event closes. Nothing here moves a
+// machine.
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { Event, TaskStatus, WorkTask, WorldWorker } from '../contracts'
 import { fmtHM, fmtMD } from '../format'
 import { useWarRoom } from '../useWarRoom'
 import { LANGS, STATUS, UI, kindName, taskText, taskWhere, teamName, type Lang } from './i18n'
+import { ReportError, report, shrinkPhoto } from './report'
 
 const ALL = '__all__'
 const ORDER: Record<TaskStatus, number> = { 執行中: 0, 前往中: 1, 待派: 2, 完成: 3 }
@@ -41,14 +44,20 @@ export function Worker() {
   // a remembered person who is not in this plant (another scenario) falls back to every task once the world is in
   const eff = who === ALL || me || !world ? who : ALL
 
+  const events = state.snapshot?.events
+  // 完成 reported, the event still open: code has not confirmed the reading yet (VERIFY)
+  const verifying = useMemo(() => {
+    const open = new Set((events ?? []).filter((e: Event) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.id))
+    return (t: WorkTask) => t.mode === 'report' && t.status === '完成' && !!t.event_id && open.has(t.event_id)
+  }, [events])
   const shown = useMemo(() => {
     const mine = eff === ALL ? tasks : tasks.filter((t) => t.worker_id === eff)
-    const open = mine.filter((t) => t.status !== '完成')
+    const open = mine.filter((t) => t.status !== '完成' || verifying(t))
       .sort((a, b) => ORDER[a.status] - ORDER[b.status] || a.created_at.localeCompare(b.created_at))
-    const done = mine.filter((t) => t.status === '完成')
+    const done = mine.filter((t) => t.status === '完成' && !verifying(t))
       .sort((a, b) => (b.done_at ?? '').localeCompare(a.done_at ?? '')).slice(0, DONE_SHOWN)
     return { open, done }
-  }, [tasks, eff])
+  }, [tasks, eff, verifying])
 
   const ft = world?.factory_time
   return (
@@ -80,13 +89,13 @@ export function Worker() {
         </div>
       )}
       <ul className="wk-list" data-testid="wk-open">
-        {shown.open.map((t) => <TaskCard key={t.id} t={t} lang={lang} showWorker={eff === ALL} />)}
+        {shown.open.map((t) => <TaskCard key={t.id} t={t} lang={lang} showWorker={eff === ALL} me={eff === ALL ? null : eff} verifying={verifying(t)} />)}
       </ul>
       {shown.done.length > 0 && (
         <>
           <h2 className="wk-h2">{UI.done[lang]}</h2>
           <ul className="wk-list done">
-            {shown.done.map((t) => <TaskCard key={t.id} t={t} lang={lang} showWorker={eff === ALL} />)}
+            {shown.done.map((t) => <TaskCard key={t.id} t={t} lang={lang} showWorker={eff === ALL} me={eff === ALL ? null : eff} verifying={false} />)}
           </ul>
         </>
       )}
@@ -98,7 +107,7 @@ function personLabel(w: WorldWorker, lang: Lang): string {
   return `${w.name}・${teamName(w.team, lang)}`
 }
 
-function TaskCard({ t, lang, showWorker }: { t: WorkTask; lang: Lang; showWorker: boolean }) {
+function TaskCard({ t, lang, showWorker, me, verifying }: { t: WorkTask; lang: Lang; showWorker: boolean; me: string | null; verifying: boolean }) {
   const text = taskText(t, lang) ?? t.title
   const moving = t.status === '前往中' || t.status === '執行中'
   const when = t.status === '完成' ? t.done_at : t.eta ?? t.assigned_at ?? t.created_at
@@ -116,9 +125,75 @@ function TaskCard({ t, lang, showWorker }: { t: WorkTask; lang: Lang; showWorker
         {when && <div><dt>{UI.time[lang]}</dt><dd>{fmtHM(when)}</dd></div>}
         {showWorker && <div><dt>{UI.worker[lang]}</dt><dd>{t.worker_name ?? UI.unassigned[lang]}</dd></div>}
       </dl>
+      {t.mode === 'report' && t.status === '執行中' && t.overdue && <p className="wk-overdue" role="status">{UI.overdue[lang]}</p>}
+      {t.mode === 'report' && (t.status === '前往中' || t.status === '執行中') && (
+        me !== null && me === t.worker_id ? <ReportControls t={t} lang={lang} me={me} />
+          : me === null ? <p className="wk-hint">{UI.pickMe[lang]}</p> : null
+      )}
+      {t.mode === 'report' && t.status === '完成' && (
+        <p className={`wk-verify ${verifying ? 'wait' : 'ok'}`} role="status" data-testid="wk-verify">
+          <b>{t.override_reason ? UI.overridden[lang] : UI.reportedDone[lang]}{t.done_at ? ` ${fmtHM(t.done_at)}` : ''}{t.photo_sha256 ? `・${UI.photoKept[lang]}` : ''}</b>
+          <span>{verifying ? UI.verifying[lang] : UI.verified[lang]}</span>
+        </p>
+      )}
       {lang !== 'zh' && <p className="wk-orig"><span>{UI.original[lang]}</span>{t.title}</p>}
     </li>
   )
 }
 
 const statusKey = (s: TaskStatus) => ({ 待派: 'wait', 前往中: 'go', 執行中: 'work', 完成: 'done' } as const)[s]
+
+function ReportControls({ t, lang, me }: { t: WorkTask; lang: Lang; me: string }) {
+  const [note, setNote] = useState('')
+  const [photo, setPhoto] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const file = useRef<HTMLInputElement>(null)
+  const done = t.status === '執行中'
+  const send = async () => {
+    setBusy(true); setErr(null)
+    try {
+      await report(t.id, done ? 'done' : 'start',
+        { worker_id: me, ...(note.trim() ? { note: note.trim() } : {}), ...(done && photo ? { photo } : {}) },
+        () => window.prompt(UI.pin[lang]))
+      setNote(''); setPhoto(null)
+    } catch (e) {
+      setErr(e instanceof ReportError ? e.message : String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+  const pick = async (f: File | undefined) => {
+    if (!f) return
+    try { setPhoto(await shrinkPhoto(f)) } catch (e) { setErr(String(e)) }
+    if (file.current) file.current.value = ''
+  }
+  return (
+    <div className="wk-report" data-testid="wk-report">
+      {done && (
+        <>
+          <input className="wk-note" type="text" maxLength={300} value={note} onChange={(e) => setNote(e.target.value)}
+            placeholder={UI.note[lang]} aria-label={UI.note[lang]} lang={HTML_LANG[lang]} />
+          {photo ? (
+            <div className="wk-photo">
+              <img src={photo} alt="" />
+              <span>{UI.photoKept[lang]}</span>
+              <button type="button" className="wk-link" onClick={() => setPhoto(null)}>{UI.photoRemove[lang]}</button>
+            </div>
+          ) : (
+            <label className="wk-photo-btn">
+              <input ref={file} type="file" accept="image/jpeg,image/png,image/webp" capture="environment"
+                onChange={(e) => pick(e.target.files?.[0])} data-testid="wk-photo" />
+              {UI.photo[lang]}
+            </label>
+          )}
+        </>
+      )}
+      <button type="button" className={`wk-go ${done ? 'done' : 'start'}`} disabled={busy} onClick={send}
+        data-testid={done ? 'wk-done' : 'wk-start'}>
+        {busy ? UI.sending[lang] : done ? UI.finish[lang] : UI.start[lang]}
+      </button>
+      {err && <p className="wk-err" role="alert">{UI.failed[lang]}：{err}</p>}
+    </div>
+  )
+}

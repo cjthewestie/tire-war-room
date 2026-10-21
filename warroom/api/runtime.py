@@ -463,6 +463,10 @@ def _needs_approval(sr: Any) -> bool:
         return True                         # not a valid notice: never an auto (R1) one
 
 
+def _iso(t: datetime | None) -> str | None:
+    return t.isoformat() if t is not None else None
+
+
 class _NoLock:
     def __enter__(self):
         return self
@@ -523,6 +527,9 @@ class Runtime:
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
         self._repaired_out: dict[str, str] = {}   # #104 machine id -> event id: 檢修完成 while out of service
         self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
+        # 人員回報 (CJ 2026-10-22: 「加回報」): workers report 開始 / 完成 on /worker instead of the simulator's timers.
+        # Off (自動・展示) by default; WORKER_REPORT=1 or the 後台 switch (set_worker_report) turns it on.
+        self.worker_report = os.environ.get("WORKER_REPORT", "0").strip().lower() in ("1", "true", "yes", "on")
         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
         self._cases: Any = None                  # SafetyCases of the current components (warroom/api/resolve.py)
@@ -1030,14 +1037,24 @@ class Runtime:
         board.fast_s = float(self.settings.repair_fast_s)    # fast repair (Kyle 10-21: 紅燈到綠燈只要 2–5 秒)
         board.speed = lambda: self.speed
         board.hold = self._awaits_decision                    # fast repair starts after 主管核准, not at the card
+        board.report_mode = self.worker_report
 
         def on_task(what: str, t: Any, now: datetime) -> None:
             if what == "created":
                 return                          # the state machine audits creation with its source step
-            self.audit.append(AuditKind.TASK, "world",
-                              {"task_id": t.id, "status": t.status, "change": what, "kind": t.kind, "title": t.title,
-                               "worker_id": t.worker_id, "worker": t.worker_name, "where": t.where,
-                               "at": now.isoformat()}, t.event_id)
+            actor = "world"
+            detail: dict[str, Any] = {"task_id": t.id, "status": t.status, "change": what, "kind": t.kind,
+                                      "title": t.title, "worker_id": t.worker_id, "worker": t.worker_name,
+                                      "where": t.where, "at": now.isoformat(), "mode": t.mode}
+            if what in ("reported_start", "reported_done", "override_done"):
+                actor = t.reported_by if what == "override_done" else (t.worker_id or "worker")
+                detail.update({"note": t.report_note, "photo_sha256": t.photo_sha256,
+                               "override_reason": t.override_reason, "started_at": _iso(t.started_at),
+                               "done_at": _iso(t.done_at)})
+            elif what == "overdue":
+                detail["msg"] = f"逾時提醒：{t.kind} 執行超過預計 {t.work_min:g} 分鐘的 2 倍，尚未回報完成"
+            self.audit.append(AuditKind.TASK, actor, detail, t.event_id)
+            self._task_note(what, t, now)
             # Kyle 10-21: 「已經兩個人去修理…但沒有修好，這樣不行」. The crew finished every repair task of this
             # event on this machine: the fault is fixed (applied after this sim step, see _apply_repairs).
             if t.status == "完成" and t.kind in REPAIR_KINDS and t.machine_id and t.event_id:
@@ -1045,6 +1062,38 @@ class Runtime:
                 if same and all(x.status == "完成" for x in same):
                     self._repaired[t.machine_id] = t.event_id
         board.add_listener(on_task)
+
+    def _task_note(self, what: str, t: Any, now: datetime) -> None:
+        """人員回報 on the event's timeline: 「張雅婷 09:41 回報完成（附照片）」 (VERIFY adds the reading after it)."""
+        note = getattr(self.state_machine, "task_reported", None)
+        if not callable(note) or not t.event_id or what not in ("reported_start", "reported_done", "override_done",
+                                                                "overdue"):
+            return
+        who = (t.worker_name or t.worker_id or "").split("（")[0]
+        at = now.astimezone(F.TZ).strftime("%H:%M")
+        text = {"reported_start": f"{who} {at} 回報到達・開始：{t.kind}［{t.where}］",
+                "reported_done": f"{who} {at} 回報完成" + ("（附照片）" if t.photo_sha256 else "")
+                                 + f"：{t.kind}［{t.where}］",
+                "override_done": f"主管 {at} 代為完成 {who or t.id}的{t.kind}（原因：{t.override_reason}）",
+                "overdue": f"逾時提醒：{who} 的{t.kind}已執行超過預計時間 2 倍，尚未回報完成"}[what]
+        if t.report_note and what != "override_done":
+            text += f"；備註：{t.report_note}"
+        try:
+            note(t.event_id, text, now)
+        except Exception:   # a timeline note must never break the plant loop
+            log.exception("task note")
+
+    def set_worker_report(self, on: bool, by: str) -> bool:
+        """後台 switch: 自動（展示） ↔ 人員回報. Applies to the current task board at once (and to every new World);
+        audited. Open tasks keep their status; from then on they move by reports (or by the timers again)."""
+        on = bool(on)
+        before, self.worker_report = self.worker_report, on
+        board = getattr(getattr(self.sim, "world", None), "tasks", None)
+        if board is not None:
+            board.report_mode = on
+            self.sim.world.rev += 1
+        self.audit.append(AuditKind.SYSTEM, by, {"msg": "人員任務回報模式", "worker_report": on, "before": before})
+        return on
 
     def _advance_fast_repairs(self, running: bool = True) -> None:
         """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so

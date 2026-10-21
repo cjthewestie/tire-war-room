@@ -307,6 +307,7 @@ class StateMachine:
         self._max_kept = max_events_kept
         self._events: dict[str, Event] = {}
         self._runs: dict[str, _Run] = {}         # open event id -> its run (issue #10: discussion)
+        self._task_reports: dict[str, tuple[str, bool]] = {}  # event id -> (人員回報完成 line, a repair) for VERIFY
         self._plant_inputs: dict[str, Any] = {}  # issue #17: plant event id -> its PlantInput
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._activated_by: dict[int, str] = {}  # schedule version -> the event whose approval put it in force
@@ -382,6 +383,22 @@ class StateMachine:
             self._set_status(machine_id, MachineStatus.RUNNING, ev.anomaly.message)
         if ev.state is EventState.CLOSED:
             self._report_ready(ev)
+
+    def task_reported(self, event_id: str, text: str, at: datetime) -> None:
+        """人員回報 (runtime, report mode): a worker's 開始 / 完成, the supervisor's 代為完成 or an overdue reminder goes
+        on the event's timeline. A 完成 line is kept so VERIFY can say what the reading confirmed."""
+        ev = self._events.get(event_id)
+        if ev is None:
+            return
+        self._note(ev, "系統", f"[人工] {text}", "human", ts=at)
+        if "回報完成" in text or "代為完成" in text:
+            # VERIFY quotes the repair's report (檢修 …) over a later 宣達 / 設定 report of the same event
+            from warroom.sim.work import REPAIR_KINDS
+            repair = any(f"：{k}［" in text or f"的{k}（" in text for k in REPAIR_KINDS)
+            prev = self._task_reports.get(event_id)
+            if repair or prev is None or not prev[1]:
+                head = text.split("（原因")[0] if "代為完成" in text else text.split("：")[0]
+                self._task_reports[event_id] = (head, repair)
 
     def review(self, event_id: str, by: str, note: str | None = None) -> Event:
         """主管已讀報告 (POST /api/events/{id}/review): the supervisor read the incident report of an event closed
@@ -3252,7 +3269,8 @@ class StateMachine:
                 return "contained", None
             self._note(ev, "驗證（程式）", f"{machine_label(ev.machine_id)}未進入停用狀態 → {h.id} 未完成", "dynamic")
             return "rejected", None
-        start = run.plan_at or self._now()
+        reported_at = await self._await_reports(run)
+        start = reported_at or run.plan_at or self._now()
         deadline = start + timedelta(minutes=exp.within_min)
         violated_since: datetime | None = None
         last: float | None = None
@@ -3321,6 +3339,30 @@ class StateMachine:
         except Exception:  # noqa: BLE001 - a board without tasks: nothing to wait for
             return False
 
+    async def _await_reports(self, run: _Run) -> datetime | None:
+        """人員回報 mode (TaskBoard.report_mode): nobody's timer finishes a task, so VERIFY first waits until the people
+        reported every task of this event done (or the supervisor completed it for them), at most TASK_VERIFY_MAX_MIN;
+        then code tests the reading. Returns when the wait ended (the expectation's window starts there), None when
+        there was nothing to wait for."""
+        board = self._board()
+        if board is None or not getattr(board, "report_mode", False):
+            return None
+        ev = run.ev
+        open_ = [t for t in board.for_event(ev.id) if t.status != "完成"]
+        if not open_:
+            return None
+        self._note(ev, "驗證（程式）", f"等待現場人員回報完成 {len(open_)} 項任務，再由程式確認讀值", "info")
+        deadline = self._now() + timedelta(minutes=TASK_VERIFY_MAX_MIN)
+        while any(t.status != "完成" for t in board.for_event(ev.id)) and self._now() < deadline:
+            await self._sleep(1.0)
+        left = [t.id for t in board.for_event(ev.id) if t.status != "完成"]
+        self.audit.append(AuditKind.TASK, "verifier", {"waited_for_reports": [t.id for t in open_], "open": left,
+                                                       "ok": not left}, event_id=ev.id)
+        if left:
+            self._note(ev, "驗證（程式）", f"人員回報逾時：{len(left)} 項未回報完成，交主管追蹤；改以目前讀值驗證",
+                       "dynamic")
+        return self._now()
+
     async def _verify_wait(self, run: _Run, seconds: float) -> None:
         """VERIFY's wait between reads (sim seconds). A repair reported meanwhile (on_repaired) cuts it short; after
         it, reads come every sim second until one taken after the fix is in."""
@@ -3370,6 +3412,9 @@ class StateMachine:
         elif ok:
             h.evidence.append(f"{ch}維持 {fmt_num(v)}{unit}，符合預期 {expectation_text(exp)}")
             self._note(ev, "驗證（程式）", f"比對預期：{ch} {fmt_num(v)}{unit} → {h.id} 成立", "dynamic")
+            said = self._task_reports.pop(ev.id, (None, False))[0]
+            if said:                             # 人員回報: who said it was fixed, and what code checked
+                self._note(ev, "驗證（程式）", f"{said} → 程式確認讀值回到 {fmt_num(v)}{unit}", "dynamic")
         else:
             h.evidence.append(f"{ch}續降至 {fmt_num(v)}{unit}" if exp.op == ">=" else f"{ch}達 {fmt_num(v)}{unit}")
             verb = "降到" if exp.op == ">=" else "升到"
