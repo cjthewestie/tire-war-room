@@ -62,14 +62,12 @@
 .r-note.verify { color: var(--line-c); }
 .r-note.warn { color: var(--warn); }
 .r-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin: 8px 4px 0 5px; flex: none; }
-/* worker tasks and the repair / 覆核 rows (fast repair) */
+/* worker tasks and the 維修完成 / 已恢復正常 / 異常報告 rows (fast repair) */
 .r-task { color: var(--ink-dim); font-size: 13.5px; }
 .r-task .ticon { color: var(--line-b); }
 .r-task.repair b, .r-task.tp-done .ticon { color: var(--accent); }
 .r-review { background: var(--accent-soft); color: var(--c-d6efb0, #d6efb0); }
 .r-review .ticon { color: var(--accent); }
-.r-review.rv-requested { background: var(--warn-soft); color: var(--c-f7dfae, #f7dfae); }
-.r-review.rv-requested .ticon { color: var(--warn); }
 
 /* 思考 block */
 .r-think { border: 1px solid var(--c-2a3c55, #2a3c55); background: linear-gradient(180deg, rgb(var(--info-rgb, 93 178 245) / .07), transparent 80%), var(--panel-2); border-radius: 10px; padding: 10px 12px; margin: 4px 0; }

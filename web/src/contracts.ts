@@ -360,9 +360,13 @@ export interface Event {
   command?: string | null
   constraints?: PlanConstraint[]
   discuss_replans?: number
-  // fast repair (Kyle 10-21): every repair task (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; then
-  // 「請主管覆核」 (review pending) once the event closed, done after POST /api/events/{id}/review
+  // fast repair (Kyle 10-21 flow: 核准 → 維修 → 維修完成 → 回溫 → 綠燈 → 異常報告): repaired_at = every repair task
+  // (檢修／停用檢修／放慢投料／暫停投料) done and the fault cleared; the readings then ramp back to nominal over
+  // recover_fast_s wall seconds (machine WARNING, 「回溫中」); recovered_at = back to normal (VERIFY confirms, the event
+  // closes, the machine RUNNING). review = the incident report: pending (「報告待讀」, not a gate: nothing waits for it)
+  // at close, done (「主管已讀報告」) after POST /api/events/{id}/review
   repaired_at?: ISODate | null
+  recovered_at?: ISODate | null
   review?: EventReview | null
 }
 export interface EventReview {
@@ -631,6 +635,7 @@ export interface HealthStatus {
   uptime_s: number
   agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
   repair_fast_s?: number         // REPAIR_FAST_S: wall seconds a repair task takes; 0 = real durations
+  recover_fast_s?: number        // RECOVER_FAST_S: wall seconds the readings take back to nominal after the repair
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------
@@ -759,7 +764,7 @@ export const API = {
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
-  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管覆核, 409 when no review is pending)
+  review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
   ws: "/ws",
 } as const
 

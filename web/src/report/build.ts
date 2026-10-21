@@ -4,7 +4,7 @@
 import type { ApprovalRequest, Event, StepRun, WorkTask } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { MACHINE_META, machineLabel } from '../factory'
-import { fmtHM, fmtMD } from '../format'
+import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { hypLabel, hypName, plain } from '../plain'
 import { TOOL_LABEL, resultText } from '../stepText'
 
@@ -25,6 +25,7 @@ function dur(ms: number): string {
   return m < 60 ? `${m} 分鐘` : `${Math.floor(m / 60)} 小時 ${m % 60} 分`
 }
 const when = (iso: string | null | undefined) => (iso ? `${fmtMD(iso)} ${fmtHM(iso)}` : '—')
+const whenS = (iso: string | null | undefined) => (iso ? `${fmtMD(iso)} ${fmtHMS(iso)}` : '—')
 
 export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: ReportInput): Report {
   const closed = ev.state === 'closed' || ev.state === 'safe_stop'
@@ -40,12 +41,14 @@ export function buildReport({ ev, approvals, tasks, chainOk, auditCount }: Repor
     { k: '處理時長', text: closed ? dur(t(ev.closed_at) - t(ev.opened_at)) : '—' },
     { k: '結果', text: plain(ev.outcome) || STATE_LABEL[ev.state], tone: ev.state === 'safe_stop' ? 'bad' : closed ? 'ok' : 'warn' },
   ]
-  // fast repair: when the crew's repair cleared the fault, and the supervisor's 覆核 after it
-  if (ev.repaired_at) head.push({ k: '維修完成', text: when(ev.repaired_at), tone: 'ok' })
+  // fast repair (Kyle 10-21 flow): when the crew's repair cleared the fault, when the readings were back to normal, and
+  // when the supervisor read this report (Event.review; nothing waited for it). Seconds: the steps are seconds apart.
+  if (ev.repaired_at) head.push({ k: '維修完成', text: whenS(ev.repaired_at), tone: 'ok' })
+  if (ev.recovered_at) head.push({ k: '恢復正常', text: whenS(ev.recovered_at), tone: 'ok' })
   const rv = ev.review
   if (rv) {
     const by = rv.by && rv.by !== 'supervisor' ? `・${rv.by}` : ''
-    head.push(rv.status === 'done' ? { k: '主管覆核', text: `已覆核（${when(rv.done_at)}${by}）`, tone: 'ok' } : { k: '主管覆核', text: `待主管覆核（${when(rv.requested_at)} 起）`, tone: 'warn' })
+    head.push(rv.status === 'done' ? { k: '主管已讀', text: `${whenS(rv.done_at)}${by}`, tone: 'ok' } : { k: '主管已讀', text: `尚未讀取（報告 ${whenS(rv.requested_at)} 產生）` })
   }
 
   const parts: Part[] = []

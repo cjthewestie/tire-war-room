@@ -1,8 +1,9 @@
 // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
 // talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
 // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
-// Fast repair (Kyle 10-21): an event repaired and closed waits for 覆核 — a 「維修完成，請覆核」 card on top (ReviewCard),
-// one per event (3 件同時異常: one after another), ringing like a new approval; 「已覆核」 joins the history.
+// Fast repair (Kyle 10-21 flow): after 核准 the AI line says 專人維修中（n/m）; at Event.repaired_at a 「維修完成：…，溫度回升中」
+// notice, at close 「已恢復正常・異常報告已產生」 with 看報告 / 知道了 (RepairNotice), one per event (3 件同時異常: one after
+// another), each ringing once; nothing waits for them. 「主管已讀」 joins the history.
 import { useState } from 'react'
 import type { ApprovalRequest, AskAnswer, Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
@@ -12,12 +13,12 @@ import { MACHINE_META, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { reviewAlerts, useApprovalAlerts } from './alert'
+import { repairNotices, useApprovalAlerts } from './alert'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
 import { AiStatusLine } from '../AiStatusLine'
 import { OptionGuideNote } from '../OptionGuideNote'
-import { ReviewCard } from './ReviewCard'
+import { RepairNotice } from './RepairNotice'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 
@@ -35,27 +36,27 @@ export function Phone() {
   // the idle card: one status line per open event (3 at most, 「3 件同時異常」), the 修復預估 for the newest only
   const openEvs = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop')
     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
-  // 覆核: confirmed here are hidden at once (the event update follows over the socket); keyed by the review request,
-  // since a scenario restart reuses event ids
-  const [reviewed, setReviewed] = useState<Record<string, Event>>({})
-  const rkey = (e: Event) => `${e.id}:${e.review?.requested_at ?? ''}`
+  // fast-repair notices: 維修完成 while the readings come back, then the report until 知道了 (hidden here at once, the event
+  // update follows over the socket); keyed by the repair, since a scenario restart reuses event ids
+  const [read, setRead] = useState<Record<string, Event>>({})
+  const rkey = (e: Event) => `${e.id}:${e.repaired_at ?? ''}`
   const events = state.snapshot?.events ?? []
-  const reviews = events.filter((e) => e.review?.status === 'pending' && !reviewed[rkey(e)])
-    .sort((a, b) => (a.review!.requested_at < b.review!.requested_at ? -1 : 1))
-  const doneReviews = events.filter((e) => e.review?.status === 'done' || reviewed[rkey(e)])
-    .map((e) => (e.review?.status === 'done' ? e : reviewed[rkey(e)]))
-  // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line; 已覆核 rows
-  // join it by time
+  const notices = events.filter((e) => e.repaired_at && !read[rkey(e)] && (e.state === 'closed' ? e.review?.status === 'pending' : e.state !== 'safe_stop'))
+    .sort((a, b) => (a.repaired_at! < b.repaired_at! ? -1 : 1))
+  const readReports = events.filter((e) => e.review?.status === 'done' || read[rkey(e)])
+    .map((e) => (e.review?.status === 'done' ? e : read[rkey(e)]))
+  // a card the server carried over (decision.via 'auto', 「沿用 …」) repeats the supervisor's own decision line; 主管已讀
+  // rows join it by time
   const history = [
     ...state.resolved.filter((r) => r.decision?.via !== 'auto').slice(0, 3).map((r) => ({ at: r.decision?.decided_at ?? r.created_at, key: r.id, node: (
       <>{plain(r.title)}{r.round > 1 ? `（${ROUND[r.round] ?? `第${r.round}輪`}）` : ''}・<b>{DEC_LABEL[r.status] ?? r.status}</b>{r.decision?.option_id ? `（${r.decision.option_id}）` : ''}</>
     ) })),
-    ...doneReviews.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, node: (
-      <>{machineLabel(e.machine_id)}維修完成・<b data-testid="phone-reviewed">已覆核</b></>
+    ...readReports.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, node: (
+      <>{machineLabel(e.machine_id)}異常報告・<b data-testid="phone-report-done">主管已讀</b></>
     ) })),
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
-  const alerts = useApprovalAlerts([...pending, ...reviewAlerts(reviews)], connected && !lanDown)
+  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines)], connected && !lanDown)
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -66,7 +67,7 @@ export function Phone() {
           <ThemeToggle className="ph-tog" />
         </div>
         {top ? <div className="ph-notif" role="status" data-testid="phone-notif"><b>戰情室・待你核准</b>{plain(top.title)}</div>
-          : reviews.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・維修完成，請覆核</b>{reviews.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
+          : notices.length > 0 && <div className="ph-notif ph-notif-ok" role="status" data-testid="phone-notif"><b>戰情室・{notices.some((e) => e.state === 'closed') ? '異常報告已產生' : '維修完成'}</b>{notices.map((e) => machineLabel(e.machine_id)).join('、')}</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : (
@@ -79,8 +80,8 @@ export function Phone() {
         {sent && <p className="ph-sent" role="status">已送出「{sent}」・AI 重排中，新版核准卡會送到這裡</p>}
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件推播暫存中，網路恢復後補推。</div>}
         {lanDown && <div className="ph-banner">廠內 LAN 中斷：請至現場觸控螢幕核准（警示燈已亮）。</div>}
-        {reviews.map((e) => <ReviewCard key={rkey(e)} ev={e} disabled={lanDown || !transport}
-          onDone={(x) => setReviewed((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
+        {notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
+          onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)}
         {pending.length === 0 ? (
           <div className="ph-card idle">
             <h2>目前沒有待核准事項</h2>
