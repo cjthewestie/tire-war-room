@@ -1,18 +1,21 @@
-// 核准區 waiting list (UX brief, confirmed by CJ 2026-10-20: 「清單順序對，第一眼用「現在要你處理的事」」).
+// 處理清單 (UX brief, confirmed by CJ 2026-10-20: 「清單順序對，第一眼用「現在要你處理的事」」; names: veteran 10-22 for HY).
 // One ranked list of what needs a human, built only from live data:
-//   ① 安全／機台異常 — detector events (pending approval, safe stop, AI still planning)
-//   ② 交期風險       — orders the active schedule finishes after their due date, and the solver's own late warnings
-//   ③ 插單／人力決定 — supervisor tasks (下新任務) waiting for approval
-//   ④ 執行中，等確認完成 — approved work being executed or verified
-//   ⑤ AI 已自行處理 — closed events, Safety Core actions, rejected bad data (collapsed)
+//   機台異常   — detector events (pending approval, safe stop, Agent Nemo still planning)
+//   交期風險   — orders the active schedule finishes after their due date, and the solver's own late warnings
+//   插單與人力 — supervisor tasks (下新任務) waiting for approval
+//   處理中     — approved work being repaired, recovering or still done by people on the floor
+//   已處理完   — closed events, Safety Core actions, rejected readings (collapsed)
 import type { ApprovalRequest, DashboardSnapshot, Event, ScheduleVersion, WorldSnapshot } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { machineLabel } from '../factory'
+import { REPAIR_KINDS } from '../aiStatus'
 import { fmtHM, fmtMD, ms } from '../format'
-import { RISK_PLAIN, plain } from '../plain'
+import { plain } from '../plain'
+import { deadline } from './planAnswer'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
-export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
+/** No ①–⑤: a group shows only when it has items, and its name says what it is. */
+export const RANK_LABEL: Record<Rank, string> = { 1: '機台異常', 2: '交期風險', 3: '插單與人力', 4: '處理中', 5: '已處理完' }
 
 export interface HomeItem {
   key: string                // event id, or `order:<id>` / `fyi:<id>`
@@ -20,17 +23,34 @@ export interface HomeItem {
   title: string
   sub: string
   pill: string
-  tone: 'wait' | 'bad' | 'run' | 'risk' | 'done'
+  tone: 'wait' | 'bad' | 'run' | 'risk' | 'ok' | 'done'   // ok = back to normal (green)
   eventId: string | null
   orderId: string | null
   req: ApprovalRequest | null
   ts: number
-  progress?: number         // ④: share of the event's worker tasks done (0–1)
+  progress?: number         // 處理中: share of the event's field work done (0–1)
 }
 
 const OPEN = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'
-/** 「主管指令：…」 once: a supervisor task's card title may already start with it (「主管指令：主管指令：…」). */
-const titled = (head: string, title: string) => (title.startsWith(`${head}：`) ? title : `${head}：${title}`)
+/** 「7 號硫化機・溫度下降 128→122.3°C」: the machine once (a card title often starts with 「7 號機」 or 「異常：B 線開煉機」);
+ *  「主管指令：…」 once for a supervisor task, whose card title may already start with it. */
+function named(head: string, title: string, machine?: string): string {
+  let t = title.replace(/^異常[：:]\s*/, '')
+  if (t.startsWith(`${head}：`)) return t
+  const n = machine ? /^CURE-0?(\d+)$/.exec(machine) : null
+  const own = [machine ? machineLabel(machine) : null, n ? `${n[1]} 號機` : null].find((x) => x && t.startsWith(x))
+  if (own) t = t.slice(own.length).trim()
+  return t ? `${head}${machine ? '・' : '：'}${t}` : head
+}
+/** How a closed event ended, in the supervisor's words: 已恢復正常 only when a reading confirmed it. */
+function ended(ev: Event): { pill: string; tone: HomeItem['tone'] } {
+  const out = ev.outcome ?? ''
+  if (/停用/.test(out)) return { pill: '已停用該機', tone: 'done' }
+  if (/未驗證|未以讀值/.test(out)) return { pill: '已處置，未用讀值確認', tone: 'done' }
+  return { pill: '已恢復正常', tone: 'ok' }
+}
+/** The outcome without the backend's 「已修復：」 head (the pill already says how it ended). */
+const outcomeText = (ev: Event) => plain(ev.outcome ?? '').replace(/^(已修復：)+/, '')
 
 export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalRequest[], schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): HomeItem[] {
   const out: HomeItem[] = []
@@ -40,31 +60,47 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
   for (const ev of events) {
     const req = pendBy.get(ev.id) ?? null
     const who = ev.source === 'plant' ? '工廠事件' : machineLabel(ev.machine_id)
-    const task = ev.source === 'supervisor' || ev.source === 'plant'   // 下新任務 and plant events (開工、插單、缺人) are ③
+    const task = ev.source === 'supervisor' || ev.source === 'plant'   // 下新任務 and plant events (開工、插單、缺人) are 插單與人力
+    const head = task ? (ev.source === 'plant' ? who : '主管指令') : who
+    const machine = task ? undefined : ev.machine_id
+    const title = named(head, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message), machine)
     const tasks = (world?.tasks?.items ?? []).filter((t) => t.event_id === ev.id)
     const tasksOpen = tasks.filter((t) => t.status !== '完成').length
     const base = { key: ev.id, eventId: ev.id, orderId: null, req, ts: ms(ev.opened_at) }
+    const closed = !OPEN(ev)
     if (req) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `待核准・${req.risk}${(req.version ?? 1) > 1 ? `・v${req.version}` : ''}`,
-        title: plain(req.title), sub: `${task ? '主管指令' : who}・${RISK_PLAIN[req.risk]}・${fmtHM(req.created_at)} 起${req.expires_at ? `・${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前決定` : ''}` })
+      // one mention of the approval per card: the pill (veteran 10-22: 「03:54 前核准」); no R code on the supervisor's screen
+      const by = deadline(req.expires_at, now)
+      out.push({ ...base, rank: task ? 3 : 1, tone: 'wait', pill: `${by ? `${by}核准` : '待核准'}${(req.version ?? 1) > 1 ? '・已重算' : ''}`,
+        title: named(head, plain(req.title), machine), sub: '' })
     } else if (ev.state === 'safe_stop') {
-      out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title: `${who}：${plain(ev.alert_card?.title ?? ev.anomaly.message)}`, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
+      out.push({ ...base, rank: 1, tone: 'bad', pill: '安全停止', title, sub: plain(ev.outcome ?? '安全核心已停機，待現場處理') })
     } else if (ev.state === 'execute' || ev.state === 'verify' || (tasks.length > 0 && tasksOpen > 0)) {
-      // approved work stays on the list until people finish it (worker tasks, warroom/sim/work.py)
+      // approved work stays on the list until people finish it (field work, warroom/sim/work.py); once a reading
+      // confirmed the machine is back, it turns green and only counts the field work left
       const total = ev.steps.length, ok = ev.steps.filter((s) => s.state === 'ok').length
       const done = tasks.length - tasksOpen
-      out.push({ ...base, rank: 4, tone: 'run', progress: tasks.length ? done / tasks.length : ok / Math.max(1, total), pill: tasks.length ? `任務 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
-        title: titled(task ? (ev.source === 'plant' ? who : '主管指令') : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
-    } else if (OPEN(ev)) {
-      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
+      const repair = tasks.filter((t) => REPAIR_KINDS.has(t.kind))
+      const repairOpen = repair.filter((t) => t.status !== '完成').length
+      const progress = tasks.length ? done / tasks.length : ok / Math.max(1, total)
+      if (closed) {
+        const e = ended(ev)
+        out.push({ ...base, rank: 4, tone: e.tone, progress, pill: e.pill, title, sub: `還有 ${tasksOpen} 件現場工作` })
+      } else {
+        out.push({ ...base, rank: 4, tone: 'run', progress,
+          pill: ev.recovered_at ? '已恢復正常' : ev.repaired_at ? '維修完成・回溫中' : repairOpen ? `維修中（${repair.length - repairOpen}/${repair.length}）`
+            : tasks.length ? `現場工作 ${done}/${tasks.length}` : `${STATE_LABEL[ev.state]} ${ok}/${total}`,
+          title,
+          sub: tasks.length ? `現場工作 ${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・讀值確認中' : ''}` : ev.state === 'verify' ? '系統比對讀值中，回到正常就自動確認' : `執行核准內容・${ok}/${total} 步完成` })
+      }
+    } else if (!closed) {
+      out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: 'Agent Nemo 規劃中', title, sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
     } else {
-      out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
+      const e = ended(ev)
+      out.push({ ...base, rank: 5, tone: e.tone, pill: e.pill, title, sub: `${outcomeText(ev)}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })
     }
   }
-  // ② delivery risk: the active schedule's last de-mold for an order after its due date, plus the solver's warnings
+  // 交期風險: the active schedule's last de-mold for an order after its due date, plus the solver's warnings
   const seen = new Set<string>()
   const jobs = schedule?.schedule.jobs ?? []
   for (const o of world?.orders.items ?? []) {
@@ -88,28 +124,14 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
         title: `${id} 預估晚於交期`, sub: `${plain(seg.trim())}${head ? `・${plain(head)}` : ''}` })
     }
   }
-  // ⑤ the Safety Core and the validation layer acted without the AI
+  // 已處理完: the Safety Core and the validation layer acted without Agent Nemo
   for (const a of (snap?.safety_actions ?? []).slice(-5)) {
     out.push({ key: `fyi:${a.id}`, rank: 5, tone: 'done', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(a.ts),
       title: `${machineLabel(a.machine_id)}：${plain(a.message)}`, sub: `不經 AI・${a.latency_ms.toFixed(0)} ms・${fmtHM(a.ts)}` })
   }
   for (const b of snap?.header.bad_data ?? []) {
-    out.push({ key: `fyi:bad-${b.machine_id}`, rank: 5, tone: 'done', pill: '壞資料', eventId: null, orderId: null, req: null, ts: ms(b.last_at),
-      title: `${machineLabel(b.machine_id)}：驗證層攔下 ${b.count} 筆讀值`, sub: `未喚醒 AI・${fmtHM(b.last_at)}` })
+    out.push({ key: `fyi:bad-${b.machine_id}`, rank: 5, tone: 'done', pill: '已擋下不可信的讀值', eventId: null, orderId: null, req: null, ts: ms(b.last_at),
+      title: `${machineLabel(b.machine_id)} ${b.count} 筆讀值不可信，已自動擋下`, sub: `沒有交給 Agent Nemo・${fmtHM(b.last_at)}` })
   }
   return out.sort((a, b) => a.rank - b.rank || (a.req && b.req ? (a.req.risk > b.req.risk ? -1 : a.req.risk < b.req.risk ? 1 : 0) : 0) || b.ts - a.ts)
-}
-
-/** What comes next when nothing needs a human (empty state): the next de-mold, truck, delivery and maintenance. */
-export function nextUp(schedule: ScheduleVersion | null, world: WorldSnapshot | null, now: number): string[] {
-  const out: { t: number; s: string }[] = []
-  const dm = (schedule?.schedule.jobs ?? []).map((j) => ({ t: ms(j.demold), j })).filter((x) => x.t > now).sort((a, b) => a.t - b.t)[0]
-  if (dm) out.push({ t: dm.t, s: `${fmtHM(dm.t)} ${machineLabel(dm.j.press_id)}出模（${dm.j.order_id}）` })
-  const dep = world?.dock.next_departure
-  if (dep && ms(dep) > now) out.push({ t: ms(dep), s: `${fmtHM(dep)} 出貨車離廠・待出貨 ${world?.finished_goods.waiting_ship ?? 0} 條` })
-  const po = (world?.purchase_orders ?? []).filter((p) => p.status === '在途' && ms(p.eta) > now).sort((a, b) => ms(a.eta) - ms(b.eta))[0]
-  if (po) out.push({ t: ms(po.eta), s: `${fmtHM(po.eta)} ${po.name}到貨` })
-  const mt = (world?.maintenance.upcoming ?? []).filter((m) => ms(m.start) > now).sort((a, b) => ms(a.start) - ms(b.start))[0]
-  if (mt) out.push({ t: ms(mt.start), s: `${fmtMD(mt.start)} ${fmtHM(mt.start)} ${machineLabel(mt.machine_id)}${mt.title}` })
-  return out.sort((a, b) => a.t - b.t).map((x) => x.s)
 }

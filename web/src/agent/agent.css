@@ -347,7 +347,7 @@
 .feed-ev-h { align-self: flex-start; margin: 10px 0 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-size: 12.5px; color: var(--ink-dim); }
 .feed-ev-h:hover { color: var(--ink); border-color: var(--ink-faint); }
 
-/* 核准區：等待列表 */
+/* 處理清單 */
 .home-list { display: flex; flex-direction: column; padding: 0; overflow: hidden; }
 .hl-h { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
 .hl-h h2 { margin: 0; font-size: 15px; font-weight: 700; }
@@ -364,6 +364,7 @@
 .hl-pill.tone-wait, .hl-pill.tone-risk { background: var(--warn-soft); color: var(--warn); }
 .hl-pill.tone-bad { background: var(--alarm-soft); color: var(--alarm); }
 .hl-pill.tone-run { background: var(--panel-3); color: var(--info); }
+.hl-pill.tone-ok { background: var(--accent-soft); color: var(--accent); }
 .hl-t { font-weight: 600; font-size: 14px; line-height: 1.4; }
 .hl-s { display: none; font-size: 12.5px; color: var(--ink-dim); }
 .hl-item.on .hl-s { display: block; }
@@ -648,11 +649,6 @@ a.ov-row:hover { background: var(--panel-2); }
 .r-chat.agent.main { border-left: 3px solid var(--line-c); }
 .r-chat.agent.main header b { color: var(--line-c); }
 .r-chat.agent.k-interrupt { border-left-color: var(--alarm); }
-.hl-agent { display: inline-block; margin-top: 4px; font-size: 11.5px; padding: 0 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); }
-.hl-agent.s-waiting_approval, .hl-agent.s-waiting_model, .hl-agent.s-queued { background: var(--warn-soft); color: var(--warn); }
-.hl-agent.s-running, .hl-agent.s-waiting_tasks { background: var(--c-2a3c55, #2a3c55); color: var(--info); }
-.hl-agent.s-done { background: var(--accent-soft); color: var(--accent); }
-.hl-agent.s-failed, .hl-agent.s-interrupted { background: var(--alarm-soft); color: var(--alarm); }
 
 /* ---------- Agent page: 主 agent → 子 agent tree, model queue, interrupt (issue #54) ---------- */
 .mq { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 10px 16px; margin-bottom: var(--gap); }

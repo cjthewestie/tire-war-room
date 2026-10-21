@@ -1,13 +1,12 @@
-// Home 主控台: the 核准區 list, the plan of the selected item (核准 / 討論), and the conversation with the 主 agent
+// Home 主控台: the 處理清單 list, the plan of the selected item (核准 / 討論), and the conversation with the 主 agent
 // (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
 // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Event, Line } from '../contracts'
 import { useWarRoom } from '../useWarRoom'
 import { ApprovalList } from './ApprovalList'
 import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
-import { nextUp } from './homeItems'
 import { useHomeSelection } from './homeSelection'
 import { PlanArea } from './PlanArea'
 import type { LocalItem } from './transcript'
@@ -21,7 +20,7 @@ import { useEventBriefing } from '../useBriefing'
 import './agent.css'
 
 /** Home 主控台 (UX brief; CJ 2026-10-20: 「我的plancanvas 那樣可以嗎計劃版然後旁邊對話匡核准列表找地方放 不要懸浮了」):
- *  one status line, then three docked columns — LEFT the ranked 核准區 list, CENTER the 計劃板 of the selected item
+ *  one status line, then three docked columns — LEFT the ranked 處理清單, CENTER the 計劃板 of the selected item
  *  (step cards + arrows, delivery impact, who does what, 核准 / 討論 pinned), RIGHT the Agent conversation, which
  *  follows the selected item (or 全部); 討論 puts the caret in its input in 討論這個計劃 mode. */
 export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, onFocus }: {
@@ -30,11 +29,10 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   onFocus?: (machine?: string, line?: Line) => void
 }) {
   const { state } = useWarRoom()
-  const { events, list, sel, ev, now } = useHomeSelection(picked)
+  const { events, list, sel, ev } = useHomeSelection(picked)
   const { items } = useTranscript(ev)
   const [focus, setFocus] = useState<BarFocus | null>(null)
   const chat = (mode?: BarMode, text?: string) => { setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
-  const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
   const replans = useReplans()
   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
@@ -56,7 +54,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
-      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
+      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
     </div>
