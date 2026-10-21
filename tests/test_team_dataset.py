@@ -213,7 +213,7 @@ def kb():
 
 def test_team_chunks_indexed_alongside_house_sops(kb):
     assert len(kb._team_chunks) == 60 and kb.team_mode in ("vector", "lexical")
-    assert len(kb.titles()) == 15                                # house SOPs untouched
+    assert len(kb.titles()) == 16                                # house SOPs (15 + SOP-MT-01 原料短缺)
     assert len(kb.team_titles()) == 12
     assert kb.search("硫化中斷處置")[0].sop_id == "SOP-CP-01"    # page 11 unchanged
 
@@ -226,8 +226,10 @@ def test_sop_search_returns_team_dataset_chunks(kb):
     ctx = Ctx()
     ctx.kb = kb
     out = sop_search_tool(ctx, {"query": "疏水閥 卡滯 蒸汽壓力", "k": 3})
-    assert all(h["source"].endswith(".md") for h in out["hits"])
+    # hits = house and team SOPs merged on one score; team_hits = the team ones among them
+    assert {h["source_label"] for h in out["hits"]} == {"工廠 SOP", "團隊資料集"}
     assert out["team_hits"] and all(h["source"] == "team_dataset" for h in out["team_hits"])
+    assert all(h in out["hits"] for h in out["team_hits"])
     assert out["team_hits"][0]["sop_id"] == "SOP-06"            # 蒸汽壓力異常與疏水閥檢查
     assert "SOP-06-C" in out["team_hits"][0]["text"]            # chunk id cited
     assert "蒸汽壓力異常與疏水閥檢查" in kb.get("SOP-06")

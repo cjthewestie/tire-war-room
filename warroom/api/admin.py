@@ -242,8 +242,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
             t = time.perf_counter()
             hits = kb.search(q, k)
             team = kb.search_team(q, k) if hasattr(kb, "search_team") else []
+            # what the agents get: both collections on one score, through the no-answer gate
+            r = kb.retrieve(q, k) if hasattr(kb, "retrieve") else None
             return {"q": q, "hits": [h.model_dump(mode="json") for h in hits],
                     "team_hits": [h.model_dump(mode="json") for h in team],
+                    "answer": None if r is None else {"hits": [h.model_dump(mode="json") for h in r.hits],
+                                                      "reason": r.reason},
                     "mode": getattr(kb, "mode", "keyword"), "ms": round((time.perf_counter() - t) * 1000, 1)}
         return await asyncio.to_thread(run)
 

@@ -17,7 +17,7 @@ from typing import Any
 
 from warroom.contracts import QueryOrdersShiftsArgs, SopSearchArgs
 from warroom.kb.orders_db import OrdersDB
-from warroom.kb.store import QdrantSopKB
+from warroom.kb.store import SOURCE_LABELS, TEAM_SOURCE, QdrantSopKB
 
 _lock = threading.Lock()
 _default_kb: QdrantSopKB | None = None
@@ -54,15 +54,29 @@ def set_default_db(db: OrdersDB | None) -> None:
 TEAM_HITS_K = 2
 
 
+def _hit_json(h) -> dict[str, Any]:
+    d = h.model_dump(mode="json")
+    d["source_label"] = SOURCE_LABELS[TEAM_SOURCE if h.source == TEAM_SOURCE else "house"]
+    return d
+
+
 def sop_search_tool(ctx: Any, args: dict[str, Any]) -> dict[str, Any]:
-    """{"query", "k"} -> {"query", "mode", "hits": [SopHit json], "team_hits": [SopHit json]}.
-    hits = the house SOPs (warroom/kb/sop), each citing sop_id/title/source file. team_hits = the
-    best TEAM_HITS_K team dataset SOPs (source "team_dataset", synthetic reference), when the KB has them."""
+    """{"query", "k"} -> {"query", "mode", "hits", "team_hits", "reason"}.
+    hits = the top k SOPs across the house SOPs (warroom/kb/sop) and the team dataset, ranked on one score and passed
+    through the KB's no-answer gate (QdrantSopKB.retrieve); each hit carries sop_id/title/source and source_label
+    (工廠 SOP / 團隊資料集). No hit -> hits [] and reason 「知識庫沒有相關 SOP：…」. team_hits = the team SOPs among hits.
+    A KB without retrieve() (test fakes) keeps the old shape: house hits plus TEAM_HITS_K team hits, ungated."""
     a = SopSearchArgs.model_validate(args)
     kb = getattr(ctx, "kb", None) or default_kb()
-    hits = kb.search(a.query, k=a.k)
-    out = {"query": a.query, "mode": getattr(kb, "mode", "unknown"),
-           "hits": [h.model_dump(mode="json") for h in hits]}
+    out: dict[str, Any] = {"query": a.query, "mode": getattr(kb, "mode", "unknown")}
+    retrieve = getattr(kb, "retrieve", None)
+    if callable(retrieve):
+        r = retrieve(a.query, k=a.k)
+        out["hits"] = [_hit_json(h) for h in r.hits]
+        out["team_hits"] = [h for h in out["hits"] if h["source"] == TEAM_SOURCE]
+        out["reason"] = r.reason
+        return out
+    out["hits"] = [h.model_dump(mode="json") for h in kb.search(a.query, k=a.k)]
     search_team = getattr(kb, "search_team", None)
     if callable(search_team):
         out["team_hits"] = [h.model_dump(mode="json") for h in search_team(a.query, k=TEAM_HITS_K)]

@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     qdrant_url: str | None = None         # set on Spark to use the qdrant container
     embed_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     sop_dir: Path = ROOT / "warroom" / "kb" / "sop"
+    # SOP no-answer gate (warroom/kb/store.py retrieve): a hit needs this hybrid score plus a key term of the
+    # question, or kb_strong_score alone. Calibrated on tests/data/rag_eval.yaml: scripts/rag_eval.py --curve.
+    kb_min_score: float = 0.18
+    kb_strong_score: float = 0.9
 
     audit_path: Path = ROOT / "data" / "runtime" / "audit.jsonl"
     schedule_dir: Path = ROOT / "data" / "runtime" / "schedules"

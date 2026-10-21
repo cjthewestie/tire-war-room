@@ -133,7 +133,7 @@ def result_text(tool: ToolName, args: dict[str, Any], data: dict[str, Any], toda
         return "、".join(bits) or "感測器讀值"
     if tool is ToolName.SOP_SEARCH:
         hits = data.get("hits") or []
-        return "、".join(f"SOP「{h.get('title')}」" for h in hits[:1]) or "SOP 無相符"
+        return "、".join(f"SOP「{h.get('title')}」" for h in hits[:1]) or "知識庫沒有相關 SOP"
     if tool is ToolName.SOLVE_SCHEDULE:
         return solver_text(data)
     if tool is ToolName.PREDICT_ANOMALY:
