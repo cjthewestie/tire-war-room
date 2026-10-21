@@ -287,6 +287,7 @@ class ScenarioName(StrEnum):
     RUSH_ORDER = "rush_order"                  # 插單: a rush order arrives, re-solve
     STAFFING = "staffing"                      # 人力調度: an operator calls in sick
     DAY_LOOP = "day_loop"                      # issue #36 一日循環: one dataset day 00:00 -> 24:00, repeated
+    MORNING_RUSH = "morning_rush"              # issue #104 一早訂單湧入: shift start, order flood, p.11, truck
 
 
 class AuditKind(StrEnum):
@@ -444,6 +445,9 @@ class ScenarioStep(_M):
     fault: FaultSpec | None = None
     note: str | None = None
     plant: PlantInput | None = None   # issue #17
+    # issue #104: a normal order arrives. It joins the order book (the scheduler sees it on the next solve) and the
+    # world feed; unlike a rush order it opens no plant event
+    order: Order | None = None
 
 
 class Scenario(_M):
