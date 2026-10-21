@@ -322,5 +322,19 @@ class JsonlAuditLog:
         last_seq = entries[-1].seq if entries else 0
         return last_seq == self._seq and (not entries or entries[-1].hash == self._last_hash)
 
+    def verify_report(self) -> dict[str, Any]:
+        """verify_chain() with the where: entries checked, the last good seq and, on a break, the first bad seq
+        (後台 稽核紀錄: 「✗ 第 N 筆斷裂」)."""
+        if not self.path.exists():
+            ok = self._seq == 0
+            return {"ok": ok, "checked": 0, "last_seq": 0, "broken_at": None if ok else 1,
+                    "problem": None if ok else "audit file missing"}
+        entries, _, problem = self._scan(self.path.read_bytes())
+        last_seq = entries[-1].seq if entries else 0
+        if problem is None and not (last_seq == self._seq and (not entries or entries[-1].hash == self._last_hash)):
+            problem = f"file ends at seq {last_seq}, the log is at seq {self._seq}"
+        return {"ok": problem is None, "checked": len(entries), "last_seq": last_seq,
+                "broken_at": None if problem is None else last_seq + 1, "problem": problem}
+
     def __len__(self) -> int:
         return self._seq

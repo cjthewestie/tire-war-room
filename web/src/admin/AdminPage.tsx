@@ -1,28 +1,29 @@
-// 後台 (#admin, issue #37), first version. CJ, 2026-10-20: 「後台的話我是希望可以存取一些 memory 或者是 RAG 資料庫的維護」.
-// Four pages: 狀態 (health, model, audit chain), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
+// 後台 (#admin, issue #37). CJ, 2026-10-20: 「後台的話我是希望可以存取一些 memory 或者是 RAG 資料庫的維護」; 2026-10-22:
+// 「稽核紀錄跟系統運作基本參數需要在這裡 狀態欄有點意義不明可以怎麼修改」.
+// Pages: 系統健康 (one plain-language card per subsystem, HealthPage.tsx), 稽核紀錄 (read-only audit viewer,
+// AuditPage.tsx), 系統參數 (live parameters, ParamsPage.tsx), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
 // tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes the agent does not
 // read yet) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
 // network only, every write audited.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { MACHINES, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
 import { adminFetch } from '../transport'
 import { useWarRoom } from '../useWarRoom'
+import { Err } from './adminCommon'
+import { useLoad, type Job } from './adminData'
+import { AuditPage } from './AuditPage'
+import { HealthPage } from './HealthPage'
+import { ParamsPage } from './ParamsPage'
 import './admin.css'
 
-type Page = 'status' | 'rag' | 'plant' | 'memory' | 'runs'
+type Page = 'status' | 'audit' | 'params' | 'rag' | 'plant' | 'memory' | 'runs'
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'status', label: '狀態' }, { id: 'rag', label: 'RAG 知識庫' }, { id: 'plant', label: '工廠指示 PLANT.md' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
+  { id: 'status', label: '系統健康' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'rag', label: 'RAG 知識庫' }, { id: 'plant', label: '工廠指示 PLANT.md' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
-interface Job { state: 'idle' | 'running' | 'done' | 'failed'; phase: string; files: number; chunks: number | null; team_chunks: number | null; mode: string | null; error: string | null; elapsed_s: number | null }
-interface Status {
-  llm_mode: string; model: string; llm_host: string | null; llm_reachable: boolean; kb_ok: boolean; kb_mode: string; team_mode: string
-  audit_chain_ok: boolean; audit_entries: number; audit_last_seq: number; degraded: Record<string, string>; scenario: string
-  factory_time: string; uptime_s: number; network: string; memory_notes: number; reindex: Job
-}
 interface Doc { file: string; sop_id: string; title: string; chunks: number; bytes: number; modified: string; sections: string[]; error: string | null }
 interface Rag {
   folder: string; docs: Doc[]; team: { sop_id: string; title: string; chunks: number }[]; kb_mode: string; team_mode: string
@@ -54,67 +55,10 @@ export function AdminPage() {
         </nav>
         <span className="muted small">只限廠內網路・需主管 PIN（現場螢幕免輸入）・每次寫入都記稽核</span>
       </header>
-      {page === 'status' ? <StatusPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
+      {page === 'status' ? <HealthPage /> : page === 'audit' ? <AuditPage /> : page === 'params' ? <ParamsPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
     </div>
   )
 }
-
-function useLoad<T>(path: string): { data: T | null; err: string | null; reload: () => void } {
-  const [data, setData] = useState<T | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [n, setN] = useState(0)
-  useEffect(() => {
-    let off = false
-    adminFetch<T>(path).then((d) => { if (!off) { setData(d); setErr(null) } }).catch((e) => { if (!off) setErr(String(e).replace(/^Error: /, '')) })
-    return () => { off = true }
-  }, [path, n])
-  return { data, err, reload: useCallback(() => setN((x) => x + 1), []) }
-}
-
-function Err({ err }: { err: string | null }) {
-  if (!err) return null
-  return <p className="note admin-err" role="alert">{/^40[13]/.test(err) ? `沒有權限：${err}。後台只限廠內網路，遠端需輸入主管 PIN。` : `讀取失敗：${err}`}</p>
-}
-
-// ---------------------------------------------------------------- 狀態
-function StatusPage() {
-  const { data: s, err, reload } = useLoad<Status>('/api/admin/status')
-  return (
-    <section className="admin-body">
-      <Err err={err} />
-      {s && (
-        <div className="admin-cards">
-          <Card title="模型" tone={s.llm_mode === 'mock' ? 'muted' : s.llm_reachable ? 'ok' : 'bad'}>
-            <b>{s.llm_mode === 'llm' ? `Nemotron・${s.model}` : '規則模式（未呼叫模型）'}</b>
-            <span>{s.llm_mode === 'mock' ? '指揮官用規則產生計畫' : `${s.llm_host ?? ''}・${s.llm_reachable ? '連得上' : '連不上'}`}</span>
-          </Card>
-          <Card title="SOP 知識庫" tone={s.kb_ok ? 'ok' : 'bad'}>
-            <b>{s.kb_mode === 'vector' ? '向量＋字詞混合搜尋' : s.kb_mode === 'lexical' ? '只有字詞搜尋（嵌入模型未載入）' : s.kb_mode}</b>
-            <span>團隊資料集：{s.team_mode === 'off' ? '未載入' : s.team_mode === 'vector' ? '向量' : '字詞'}・{s.kb_ok ? '可用' : '不可用'}</span>
-          </Card>
-          <Card title="稽核紀錄" tone={s.audit_chain_ok ? 'ok' : 'bad'}>
-            <b data-testid="audit-chain">{s.audit_chain_ok ? '雜湊鏈完整' : '雜湊鏈有問題'}</b>
-            <span>{s.audit_entries} 筆・最新 #{s.audit_last_seq}</span>
-          </Card>
-          <Card title="系統" tone={Object.keys(s.degraded).length ? 'warn' : 'ok'}>
-            <b>已運轉 {Math.floor(s.uptime_s / 3600)} 小時 {Math.floor((s.uptime_s % 3600) / 60)} 分</b>
-            <span>情境 {s.scenario}・網路 {s.network}・工廠時間 {fmtMD(s.factory_time)} {fmtHM(s.factory_time)}</span>
-          </Card>
-          <Card title="記憶筆記" tone="muted"><b>{s.memory_notes} 則</b><span>Agent 目前不讀（唯讀、未接進提示詞）</span></Card>
-          <Card title="上次重新索引" tone={s.reindex.state === 'failed' ? 'bad' : 'muted'}>
-            <b>{JOB_TEXT[s.reindex.state]}</b><span>{s.reindex.chunks != null ? `${s.reindex.chunks} 段・${s.reindex.elapsed_s} 秒` : '這次啟動後還沒做'}</span>
-          </Card>
-        </div>
-      )}
-      {s && Object.keys(s.degraded).length > 0 && (
-        <details className="admin-deg"><summary>降級中的元件（{Object.keys(s.degraded).length}）</summary>
-          <ul>{Object.entries(s.degraded).map(([k, v]) => <li key={k}><b>{k}</b> <span className="muted">{v}</span></li>)}</ul></details>
-      )}
-      <button className="btn-ghost" onClick={reload}>重新整理</button>
-    </section>
-  )
-}
-const JOB_TEXT: Record<Job['state'], string> = { idle: '尚未執行', running: '進行中', done: '完成', failed: '失敗' }
 
 function Card({ title, tone, children }: { title: string; tone: 'ok' | 'bad' | 'warn' | 'muted'; children: React.ReactNode }) {
   return <div className={`admin-card t-${tone}`}><span className="admin-card-k"><i className={`dot ${tone === 'ok' ? 'ok' : tone === 'bad' ? 'bad' : tone === 'warn' ? 'data' : 'idle'}`} />{title}</span>{children}</div>
