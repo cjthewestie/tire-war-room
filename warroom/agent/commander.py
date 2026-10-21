@@ -116,7 +116,7 @@ def _tool_catalogue() -> str:
         "- sop_search {query, k=3} SOP 知識庫（讀，自動）",
         "- confirm_schedule {schedule_version: int, reason} 確認新排程（寫，需主管核准）",
         "- set_cure_time {press_id, total_cure_h, reason} 設定硫化時間建議值（寫，需主管核准）",
-        "- notify_teams {teams: [curing|body|side|bead_nylon|bigopen|bond|maintenance|qc|supervisor], "
+        "- notify_teams {teams: [curing|body|side|bead_nylon|bigopen|bond|maintenance|qc|trim|supervisor], "
         "kind: maintenance|info|slow_feed|pause_feed|staff_move|overtime|machine_out|dispatch, message, machine_id?} "
         "通知各組（寫；maintenance/info 自動，其餘需核准；dispatch=派工，核准後由程式轉成人員任務）",
     ])

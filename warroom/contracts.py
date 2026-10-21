@@ -65,6 +65,7 @@ class TeamId(StrEnum):
     BOND = "bond"                # 貼合組
     MAINTENANCE = "maintenance"  # 維修
     QC = "qc"
+    TRIM = "trim"                # 修邊組（資料集的第 8 個工作組：人工整修）
     SUPERVISOR = "supervisor"
 
 
