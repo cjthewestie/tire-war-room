@@ -83,6 +83,13 @@ class TeamReplayFactory(Factory):
             self._arm(sc.start_at)
         return sc
 
+    def _plan_anchor(self, sc: Scenario) -> datetime:
+        """Armed replay plays the plan as of the (first) window's start; other scenarios use the plain mapping."""
+        if sc.name is ScenarioName.NORMAL and self.replay_windows:
+            from warroom.data.team_dataset import WINDOWS
+            return WINDOWS[self.replay_windows[0]].start
+        return super()._plan_anchor(sc)
+
     def _arm(self, t0: datetime) -> None:
         import tempfile
 

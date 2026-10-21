@@ -202,10 +202,10 @@ class FallbackFactory:
         cure = None
         if machine_id == F.press_id(7):
             now = self.clock.now()
-            cure = CureJobState(job_id="J-0307", order_id="#A-307", size=TireSize.M, mold_id="M-307",
-                                mold_in_at=now - timedelta(hours=10),
-                                planned_demold_at=now + timedelta(hours=18),
-                                cure_required_h=F.CURE_HOURS[TireSize.M], cure_elapsed_h=10.0)
+            cure = CureJobState(job_id="J-0307", order_id="#S-38", size=TireSize.S, mold_id="S-307",
+                                mold_in_at=now - timedelta(hours=14.4),
+                                planned_demold_at=now + timedelta(hours=9.6),
+                                cure_required_h=F.CURE_HOURS[TireSize.S], cure_elapsed_h=14.4)
         return MachineState(
             machine_id=m.id, line=m.line, name=m.name, short_name=m.short_name, status=self._status[m.id],
             last_reading=hist[-1] if hist else None, step_elapsed_min=14.0 if m.handles_compound else 0.0,
@@ -222,7 +222,7 @@ class FallbackFactory:
     def orders(self) -> list[Order]:
         today = self.clock.now().date()
         return [
-            Order(id="#A-311", size=TireSize.M, qty=20, done=0, due=today + timedelta(days=3), mold_id="A-311"),
+            Order(id="#A-311", size=TireSize.S, qty=20, done=0, due=today + timedelta(days=3), mold_id="A-311"),
             Order(id="#A-307", size=TireSize.M, qty=40, done=12, due=today + timedelta(days=20)),
             Order(id="#L-07", size=TireSize.L, qty=100, done=8, due=today + timedelta(days=60)),
             Order(id="#S-38", size=TireSize.S, qty=100, done=38, due=today + timedelta(days=10)),

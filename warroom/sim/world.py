@@ -1244,7 +1244,7 @@ class World:
             else:
                 self._set(w, t, "待命", "staff")
             return
-        if w.group == "修邊組":          # 整修 (manual finishing) by the presses
+        if w.team is TeamId.TRIM:         # 修邊組 整修 (manual finishing) by the presses
             self._set(w, t, "在機台", "line_CURE")
             return
         if w.team is TeamId.QC:

@@ -79,7 +79,7 @@ const text = async (p) => (await p.locator('body').innerText()).replace(/\u2060/
   await p.click('[data-testid=timeline-all]').catch(() => {})
   const tl = await (p.locator('[data-testid=focus-timeline]').innerText())
   check('timeline rows', ['02:14:00', '02:14:01', '02:14:11', '02:16:40', '02:31:00', '02:31:04'].every((x) => tl.includes(x)))
-  check('timeline numbers', tl.includes('36.5 h') && tl.includes('+8.5 h') && tl.includes('119.5°C') && tl.includes('#A-311'))
+  check('timeline numbers', tl.includes('28.5 h') && tl.includes('+4.5 h') && tl.includes('119.5°C') && tl.includes('#A-311'))
   await p.click('text=人力排程')
   await p.waitForSelector('.gantt svg')
   await p.evaluate(() => { const d = document.querySelector('details.plan-panel'); if (d) d.open = true })   // ⑥ is folded by default

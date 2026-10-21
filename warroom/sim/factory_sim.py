@@ -154,6 +154,8 @@ class Factory:
             stagger_min = 6.0 if d.id == "A-BIGOPEN" else (i * 7.0) % max(nom.cycle_min, 1.0)
             m.batch_epoch = t0 - timedelta(minutes=stagger_min)
             self._m[d.id] = m
+        self._plan_at = self._plan_anchor(sc)
+        self._plan_state = self._load_plan(self._plan_at)
         self._init_orders(t0)
         self._init_presses(t0)
         # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
@@ -168,7 +170,58 @@ class Factory:
         self.world = World(self, t0, self.seed)
         return sc
 
+    # issue #20 Q1: orders and what every press holds come from the team dataset (orders.csv, tire_unit.csv) as of
+    # one dataset moment, shifted onto the scenario's clock. Page 11 plays the EV-2 night (10/28 02:12 -> 10/03),
+    # page 2 the EV-1 afternoon (10/22), every other scenario the same night at its own time of day.
+    # (concurrent_3 injects faults on presses 3 and 10 at 10:00: the dataset day on which both are curing then)
+    _PLAN_DAY = {ScenarioName.OPEN_MILL_OVERHEAT: date(2026, 10, 22), ScenarioName.DAY_LOOP: date(2026, 10, 21),
+                 ScenarioName.CONCURRENT_3: date(2026, 10, 27)}
+    _PLAN_DAY_DEFAULT = date(2026, 10, 28)
+
+    def _plan_anchor(self, sc: Scenario) -> datetime:
+        day = self._PLAN_DAY.get(sc.name, self._PLAN_DAY_DEFAULT)
+        t = sc.start_at
+        return datetime(day.year, day.month, day.day, t.hour, t.minute, t.second, tzinfo=t.tzinfo)
+
+    def _load_plan(self, at: datetime):
+        try:
+            from warroom.data.team_plan import plan_state
+            st = plan_state(at, getattr(self, "_dataset_path", None))
+            return st if st.orders else None
+        except (OSError, KeyError, ValueError):       # dataset missing / unreadable: the built-in demo book
+            return None
+
     def _init_orders(self, t0: datetime) -> None:
+        st = self._plan_state
+        if st is None:
+            return self._init_orders_demo(t0)
+        shift = t0 - self._plan_at
+        self._orders = {o.id: o.model_copy(update={"due": (datetime.combine(due, datetime.min.time()) + shift).date()})
+                        for o, due in st.orders}
+        self._remaining0 = {z: sum(o.qty - o.done for o in self._orders.values() if o.size is z) for z in TireSize}
+
+    def _init_presses(self, t0: datetime) -> None:
+        st = self._plan_state
+        if st is None:
+            return self._init_presses_demo(t0)
+        shift = t0 - self._plan_at
+        self._press = {}
+        self._in_press = {oid: 0 for oid in self._orders}
+        self._plan_started = set()
+        for pid in (m for m in self._m if m.startswith("CURE-")):
+            u = st.running.get(pid)
+            ps = _Press(queue=list(st.queues.get(pid, [])))
+            if u is not None:
+                job = self._make_job(pid, self._orders[u.order_id], u.cure_start + shift)
+                ps.job = job
+                self._in_press[u.order_id] += 1
+                self._plan_started.add(job.job_id)
+            else:
+                ps.idle_until = t0
+                self._m[pid].status = MachineStatus.IDLE
+            self._press[pid] = ps
+
+    def _init_orders_demo(self, t0: datetime) -> None:
         d0 = t0.date()
         s_done, _, _ = DEMO_ORDER_PROGRESS[TireSize.S]
         m_done, _, _ = DEMO_ORDER_PROGRESS[TireSize.M]
@@ -177,7 +230,7 @@ class Factory:
         orders = [
             Order(id="#S-101", size=TireSize.S, qty=60, done=s_done, due=d0 + timedelta(days=5), customer="客戶甲",
                   mold_id="MD-S101"),
-            Order(id="#S-102", size=TireSize.S, qty=40, done=0, due=d0 + timedelta(days=12), customer="客戶乙",
+            Order(id="#S-102", size=TireSize.S, qty=39, done=0, due=d0 + timedelta(days=12), customer="客戶乙",
                   mold_id="MD-S102"),
             Order(id="#M-201", size=TireSize.M, qty=50, done=m_done, due=d0 + timedelta(days=21), customer="客戶丙",
                   mold_id="MD-M201"),
@@ -185,26 +238,26 @@ class Factory:
                   mold_id="MD-M202"),
             Order(id="#L-301", size=TireSize.L, qty=59, done=l_done, due=d0 + timedelta(days=30), customer="客戶戊",
                   mold_id="MD-L301"),
-            Order(id="#A-311", size=TireSize.L, qty=1, done=0, due=d0 + timedelta(days=3), customer="客戶己",
+            Order(id="#A-311", size=TireSize.S, qty=1, done=0, due=d0 + timedelta(days=3), customer="客戶己",
                   mold_id="#A-311", priority=2),
-            Order(id="#L-302", size=TireSize.L, qty=40, done=0, due=d0 + timedelta(days=60), customer="客戶庚",
+            Order(id="#L-302", size=TireSize.L, qty=41, done=0, due=d0 + timedelta(days=60), customer="客戶庚",
                   mold_id="MD-L302"),
         ]
         self._orders: dict[str, Order] = {o.id: o for o in orders}
         self._remaining0 = {s: DEMO_ORDER_PROGRESS[s][1] - DEMO_ORDER_PROGRESS[s][0] for s in TireSize}
 
-    def _init_presses(self, t0: datetime) -> None:
-        # press -> (order, elapsed h at start). CURE-07 reaches exactly 10 h of a 28 h medium cure
-        # at 02:14:00 in the page-11 scenario (start 02:12:00).
+    def _init_presses_demo(self, t0: datetime) -> None:
+        # press -> (order, elapsed h at start). CURE-07 (small-only, dataset EV-2 tire S-027) reaches exactly
+        # 14.4 h of a 24 h small cure at 02:14:00 in the page-11 scenario (start 02:12:00).
         plan: dict[str, tuple[str, float]] = {
             "CURE-01": ("#S-101", 2.0), "CURE-02": ("#S-101", 6.0), "CURE-03": ("#S-101", 10.0),
             "CURE-04": ("#S-101", 14.0), "CURE-05": ("#S-101", 18.0), "CURE-06": ("#S-101", 21.0),
-            "CURE-11": ("#S-101", 16.0),
-            "CURE-07": ("#M-201", 10.0 - 2.0 / 60.0), "CURE-08": ("#L-301", 20.0),
+            "CURE-07": ("#S-101", 14.4 - 2.0 / 60.0),
+            "CURE-11": ("#M-201", 10.0), "CURE-08": ("#L-301", 20.0),
             "CURE-09": ("#M-201", 24.0), "CURE-10": ("#L-301", 6.0),
         }
-        queues = {"CURE-07": ["#A-311", "#M-201"], "CURE-08": ["#L-301"], "CURE-09": ["#M-201"],
-                  "CURE-10": ["#L-301"]}
+        queues = {"CURE-07": ["#A-311", "#S-101"], "CURE-08": ["#L-301"], "CURE-09": ["#M-201"],
+                  "CURE-10": ["#L-301"], "CURE-11": ["#M-201"]}
         self._press: dict[str, _Press] = {}
         self._in_press: dict[str, int] = {o: 0 for o in self._orders}
         self._plan_started: set[str] = set()       # schedule job ids already loaded into a press
@@ -431,7 +484,7 @@ class Factory:
 
         With a plan attached, a free press loads the plan's next not-yet-started job on that press,
         at max(planned T, de-mold + 30 min), with the plan's order, mold and cure_h; and stays idle
-        when the plan has nothing for it. So an approved move (#A-311 -> press 9) and the staffed
+        when the plan has nothing for it. So an approved move of #A-311 off press 7 and the staffed
         de-mold windows reach the plant. Without a plan the sim keeps its own queue (tests, replay)."""
         if source is None:
             self._plan_source = None
@@ -517,6 +570,10 @@ class Factory:
                 elif now >= ps.idle_until:
                     self._start_next(pid, ps, ps.idle_until)
 
+    # #A-311 (small, dataset S-033) is pinned as the next mold of press 7 (page 11); the other small presses
+    # must not pick it up first just because it has the highest priority.
+    RESERVED_NEXT: dict[str, str] = {"#A-311": "CURE-07"}
+
     def _start_next(self, pid: str, ps: _Press, at: datetime) -> None:
         """No plan attached: the sim's own queue, then order priority / due date."""
         sizes = (TireSize.M, TireSize.L) if pid in ML_PRESSES else (TireSize.S,)
@@ -525,6 +582,8 @@ class Factory:
         for oid in candidates:
             o = self._orders.get(oid)
             if o is None or o.size not in sizes:
+                continue
+            if self.RESERVED_NEXT.get(oid, pid) != pid:     # a pinned next mold stays on its own press
                 continue
             if o.done + self._in_press[oid] >= o.qty:
                 continue

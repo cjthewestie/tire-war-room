@@ -12,7 +12,7 @@ Assumptions (page 11 marks Ea as assumed; it needs factory calibration):
   at Tref, and the press stays at `actual_temp_c` for the rest of the cure.
 - Ea = 85 kJ/mol, R = 8.314 J/(mol·K).
 No tuning was needed: with Tref = 128 °C exactly, page 11 reproduces — ratio 0.679,
-18 h left at 128 °C -> 26.5 h at 122 °C, total 36.5 h, +8.5 h.
+9.6 h left at 128 °C -> 14.1 h at 122 °C, total 28.5 h, +4.5 h.
 """
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def rate_ratio(actual_temp_c: float, ref_temp_c: float = F.CURE_TEMP_NOMINAL_C,
 def arrhenius_cure(args: CureFormulaArgs) -> CureFormulaData:
     """rate_ratio = exp(-Ea/R * (1/T - 1/Tref)), T in K. remaining_ref_h = ref_cure_h - elapsed_h;
     remaining_actual_h = remaining_ref_h / rate_ratio; total = elapsed + remaining_actual.
-    Page 11 check: M, 128°C ref, 122°C actual, 10 h elapsed, 28 h, 85 kJ/mol -> total 36.5 h, +8.5 h."""
+    Page 11 check: S, 128°C ref, 122°C actual, 14.4 h elapsed, 24 h, 85 kJ/mol -> total 28.5 h, +4.5 h."""
     ref_cure_h = args.ref_cure_h if args.ref_cure_h is not None else F.CURE_HOURS[args.size]
     if args.elapsed_h < 0:
         raise ValueError("elapsed_h must be >= 0")
