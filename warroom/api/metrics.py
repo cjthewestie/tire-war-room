@@ -139,7 +139,8 @@ def call_row(e: Any) -> dict[str, Any] | None:
     ms, out = p.get("total_ms"), p.get("completion_tokens")
     tps = round(out / (ms / 1000), 1) if isinstance(out, (int, float)) and isinstance(ms, (int, float)) and ms > 0 and out else None
     return {"actor": e.actor, "ms": ms if isinstance(ms, (int, float)) else None, "tps": tps, "error": bool(p.get("error")),
-            "fell_back": bool(p.get("fell_back_to_mock") or p.get("fell_back"))}
+            "fell_back": bool(p.get("fell_back_to_mock") or p.get("fell_back")) and p.get("cause") != "budget",
+            "budget": p.get("cause") == "budget"}
 
 
 def pct(xs: list[float], q: float) -> float | None:
@@ -326,6 +327,8 @@ class MetricsSampler:
         out["calls_seen"] = metric(len(self.calls), f"稽核鏈 llm_call（最近 {CALLS_KEPT} 筆）")
         out["fallbacks"] = metric(sum(1 for c in self.calls if c["fell_back"]),
                                   f"稽核鏈 llm_call fell_back_to_mock（最近 {CALLS_KEPT} 筆）")
+        out["budget_refused"] = metric(sum(1 for c in self.calls if c["budget"]),
+                                       f"稽核鏈 llm_call cause=budget（用量上限擋下，最近 {CALLS_KEPT} 筆）")
         out["errors"] = metric(sum(1 for c in self.calls if c["error"]), f"稽核鏈 llm_call error（最近 {CALLS_KEPT} 筆）")
         out["queue"] = self._queue(r)
         return out
