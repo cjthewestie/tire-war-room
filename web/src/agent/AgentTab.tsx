@@ -1,5 +1,5 @@
 // Home 主控台: the 核准區 list, the plan of the selected item (核准並派發 / 討論), and the conversation with the 主 agent
-// (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles, one input, a switcher to follow one subagent's progress.
+// (issue #54; CJ, 2026-10-20: 「單純一點好嗎」): plain bubbles and one input (CJ, 2026-10-21: the subagent switcher is gone).
 // Every step behind it is on the Agent page (#console), linked from 「看完整過程」.
 import { useEffect, useMemo, useState } from 'react'
 import type { Event, Line } from '../contracts'
@@ -12,9 +12,8 @@ import { PlanArea } from './PlanArea'
 import type { LocalItem } from './transcript'
 import { setReplan, useReplans } from './replanStore'
 import { ChatBar, type BarFocus, type BarMode } from './ChatBar'
-import { Bubbles, SubProgress } from './SimpleChat'
+import { Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
-import { isOpen, plainStatus, whatOf } from './subagents'
 import { useTranscript } from './useTranscript'
 import './agent.css'
 
@@ -30,10 +29,6 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   const { state } = useWarRoom()
   const { events, list, sel, ev, now } = useHomeSelection(picked)
   const { items } = useTranscript(ev)
-  // the conversation shows the 主 agent, or the subagent of the item the supervisor picked in the plan area
-  const [view, setView] = useState<string>('main')
-  const [seenPick, setSeenPick] = useState(picked)
-  if (picked !== seenPick) { setSeenPick(picked); if (sel?.eventId) setView(sel.eventId) }
   const [focus, setFocus] = useState<BarFocus | null>(null)
   const chat = (mode?: BarMode, text?: string) => { setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
   const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
@@ -59,54 +54,32 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <div className="home">
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
-      <Console view={view} setView={setView} planEv={ev} events={events} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
+      <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
     </div>
     </>
   )
 }
 
-/** The 主控台 conversation panel. Its header is a switcher (CJ, 2026-10-20: 「這邊就是可以切換主 agent 跟選擇哪個 subagent 的
- *  工作進度追蹤」): 「主 agent」 (the plain conversation) first, then each subagent as 「<what>：<plain status>」, open ones first,
- *  filtered by 處理中 / 已結案 / 全部. A subagent shows its progress here with 中斷; 看完整過程 opens the Agent page. */
-function Console({ view, setView, planEv, events, asks, setAsks, focus, onFull }: {
-  view: string; setView: (v: string) => void; planEv: Event | null; events: Event[]
+/** The 主控台 conversation panel: the 主 agent conversation only (CJ, 2026-10-21: 「我不要長這樣」 about the
+ *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed). Each subagent's progress is on the Agent page, via 看完整過程. */
+function Console({ planEv, asks, setAsks, focus, onFull }: {
+  planEv: Event | null
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
 }) {
   const { state } = useWarRoom()
   const thread = useMainThread(asks)
-  const subs = state.subagents?.items ?? []
-  const [scope, setScope] = useState<'open' | 'closed' | 'all'>('open')
-  const listed = subs.filter((x) => scope === 'all' || (scope === 'open') === isOpen(x))
-    .sort((a, b) => Number(isOpen(b)) - Number(isOpen(a)) || (a.started < b.started ? 1 : -1))
-  const ev = view === 'main' ? null : events.find((e) => e.id === view) ?? null
-  const sel = ev ? subs.find((x) => x.id === ev.id) : undefined
-  // the input talks about the plan on screen: the selected subagent's, else the one in the plan area
-  const talkEv = ev ?? planEv
+  // the input talks about the plan on screen
+  const talkEv = planEv
   const waiting = !!talkEv && talkEv.state === 'await_approval' && state.pending.some((p) => p.event_id === talkEv.id)
   const full = (e: React.MouseEvent) => { if (onFull) { e.preventDefault(); onFull(talkEv?.id) } }
 
   return (
     <section className="console panel" aria-label="主 agent 對話">
-      <header className="con-h sw">
-        <div className="sw-top">
-          <h2 className="sw-title">主 agent ▸ 派出的子 agent</h2>
-          <span className="muted small sw-n" data-testid="sw-counts">子 agent {subs.length}・進行中 {subs.filter(isOpen).length}</span>
-        </div>
-        <select className="sw-pick" value={ev ? ev.id : 'main'} onChange={(e) => setView(e.target.value)} aria-label="主 agent 或子 agent" data-testid="agent-switch">
-          <option value="main">主 agent</option>
-          {listed.map((x) => <option key={x.id} value={x.id}>{isOpen(x) ? '● ' : '○ '}{whatOf(x, events.find((e) => e.id === x.id))}：{plainStatus(x)}</option>)}
-          {ev && !listed.some((x) => x.id === ev.id) && sel && <option value={ev.id}>{whatOf(sel, ev)}：{plainStatus(sel)}</option>}
-        </select>
-        <div className="seg sm" role="group" aria-label="子 agent 範圍">
-          {(['open', 'closed', 'all'] as const).map((s) => (
-            <button key={s} className={scope === s ? 'on' : ''} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'open' ? '處理中' : s === 'closed' ? '已結案' : '全部'}</button>
-          ))}
-        </div>
+      <header className="con-h">
         <a className="con-full" href={`#console${talkEv ? `?event=${encodeURIComponent(talkEv.id)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
       </header>
-      {ev ? <SubProgress ev={ev} talk={thread.filter((b) => b.about === ev.id)} /> : <Bubbles items={thread} empty="跟主 agent 說要做的事，或問工廠現在的狀況。" />}
-      {/* a new message shows in the 主 agent conversation; a word about the waiting plan stays with its subagent */}
-      <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} onSent={(about) => { if (!about || (ev && about !== ev.id)) setView(about ?? 'main') }} />
+      <Bubbles items={thread} empty="跟主 agent 說要做的事，或問工廠現在的狀況。" />
+      <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} />
     </section>
   )
 }

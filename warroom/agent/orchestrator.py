@@ -328,7 +328,7 @@ class Orchestrator:
         self.queue.tags[ev.id] = (t, p)
         self._audit({"orch": "dispatch", "phase": "plan", "type": t, "type_label": TYPES[t], "priority": p, "by": via,
                      "reason": why, "machine_id": ev.machine_id,
-                     "text": f"已請子 agent 規劃：{TYPES[t]}（{self._what(ev)}）；計劃好了會送核准，核准後派發執行", **extra}, ev.id)
+                     "text": f"新任務：{TYPES[t]}（{self._what(ev)}）；這個任務的 agent 擬好計劃會送核准，核准後執行", **extra}, ev.id)
         self.publish()
 
     async def dispatch_command(self, text: str, actor: str, start: Callable[[str, str], Event]) -> tuple[Event, dict[str, Any]]:
@@ -371,9 +371,9 @@ class Orchestrator:
         t = sub.type if sub else "machine"
         kind = d.decision.value
         if kind in ("approve", "modify"):
-            text = f"已核准，派發子 agent 執行：{TYPES.get(t, t)}{'（方案 ' + d.option_id + '）' if d.option_id else ''}；完成後回報"
+            text = f"已核准，{TYPES.get(t, t)} agent 開始執行{'（方案 ' + d.option_id + '）' if d.option_id else ''}；完成後回報"
         elif kind == "reject":
-            text = f"主管駁回{TYPES.get(t, t)}子 agent 的計劃，不執行"
+            text = f"主管駁回{TYPES.get(t, t)} agent 的計劃，不執行"
         else:
             return
         self._audit({"orch": "dispatch", "phase": "execute" if kind != "reject" else "rejected", "type": t,
@@ -418,7 +418,7 @@ class Orchestrator:
                                    f"{'方案 ' + r.decision.option_id if r.decision.option_id else ''}")
         head = "已中斷" if sub.interrupted else "完成" if ev.state is EventState.CLOSED else "已停止"
         outcome = re.sub(r"^(安全中止|已中斷)[：:]\s*", "", (ev.outcome or "").strip())   # never 「安全中止：安全中止：…」
-        parts = [f"{TYPES[sub.type]}子 agent {head}：{outcome or '無需動作'}"]
+        parts = [f"{TYPES[sub.type]} agent {head}：{outcome or '無需動作'}"]
         parts.append(f"改了：{'、'.join(writes)}" if writes else "沒有寫入任何變更")
         parts.append(f"核准：{'、'.join(decided)}" if decided else "沒有核准")
         return "。".join(parts), {"writes": writes, "approvals": decided, "outcome": ev.outcome, "rounds": len(ev.prior_rounds) + 1,
@@ -472,7 +472,7 @@ class Orchestrator:
         detail = {"orch": "interrupt", "by": by, "reason": reason, "cancelled_run": cancelled_run,
                   "superseded_approvals": superseded, "cancelled_tasks": cancelled_tasks, "schedule_kept": kept,
                   "state": ev.state.value, "type": sub.type,
-                  "text": f"主管中斷{TYPES[sub.type]}子 agent：停止新的工具呼叫"
+                  "text": f"主管中斷{TYPES[sub.type]} agent：停止新的工具呼叫"
                           f"{f'，作廢核准卡 {len(superseded)} 張' if superseded else ''}"
                           f"{f'，取消人員任務 {len(cancelled_tasks)} 件' if cancelled_tasks else ''}"
                           f"，排程維持{f' v{kept}' if kept else '原樣'}"}

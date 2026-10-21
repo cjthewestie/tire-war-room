@@ -887,8 +887,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         refusal = physical_request(body.text)
         how = "模型判斷" if d["by"] == "model" else "關鍵字規則" + ("（模型失敗改用規則）" if d.get("fell_back") else "")
         return CommandReply(event_id=ev.id, accepted=refusal is None,
-                            reply=refusal or f"主 agent 已請子 agent 規劃：{TYPES[d['type']]}（{how}：{d['reason']}）。"
-                                             "計劃好了會送到計劃區給你核准；核准後派發執行，完成後在這裡回報。")
+                            reply=refusal or f"已開新任務：{TYPES[d['type']]}（{how}：{d['reason']}）。"
+                                             "這個任務的 agent 擬好計劃會送到計劃區給你核准；核准後執行，完成後在這裡回報。")
 
     @app.post("/api/events/{event_id}/discuss", response_model=DiscussReply)
     async def discuss(event_id: str, body: DiscussRequest, session: Session = Depends(supervisor)) -> DiscussReply:
@@ -931,7 +931,6 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             card = getattr(sm, "waiting_card", lambda _e: None)(body.event_id)
             waiting = card.title if card is not None else None
         from warroom.agent.ask import AskAgent
-        from warroom.agent.main_agent import DISPATCHES
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult
 
@@ -941,11 +940,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             eid, step = call_id.split(":")[0], call_id.split(":")[-1]
             return await AskAgent._run(r.c.tools, r.audit, eid, int(step[1:] or 1), ToolName(name), args)
 
-        async def dispatch(t: str, task: str) -> dict[str, Any]:
-            name = next(k for k, v in DISPATCHES.items() if v == t)
-            d = {"dispatch": name, "type": t, "reason": "主 agent 對話中派發", "by": "model" if _main_agent(r).llm else "rules",
-                 "fell_back": False, "error": None, "ms": None, "model": r.settings.model}
-            ev = r.orch.start_task(task, session.actor, r.start_command, d)
+        async def propose(task: str) -> dict[str, Any]:
+            # the 下新任務 path: one supervisor-command event (PLAN → GATE → approval), no subagent dispatch
+            ev = r.start_command(task, session.actor)
             return {"event_id": ev.id}
 
         async def talk(t: str) -> dict[str, Any]:
@@ -956,7 +953,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return r.orch.queue.slot(PRIORITY["task"], "main_agent", body.event_id, "主 agent 對話")
 
         res = await _main_agent(r).turn(text, context=r.ask_context(), waiting_plan=waiting, run_tool=run_tool,
-                                        dispatch=dispatch, discuss=talk if waiting else None, slot=slot)
+                                        propose=propose, discuss=talk if waiting else None, slot=slot)
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
