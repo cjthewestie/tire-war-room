@@ -16,7 +16,8 @@ export function ApprovalList({ items, selected, onPick }: {
   return (
     <section className="panel home-list" aria-label="處理清單" data-testid="approval-list">
       <header className="hl-h"><h2>處理清單</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
-      {!open.length && (
+      {/* nothing selected = 今日工廠概況 beside it already says 「全廠正常，沒有要你處理的事」 */}
+      {!open.length && selected != null && (
         <div className="hl-empty" data-testid="home-empty">
           <p className="calm-title">全廠正常，沒有要你處理的事</p>
         </div>

@@ -49,14 +49,15 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   useEffect(() => {
     if (ended?.ev) setReplan(ended.r.orderId, { state: 'closed', outcome: ended.ev.outcome ?? null })
   }, [ended?.ev, ended?.r.orderId])
+  // nothing open: the list would only repeat 「全廠正常」, so the plan column takes its place (veteran 10-22 for HY); finished
+  // events stay in 今天處理過的事. Safety Core actions and blocked readings are nowhere else on 主控台: they keep the list.
+  const calm = !sel && list.every((i) => i.eventId != null)
   return (
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
-    <div className={`home ${sel ? '' : 'calm'}`}>
+    <div className={`home ${calm ? 'calm' : ''}`}>
       {!sel && <HomeOverview onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
-      {/* nothing open: the list would only repeat 「全廠正常」, so the plan column takes its place (veteran 10-22 for HY);
-          finished events stay in 今天處理過的事 */}
-      {sel && <ApprovalList items={list} selected={sel.key} onPick={setPicked} />}
+      {!calm && <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />}
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />
     </div>
