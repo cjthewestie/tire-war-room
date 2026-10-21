@@ -1029,10 +1029,15 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 ref = (ref or body.event_id or "").strip()
                 hit = [e for e in evs if e.id == ref]
                 if not hit:
-                    open_ = [e for e in evs if e.closed_at is None] or evs
-                    mids = machines_in(ref)
-                    oids = orders_in(ref)
-                    hit = [e for e in open_ if (mids and e.machine_id in mids) or (oids and any(o in (e.command or "") for o in oids))]
+                    mids, oids = machines_in(ref), orders_in(ref)
+
+                    def named(e) -> bool:
+                        return bool((mids and e.machine_id in mids) or (oids and any(o in (e.command or "") for o in oids)))
+                    # an open task first; else the latest one that ended (「3 號機那件重新規劃」 after it was interrupted)
+                    hit = [e for e in evs if e.closed_at is None and named(e)]
+                    if not hit:
+                        ended = sorted((e for e in evs if named(e)), key=lambda e: e.opened_at)
+                        hit = ended[-1:]
                 if len(hit) != 1:
                     return None
                 e = hit[0]
