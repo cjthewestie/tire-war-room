@@ -93,7 +93,9 @@ export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
           </div>
           <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
             <option value={MAIN}>Agent Nemo 對話</option>
-            {listed.map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}・${plainStatus(sa, e, tasks)}` : evName(e)}</option> })}
+            {/* the event on screen stays in the picker when it leaves the scope (closed while watched): the phone never
+                shows 「Agent Nemo 對話」 over an event */}
+            {(ev && !listed.includes(ev) ? [ev, ...listed] : listed).map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}・${plainStatus(sa, e, tasks)}` : evName(e)}</option> })}
           </select>
         </div>
         <ul className="trace-list tree" role="listbox" aria-label="處理中的事件">
