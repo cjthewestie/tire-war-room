@@ -259,9 +259,11 @@ def _orch(ev: Event, reporter: IncidentReporter | None = None):
     return o, sm, audit, bus
 
 
-def _close(ev: Event, sm: _SM) -> None:
+def _close(ev: Event, sm: _SM, recovered: bool = True) -> None:
     ev.state = EventState.CLOSED
     ev.repaired_at = T0 + timedelta(seconds=40)
+    if recovered:                                    # the new flow closes once the readings are back (已恢復正常)
+        ev.recovered_at = T0 + timedelta(seconds=44)
     ev.closed_at = T0 + timedelta(seconds=44)
     ev.outcome = "已修復：A 線大開煉機 膠溫回到 100°C（維修完成 14:21）"
     sm.on_end(ev)
@@ -338,7 +340,7 @@ async def test_the_recovery_ramp_holds_the_report_until_recovered_at():
     o, sm, _, _ = _orch(ev)
     o.on_decided(_card())
     await o.reports.jobs[ev.id].task
-    _close(ev, sm)
+    _close(ev, sm, recovered=False)
     await asyncio.sleep(0.3)
     assert ev.ai_report is None                              # repaired, still ramping back
     ev.recovered_at = T0 + timedelta(seconds=50)
