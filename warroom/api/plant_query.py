@@ -404,11 +404,33 @@ def questionable(r: Any) -> dict[str, Any]:
     return {"count": len(items), "questionable": items}
 
 
+# ---------------------------------------------------------------------------------- memory (CJ 2026-10-22: 「接記憶」)
+def machine_history(r: Any, machine_id: str | None = None) -> dict[str, Any]:
+    """One machine's 後台 notes and its last past events: the same block the commander gets (context.machine_memory)."""
+    if not machine_id:
+        return {"error": "要給 machine_id"}
+    if machine_id not in F.MACHINE_BY_ID:
+        return {"error": f"沒有這台機台：{machine_id}"}
+    from warroom.data import machine_memory as MM
+    block = MM.for_machine(machine_id, getattr(r, "memory_notes", None), r.audit, r.events())
+    return block or {"machine_id": machine_id, "notes": [], "past": [], "note": "這台機台沒有筆記，也沒有過去事件紀錄"}
+
+
+def memory_notes(r: Any) -> dict[str, Any]:
+    """Every note the supervisor wrote in 後台 記憶, newest first (「我在後台寫了什麼」)."""
+    from warroom.agent.narrate import machine_label
+    notes = getattr(r, "memory_notes", None)
+    rows = sorted(notes.all(), key=lambda n: n.created_at, reverse=True) if notes is not None else []
+    return {"count": len(rows), "notes": [{"machine": machine_label(n.machine_id), "machine_id": n.machine_id,
+                                           "at": _hm(n.created_at), "by": n.author, "text": n.text} for n in rows]}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
           "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
-          "safety_stops": safety_stops, "questionable": questionable}
+          "safety_stops": safety_stops, "questionable": questionable,
+          "machine_history": machine_history, "memory_notes": memory_notes}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -419,9 +441,14 @@ def _shrink(d: Any, n: int) -> Any:
     return d
 
 
-def query(r: Any, topic: str, order_id: str | None = None) -> dict[str, Any]:
+def query(r: Any, topic: str, order_id: str | None = None, machine_id: str | None = None) -> dict[str, Any]:
     """{topic: data} for one topic, at most MAX_CHARS as JSON; KeyError for an unknown topic."""
-    data = TOPICS[topic](r, order_id) if topic == "order_lookup" else TOPICS[topic](r)
+    if topic == "order_lookup":
+        data = TOPICS[topic](r, order_id)
+    elif topic == "machine_history":
+        data = TOPICS[topic](r, machine_id)
+    else:
+        data = TOPICS[topic](r)
     n = 20
     while len(json.dumps(data, ensure_ascii=False, default=str)) > MAX_CHARS and n > 1:
         n //= 2

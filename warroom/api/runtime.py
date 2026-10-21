@@ -1358,6 +1358,8 @@ class Runtime:
             self._orch.queue.on_change = self._orch.publish
             self._orch.precheck = lambda ev: self.precheck_line(self._preplan_order(ev))
             self._orch_c = self.c
+            if hasattr(self.c.state_machine, "memory"):   # 「接記憶」: plans and replans read the machine's memory
+                self.c.state_machine.memory = self.machine_memory
         return self._orch
 
     def start_command(self, text: str, actor: str = "supervisor") -> Event:
@@ -1910,6 +1912,20 @@ class Runtime:
             return list(self.state_machine.events())
         except Exception:  # noqa: BLE001
             return []
+
+    @property
+    def memory_notes(self) -> Any:
+        """The supervisor's per-machine notes from 後台 (warroom/data/memory_notes.py), next to the audit log."""
+        mn = self.__dict__.get("_memory_notes")
+        if mn is None:
+            from warroom.data.memory_notes import MemoryNotes
+            mn = self.__dict__["_memory_notes"] = MemoryNotes(Path(self.settings.audit_path).parent / "memory_notes.json")
+        return mn
+
+    def machine_memory(self, machine_id: str, exclude: str | None = None) -> dict[str, Any] | None:
+        """One machine's notes and last past events, compact (warroom/data/machine_memory.py), or None. Read-only."""
+        from warroom.data import machine_memory as MM
+        return MM.for_machine(machine_id, self.memory_notes, self.audit, self.events(), exclude)
 
     @property
     def tasklog(self) -> Any:

@@ -2,8 +2,8 @@
 // 「稽核紀錄跟系統運作基本參數需要在這裡 狀態欄有點意義不明可以怎麼修改」.
 // Pages: 系統健康 (one plain-language card per subsystem, HealthPage.tsx), 稽核紀錄 (read-only audit viewer,
 // AuditPage.tsx), 系統參數 (live parameters, ParamsPage.tsx), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
-// tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes the agent does not
-// read yet) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
+// tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes; since 「接記憶」 the
+// commander gets a machine's notes and last 3 past events on every plan, previewed here) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
 // network only, every write audited.
 import { useEffect, useMemo, useState } from 'react'
 import { MACHINES, machineLabel } from '../factory'
@@ -33,7 +33,9 @@ interface Hit { sop_id: string; title: string; source: string; score: number; te
 interface Incident { id: string; date: string; machine_id: string | null; equipment: string; symptom: string; action: string; downtime_min: number; outcome: string }
 interface Closed { id: string; machine_id: string | null; closed_at: string; state: string; what: string | null; outcome: string | null }
 interface Note { id: string; machine_id: string; text: string; author: string; created_at: string }
-interface Memory { incidents: Incident[]; closed_events: Closed[]; notes: Note[]; agent_reads_notes: boolean }
+interface Memory { incidents: Incident[]; closed_events: Closed[]; notes: Note[]; agent_reads_notes: boolean; agent_uses?: string }
+interface PastItem { id: string; date: string; symptom?: string; cause?: string; action?: string; outcome?: string; source: string }
+interface MachineMemory { machine_id: string; use: string; notes: { id: string; date: string; by: string; text: string }[]; past: PastItem[] }
 interface Run { id: string; kind: 'event' | 'command' | 'ask' | 'chat'; ts: string; by?: string; machine_id?: string; state?: string; title?: string | null; question?: string | null; answer?: string | null; outcome?: string | null; tools?: number; replans?: number }
 
 export function AdminPage() {
@@ -224,8 +226,11 @@ function MemoryPage() {
   return (
     <section className="admin-body">
       <Err err={err} />
-      <p className="note">Agent 目前<b>沒有記憶</b>：這裡是給人看的「事件記憶」——團隊資料集的歷史異常、稽核紀錄裡已結案的事件，加上主管寫的機台筆記。筆記<b>Agent 目前不讀</b>（唯讀、還沒接進提示詞）。</p>
+      {m?.agent_reads_notes
+        ? <p className="note" data-testid="memory-agent-reads"><b>{m.agent_uses ?? 'Agent 規劃時會參考：機台筆記、最近 3 件過去事件'}</b>。某台機台出事時，指揮官擬計劃會帶上那台的筆記（最新 5 則）和最近 3 件過去事件（結案事件＋團隊資料集），Agent Nemo 問到那台也查得到；只供參考假設，數字仍以工具結果為準。唯讀，不會改任何東西。</p>
+        : <p className="note">這裡是給人看的「事件記憶」——團隊資料集的歷史異常、稽核紀錄裡已結案的事件，加上主管寫的機台筆記。</p>}
       <NoteForm onDone={reload} />
+      {m?.agent_reads_notes && <MemoryPreview stamp={m.notes.length} />}
       <div className="order-tools">
         <form className="order-search" role="search" onSubmit={(e) => e.preventDefault()}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋症狀、處置、結果，例如 蒸汽、溫度" aria-label="搜尋記憶" data-testid="memory-q" />
@@ -249,6 +254,28 @@ function MemoryPage() {
           </section>
         ))}
       </div>
+    </section>
+  )
+}
+
+// what the commander would get as context.machine_memory for one machine, right now
+function MemoryPreview({ stamp }: { stamp: number }) {
+  const [mid, setMid] = useState('CURE-07')
+  const { data, err } = useLoad<{ machine_id: string; machine_memory: MachineMemory | null }>(`/api/admin/memory/preview?machine_id=${encodeURIComponent(mid)}&n=${stamp}`)
+  const mm = data?.machine_id === mid ? data.machine_memory : undefined
+  return (
+    <section className="panel mem-g" data-testid="memory-preview">
+      <header className="panel-h"><h2>Agent 會看到什麼</h2>
+        <select value={mid} onChange={(e) => setMid(e.target.value)} aria-label="預覽的機台">{MACHINES.map((x) => <option key={x.id} value={x.id}>{machineLabel(x.id)}</option>)}</select>
+      </header>
+      <Err err={err} />
+      {mm === null && <p className="muted small">{machineLabel(mid)}沒有筆記，也沒有過去事件：規劃時不帶記憶。</p>}
+      {mm && (
+        <ul className="mem-list">
+          {mm.notes.map((n) => <li key={n.id} className="k-note"><span className="mem-k">筆記</span><span>{n.text}<small className="muted">{n.date}・{n.by}</small></span></li>)}
+          {mm.past.map((p) => <li key={p.id} className="k-ev"><span className="mem-k">過去事件</span><span>{p.date}・{plain(p.symptom ?? p.id)}{p.cause ? `；原因 ${plain(p.cause)}` : ''}{p.action ? `；處置 ${plain(p.action)}` : ''}{p.outcome ? `；結果 ${plain(p.outcome)}` : ''}<small className="muted">{p.id}・{p.source === 'team_dataset' ? '團隊資料集' : '稽核紀錄'}</small></span></li>)}
+        </ul>
+      )}
     </section>
   )
 }

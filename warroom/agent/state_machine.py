@@ -127,6 +127,7 @@ from warroom.contracts import (
 )
 from warroom.agent.gate import cure_notice_press
 from warroom.agent.strict import failure_cause, strict_reason
+from warroom.data import machine_memory as MM
 from warroom.factory import (
     CURE_PRESS_IDS,
     CURE_TEMP_MAX_C,
@@ -256,6 +257,7 @@ class _Run:
     newly_rejected: str | None = None                        # hypothesis VERIFY rejected just before this replan
     sop_handoff: bool = False                                # tools failed: the plan hands the event to people (SOP)
     commander_error: str | None = None                       # why the latest commander call produced no plan
+    memory_ids: dict[str, Any] | None = None                 # 「接記憶」: note / past-event ids last put in the context
     current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
     approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
     stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
@@ -317,6 +319,9 @@ class StateMachine:
         self.on_end: Callable[[Event], None] | None = None
         self._interrupt: dict[str, str] = {}
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
+        # 「接記憶」: machine_id, event id -> that machine's notes and past events (warroom/data/machine_memory.py), set by
+        # the Runtime; None = no memory. Read-only; it goes in the per-event context, never in the system prompt.
+        self.memory: Callable[[str, str], dict[str, Any] | None] | None = None
         try:
             self._commander_streams = "on_alert" in inspect.signature(commander.plan).parameters
         except (TypeError, ValueError):
@@ -1313,6 +1318,7 @@ class StateMachine:
         """One commander call, audited (LLM_CALL, plus INTERCEPTED for dropped steps). None when it raised: the
         reason is in run.commander_error."""
         ev = run.ev
+        mem = (req.context or {}).get("machine_memory")         # 「接記憶」: which notes / past events went in (audited)
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
@@ -1330,12 +1336,15 @@ class StateMachine:
             self.audit.append(AuditKind.LLM_CALL, "commander",
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
                                "fell_back_to_mock": False, "plan_source": None, "strict": strict,
-                               "reason": run.commander_error, "plant_sha256": self._plant_sha()}, event_id=ev.id)
+                               "reason": run.commander_error, "plant_sha256": self._plant_sha(),
+                               "machine_memory": MM.attached(mem)}, event_id=ev.id)
             self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
             self.compute_inflight -= 1
-        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha()}
+        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha(),
+                                   "machine_memory": {**MM.attached(mem),
+                                                      "trimmed": "context.machine_memory" in (info.trimmed or [])}}
         if info.fell_back_to_mock:
             # the model's output was rejected: what runs is the deterministic fallback's plan, and the
             # record says so (never credit the mock's steps to the model), with why and what it sent
@@ -1362,6 +1371,24 @@ class StateMachine:
                                   if info.fell_back_to_mock else "")}, event_id=ev.id)
         return plan, info
 
+    def _machine_memory(self, run: _Run) -> dict[str, Any] | None:
+        """The event machine's notes and last past events for this plan / replan, or None. A timeline line says what
+        was attached whenever it differs from the last one this event got."""
+        ev = run.ev
+        if self.memory is None or ev.source == "plant":
+            return None
+        try:
+            mem = self.memory(ev.machine_id, ev.id)
+        except Exception as e:  # noqa: BLE001 - memory is reference only: a plan never waits on it
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"machine_memory_error": f"{type(e).__name__}: {e}"[:200]}, event_id=ev.id)
+            return None
+        ids = MM.attached(mem)
+        if mem and ids != run.memory_ids:
+            self._note(ev, "系統", MM.timeline_line(mem), "info")
+        run.memory_ids = ids
+        return mem
+
     async def _ask(self, run: _Run, phase: str, extra: dict[str, Any]) -> CommanderPlan | None:
         ev = run.ev
         allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
@@ -1369,6 +1396,9 @@ class StateMachine:
         ctx = {**run.base_context, **extra}
         if ev.previous is not None:              # 「請 AI 重新規劃」: why the last run of this ended in SAFE_STOP
             ctx["previous_run"] = {"event_id": ev.previous.event_id, "stop_reason": ev.previous.reason_text}
+        mem = self._machine_memory(run)
+        if mem:
+            ctx["machine_memory"] = mem
         req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
                                context=ctx, rejected=rejected)
 

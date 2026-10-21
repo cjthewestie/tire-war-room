@@ -53,6 +53,7 @@ from warroom import factory as F
 from warroom.api.runtime import Runtime
 from warroom.config import ROOT
 from warroom.api.tasks import install_tasks
+from warroom.data import machine_memory as MM
 from warroom.contracts import (
     Anomaly,
     AskAnswer,
@@ -1080,23 +1081,27 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
                                      "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
-        async def read_plant(topic: str, call_id: str, order_id: str | None = None) -> dict[str, Any]:
+        async def read_plant(topic: str, call_id: str, order_id: str | None = None,
+                             machine_id: str | None = None) -> dict[str, Any]:
             # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
             # refuses it); audited here like an ask read (tool_call / tool_result, R0), read-only by construction.
             # Called on the loop, not in a thread: it walks live runtime state the loop also changes
             eid, step = call_id.split(":")[0], call_id.split(":")[-1]
             row = {"call_id": f"{eid}:Q{step[1:]}", "step_id": f"Q{step[1:]}", "attempt": 1, "risk": "R0"}
-            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic, **({"order_id": order_id} if order_id else {})},
-                                                                 "state": "ASK"},
-                           event_id=eid)
+            qargs = {"topic": topic, **({"order_id": order_id} if order_id else {}),
+                     **({"machine_id": machine_id} if machine_id else {})}
+            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": qargs, "state": "ASK"}, event_id=eid)
             t0 = time.perf_counter()
             try:
-                data, err = plant_query.query(r, topic, order_id), None
+                data, err = plant_query.query(r, topic, order_id, machine_id), None
             except Exception as e:  # noqa: BLE001 - a failed read is said in the reply, never a 500
                 data, err = None, f"{type(e).__name__}: {e}"[:200]
             r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",
                            {**row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
-                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
+                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else [],
+                                     # which notes / past events went to the model (「接記憶」)
+                                     **(MM.attached(data) if topic == "machine_history" and isinstance(data, dict) else {})}},
+                           event_id=eid)
             reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
 
