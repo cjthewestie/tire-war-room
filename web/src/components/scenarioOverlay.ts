@@ -3,7 +3,8 @@
 // adds its faults on top from now (POST /api/sim/control {action:'overlay'}; the mock engine does the same) instead of
 // rebuilding the plant. The same scenario again (also once it has been overlaid), ↺ 重來, a story scenario, or a click
 // with nothing open loads as before: docs/DEMO-SCRIPT.md's rescue 「click 7 號硫化機溫降 again」 still starts it fresh.
-// Used by the demo strip, the 3D presenter keys and the 3D 觸發異常 menu.
+// Used by the demo strip, the 3D presenter keys and the 3D 觸發異常 menu. The strip's default three (正常運轉,
+// 7 號硫化機溫降, 3 件同時異常) leave only 3 件同時異常 to overlay; ?scenarios=all brings back the rest of the set.
 import type { OverlayResult, ScenarioName } from '../contracts'
 import type { WarRoomState } from '../store'
 
