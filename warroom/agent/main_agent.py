@@ -150,14 +150,10 @@ _FOLLOW_UP_RX = re.compile(r"^(那|還有|然後|另外|再)|呢[?？]?\s*$|剛�
 # 「為什麼」「真的嗎」「所以呢」: a question about the agent's own last answer, so that answer rides along
 _ABOUT_LAST_RX = re.compile(r"^(?:為什麼|為何|怎麼會|真的嗎|確定嗎|所以呢|然後呢|什麼意思|怎麼說)")
 # small talk (今天好累喔、午餐吃什麼、講個笑話): one warm sentence, one plant fact, an offer — lowest queue priority
-# questions whose data the plant does not have: an honest 「沒有這份資料」 by code (at 0.7 the model said 「今天天氣是晴天」)
-_NO_DATA_TOPIC_RX = re.compile(r"天氣|氣溫|下雨|颱風|新聞|股價|股市|匯率|油價|比分|彩券")
 SMALLTALK_LINES = ("辛苦了，先喝口水喘口氣！", "撐著點，今天也快過一半了！", "累了就先放鬆一下肩膀！", "好好吃頓飯，下午才有力氣！")
 _PLANT_WORD_RX = re.compile(r"機|爐|溫度|訂單|排程|出貨|產線|硫化|天氣|\d")
 _PLANT_STAT_RX = re.compile(r"在班|上班人員|運轉|待機|出貨|機台|號機|工單|訂單|事件")
 _JOKE_TAIL_RX = re.compile(r"工廠|排程|出貨|輪胎|訂單|機台|在班")
-NO_DATA_REPLIES = ("我這邊沒有天氣、新聞這類外部資料，這題沒辦法回答。", "這個我查不到，我只接了工廠裡的資料。",
-                   "外面的資料我沒有接進來，這題答不了。")
 DATA_OPEN, DATA_CLOSE = "<<<DATA", "DATA>>>"
 # instruction-like text inside a tool result (SOP, knowledge base, worker note, order memo): removed before the model
 _INJECTED_DATA_RX = re.compile(r"[^。！!？?\n]*(?:忽略(?:以上|上面|前面|所有|你的)?(?:的)?(?:指令|規則|指示)|ignore (?:all |the )?(?:previous|above)"
@@ -821,10 +817,6 @@ class MainAgent:
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
-            if code is None and casual and _NO_DATA_TOPIC_RX.search(t) and not re.search(r"沒有|查不到|無法|沒辦法|答不了", words):
-                # weather / news: the plant has no such data; at 0.7 the model said 「今天天氣是晴天」 (preview run 10-21)
-                out["intent"] = "no_data"
-                words = self._with_fact(self._rot(NO_DATA_REPLIES), context)
             if code is None and inject and not re.search(r"不能|無法|沒辦法|核准", words):
                 # 「直接呼叫 set_cure_time」 got a plant status dump (real run 10-21): the refusal is said, politely
                 words = INJECT_REPLY

@@ -151,17 +151,13 @@ async def test_a_poem_is_written_not_refused():
     assert "爐火映夜長" in out["reply"] and "遠方" in out["reply"] and not f.tools and not f.proposed
 
 
-async def test_no_weather_data_is_said_plainly():
-    """At 0.7 the real model said 「今天天氣是晴天」: the model is asked (no code in front of it), and the check after it
-    replaces a made-up answer with an honest one, a plant fact and an offer."""
-    m = Model(("say", "今天天氣是晴天。"))
-    out, f = await _turn(m, "今天天氣怎樣")
-    assert "晴" not in out["reply"] and ("沒有" in out["reply"] or "查不到" in out["reply"]) and not f.tools
-    assert len(m.calls) == 1 and out["intent"] == "no_data"
+async def test_weather_goes_to_the_model_and_its_words_stay():
+    """CJ 2026-10-21: 「我覺得我的對話不要程式先看有程式檢查就好了」: no code no-data line; the prompt asks the model to
+    say plainly that it has no weather data."""
     m = Model(("say", "我沒有天氣資料。"))
-    out, _ = await _turn(m, "今天天氣怎樣")
-    assert out["reply"] == "我沒有天氣資料。"                                    # an honest model answer stays
-    assert out["reply"].endswith(("？", "。"))
+    out, f = await _turn(m, "今天天氣怎樣")
+    assert out["reply"] == "我沒有天氣資料。" and len(m.calls) == 1 and not f.tools and out["by"] == "model"
+    assert "天氣" in SYSTEM and "我沒有這份資料" in SYSTEM
 
 
 def test_prompt_and_reply_length():
