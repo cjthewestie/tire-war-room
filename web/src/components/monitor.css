@@ -1,0 +1,3 @@
+/* 產線監控 (council review 10-21): an empty 預警 is one line, not a whole panel */
+.early.is-empty { padding-block: 12px; }
+.early.is-empty .panel-h { margin-bottom: 0; }

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CapacityReport, Event, EventState, ScheduleJob, ScheduleVersion, Shift, StepRun } from '../contracts'
-import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
-import { TOOL_LABEL, isRevoke, resultText, staffingChoice, stepLabel } from '../stepText'
-import { RISK_SHORT, hypLabel, hypName, plain } from '../plain'
+import type { CapacityReport, ScheduleJob, ScheduleVersion, Shift } from '../contracts'
+import { CAPACITY_CONDITIONS, CAPACITY_TARGETS, CURE_PRESS_IDS, LABOR_TEAMS, LEAD_TIME_WEEKS, ML_PRESSES, ML_RANGE, SIZE_LABEL, TEAM_LABELS, machineLabel } from '../factory'
+import { plain } from '../plain'
 import { factoryMidnight, fmtHM, fmtMD, fmtWeekday, ms } from '../format'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
 import { heldAt } from './MachineDrawer'
-import { MarkedText, Panel, RISK_LABEL, STATE_LABEL, useWidth } from './common'
+import { Panel, RISK_LABEL, useWidth } from './common'
+import { TodayPlan } from './TodayPlan'
 
 const H = 3_600_000
 
@@ -17,7 +17,6 @@ export function ScheduleTab() {
   const [shifts, setShifts] = useState<Shift[]>([])
   const [current, setCurrent] = useState<Shift[]>([])
   const [cap, setCap] = useState<CapacityReport | null>(null)
-  const [eventId, setEventId] = useState<string | null>(null)
   const [msg, setMsg] = useState<string | null>(null)
   const now = ms(state.clock?.factory_time ?? state.snapshot?.header.factory_time)
 
@@ -36,7 +35,7 @@ export function ScheduleTab() {
   const active = versions.find((v) => v.status === 'active') ?? state.schedule ?? null
   const orderInfo = useMemo(() => new Map((state.world?.orders.items ?? []).map((o) => [o.id, { customer: o.customer, due: o.due, rush: o.rush }])), [state.world?.orders.items])
   const events = state.snapshot?.events ?? []
-  const ev = events.find((e) => e.id === eventId) ?? primaryEvent(events)
+  const ev = primaryEvent(events)
   // presses out of service (page 11): their in-mold tire is held for QC, so its bar ends at the stop
   const outAt: Record<string, number> = {}
   for (const m of state.snapshot?.machines ?? []) {
@@ -71,28 +70,28 @@ export function ScheduleTab() {
     } catch (e) { setMsg(`回復失敗：${e}`) }
   }
 
+  // HY, 2026-10-21: 「必要資訊就好；重複的資訊、主管不需要知道的資訊全部刪掉」 — the schedule first (the demo opens this tab
+  // for 第 N 版 生效 and 回復上一版), then today's people next to the next mold-ins, then the lead-time numbers.
+  // ⑥ 指揮官步驟計畫 left this page: the same steps are on 主控台's 計劃板 and the Agent page.
   return (
-    <div className="schedule">
-      <Panel title="硫化機排程：11 台硫化機，每一條是一張訂單的一條胎" num="⑤" className="gantt-panel"
+    <div className="schedule sp">
+      <Panel title="硫化機排程" className="gantt-panel"
         right={<VersionBar versions={versions} active={active} onRollback={rollback} />}>
         <SchedHelp />
         {msg && <p className="note">{msg}</p>}
         {active ? <Gantt version={active} prev={versions.find((v) => v.version === active.parent_version)} shifts={shifts} now={now} focusPress={ev?.machine_id} outAt={outAt} orders={orderInfo} /> : <p className="muted">等待排程…</p>}
-        {active && <NextUp jobs={active.schedule.jobs} now={now} orders={orderInfo} outAt={outAt} />}
-        {active && (active.schedule.staffing_changes.length > 0 || active.schedule.warnings.length > 0) && (
+        {active && active.schedule.staffing_changes.length > 0 && (
           <div className="sched-notes">
             {active.schedule.staffing_changes.map((c, i) => <span key={i} className={`pill ${c.kind}`}>{c.kind === 'overtime' ? '加班' : '跨組調人'}：{c.label}</span>)}
-            {active.schedule.warnings.map((w, i) => <span key={`w${i}`} className="pill warn">{w}</span>)}
           </div>
         )}
       </Panel>
       <div className="sched-row">
-        <PlanPanel ev={ev} events={events} onPick={setEventId} visited={ev ? state.visited[ev.id] ?? [] : []} />
-        <LaborPanel shifts={shifts} current={current} now={now} version={active} />
+        <TodayPlan />
+        {active && <NextUp jobs={active.schedule.jobs} now={now} orders={orderInfo} outAt={outAt} />}
       </div>
-      {/* UX declutter: ⑦ 事件時間軸 was removed from this page (生管 plans here; the event's timeline is on 產線監控 ③,
-          「事件時間軸」 with 看全部). The other numbers stay as they are so ⑧ / ⑨ keep matching the docs. */}
       {cap && <CapacityPanel cap={cap} />}
+      <LaborPanel shifts={shifts} current={current} now={now} version={active} />
     </div>
   )
 }
@@ -208,9 +207,8 @@ function Gantt({ version, prev, shifts, now, focusPress, outAt = {}, orders }: {
       </svg>
       <div className="legend">
         <span><i className="lg sz-S" />小胎（硫化 24 h）</span><span><i className="lg sz-M" />中胎（28 h）</span><span><i className="lg sz-L" />大胎（34 h）</span>
-        <span><i className="lg demold" />▼ 出模時刻</span><span><i className="lg now" />現在</span><span><i className="lg staffed" />有人時段（硫化機組 6–15・14–23／胎體夜班 20–05）</span>
-        {prev && <span><i className="lg moved" />本版移動（虛線框，對照第 {prev.version} 版）</span>}
-        <span className="muted">第 {version.version} 版・{plain(version.reason)}</span>
+        <span><i className="lg demold" />出模</span><span><i className="lg now" />現在</span><span><i className="lg staffed" />有人上班</span>
+        {prev && <span><i className="lg moved" />這版換了機台（對照第 {prev.version} 版）</span>}
       </div>
     </div>
   )
@@ -231,12 +229,11 @@ function barLabel(j: ScheduleJob, who: string | undefined, px: number): string {
 /** CJ, 2026-10-20: 「人力排程這個就不知道 S101 A311 這些是什麼意思…是指我們現在是只有做硫化機的排程因為它是速率決定步驟」. */
 function SchedHelp() {
   return (
-    <details className="sched-help" open>
-      <summary>怎麼看這張圖</summary>
+    <details className="sched-help">
+      <summary>長條＝訂單（#A-311 是訂單編號，不是機台）</summary>
       <ul>
-        <li><b>#S-101、#A-311、#W-0397 是訂單編號</b>，不是機台。長條上寫訂單號、客戶和胎型；把滑鼠移到長條上看入模、出模、貼合與投料時間。</li>
-        <li><b>只排 11 台硫化機</b>：硫化一條胎要 24–34 小時，是全廠最慢、決定產量的一站（瓶頸、速率決定步驟）。硫化機排好了，前面的投料、貼合時間就跟著往回推，所以不另外排。</li>
-        <li>每一列是一台硫化機（7–10 號可做中、大胎）；顏色是胎型；<b>▼ 是出模時刻</b>，要有人在場出模、入下一模，所以底色標出有人上班的時段。</li>
+        <li>每一列是一台硫化機，{ML_RANGE} 號可做中、大胎；顏色是胎型，▼ 是出模。滑鼠移到長條上看入模、出模時間。</li>
+        <li>只排硫化機：它最慢、決定產量，前面的投料與貼合跟著往回推。</li>
       </ul>
     </details>
   )
@@ -247,8 +244,7 @@ function NextUp({ jobs, now, orders, outAt }: { jobs: ScheduleJob[]; now: number
   const next = jobs.filter((j) => ms(j.mold_in) >= now && outAt[j.press_id] == null).sort((a, b) => ms(a.mold_in) - ms(b.mold_in)).slice(0, 6)
   if (!next.length) return null
   return (
-    <div className="sched-next">
-      <h3 className="sub">接下來入模</h3>
+    <Panel title="接下來入模" className="sched-next">
       <table className="impact-t">
         <thead><tr><th>入模</th><th>硫化機</th><th>訂單</th><th>胎型</th><th>出模</th><th>交期</th></tr></thead>
         <tbody>{next.map((j) => {
@@ -262,86 +258,7 @@ function NextUp({ jobs, now, orders, outAt }: { jobs: ScheduleJob[]; now: number
           )
         })}</tbody>
       </table>
-    </div>
-  )
-}
-
-const CHAIN: EventState[] = ['detected', 'classify', 'plan', 'simulate', 'gate', 'await_approval', 'execute', 'verify', 'closed']
-
-function PlanPanel({ ev, events, onPick, visited }: { ev: Event | null; events: Event[]; onPick: (id: string) => void; visited: EventState[] }) {
-  const cur = ev?.state
-  const seen = new Set(visited)
-  if (cur) { const idx = CHAIN.indexOf(cur === 'replan' ? 'verify' : cur); CHAIN.slice(0, Math.max(0, idx)).forEach((s) => seen.add(s)) }
-  // UX declutter: folded by default on every width (生管 reads the schedule; the steps are the AI's working detail);
-  // the folded header still says which event and where it stands.
-  return (
-    <Panel title="指揮官步驟計畫" num="⑥" className="plan-panel" fold="always"
-      summary={ev ? `${ev.source === 'supervisor' ? '主管指令' : machineLabel(ev.machine_id)}：${plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}・${STATE_LABEL[ev.state]}` : '目前沒有事件'}
-      right={events.length > 1 ? (
-        <select value={ev?.id} onChange={(e) => onPick(e.target.value)} aria-label="選擇事件">
-          {events.map((e) => <option key={e.id} value={e.id}>{machineLabel(e.machine_id)}・{STATE_LABEL[e.state]}</option>)}
-        </select>
-      ) : undefined}>
-      {!ev ? <p className="muted">目前沒有事件。指揮官（唯一的 LLM）只在事件偵測喚醒時才動。</p> : (
-        <>
-          <div className="chain" aria-label="狀態機">
-            {CHAIN.map((s, i) => (
-              <span key={s} className={`ch ${cur === s ? 'cur' : seen.has(s) ? 'seen' : ''}`}>
-                {STATE_LABEL[s]}{i < CHAIN.length - 1 && <i>→</i>}
-              </span>
-            ))}
-            {(ev.replans > 0 || cur === 'replan') && <span className={`ch replan ${cur === 'replan' ? 'cur' : 'seen'}`}>↺ 重新規劃 ×{Math.max(1, ev.replans)}</span>}
-            {cur === 'safe_stop' && <span className="ch stop cur">■ 安全停止</span>}
-          </div>
-          {ev.goal && <p className="goal"><span className="k">目標</span>{ev.goal}</p>}
-          {ev.hypotheses.length > 0 && (
-            <ul className="hyps">
-              {ev.hypotheses.map((h) => (
-                <li key={h.id} className={`hyp h-${h.status}`}>
-                  <b>{hypName(h.id)}</b> {plain(h.statement)}
-                  {h.expectation && <small>預期：{h.expectation.within_min} 分內 {h.expectation.op} {h.expectation.value}°C</small>}
-                  <em>{hypLabel(h.status, ev)}</em>
-                </li>
-              ))}
-            </ul>
-          )}
-          {(ev.prior_rounds ?? []).map((r) => (
-            <details key={r.round} className="prior-round">
-              <summary>第{ROUND_NUM[r.round] ?? r.round}輪{r.hypothesis_id ? `（${r.hypothesis_id}）` : ''}・{r.steps.length} 步{r.goal ? `・${r.goal}` : ''}</summary>
-              <ol className="steps">
-                {r.steps.map((s) => <StepRow key={s.step.id} s={s} staffing={staffingChoice(r.steps)} />)}
-              </ol>
-            </details>
-          ))}
-          {(ev.prior_rounds ?? []).length > 0 && <p className="muted small round-now">第{ROUND_NUM[(ev.prior_rounds ?? []).length + 1] ?? (ev.prior_rounds ?? []).length + 1}輪{ev.state === 'closed' || ev.state === 'safe_stop' ? '（最後一輪）' : '（目前）'}</p>}
-          <ol className="steps">
-            {ev.steps.map((s) => <StepRow key={s.step.id} s={s} staffing={staffingChoice(ev.steps)} />)}
-          </ol>
-          {ev.outcome && <p className="outcome">結果：{ev.outcome}</p>}
-        </>
-      )}
     </Panel>
-  )
-}
-
-const STEP_LABEL: Record<StepRun['state'], string> = { pending: '等待', running: '執行中', ok: '完成', failed: '失敗', skipped: '略過', awaiting_approval: '待核准', rejected: '駁回' }
-const ROUND_NUM: Record<number, string> = { 1: '一', 2: '二', 3: '三', 4: '四', 5: '五' }
-
-function StepRow({ s, staffing }: { s: StepRun; staffing?: string }) {
-  const summary = s.result?.ok ? resultText(s.step.tool, s.step.args, s.result.data, { staffing }) : s.result?.error ? `錯誤：${s.result.error.slice(0, 60)}` : ''
-  const label = stepLabel(s.step.id)
-  return (
-    <li className={`step ss-${s.state}`}>
-      <span className="step-id" title={s.step.id}>{label}</span>
-      <div className="step-b">
-        <div className="step-t"><code title={s.step.tool}>{TOOL_LABEL[s.step.tool] ?? s.step.tool}</code>{s.step.depends_on.length > 0 && <small className="muted">依賴 {s.step.depends_on.map(stepLabel).join('、')}</small>}
-          {s.gate?.risk && !isRevoke(s.step.id) && <small className={`risk r-${s.gate.risk}`} title={RISK_LABEL[s.gate.risk]}>{RISK_SHORT[s.gate.risk]}</small>}
-          {isRevoke(s.step.id) && <small className="muted" title="主管後一輪改選，先前已執行的人力調動依此撤回並通知；不是另一項核准">因主管改選而撤回</small>}</div>
-        <div className="step-p">{s.step.purpose}</div>
-        {summary && <div className="step-r"><MarkedText text={summary} /></div>}
-      </div>
-      <span className="step-st">{STEP_LABEL[s.state]}</span>
-    </li>
   )
 }
 
@@ -358,7 +275,7 @@ function LaborPanel({ shifts, current, now, version }: { shifts: Shift[]; curren
   const demolds = useMemo(() => (version?.schedule.jobs ?? []).map((j) => ms(j.demold)).filter((t) => t >= d0 && t < d1), [version, d0, d1])
   const Hh = TOP + rows.length * ROW + 4
   return (
-    <Panel title="人力與班表（24 h）" num="⑧" className="labor-panel" fold="phone"
+    <Panel title="班表時間軸：現況與優化班表（提案 p.4、p.6）" className="labor-panel" fold="always"
       right={<div className="seg sm"><button className={mode === 'cur' ? 'on' : ''} onClick={() => setMode('cur')}>現況</button><button className={mode === 'opt' ? 'on' : ''} onClick={() => setMode('opt')}>優化班表</button></div>}>
       <div ref={ref} className="labor">
         <svg width={W} height={Hh} role="img" aria-label="人力時間軸">
@@ -420,22 +337,26 @@ function CapacityPanel({ cap }: { cap: CapacityReport }) {
     </>
   )
   return (
-    <Panel title="每台硫化機週產量與交期" num="⑨" className="cap-panel" fold="phone" right={<span className="muted small">大字＝提案 p.6・小字＝本機模擬</span>}>
+    <Panel title="交期縮短：100 條要幾週" className="cap-panel" right={<span className="muted small">大字：提案試算・小字：本機模擬</span>}>
       <div className="cap">
+        <div className="cap-big">
+          <div><span className="muted small">中、大胎各 100 條</span>{pair(LEAD_TIME_WEEKS.ml, cap.ml_100_weeks)}</div>
+          <div><span className="muted small">小胎 100 條</span>{pair(LEAD_TIME_WEEKS.small, cap.small_100_weeks)}</div>
+        </div>
         <table>
+          <caption className="muted small">每台硫化機每週產量（條）</caption>
           <thead><tr><th>方案</th><th>小胎</th><th>中胎</th><th>大胎</th></tr></thead>
           <tbody>{CAPACITY_TARGETS.map((t, i) => {
             const g = sim(t.label)
             return <tr key={t.label} className={i === CAPACITY_TARGETS.length - 1 ? 'best' : ''}><td>{t.label}</td>{cell(t.small, g?.small)}{cell(t.medium, g?.medium)}{cell(t.large, g?.large)}</tr>
           })}</tbody>
         </table>
-        <div className="cap-big">
-          <div><span className="muted small">中、大胎各 100 條</span>{pair(LEAD_TIME_WEEKS.ml, cap.ml_100_weeks)}</div>
-          <div><span className="muted small">小胎 100 條</span>{pair(LEAD_TIME_WEEKS.small, cap.small_100_weeks)}</div>
-        </div>
       </div>
-      <p className="muted small">模擬條件：{CAPACITY_CONDITIONS}。{CAP_SIM_NOTE}</p>
-      <p className="muted small">提案數字為 p.6 試算；本機模擬為 40 週離散事件模擬的穩態值，與提案不同處以小字並列，不改寫提案數字。數值由排程求解器與公式計算，不由 AI 推測。</p>
+      <details className="cap-why">
+        <summary>計算條件</summary>
+        <p className="muted small">模擬條件：{CAPACITY_CONDITIONS}。{CAP_SIM_NOTE}</p>
+        <p className="muted small">提案數字為 p.6 試算；本機模擬為 40 週離散事件模擬的穩態值，與提案不同處以小字並列，不改寫提案數字。數值由排程求解器與公式計算，不由 AI 推測。</p>
+      </details>
     </Panel>
   )
 }
