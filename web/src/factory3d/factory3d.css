@@ -122,6 +122,33 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-success { position: absolute; z-index: 16; left: 50%; top: 18px; transform: translateX(-50%); background: #eaf6d8; color: #23410a; border: 3px solid #76b900; border-radius: 999px; padding: 8px 20px; font-size: 16px; font-weight: 800; white-space: nowrap; pointer-events: none; box-shadow: var(--c-shadow); animation: f3-pop .25s ease-out; }
 @media (max-width: 700px) { .f3-success { top: auto; bottom: 150px; font-size: 14px; max-width: calc(100vw - 32px); white-space: normal; text-align: center; } }
 
+/* #71 觸發異常: a clickable demo menu under the HUD (the HUD itself lets clicks through to the canvas) */
+.f3-hud > .f3-anom { background: none; box-shadow: none; padding: 0; pointer-events: auto; display: grid; gap: 6px; justify-items: start; }
+.f3-anom-btn { font: inherit; font-weight: 700; font-size: 14px; color: #fff; background: #d9472b; border: 0; border-radius: 999px; padding: 8px 16px; box-shadow: var(--c-shadow); cursor: pointer; }
+.f3-anom-btn.on, .f3-anom-btn:hover { background: #b8361d; }
+.f3-anom-btn kbd { margin-left: 6px; font-size: 11px; background: rgba(255, 255, 255, .25); color: #fff; border: 0; }
+.f3-anom-menu { display: grid; gap: 6px; min-width: 240px; max-height: min(60vh, 520px); overflow: auto; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 16px; padding: 10px 12px; box-shadow: 0 10px 30px rgba(90, 70, 40, .25); }
+.f3-anom-menu p { margin: 4px 0 0; font-size: 12px; color: var(--c-ink-dim); }
+.f3-anom-menu button { font: inherit; font-size: 14px; text-align: left; color: var(--c-ink); background: var(--c-paper); border: 1px solid rgba(90, 70, 40, .15); border-radius: 10px; padding: 8px 10px; cursor: pointer; display: flex; justify-content: space-between; gap: 10px; }
+.f3-anom-menu button:hover:not(:disabled) { border-color: #d9472b; }
+.f3-anom-menu button:disabled { opacity: .5; cursor: default; }
+.f3-anom-menu small { color: var(--c-ink-dim); font-size: 11px; }
+.f3-anom-row { display: flex; gap: 6px; margin-top: 4px; }
+.f3-anom-row button { flex: 1; justify-content: center; }
+
+/* #72 現場處置 SOP inside the machine drawer (3D only) */
+.field-sop { margin: 10px 0; padding: 12px 14px; border-radius: 12px; border: 2px solid #f0a33a; background: rgba(240, 163, 58, .1); display: grid; gap: 8px; }
+.field-sop h4 { margin: 0; font-size: 16px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
+.field-sop h4 small { font-size: 12px; font-weight: 400; opacity: .75; }
+.field-sop-steps { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; counter-reset: sop; }
+.field-sop-steps li { counter-increment: sop; }
+.field-sop-steps label { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: start; cursor: pointer; font-size: 14px; line-height: 1.5; white-space: pre-line; }
+.field-sop-steps label span::before { content: counter(sop) ". "; font-weight: 700; }
+.field-sop-steps input { width: 18px; height: 18px; margin-top: 2px; accent-color: #2e9e5b; }
+.field-sop-steps li.on span { opacity: .6; text-decoration: line-through; }
+.field-sop-go { font: inherit; font-weight: 700; padding: 10px 14px; border-radius: 10px; border: 0; background: #2e9e5b; color: #fff; cursor: pointer; }
+.field-sop-go:disabled { background: rgba(127, 127, 127, .35); cursor: default; }
+.field-sop-ok { margin: 0; font-weight: 700; color: #2e9e5b; }
 /* raw-material plate above the loading-area pallet (issue #48): same chip as a machine tag, one row per low material */
 .f3-stock { gap: 1px; }
 .f3-stock b { font-size: 14px; }

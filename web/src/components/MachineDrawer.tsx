@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { LINE_LABELS, type Event, type MachineDetail, type SafetyAction } from '../contracts'
 import { COMPOUND_STOP_C, CURATIVE_STOP_C, SIZE_LABEL, machineLabel } from '../factory'
 import { fmtHM, fmtHMS, fmtMD, fmtNum, ms } from '../format'
@@ -29,7 +29,8 @@ export function heldAt(actions: SafetyAction[], events: Event[], pressId: string
   return ev?.closed_at ?? null
 }
 
-export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void }) {
+/** `extra`: the 3D factory adds its 現場處置 SOP here (#72), right under the status line. */
+export function MachineDrawer({ id, onClose, extra }: { id: string; onClose: () => void; extra?: (d: MachineDetail) => ReactNode }) {
   const { transport, state } = useWarRoom()
   const [d, setD] = useState<MachineDetail | null>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -84,6 +85,7 @@ export function MachineDrawer({ id, onClose }: { id: string; onClose: () => void
               <span className="muted small">更新 {fmtHMS(d.state.last_reading?.ts ?? tick)}</span>
             </div>
             {d.state.note && <p className="note">{d.state.note}</p>}
+            {extra?.(d)}
             <div className="tiles">
               {d.tiles.map((t) => <div key={t.label} className={`tile ${t.status}`}><span className="tile-l">{t.label}</span><span className="tile-v sm">{t.label === '時間' && job ? (out ? (held ? `停用時 ${fmtNum((ms(held) - ms(job.mold_in_at)) / H)} h` : '扣模待品管') : `${job.cure_elapsed_h.toFixed(1)} h`) : t.value}</span></div>)}
             </div>

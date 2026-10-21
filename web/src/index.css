@@ -900,3 +900,12 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .more-sheet span { display: flex; flex-direction: column; }
 .more-sheet small { color: var(--ink-dim); font-size: 12px; }
 @media (min-width: 1024px) { .more-sheet { display: none; } }
+
+/* #73 修復預估 on the supervisor phone */
+.ph-eta { background: var(--panel-2); border-left: 4px solid var(--accent); border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; font-size: 15px; }
+.ph-eta > b { display: block; margin-bottom: 6px; }
+.ph-eta dl { display: grid; grid-template-columns: 70px 1fr; gap: 6px 10px; margin: 0; }
+.ph-eta dt { color: var(--ink-dim); }
+.ph-eta dd { margin: 0; min-width: 0; }
+.ph-eta ol, .ph-eta ul { margin: 4px 0 0; padding-left: 18px; }
+.ph-eta li { margin: 2px 0; }
