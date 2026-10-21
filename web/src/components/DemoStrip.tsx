@@ -80,7 +80,7 @@ export function DemoStrip() {
         ))}
       </div>
       {state.lastAlert && (
-        <span className="demo-alert" title={state.lastAlert.summary}>⚡ 首張告警卡：{state.lastAlert.title}</span>
+        <span className="demo-alert" title={state.lastAlert.summary}>⚡ 最新告警卡：{state.lastAlert.title}</span>
       )}
     </div>
   )
