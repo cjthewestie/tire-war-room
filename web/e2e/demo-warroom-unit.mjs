@@ -15,6 +15,7 @@ const vite = await createServer({ root: resolve(here, '..'), configFile: false, 
 const B = await vite.ssrLoadModule('/src/demo/beats.ts')
 const C = await vite.ssrLoadModule('/src/demo/cues.ts')
 const S = await vite.ssrLoadModule('/src/demo/signals.ts')
+const G = await vite.ssrLoadModule('/src/demo/gamepad.ts')
 await vite.close()
 
 // every shared cue has a war room beat
@@ -29,6 +30,10 @@ const want = {
   worker: ['agent', 'result-strip', '員工完成，程式驗證讀值'],
   agent: ['console', 'trace-body', '每一步都在稽核鏈上'],
   robot: ['sm', 'sm-stages', '只有「規劃」和「換假設」會叫 AI'],
+  rush: ['agent', 'approve-bar', '急單進來：先核准'],
+  h1: ['agent', 'approve-bar', '核准 H1（第一個假設）'],
+  verify: ['agent', 'result-strip', '程式驗證讀值：H1 不成立'],
+  h2: ['agent', 'approve-bar', 'AI 換假設：程式驗證失敗才會換'],
 }
 for (const [id, [tab, anchor, caption]] of Object.entries(want)) {
   const b = B.BEATS[id]
@@ -75,6 +80,16 @@ check('worker not yet: the approval was before the demo', S.signals(base, seen).
 check('worker not on an order approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R')] }, seen).worker === false)
 check('worker after the incident approval', S.signals({ ...base, resolved: [ok('EV-OLD'), ok('EV-R'), ok('EV-7')] }, seen).worker === true)
 check('incident followed', seen.id === 'EV-7' && seen.machine === 'CURE-07')
+
+// the Xbox pad: A continues, Menu pauses, a held button fires once
+const pad = (...down) => ({ buttons: Array.from({ length: 17 }, (_, i) => ({ pressed: down.includes(i) })) })
+let e = G.padEdges(new Set(), [pad(G.PAD_A)])
+check('A press → continue', e.pressed.includes(0) && G.PAD_A === 0)
+e = G.padEdges(e.held, [pad(G.PAD_A)])
+check('A held → no repeat', e.pressed.length === 0)
+e = G.padEdges(e.held, [pad()])
+e = G.padEdges(e.held, [null, pad(G.PAD_MENU)])
+check('Menu (9) on a second pad → pause', e.pressed.join() === '9' && G.PAD_MENU === 9)
 
 console.log(failed ? `\n${failed} FAILED` : '\nall passed')
 process.exit(failed ? 1 : 0)

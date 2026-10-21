@@ -25,7 +25,7 @@ let f3 = null
 const api = (path, body) => wr.evaluate(([p, b]) => fetch(p, b ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) } : undefined).then((r) => r.json()), [path, body])
 
 await wr.goto(BASE + '/')
-await wr.waitForSelector('[data-testid="demo-start"]', { timeout: 20000 })
+await wr.waitForSelector('[data-testid="demo-mode-button"]', { timeout: 20000 })
 const st0 = await api('/api/demo/state')
 if (st0.running) await api('/api/demo/state', { action: 'exit' })
 await phone.goto(BASE + '/phone')
@@ -38,7 +38,7 @@ if (!NO3D) {
   } catch (e) { console.log('3D tab not available:', String(e).slice(0, 120)); f3 = null }
 }
 
-await wr.click('[data-testid="demo-start"]')
+await wr.click('[data-testid="demo-mode-button"]')
 await wr.waitForSelector('[data-testid="demo-bar"]', { timeout: 10000 })
 check('demo bar shows on start', true)
 await phone.waitForTimeout(1500)

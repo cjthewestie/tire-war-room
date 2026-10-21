@@ -9,13 +9,18 @@ import {
   skip, step, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
 import { beatFor, waitingFor } from './beats'
+import { PAD_A, PAD_MENU, padEdges } from './gamepad'
 import { freshSeen, signals } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
 /** This tab's driver id: the war room drives only the demo it started, in the tab that started it. */
 const ME = `warroom:${Math.random().toString(36).slice(2, 8)}`
 
-const waitOf = (i: number) => (CUES[i] ? waitingFor(CUES[i].id, CUES[i + 1]?.on) : null)
+/** What cue i waits for: its own checkpoint (cues.ts, 按 A 繼續 or the real approval), else the beat map's rule. */
+const waitOf = (i: number) => {
+  const c = CUES[i] as (typeof CUES)[number] & { checkpoint?: 'continue' | 'approval' }
+  return c ? c.checkpoint ?? waitingFor(c.id, CUES[i + 1]?.on) : null
+}
 
 /** Move the timeline to cue `i` (a continue pressed on another screen). */
 function jumpTo(tl: Timeline, i: number, t: number): Timeline {
@@ -121,6 +126,28 @@ export function useDemo() {
     }, 250)
     return () => clearInterval(id)
   }, [driving, load, send])
+
+  // ---------------------------------------------------------------- Xbox pad: A continue, Menu pause (Gamepad API)
+  useEffect(() => {
+    if (!running || typeof navigator === 'undefined' || !navigator.getGamepads) return
+    let prev = new Set<number>()
+    const id = setInterval(() => {
+      const { held, pressed } = padEdges(prev, [...navigator.getGamepads()])
+      prev = held
+      if (pressed.includes(PAD_A)) void cont()
+      if (pressed.includes(PAD_MENU)) void togglePause()
+    }, 80)
+    return () => clearInterval(id)
+  }, [running, cont, togglePause])
+
+  // ---------------------------------------------------------------- html[data-demo]: other overlays (the global
+  // pending-approval bar) go compact while the demo runs
+  useEffect(() => {
+    const el = document.documentElement
+    if (running && demo?.cue_id) el.dataset.demo = demo.cue_id
+    else delete el.dataset.demo
+    return () => { delete el.dataset.demo }
+  }, [running, demo?.cue_id])
 
   // ---------------------------------------------------------------- keys: Space / N continue, P pause, Esc exit
   useEffect(() => {

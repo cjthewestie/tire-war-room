@@ -48,9 +48,22 @@
 .dm-pitch-in b { font-size: 40px; color: var(--ink); }
 .dm-pitch-s { color: var(--ink-faint); font-size: 16px; }
 
-/* the 「▶ Demo」 button in the demo strip */
-.demo .demo-go { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); border-radius: 8px; padding: 5px 12px; font-weight: 700; cursor: pointer; font: inherit; font-weight: 700; }
-.demo .demo-go.on { background: var(--panel-2); color: var(--accent); }
+/* the demo strip: 「▶ Demo 模式」 and 「💬 QA 模式」, the old controls folded under ⚙ 展示控制 */
+.demo-modes { display: flex; gap: 12px; flex-wrap: wrap; }
+.demo .demo-mode {
+  min-height: 52px; padding: 10px 26px; border-radius: 12px; font: inherit; font-size: 18px; font-weight: 800; cursor: pointer;
+  background: var(--accent); color: var(--accent-ink); border: 2px solid var(--accent);
+}
+.demo .demo-mode.qa { background: var(--panel-2); color: var(--ink); border-color: var(--info); }
+.demo .demo-mode.on { background: var(--panel-2); color: var(--accent); }
+.demo-more { margin-left: auto; }
+.demo-more > summary { cursor: pointer; color: var(--ink-faint); font-size: 13px; padding: 6px 8px; border-radius: 8px; list-style: none; }
+.demo-more > summary::-webkit-details-marker { display: none; }
+.demo-more[open] { flex-basis: 100%; margin-left: 0; }
+.demo-more[open] > summary { color: var(--ink); }
+.demo-ctl { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding-top: 6px; }
+/* while the demo runs, its bar replaces the strip */
+.app.demo-on .demo-sheet { display: none; }
 
 @media (max-width: 700px) {
   .dm-bar { flex-wrap: wrap; gap: 6px 10px; padding: 6px 10px; }
