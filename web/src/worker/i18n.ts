@@ -14,10 +14,10 @@ export const LANGS: { id: Lang; label: string }[] = [
 type Tri = Record<Lang, string>
 
 export const UI = {
-  title: { zh: '現場任務', vi: 'Công việc tại xưởng', id: 'Tugas di lantai produksi' },
+  title: { zh: '現場工作', vi: 'Công việc tại xưởng', id: 'Tugas di lantai produksi' },
   who: { zh: '我是', vi: 'Tôi là', id: 'Saya' },
-  all: { zh: '全部任務', vi: 'Tất cả công việc', id: 'Semua tugas' },
-  none: { zh: '目前沒有任務', vi: 'Hiện chưa có việc', id: 'Belum ada tugas' },
+  all: { zh: '全部工作', vi: 'Tất cả công việc', id: 'Semua tugas' },
+  none: { zh: '目前沒有現場工作', vi: 'Hiện chưa có việc', id: 'Belum ada tugas' },
   noneHint: {
     zh: '主管核准計畫後，派給你的工作會出現在這裡。',
     vi: 'Khi quản lý duyệt kế hoạch, việc giao cho bạn sẽ hiện ở đây.',
