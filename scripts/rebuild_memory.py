@@ -25,9 +25,10 @@ def rebuild(audit: Path, at: str | None = None) -> dict[str, int]:
     rows = ML.read_rows(audit)
     by_key: dict[tuple[str, int | None], list[dict]] = {}
     obs = []
-    for key, r in ML.scan(rows):
+    st: dict = {}
+    for key, r in ML.scan(rows, st):
         by_key.setdefault(key, []).append(r)
-        o = ML.observe(r)
+        o = ML.observe(r, st["chain"])
         if o is not None:
             obs.append((ML.day_name(*key), o))
     written = 0

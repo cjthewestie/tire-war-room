@@ -41,11 +41,11 @@ def test_capture_makes_the_right_typed_observations():
         _row(12, "system", "admin:sup", {"admin": "memory_note_add", "machine_id": "CURE-07", "text": "疏水閥易卡"}),
         _row(13, "system", "main_agent", {"orch": "chat", "text": "不要動 9 號機", "pinned": "不要動 9 號機"}),
         _row(14, "tool_call", "tool:read_sensors", {}, eid),                       # not an observation
-        _row(15, "system", "main_agent", {"orch": "chat", "text": "你好"}),         # neither
+        _row(15, "system", "main_agent", {"orch": "chat", "text": "你好"}),         # a chat turn (CJ 10-22: 對話紀錄都要記錄下來)
     ]
     obs = [ML.observe(r) for r in rows]
     assert [o["type"] if o else None for o in obs] == ["event", "event", "approve", "reject", "event", "event", "safety",
-                                                        "task", "order", "ship", "order", "note", "note", None, None]
+                                                        "task", "order", "ship", "order", "note", "note", None, "chat"]
     assert obs[0]["id"] == "OB-0001" and obs[0]["machines"] == ["CURE-07"] and obs[0]["ref"] == eid
     assert obs[1]["title"] == "7 號機 計劃 v2 送核准" and obs[1]["orders"] == ["#A-311"]
     assert obs[4]["title"] == "7 號機H1 被推翻" and obs[5]["title"] == "7 號機安全停止"

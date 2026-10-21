@@ -35,12 +35,34 @@ import json
 import os
 import secrets
 import threading
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from warroom.contracts import AuditEntry, AuditKind, WsType
 from warroom.factory import TZ
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows: one process per log, as before
+    fcntl = None
+
+
+@contextmanager
+def _file_lock(path: Path):
+    """An exclusive lock across processes on `<log>.lock` (a file nobody replaces, unlike the log, which _archive moves).
+    Two servers on one data/runtime each appended with their own seq, so the next open found a seq/prev_hash mismatch
+    and archived the whole log as broken-N (14 times on CJ's Mac by 2026-10-22)."""
+    if fcntl is None:
+        yield
+        return
+    with open(path, "a") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 GENESIS_HASH = "0" * 64
 KEY_ENV = "WARROOM_AUDIT_KEY"
@@ -126,14 +148,17 @@ class JsonlAuditLog:
         self._seq = 0
         self._last_hash = GENESIS_HASH
         self.recovery: list[dict[str, Any]] = []
-        if self.path.exists():
-            self._open_existing()
-        else:
-            ext = self._read_anchor(self.anchor_path)
-            if ext is not None and self._anchor_problem("external", ext, []) is not None:
-                self.recovery.append({"msg": "audit log missing although the external anchor names entries; "
-                                             "new chain started", "anchor_seq": ext["seq"],
-                                      "anchor": str(self.anchor_path)})
+        self._lock_path = self.path.with_name(self.path.name + ".lock")
+        with _file_lock(self._lock_path):
+            if self.path.exists():
+                self._open_existing()
+            else:
+                ext = self._read_anchor(self.anchor_path)
+                if ext is not None and self._anchor_problem("external", ext, []) is not None:
+                    self.recovery.append({"msg": "audit log missing although the external anchor names entries; "
+                                                 "new chain started", "anchor_seq": ext["seq"],
+                                          "anchor": str(self.anchor_path)})
+            self._at = self._stat()
         for note in self.recovery:
             self.append(AuditKind.SYSTEM, "audit", note)
 
@@ -272,12 +297,35 @@ class JsonlAuditLog:
                     raise
 
     # ------------------------------------------------------------------ API
+    def _stat(self) -> tuple[int, int] | None:
+        try:
+            st = os.stat(self.path)
+        except FileNotFoundError:
+            return None
+        return st.st_ino, st.st_size
+
+    def _follow(self) -> None:
+        """Under the file lock: another process appended (or started a new file) since our last write, so continue
+        from the file's last entry instead of our own seq; the chain stays one valid chain."""
+        at = self._stat()
+        if at == self._at:
+            return
+        if at is None or at[1] == 0:
+            self._seq, self._last_hash = 0, GENESIS_HASH
+            return
+        with open(self.path, "rb") as f:
+            f.seek(max(0, at[1] - 65536))
+            lines = f.read().rstrip(b"\n").split(b"\n")
+        last = json.loads(lines[-1])
+        self._seq, self._last_hash = int(last["seq"]), str(last["hash"])
+
     def _now(self) -> datetime:
         return self._clock.now() if self._clock else datetime.now(TZ)
 
     def append(self, kind: AuditKind, actor: str, payload: dict[str, Any],
                event_id: str | None = None) -> AuditEntry:
-        with self._lock:
+        with self._lock, _file_lock(self._lock_path):
+            self._follow()
             draft = AuditEntry(seq=self._seq + 1, ts=self._now(), kind=AuditKind(kind), actor=actor,
                                event_id=event_id, payload=json.loads(_canonical(payload or {})),
                                prev_hash=self._last_hash, hash="")
@@ -292,6 +340,7 @@ class JsonlAuditLog:
             entry = draft.model_copy(update={"hash": h})
             self._seq, self._last_hash = entry.seq, h
             self._write_head()
+            self._at = self._stat()
             self._entries.append(entry)
             if len(self._entries) > self._keep:
                 del self._entries[: len(self._entries) - self._keep]
