@@ -132,6 +132,8 @@ check('supervisor command → window wording', !fastApplies(evOf('supervisor', [
   const feed = ct.liveLine({ ...ev, machine_id: 'B-OPEN', state: 'execute' }, [{ ...working[0], kind: '放慢投料' }], F)
   check('watching: a mill slowing its feed is 放慢投料中, not 維修中', feed.phase === '放慢投料中', feed.phase)
   check('watching: still planning → Agent Nemo 擬方案中', ct.liveLine({ ...ev, state: 'plan' }, [], F).phase === 'Agent Nemo 擬方案中')
+  const stop = ct.liveLine({ ...ev, state: 'safe_stop' }, [], F)
+  check('watching: a safe stop says a person has to act, not 正常', stop.phase === '已安全停止，需要人工處置' && /請到現場確認設備/.test(stop.who ?? ''), `${stop.phase}｜${stop.who}`)
 }
 
 await vite.close()

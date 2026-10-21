@@ -138,7 +138,8 @@ export function rebasedText(ev: Event | null, req: ApprovalRequest): string | nu
   return `${who}的排程先生效了，${name}這張已依新排程重算${what.length ? `：${what.join('，')}` : ''}。請再核准一次。`
 }
 
-/** One open event, one line: 「10 號硫化機・維修中・約 4 秒」, 「B 線開煉機・放慢投料中・約 8 秒」, 「3 號硫化機・Agent Nemo 擬方案中」.
+/** One open event, one line: 「10 號硫化機・維修中・約 4 秒」, 「B 線開煉機・放慢投料中・約 8 秒」, 「3 號硫化機・Agent Nemo 擬方案中」,
+ *  「7 號硫化機・已安全停止，需要人工處置」.
  *  `who`, for the single-event headline: 「黃建宏正在檢查蒸汽供應與溫度計。溫度回到正常才轉綠。」 (names from the task board). */
 export interface LiveLine { id: string; name: string; phase: string; secs: string | null; who: string | null }
 const FEED: Record<string, string> = { 放慢投料: '放慢投料中', 暫停投料: '暫停投料中' }
@@ -148,7 +149,8 @@ export function liveLine(ev: Event, tasks: WorkTask[], fast: FastRepair | null):
   const fix = mine.filter((t) => isRepairTask(t) && t.status !== '完成')
   const base = { id: ev.id, name, secs: null, who: null }
   const x = expectationOf(ev)
-  if (ev.state === 'safe_stop') return { ...base, phase: '已安全停止' }
+  // the flow stopped, the fault did not (Phone keeps the event until its machine reads normal again)
+  if (ev.state === 'safe_stop') return { ...base, phase: '已安全停止，需要人工處置', who: '自動處置沒有完成，原排程保留。請到現場確認設備。' }
   if (fix.length && ev.state !== 'await_approval' && !['detected', 'classify', 'plan', 'simulate', 'gate'].includes(ev.state)) {
     const lead = fix.find((t) => t.worker_name) ?? fix[0]
     const feed = fix.map((t) => FEED[t.kind]).find(Boolean)

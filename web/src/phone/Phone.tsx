@@ -78,11 +78,16 @@ export function Phone() {
     const t = window.setTimeout(() => setFlash(null), 3000)
     return () => window.clearTimeout(t)
   }, [flash])
-  // watching: one line per event still being handled (open, or closed while its crew still repairs), 3 at most, newest
-  // first; an event whose 維修完成 notice is up is said there
+  // watching: one line per event still being handled (open, closed while its crew still repairs, or safely stopped with
+  // its machine not back to normal: a safe stop ends the flow, not the fault), 3 at most, newest first; an event whose
+  // 維修完成 notice is up is said there
   const tasks = state.world?.tasks.items ?? []
   const fast = fastRepairOf(useHealth())
-  const handling = events.filter((e) => (e.state !== 'closed' && e.state !== 'safe_stop') || tasks.some((t) => t.event_id === e.id && isRepairTask(t) && t.status !== '完成'))
+  const tiles = state.snapshot?.machines ?? []
+  const stopped = (e: Event) => e.state === 'safe_stop' && !e.recovered_at
+    && tiles.some((m) => m.machine_id === e.machine_id && m.status !== 'running' && m.status !== 'idle')
+  const handling = events.filter((e) => (e.state !== 'closed' && e.state !== 'safe_stop') || stopped(e)
+    || tasks.some((t) => t.event_id === e.id && isRepairTask(t) && t.status !== '完成'))
     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))
   const lines = handling.filter((e) => !notices.includes(e)).slice(0, 3).map((e) => liveLine(e, tasks, fast))
   return (
