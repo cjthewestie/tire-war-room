@@ -31,7 +31,7 @@ type Kind = 'all' | 'state' | 'think' | 'tool' | 'data' | 'gate' | 'approval' | 
 const KINDS: { id: Kind; label: string; hint: string }[] = [
   { id: 'all', label: '全部', hint: '每一步' },
   { id: 'state', label: '狀態', hint: '狀態變化、事件偵測、安全核心、人員任務、維修與恢復' },
-  { id: 'think', label: '計畫與判斷', hint: '指揮官回傳的計畫、假設、程式驗證' },
+  { id: 'think', label: '計畫與判斷', hint: 'Agent Nemo 回傳的計畫、假設、程式驗證' },
   { id: 'tool', label: '工具', hint: '每次工具呼叫：參數、結果、耗時' },
   { id: 'data', label: '讀資料', hint: '只讀的工具：感測器、預測、SOP、訂單班表、排程求解' },
   { id: 'gate', label: '把關', hint: '動作把關的判定與攔截' },
@@ -227,7 +227,7 @@ function Trace({ ev, asks, setAsks, onPick }: {
         })}
         <label className="trace-open"><input type="checkbox" checked={open} onChange={(e) => setOpen(e.target.checked)} />展開工具細節</label>
       </div>
-      <p className="muted small trace-note">指揮官以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
+      <p className="muted small trace-note">Agent Nemo 以推理模式關閉執行：「計畫與判斷」是模型回傳的計畫與假設，不是隱藏的思考過程。每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
       <div className="con-body trace-body" data-testid="trace-body">
         {pick && <p className="muted small">只顯示在「{STATE_LABEL[pick]}」狀態時寫下的 {shown.length} 筆</p>}
         {!shown.length && <p className="muted con-empty">{items.length ? '這個篩選沒有紀錄' : '讀取稽核紀錄中…'}</p>}

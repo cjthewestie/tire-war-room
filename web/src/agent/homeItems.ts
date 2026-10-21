@@ -58,7 +58,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
         sub: tasks.length ? `人員執行中・${done}/${tasks.length} 件完成${ev.state === 'verify' ? '・程式驗證中' : ''}` : ev.state === 'verify' ? '程式比對預期與讀值中，達標即自動結案' : `執行核准內容・${ok}/${total} 步完成` })
     } else if (OPEN(ev)) {
       out.push({ ...base, rank: task ? 3 : 1, tone: 'run', pill: `AI ${STATE_LABEL[ev.state]}`, title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
-        sub: 'AI 指揮官處理中，有需要你決定的會變成待核准' })
+        sub: 'Agent Nemo 處理中，有需要你決定的會變成待核准' })
     } else {
       out.push({ ...base, rank: 5, tone: 'done', pill: '已結案', title: titled(ev.source === 'supervisor' ? '主管指令' : who, plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)),
         sub: `${plain(ev.outcome ?? '已結案')}${ev.closed_at ? `・${fmtHM(ev.closed_at)}` : ''}` })

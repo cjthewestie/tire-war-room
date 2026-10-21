@@ -114,7 +114,7 @@ export function PlanArea({ sel, ev, items, onDiscuss, onAsk, onCommand, opened =
             </ul>
           )}
           {!closed && exp && <div className="apv-b"><h4 className="apv-bh">怎麼確認做完</h4><p className="impact-line">程式比對讀值：{exp}；達標即自動結案，不達標換下一個假設。</p></div>}
-          {!steps.length && !closed && <p className="muted">AI 指揮官正在規劃；有需要你決定的會變成待核准。</p>}
+          {!steps.length && !closed && <p className="muted">Agent Nemo 正在規劃；有需要你決定的會變成待核准。</p>}
         </div>
         <footer className="apv-act"><div className="apv-btns">
           <button className="btn-sec" onClick={onAsk}>問 AI</button>

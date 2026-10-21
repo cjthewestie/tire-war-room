@@ -111,7 +111,7 @@ function VersionRow({ it }: { it: VersionItem }) {
 
 function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: number }) {
   const { hyp, steps } = thinkContext(ev, it, nth)
-  const who = it.mode === 'llm' ? `Nemotron${it.model ? `（${it.model}）` : ''}` : it.mode === 'mock' ? '規則模式指揮官' : 'AI 指揮官'
+  const who = it.mode === 'llm' ? `Nemotron${it.model ? `（${it.model}）` : ''}` : it.mode === 'mock' ? 'Agent Nemo（規則模式）' : 'Agent Nemo'
   const exp = expectationText(hyp)
   return (
     <article className="r-think" data-kind="think" data-testid="think-block">
@@ -136,7 +136,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
         </ol>
       )}
       {it.rationale && <p className="r-sub">理由：{plain(it.rationale)}</p>}
-      {it.safeStop && <p className="r-warn">指揮官建議安全停止</p>}
+      {it.safeStop && <p className="r-warn">Agent Nemo 建議安全停止</p>}
     </article>
   )
 }
@@ -145,7 +145,7 @@ function ThinkRow({ it, ev, nth }: { it: ThinkItem; ev: Event | null; nth: numbe
 function thinkNote(it: ThinkItem): string {
   if (it.mode === 'llm' && it.source === 'mock_fallback') return '模型輸出未採用：以下計畫由規則備援產生，不是模型的思考過程。'
   if (it.mode === 'llm') return '推理模式關閉：以下是模型回傳的計畫與假設，不是隱藏的思考過程。'
-  if (it.mode === 'mock') return '規則模式：沒有呼叫模型，以下計畫與假設由規則式指揮官產生。'
+  if (it.mode === 'mock') return '規則模式：沒有呼叫模型，以下計畫與假設由 Agent Nemo 的規則備援產生。'
   return '以下是這一輪的計畫與假設（依事件紀錄重建），不是隱藏的思考過程。'
 }
 
@@ -221,7 +221,7 @@ function AskRow({ it, brief }: { it: AskItem; brief: boolean }) {
 }
 
 const REASON: Record<string, string> = {
-  'detector wake-up': '事件偵測喚醒', 'gather sensor window, prediction and SOP': '讀感測器、預測與 SOP', 'ask commander': '請指揮官規劃',
+  'detector wake-up': '事件偵測喚醒', 'gather sensor window, prediction and SOP': '讀感測器、預測與 SOP', 'ask commander': '請 Agent Nemo 規劃',
   'run read/compute steps': '執行讀取／計算步驟', 'check write steps': '檢查會改變現場的步驟', 'approved by supervisor': '主管已核准',
   'compare expectation with readings (code)': '程式比對預期與讀值', 'rejected by supervisor': '主管已駁回',
 }

@@ -328,7 +328,7 @@ function systemText(actor: string, p: D): { text: string; tone: NoteItem['tone']
   }
   if (p.failure) return { text: `失敗：${String(p.failure)}（連續 ${String(p.consecutive_failures ?? '?')} 次）`, tone: 'warn' }
   if (p.rebased_version != null) return { text: `排程已改用第 ${String(p.rebased_version)} 版（第 ${String(p.stale_version)} 版已過期，需重新核准）`, tone: 'warn' }
-  if (p.expectation_bounded) return { text: '程式把指揮官的預期值限制在安全範圍內', tone: 'plain' }
+  if (p.expectation_bounded) return { text: '程式把 Agent Nemo 的預期值限制在安全範圍內', tone: 'plain' }
   if (p.error) return { text: String(p.error), tone: 'warn' }
   return null
 }
