@@ -849,7 +849,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .order-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .order-tools .order-search { flex: 1 1 320px; }
 .order-tools select, .admin select { background: var(--panel); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }
-.order-tools .seg button { padding: 6px 11px; }
+.order-tools .seg button { padding: 6px 11px; white-space: nowrap; }
 .order-tools .seg small { color: var(--ink-faint); }
 .order-table { padding-bottom: 10px; }
 .ot-head, .ot-row { display: grid; grid-template-columns: minmax(170px, 1.3fr) minmax(110px, .8fr) minmax(170px, 1.4fr) 108px 64px; gap: 4px 14px; align-items: center; }
@@ -858,13 +858,12 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ot-row { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--border); padding: 10px 8px; color: var(--ink); font-size: 14px; border-left: 3px solid transparent; }
 .ot-row:hover, .ot-row.on { background: var(--panel-2); }
 .ot-row.r-late { border-left-color: var(--alarm); }
-.ot-row.r-risk { border-left-color: var(--warn); }
 .ot-id { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
 .ot-id small { flex-basis: 100%; font-size: 12.5px; }
 .ot-st { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; font-weight: 600; }
 .ot-st small { font-weight: 400; font-size: 12px; }
 .ot-st small.muted { flex-basis: 100%; }
-.r-late .ot-st { color: var(--alarm); } .r-risk .ot-st { color: var(--warn); } .r-ok .ot-st { color: var(--accent); } .r-done .ot-st { color: var(--ink-dim); }
+.r-late .ot-st { color: var(--alarm); } .r-unsched .ot-st { color: var(--ink-dim); } .r-ok .ot-st { color: var(--accent); } .r-done .ot-st { color: var(--ink-dim); }
 .risk-dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; display: inline-block; }
 .ot-stages { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 3px; }
 .ot-stages i { height: 8px; border-radius: 3px; background: var(--panel-3); overflow: hidden; display: block; }
@@ -872,7 +871,7 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ot-stages i.done b { background: var(--accent); }
 .ot-eta, .ot-due { font-size: 13.5px; white-space: nowrap; }
 .ot-due.late { color: var(--alarm); font-weight: 700; }
-.ot-why { grid-column: 1 / -1; font-size: 12.5px; color: var(--warn); }
+.ot-why { grid-column: 1 / -1; font-size: 12.5px; color: var(--ink-dim); }
 .r-late .ot-why { color: var(--alarm); }
 @media (max-width: 899px) {
   .ot-head { display: none; }

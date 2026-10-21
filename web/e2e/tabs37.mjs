@@ -89,8 +89,9 @@ await p.click('[data-testid="tab-orders"]')
 await p.waitForSelector('[data-testid="order-list"] .ot-row')
 const nOrders = await p.evaluate(() => fetch('/api/world').then((r) => r.json()).then((w) => w.orders.items.length))
 check('every order listed', await p.locator('[data-testid="order-list"] .ot-row').count() === nOrders, `${nOrders}`)
-const ranks = await p.locator('[data-testid="order-list"] .ot-row').evaluateAll((els) => els.map((e) => ['r-late', 'r-risk', 'r-ok', 'r-complete', 'r-done'].findIndex((c) => e.classList.contains(c))))
-check('at-risk first', ranks.every((r, i) => i === 0 || ranks[i - 1] <= r), ranks.join(''))
+// 會晚交 first; 未排程 is not a risk and sorts with 準時 by due date (veteran 10-22)
+const ranks = await p.locator('[data-testid="order-list"] .ot-row').evaluateAll((els) => els.map((e) => [['r-late'], ['r-unsched', 'r-ok'], ['r-complete'], ['r-done']].findIndex((cs) => cs.some((c) => e.classList.contains(c)))))
+check('會晚交 first', ranks.every((r, i) => r >= 0 && (i === 0 || ranks[i - 1] <= r)), ranks.join(''))
 check('rush marked', await p.locator('[data-testid="order-list"] .tag.rush').count() >= 1)
 await p.fill('[data-testid="order-search"]', 'A-311')
 check('search filters', await p.locator('[data-testid="order-list"] .ot-row').count() === 1 && await p.locator('[data-testid="order-card"]').count() === 1)
@@ -158,8 +159,8 @@ check('每日事件紀錄: CSV download', csv.s === 200 && csv.t.includes('id,�
 await p.click('[data-testid="tab-orders"]')
 await p.waitForSelector('[data-testid="order-list"] .ot-row')
 const segs = await p.locator('.order-tools .seg button').allInnerTexts()
-check('訂單 filters 進行中 / 已完成 / 已出貨', ['進行中', '已完成', '已出貨'].every((x) => segs.some((s) => s.includes(x))), segs.join('|'))
-await p.click('.order-tools .seg button:has-text("已出貨")')
+check('訂單 filters 全部 / 會晚交 / 急單 / 已完成・出貨', segs.length === 4 && ['全部', '會晚交', '急單', '已完成・出貨'].every((x) => segs.some((s) => s.includes(x))), segs.join('|'))
+await p.click('.order-tools .seg button:has-text("已完成・出貨")')
 check('shipped orders show a success line with on-time', (await p.locator('[data-testid="order-success"]').first().innerText()).includes('✓'))
 await p.click('.order-tools .seg button:has-text("全部")')
 
@@ -228,8 +229,8 @@ check('主控台 shows a success toast for a new completion / shipment', !!toast
 check('ticker lists the success items', (await p.locator('[data-testid="tk-track"] > .tk-i.t-good').allInnerTexts()).some((t) => /完成|已出貨/.test(t)))
 await p.click('[data-testid="tab-orders"]')
 await p.waitForSelector('[data-testid="order-list"] .ot-row')
-await p.click('.order-tools .seg button:has-text("已出貨")')
-check('訂單 已出貨: time and on time / late', /出貨・(準時|逾期)/.test(await p.locator('[data-testid="order-success"]').first().innerText()))
+await p.click('.order-tools .seg button:has-text("已完成・出貨")')
+check('訂單 已出貨: time and on time / late', (await p.locator('[data-testid="order-success"]').allInnerTexts()).some((t) => /出貨・(準時|逾期)/.test(t)))
 
 // ticker contrast (WCAG AA 4.5:1) in both themes, every item and the fixed counts
 for (const theme of ['light', 'dark']) {

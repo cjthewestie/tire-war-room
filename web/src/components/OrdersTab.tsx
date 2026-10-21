@@ -11,13 +11,12 @@ import { TodayOrders } from './TodayOrders'
 import { successOf, type Success } from '../agent/tickerItems'
 import { RISK_TEXT, byRisk, orderView, warningsFor, type OrderSuccess, type OrderView } from './orderModel'
 
-type Show = 'all' | 'risk' | 'rush' | 'open' | 'done' | 'shipped'
+// four filters with their counts on them (veteran 10-22 for HY: the KPI numbers move here; fewer buttons, no line breaks)
+type Show = 'all' | 'late' | 'rush' | 'finished'
 const SHOW: { id: Show; label: string }[] = [
-  { id: 'all', label: '全部' }, { id: 'risk', label: '有風險' }, { id: 'rush', label: '急單' }, { id: 'open', label: '進行中' }, { id: 'done', label: '已完成' }, { id: 'shipped', label: '已出貨' },
+  { id: 'all', label: '全部' }, { id: 'late', label: '會晚交' }, { id: 'rush', label: '急單' }, { id: 'finished', label: '已完成・出貨' },
 ]
-const inShowOf = (v: OrderView, s: Show) => s === 'all' || (s === 'risk' ? v.risk === 'late' || v.risk === 'risk' : s === 'rush' ? v.o.rush
-  : s === 'open' ? v.o.status === '待排程' || v.o.status === '生產中' : s === 'done' ? v.risk === 'complete' : v.risk === 'done')
-const DAY = 24 * 3_600_000
+const inShowOf = (v: OrderView, s: Show) => s === 'all' || (s === 'late' ? v.risk === 'late' : s === 'rush' ? v.o.rush : v.risk === 'complete' || v.risk === 'done')
 
 export function OrdersTab() {
   const { state } = useWarRoom()
@@ -49,21 +48,9 @@ export function OrdersTab() {
   const count = (s: Show) => views.filter((v) => inShowOf(v, s)).length
   const sel = views.find((v) => v.o.id === picked) ?? (query ? list[0] : null) ?? null
   if (!w) return <div className="loading">讀取訂單中…（訂單資料來自後端；瀏覽器模擬模式沒有這部分）</div>
-  const atRisk = views.filter((v) => v.risk === 'late' || v.risk === 'risk')
-  const dueSoon = views.filter((v) => v.o.status !== '已出貨' && v.due - now < 3 * DAY)
   return (
     <div className="orders-tab" data-testid="orders-tab">
       <TodayOrders />
-      <section className="kpis" aria-label="訂單重點">
-        <div className="kpi"><span className="kpi-l">全部訂單</span><span className="kpi-v">{views.length}<small> 張</small></span>
-          <span className="kpi-s">進行中 {count('open')}・已完成 {count('done')}・已出貨 {count('shipped')}</span></div>
-        <div className={`kpi ${atRisk.length ? 'is-alarm' : ''}`}><span className="kpi-l">有風險</span><span className="kpi-v" data-testid="kpi-risk">{atRisk.length}<small> 張</small></span>
-          <span className="kpi-s">{atRisk.length ? atRisk.slice(0, 3).map((v) => v.o.id).join('、') : '全部預估準時'}</span></div>
-        <div className={`kpi ${w.orders.rush_open ? 'is-warn' : ''}`}><span className="kpi-l">急單</span><span className="kpi-v">{count('rush')}<small> 張</small></span>
-          <span className="kpi-s">未完成 {w.orders.rush_open}</span></div>
-        <div className="kpi"><span className="kpi-l">3 天內到期</span><span className="kpi-v">{dueSoon.length}<small> 張</small></span>
-          <span className="kpi-s">今日新單 {w.orders.new_today}</span></div>
-      </section>
       <div className="order-tools">
         <form className="order-search" role="search" onSubmit={(e) => { e.preventDefault(); if (list[0]) setPicked(list[0].o.id) }}>
           <input value={q} onChange={(e) => { setQ(e.target.value); setPicked(null) }} placeholder="訂單號、客戶或胎型，例如 A-311、中胎" aria-label="查訂單" data-testid="order-search" />
@@ -75,7 +62,7 @@ export function OrdersTab() {
       </div>
       {sel && <OrderCard o={sel.o} jobs={jobs} now={now} warnings={warningsFor(sel.o.id, warnings)} />}
       <section className="panel order-table" aria-label="訂單清單">
-        <header className="panel-h"><h2>{query || show !== 'all' ? `符合的訂單（${list.length}）` : `全部訂單（${views.length}）`}</h2><span className="muted small">有風險的排最前・點一列看明細</span></header>
+        <header className="panel-h"><h2>{query || show !== 'all' ? `符合的訂單 ${list.length} 張` : `訂單 ${views.length} 張`}</h2><span className="muted small">會晚交的排最前，點一列看明細</span></header>
         {query && !list.length && <p className="note">找不到「{q}」。請確認訂單號，或清空搜尋看全部訂單。</p>}
         <div className="ot-head" aria-hidden><span>訂單</span><span>狀態</span><span>各站進度（投料・貼合・入模・出模・完成・出貨）</span><span>預估完成</span><span>交期</span></div>
         <ul className="ot-list" role="list" data-testid="order-list">

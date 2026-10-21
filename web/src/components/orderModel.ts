@@ -1,6 +1,7 @@
 // One order's state, computed once for the 訂單 list and the order card: per-stage progress (投料 → 貼合 →
 // 入模硫化 → 出模 → 完成 → 出貨) from the active schedule's jobs against the factory clock, the ETA (last
-// scheduled de-mold) against the due date, and a risk level so at-risk orders sort first.
+// scheduled de-mold) against the due date, and a delivery state so late orders sort first. 交期狀態 (veteran 10-22):
+// 會晚交 / 未排程 / 準時 / 已完成 / 已出貨; 未排程 (tyres the schedule window does not hold yet) is not a risk.
 import type { OrderGoods, ScheduleJob, WorldOrder } from '../contracts'
 import { ms } from '../format'
 
@@ -14,8 +15,8 @@ export function dueEnd(due: string): number {
   return /^\d{4}-\d{2}-\d{2}$/.test(due) ? ms(`${due}T23:59:00+08:00`) : ms(due)
 }
 
-export type Risk = 'late' | 'risk' | 'ok' | 'complete' | 'done'
-export const RISK_TEXT: Record<Risk, string> = { late: '會晚交', risk: '有風險', ok: '準時', complete: '已完成', done: '已出貨' }
+export type Risk = 'late' | 'unsched' | 'ok' | 'complete' | 'done'
+export const RISK_TEXT: Record<Risk, string> = { late: '會晚交', unsched: '未排程', ok: '準時', complete: '已完成', done: '已出貨' }
 
 /** When an order finished and shipped, from the world feed (issue #36 order_completed / shipment_departed, or
  *  main's order_done) and the order's own shipped_at; onTime = by the due day. */
@@ -29,7 +30,7 @@ export interface OrderView {
   due: number
   lateH: number | null                        // hours past due (eta − due), null when on time or unknown
   risk: Risk
-  why: string[]                               // plain reasons for the risk
+  why: string[]                               // plain reasons for the state (late, or not scheduled yet)
   unscheduled: number                         // tyres still to make that the schedule window does not hold
   projected: string | null                    // "10/16": the schedule's capacity estimate past its window (warnings)
   success: OrderSuccess | null                // finished / shipped: when, and whether by the due day
@@ -71,13 +72,14 @@ export function orderView(o: WorldOrder, allJobs: ScheduleJob[], now: number, wa
   if (late) why.push(`最後一條出模比交期晚 ${Math.ceil((eta - due) / H)} h`)
   why.push(...mine.map((w) => `排程視窗外預估：${w.replace(o.id, '').trim()}`))
   if (goods?.late && !late) why.push('貨品狀態預估會誤交期')
-  if (!n && !shipped && o.status === '待排程') why.push('還沒排進硫化排程')
+  if (!n && left > 0 && !shipped && o.status !== '完成' && o.status !== '待出貨') why.push(`還沒排進硫化排程${o.done ? `（剩 ${left} 條）` : ''}`)
   else if (unscheduled > 0 && isFinite(due) && due - now < 72 * H) why.push(`還有 ${unscheduled} 條不在排程視窗內，交期 3 天內`)
   // the schedule's own capacity estimate past its window ("預估 10/16"), compared with the due day
   const pm = projected ? /^(\d{1,2})\/(\d{1,2})$/.exec(projected) : null
   const projLate = !!pm && isFinite(due) && ms(`${o.due.slice(0, 4)}-${pm[1].padStart(2, '0')}-${pm[2].padStart(2, '0')}T23:59:00+08:00`) > due
   const finished = o.status === '完成' || o.status === '待出貨'
-  const risk: Risk = shipped ? 'done' : finished ? 'complete' : late || projLate || goods?.late ? 'late' : why.length ? 'risk' : 'ok'
+  // 未排程: tyres left that the schedule window does not hold and the solver gave no estimate for (「準時」 would be a guess)
+  const risk: Risk = shipped ? 'done' : finished ? 'complete' : late || projLate || goods?.late ? 'late' : unscheduled > 0 && !projected ? 'unsched' : 'ok'
   const byDue = (t: string | null | undefined) => (t ? ms(t) <= due : null)
   const shipAt = succ?.shipAt ?? o.shipped_at ?? null
   const success: OrderSuccess | null = shipped || finished ? {
@@ -87,9 +89,9 @@ export function orderView(o: WorldOrder, allJobs: ScheduleJob[], now: number, wa
   return { o, jobs, stages, eta, due, lateH: late ? Math.ceil((eta - due) / H) : null, risk, why, unscheduled, projected, success }
 }
 
-const RANK: Record<Risk, number> = { late: 0, risk: 1, ok: 2, complete: 3, done: 4 }
+const RANK: Record<Risk, number> = { late: 0, unsched: 1, ok: 1, complete: 3, done: 4 }
 
-/** At-risk first, then rush, then the nearest due date. */
+/** 會晚交 first, then rush, then the nearest due date (未排程 is not a risk: it sorts with 準時 by due date). */
 export function byRisk(a: OrderView, b: OrderView): number {
   return RANK[a.risk] - RANK[b.risk] || Number(b.o.rush) - Number(a.o.rush) || a.due - b.due || (a.o.id < b.o.id ? -1 : 1)
 }
