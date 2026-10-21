@@ -502,6 +502,7 @@ class Runtime:
         self.ingest = IngestPipeline.from_env(self.settings.audit_path.parent)
         self._orch: Any = None
         self._repaired: dict[str, str] = {}     # machine id -> event id: repair tasks all done, fault to clear
+        self._recovering: dict[str, list] = {}  # machine id -> [event id, wall s ramped]: 回溫中 after a fast repair
         self._fast_wall = time.monotonic()       # fast repair: wall clock of the last advance (paused time skipped)
         self._orch_c: Any = None
         self.speed = float(self.settings.sim_speed)
@@ -995,7 +996,9 @@ class Runtime:
 
     def _advance_fast_repairs(self, running: bool = True) -> None:
         """Fast repair (Settings.repair_fast_s): move the repair tasks on the WALL clock (every loop turn and tick, so
-        at any sim speed), then apply a fix that just finished. Paused time does not count."""
+        at any sim speed, also while another event's model call holds the plant clock), apply a fix that just
+        finished, and ramp the repaired machines back to nominal (Settings.recover_fast_s). Paused time does not
+        count."""
         now = time.monotonic()
         dt, self._fast_wall = now - self._fast_wall, now
         board = getattr(getattr(self.sim, "world", None), "tasks", None)
@@ -1004,6 +1007,41 @@ class Runtime:
             return
         board.advance_fast(self.clock.now(), dt)
         self._apply_repairs()
+        self._advance_recoveries(dt)
+
+    def _advance_recoveries(self, dt: float) -> None:
+        """回溫中 (Kyle 10-21 晚: 「機台恢復正常溫度後轉回綠燈」): every repaired machine's readings move from where the fix
+        found them to nominal over Settings.recover_fast_s WALL seconds; at the end it is back to normal: audited
+        「已恢復正常」 and the state machine is told (Event.recovered_at, VERIFY confirms, green)."""
+        total = float(self.settings.recover_fast_s)
+        for mid, rec in list(self._recovering.items()):
+            rec[1] += max(0.0, dt)
+            frac = 1.0 if total <= 0 else min(1.0, rec[1] / total)
+            r = self.sim.recover(mid, frac)
+            if r is not None and frac < 1.0:
+                continue
+            del self._recovering[mid]
+            self._recovered(mid, rec[0], r or self.sim.machine(mid).last_reading)
+
+    def _begin_recovery(self, mid: str, eid: str) -> None:
+        begin = getattr(self.sim, "begin_recovery", None)
+        if callable(begin):
+            begin(mid)
+            self._recovering[mid] = [eid, 0.0]
+            if self.settings.recover_fast_s <= 0:
+                self._advance_recoveries(0.0)
+            return
+        snap = getattr(self.sim, "snap_to_nominal", None)     # a sim without the ramp: back at once
+        if callable(snap):
+            snap(mid)
+        self._recovered(mid, eid, self.sim.machine(mid).last_reading)
+
+    def _recovered(self, mid: str, eid: str, reading: Any) -> None:
+        self.audit.append(AuditKind.SYSTEM, "world", {"msg": "已恢復正常", "machine_id": mid,
+                                                      "value": getattr(reading, "temp_c", None)}, eid)
+        on_recovered = getattr(self.state_machine, "on_recovered", None)
+        if callable(on_recovered):
+            on_recovered(eid, mid, self.clock.now(), reading)
 
     def _awaits_decision(self, event_id: str | None) -> bool:
         """The event is still before the supervisor's decision: planning, gate, waiting card, replanning — or the
@@ -1029,8 +1067,9 @@ class Runtime:
     def _apply_repairs(self) -> None:
         """Clear the faults of machines whose repair tasks all finished (once per machine and event). Fast repair
         (Settings.repair_fast_s > 0): the fix lands once the event is past the supervisor's decision (VERIFY, or it
-        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the machine's
-        readings then snap back to normal and the state machine is told (Event.repaired_at, VERIFY at once)."""
+        ended), so a 檢修 the gate let through before the card does not fix the machine before 主管核准; the state
+        machine is told (Event.repaired_at, 回溫中) and the machine's readings ramp back to normal
+        (_advance_recoveries)."""
         fast = self.settings.repair_fast_s > 0
         board = getattr(getattr(self.sim, "world", None), "tasks", None)
         for mid, eid in list(self._repaired.items()):
@@ -1046,14 +1085,13 @@ class Runtime:
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
                 continue                        # nothing injected on it (a replayed or already-cleared fault)
             self.sim.clear_faults(mid)
-            snap = getattr(self.sim, "snap_to_nominal", None)
-            if fast and callable(snap):
-                snap(mid)                        # no slow cool-down: the next reading is normal
             self.c.detector.reset(mid, repaired=True)
             self.audit.append(AuditKind.SYSTEM, "world", {"msg": "維修完成，故障排除", "machine_id": mid}, eid)
             on_repaired = getattr(self.state_machine, "on_repaired", None)
             if fast and callable(on_repaired):
                 on_repaired(eid, mid, self.clock.now())
+            if fast:
+                self._begin_recovery(mid, eid)   # a short ramp on the wall clock, not the slow cool-down
 
     @property
     def orch(self) -> Any:
@@ -1203,6 +1241,7 @@ class Runtime:
                 self._baseline.clear()
                 self._oob_seen.clear()
                 self._repaired.clear()             # a fix still waiting for the old scenario's VERIFY
+                self._recovering.clear()
                 self._holds = self._sim_holds()
                 self.__dict__.pop("_wip", None)
                 self.audit.append(AuditKind.SYSTEM, "supervisor",
@@ -1511,8 +1550,8 @@ class Runtime:
         return sorted(seen.values(), key=lambda r: r.created_at)
 
     def _effective_status(self, m: MachineState) -> MachineStatus:
-        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE, MachineStatus.WARNING) and \
-                self._open_event_id(m.machine_id):
+        # WARNING with an open event = the fast repair's 回溫中 (amber, StateMachine.on_repaired), not the red alarm
+        if m.status in (MachineStatus.RUNNING, MachineStatus.IDLE) and self._open_event_id(m.machine_id):
             return MachineStatus.ALARM
         seen = self._oob_seen.get(m.machine_id)
         if m.status in NORMAL_STATUSES and seen is not None and \

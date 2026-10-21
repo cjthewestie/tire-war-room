@@ -50,6 +50,7 @@ import inspect
 import itertools
 import json
 import re
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -263,9 +264,12 @@ class _Run:
     supersede: dict[str, Any] | None = None                  # {"old": card, "text", "by"} set by a discussion
     discuss_future: Any = None                               # asyncio.Future: the next card (or None) for discuss()
     card_snaps: dict[str, dict[str, Any]] = field(default_factory=dict)  # card id -> what it proposed (diff v1 -> v2)
-    # fast repair (Settings.repair_fast_s): the runtime reported the crew's fix (on_repaired); VERIFY wakes on it
+    # fast repair (Settings.repair_fast_s): the runtime reported the crew's fix (on_repaired), then the machine back to
+    # normal after its ramp (on_recovered, Settings.recover_fast_s); VERIFY waits for both on the wall clock
     repaired: asyncio.Event = field(default_factory=asyncio.Event)
-    repair_reading: float | None = None                      # the reading VERIFY confirmed right after the fix
+    recovered: asyncio.Event = field(default_factory=asyncio.Event)
+    recover_reading: Any = None                              # SensorReading at recovery (on_recovered)
+    repair_reading: float | None = None                      # the reading VERIFY confirmed once the machine was back
 
 
 class StateMachine:
@@ -343,37 +347,59 @@ class StateMachine:
 
     def on_repaired(self, event_id: str, machine_id: str, at: datetime) -> None:
         """Fast repair (runtime, Settings.repair_fast_s): every repair task of this event on `machine_id` is done and
-        its fault was cleared (readings back to normal). VERIFY tests the readings at once instead of waiting for the
-        expectation's within_min; an event that had already closed asks for the supervisor's review now."""
+        its fault was cleared. The runtime now ramps the readings back to nominal (Settings.recover_fast_s): the
+        machine is 回溫中 (WARNING, amber), and VERIFY waits for on_recovered."""
         ev = self._events.get(event_id)
         if ev is None or ev.repaired_at is not None:
             return
         ev.repaired_at = at
         self._note(ev, "系統", f"[人工] 維修完成：{machine_label(machine_id)}故障排除", "human", ts=at)
+        self._set_status(machine_id, MachineStatus.WARNING, "回溫中")
         run = self._runs.get(event_id)
         if run is not None:
             run.repaired.set()
-        elif ev.state is EventState.CLOSED:
-            self._request_review(ev)
+
+    def on_recovered(self, event_id: str, machine_id: str, at: datetime, reading: Any = None) -> None:
+        """Fast repair: the repaired machine's readings are back to nominal (the runtime's ramp ended; it audits
+        「已恢復正常」). VERIFY tests that reading at once and the event closes green; an event that had already closed
+        goes green and gets its incident report now."""
+        ev = self._events.get(event_id)
+        if ev is None or ev.recovered_at is not None:
+            return
+        ev.recovered_at = at
+        t = getattr(reading, "temp_c", None)
+        self._note(ev, "系統", f"已恢復正常：{machine_label(machine_id)}" + (f" {fmt_num(t)}°C" if t is not None else ""),
+                   "info", ts=at)
+        run = self._runs.get(event_id)
+        if run is not None:
+            run.recover_reading = reading
+            run.recovered.set()
+            return
+        st = self._machine_state(machine_id)
+        if st is not None and st.status is MachineStatus.WARNING:
+            self._set_status(machine_id, MachineStatus.RUNNING, None)
+        if ev.state is EventState.CLOSED:
+            self._report_ready(ev)
 
     def review(self, event_id: str, by: str, note: str | None = None) -> Event:
-        """主管覆核 (POST /api/events/{id}/review) of an event closed after a repair. KeyError: no such event;
-        ValueError: it has no pending review."""
+        """主管已讀報告 (POST /api/events/{id}/review): the supervisor read the incident report of an event closed
+        after a repair. Nothing waited for it. KeyError: no such event; ValueError: it has no pending report."""
         ev = self._events[event_id]
         if ev.review is None or ev.review.status != "pending":
-            raise ValueError(f"{event_id} has no pending review")
+            raise ValueError(f"{event_id} has no pending report")
         ev.review = EventReview(status="done", requested_at=ev.review.requested_at, done_at=self._now(), by=by)
-        self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "主管覆核", "note": note}, event_id=ev.id)
-        self._note(ev, "主管", "[人工] 主管覆核完成" + (f"：{note}" if note else ""), "human")
+        self.audit.append(AuditKind.SYSTEM, "supervisor", {"msg": "主管已讀報告", "note": note}, event_id=ev.id)
+        self._note(ev, "主管", "[人工] 主管已讀報告" + (f"：{note}" if note else ""), "human")
         return ev
 
-    def _request_review(self, ev: Event) -> None:
-        """請主管覆核: the event closed after its repair; it waits for the supervisor's confirmation."""
+    def _report_ready(self, ev: Event) -> None:
+        """異常報告已產生: the event closed after its repair; its incident report is ready (review pending = 報告待讀
+        for the supervisor). A notice, not a gate: the event is already closed and green."""
         if ev.review is not None:
             return
         ev.review = EventReview(status="pending", requested_at=self._now())
-        self.audit.append(AuditKind.SYSTEM, "state_machine", {"msg": "請主管覆核"}, event_id=ev.id)
-        self._note(ev, "系統", "請主管覆核：維修完成，事件已結案", "decision")
+        self.audit.append(AuditKind.SYSTEM, "state_machine", {"msg": "異常報告已產生"}, event_id=ev.id)
+        self._note(ev, "系統", "異常報告已產生：維修完成、已恢復正常，事件已結案", "info")
 
     async def handle(self, anomaly: Anomaly) -> Event:
         existing = self.open_event_for(anomaly.machine_id)
@@ -827,11 +853,13 @@ class StateMachine:
             del self._events[eid]
 
     # The LLM path may never lift what the safety core (STOPPED) or a decision (OUT_OF_SERVICE) put
-    # down: ALARM only over a machine that is still running, RUNNING only back from ALARM. Taking a
-    # machine out of service is always allowed (it only restricts further).
+    # down: ALARM only over a machine that is still running, RUNNING only back from ALARM (or from the
+    # fast repair's 回溫中 WARNING), WARNING only over ALARM / running. Taking a machine out of service is
+    # always allowed (it only restricts further).
     _STATUS_FROM: dict[MachineStatus, frozenset[MachineStatus]] = {
         MachineStatus.ALARM: frozenset({MachineStatus.RUNNING, MachineStatus.WARNING, MachineStatus.IDLE}),
-        MachineStatus.RUNNING: frozenset({MachineStatus.ALARM}),
+        MachineStatus.RUNNING: frozenset({MachineStatus.ALARM, MachineStatus.WARNING}),
+        MachineStatus.WARNING: frozenset({MachineStatus.ALARM, MachineStatus.RUNNING, MachineStatus.IDLE}),
     }
 
     def _set_status(self, machine_id: str, status: MachineStatus, note: str | None = None) -> bool:
@@ -1146,10 +1174,12 @@ class StateMachine:
                                "duration_ms": res.duration_ms, "attempt": attempt, "data": _brief(res.data)},
                               event_id=ev.id)
             if res.ok:
-                if tool not in WRITE_TOOLS:
+                if tool not in WRITE_TOOLS and not run.rebasing:
                     # a write has no modelled latency: pacing its sub-ms run waited for the next plant tick, which
                     # another event's model call holds (Runtime.compute_busy) — an approved round stalled 11 s
-                    # between two writes, its fix (VERIFY) and its 綠燈 with it (concurrent_3, real model)
+                    # between two writes, its fix (VERIFY) and its 綠燈 with it (concurrent_3, real model). Nor
+                    # does the code re-solve of an approved round (_resolve_stale): its reads and solve ran paced
+                    # on that held clock while the approved repair waited for its VERIFY
                     await self._pace(started, max(model_s * attempt, res.duration_ms / 1000.0))
                 return res
             if attempt <= MAX_TOOL_RETRIES:
@@ -3210,21 +3240,29 @@ class StateMachine:
         use_sim = self.sim is not None
         # Reads land on a fixed sim-clock grid (whole multiples of verify_poll_s), so the verdict time does
         # not depend on when the supervisor happened to approve (page 11: 02:31:00 = 02:14:00 + 17 min).
-        wait = self._grid_wait()
+        await self._await_fix(run)
+        wait = 0.0 if ev.repaired_at is not None else self._grid_wait()
         if wait > 0:
             await self._verify_wait(run, wait)
         while True:
+            await self._await_fix(run)
             now = self._now()
             repaired = ev.repaired_at is not None
-            v = self._read_value(exp.machine_id, exp.channel, since=ev.repaired_at) if use_sim else \
-                await self._read_value_via_tool(run, exp.machine_id, exp.channel)
+            back = run.recover_reading
+            if back is not None and getattr(back, "machine_id", None) == exp.machine_id and \
+                    getattr(back, exp.channel.value, None) is not None:
+                v = getattr(back, exp.channel.value)     # fast repair: the reading the machine came back with
+                run.recover_reading = None
+            else:
+                v = self._read_value(exp.machine_id, exp.channel, since=ev.recovered_at or ev.repaired_at) \
+                    if use_sim else await self._read_value_via_tool(run, exp.machine_id, exp.channel)
             if v is not None:
                 last = v
                 if self._satisfied(exp, v):
                     violated_since = None
                     if repaired:
-                        # fast repair: the crew's fix is in and the readings meet the expectation: confirmed now,
-                        # not at the within_min deadline
+                        # fast repair: the crew's fix is in, the machine is back to normal and the reading meets
+                        # the expectation: confirmed now, not at the within_min deadline
                         run.repair_reading = v
                         return self._verify_result(run, h, exp, True, v)
                 else:
@@ -3235,6 +3273,34 @@ class StateMachine:
                 ok = violated_since is None and last is not None
                 return self._verify_result(run, h, exp, ok, last)
             await self._verify_wait(run, self._grid_wait() or self.verify_poll_s)
+
+    RECOVER_WAIT_S = 120.0     # wall seconds VERIFY waits for a repaired machine to be back (the ramp takes RECOVER_FAST_S)
+
+    async def _await_fix(self, run: _Run) -> None:
+        """Fast repair (runtime, Settings.repair_fast_s): while this event's crew is still repairing its machine, or the
+        machine is on its way back to nominal after the fix (回溫中), VERIFY tests nothing. A reading before the fix
+        would reject (or time out) the hypothesis the repair is about to fix — 12 wall s are 12 factory minutes at
+        60x — and one on the way back would turn the light green before the machine is back. Both waits are on the
+        WALL clock (on_repaired / on_recovered), never on the plant clock another event's model call may hold."""
+        ev = run.ev
+        while ev.repaired_at is None and self._repair_open(ev):
+            await _wait_flag(run.repaired, 1.0)
+        t0 = time.monotonic()
+        while ev.repaired_at is not None and ev.recovered_at is None and time.monotonic() - t0 < self.RECOVER_WAIT_S:
+            await _wait_flag(run.recovered, 1.0)
+
+    def _repair_open(self, ev: Event) -> bool:
+        """Fast repair: a repair task (檢修 / 停用檢修 / 放慢投料 / 暫停投料) of this event on its machine is not done yet
+        (the runtime moves it on the wall clock and reports the fix with on_repaired)."""
+        board = self._board()
+        if board is None or not getattr(board, "fast_s", 0):
+            return False
+        from warroom.sim.work import REPAIR_KINDS
+        try:
+            return any(t.kind in REPAIR_KINDS and t.machine_id == ev.machine_id and t.status != "完成"
+                       for t in board.for_event(ev.id))
+        except Exception:  # noqa: BLE001 - a board without tasks: nothing to wait for
+            return False
 
     async def _verify_wait(self, run: _Run, seconds: float) -> None:
         """VERIFY's wait between reads (sim seconds). A repair reported meanwhile (on_repaired) cuts it short; after
@@ -3315,14 +3381,15 @@ class StateMachine:
         self._to(ev, EventState.CLOSED, ev.outcome)
         ev.closed_at = self._now()
         st = self._machine_state(ev.machine_id)
-        if (verified if clear_alarm is None else clear_alarm) and st is not None and st.status is MachineStatus.ALARM:
+        if (verified if clear_alarm is None else clear_alarm) and st is not None and \
+                st.status in (MachineStatus.ALARM, MachineStatus.WARNING):
             self._set_status(ev.machine_id, MachineStatus.RUNNING, None)
         self._note(ev, "系統", f"事件結案：{outcome}" + ("" if verified else f"（{why}）"), "info")
         if ev.repaired_at is not None:
-            self._request_review(ev)
+            self._report_ready(ev)
 
     def _repaired_outcome(self, ev: Event, v: float) -> str:
-        """「已修復：A 線大開煉機 膠溫回到 100°C（維修完成 14:32）」"""
+        """「已修復：A 線大開煉機 膠溫回到 100°C（維修完成 14:21、恢復 14:21）」"""
         exp = ev.hypotheses[-1].expectation if ev.hypotheses else None
         ch = exp.channel if exp is not None else Channel.TEMP
         mdef = MACHINE_BY_ID.get(ev.machine_id)
@@ -3330,7 +3397,8 @@ class StateMachine:
             CHANNEL_LABELS.get(ch, "讀值")
         unit = "°C" if ch is Channel.TEMP else ""
         at = ev.repaired_at.astimezone(TZ) if ev.repaired_at is not None else self._now()
-        return f"已修復：{machine_label(ev.machine_id)} {label}回到 {fmt_num(v)}{unit}（維修完成 {at:%H:%M}）"
+        back = f"、恢復 {ev.recovered_at.astimezone(TZ):%H:%M}" if ev.recovered_at is not None else ""
+        return f"已修復：{machine_label(ev.machine_id)} {label}回到 {fmt_num(v)}{unit}（維修完成 {at:%H:%M}{back}）"
 
     def _safe_stop(self, run: _Run, reason: str) -> None:
         ev = run.ev
@@ -3394,6 +3462,14 @@ class StateMachine:
                     and j.mold_in > now:
                 out[j.press_id] = out.get(j.press_id, 0) + 1
         return out
+
+
+async def _wait_flag(flag: asyncio.Event, timeout_s: float) -> None:
+    """Wait (wall clock) until `flag` is set, at most timeout_s."""
+    try:
+        await asyncio.wait_for(flag.wait(), timeout_s)
+    except TimeoutError:
+        pass
 
 
 def _staff_key(c: dict[str, Any]) -> tuple[str, str, str]:
