@@ -594,6 +594,7 @@ export interface HealthStatus {
   sim_running: boolean
   factory_time: ISODate
   uptime_s: number
+  agent_runtime?: string | null  // WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」
 }
 
 // ---------------- the whole plant (warroom/sim/world.py, GET /api/world, WsType "world") ----------------

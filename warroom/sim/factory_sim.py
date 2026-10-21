@@ -298,6 +298,8 @@ class Factory:
         self._faults = [f for f in self._faults if machine_id is not None and f.spec.machine_id != machine_id]
         if machine_id is None:
             self._pending = []
+        else:                                   # #76: the machine's scripted faults that have not started yet go too
+            self._pending = [(at, st) for at, st in self._pending if st.fault is None or st.fault.machine_id != machine_id]
 
     def faults(self, active_only: bool = True) -> list[FaultSpec]:
         t = self._t

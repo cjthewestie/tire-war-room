@@ -1096,6 +1096,7 @@ class HealthStatus(_M):
     sim_running: bool
     factory_time: datetime
     uptime_s: float
+    agent_runtime: str | None = None   # WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」 when the app runs inside OpenShell
 
 
 # REST surface (warroom/api implements; web/src/contracts.ts mirrors). method, path, request, response
@@ -1252,7 +1253,7 @@ class Detector(Protocol):
     def validate(self, reading: SensorReading) -> DataQuality: ...
     def ingest(self, readings: list[SensorReading]) -> list[Anomaly]: ...   # returns NEW anomalies only (debounced)
     def predict(self, machine_id: str, channel: Channel = Channel.TEMP, horizon_s: float = 1800) -> Prediction: ...
-    def reset(self, machine_id: str | None = None) -> None: ...
+    def reset(self, machine_id: str | None = None, *, repaired: bool = False) -> None: ...
 
 
 @runtime_checkable
