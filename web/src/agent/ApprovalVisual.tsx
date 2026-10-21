@@ -14,7 +14,7 @@ import {
 } from './approvalView'
 import { ToolIcon } from './ToolIcon'
 import { OptionGuideNote } from '../OptionGuideNote'
-import { askLine, deliveryWords, guideLine, optionLine, recommendLine, whoRows as planWhoRows, whyLine } from './planAnswer'
+import { askLine, changesLine, deliveryWords, guideLine, optionLine, recommendLine, whoRows as planWhoRows, whyLine } from './planAnswer'
 import { expectationText, type Item, type ToolItem } from './transcript'
 import { useTranscript, useVersions } from './useTranscript'
 import './agent.css'
@@ -228,7 +228,7 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           {(req.round > 1 || (req.version ?? 1) > 1) && (
             <div className="apv-tags">
               {req.round > 1 && <span className="apv-round">第 {req.round} 輪</span>}
-              {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag">v{req.version}</span>}
+              {(req.version ?? 1) > 1 && <span className="apv-ver" data-testid="card-version-tag" data-version={req.version}>已重算</span>}
             </div>
           )}
           <h3 className="apv-title" data-testid="plan-ask">{askLine(req, ev, now)}</h3>
@@ -247,12 +247,12 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
           <h3 className="apv-title">{plain(req.title)}</h3>
           <p className="apv-reason">{plain(req.reason)}</p>
         </>}
-        {(req.version ?? 1) > 1 && (
+        {(req.version ?? 1) > 1 && (planLayout ? <ChangedLine req={req} /> : (
           <div className="apv-changed" data-testid="card-changes">
             <b>與 v{(req.version ?? 2) - 1} 相比</b>
             {(req.changes ?? []).length ? <ul>{(req.changes ?? []).map((c, i) => <li key={i}>{plain(c)}</li>)}</ul> : <span>排程內容相同</span>}
           </div>
-        )}
+        ))}
         {(req.constraints ?? []).length > 0 && (
           <p className="apv-chips" data-testid="card-constraints"><small>主管條件：</small>{(req.constraints ?? []).map((c) => <span key={c} className="chip-c">{c}</span>)}</p>
         )}
@@ -280,6 +280,17 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
         </>}
       </footer>
     </section>
+  )
+}
+
+/** 主控台: a re-issued card in one sentence (已重算), the per-order moves folded. */
+function ChangedLine({ req }: { req: ApprovalRequest }) {
+  const { line, moves } = changesLine(req)
+  return (
+    <div className="apv-changed" data-testid="card-changes">
+      <b>跟上一張相比</b> {line}
+      {moves.length > 0 && <details className="apv-moves"><summary>換機台明細</summary><ul>{moves.map((m, i) => <li key={i}>{m}</li>)}</ul></details>}
+    </div>
   )
 }
 

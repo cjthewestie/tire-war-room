@@ -52,7 +52,7 @@ try {
   check('one 主 agent input (no mode switch) that knows the waiting plan', (await d.locator('[data-testid=mode-discuss]').count()) === 0 && (await d.locator('.console [data-testid=chat-input][data-plan=waiting]').count()) === 1)
   await d.locator('[data-testid=chat-input]').fill('9 號機今晚要保養')
   await d.locator('[data-testid=chat-input]').press('Enter')
-  const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').innerText().catch(() => '')) === 'v2')
+  const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').getAttribute('data-version').catch(() => '')) === '2')
   check('card v2 replaced v1 in the side column', gotV2)
   const tr = d.locator('[data-testid=transcript]')
   await d.waitForTimeout(1500)
@@ -76,8 +76,9 @@ try {
   }
   await d.locator('[data-testid=tab-agent]').click()
   await d.waitForSelector('[data-testid=transcript]')
-  const changes = await side.locator('[data-testid=card-changes]').innerText().catch(() => '')
-  check('card v2 shows 「與 v1 相比」 and #A-311 off press 9', changes.includes('與 v1 相比') && /#A-311：9 號 →/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
+  // 主控台 says it in one sentence (已重算・跟上一張相比), the per-order moves folded under 換機台明細
+  const changes = await side.locator('[data-testid=card-changes]').textContent().catch(() => '') ?? ''
+  check('card v2 shows 「跟上一張相比」 and #A-311 off press 9', changes.includes('跟上一張相比') && /#A-311：9 號 →/.test(changes), changes.replace(/\n/g, ' | ').slice(0, 160))
   const pend = (await api(d, '/api/approvals?status=pending')).json ?? []
   const v2 = pend.find((x) => x.version === 2)
   check('API: one pending card, v2, supersedes v1', pend.length === 1 && v2?.supersedes === v1?.id, pend.map((x) => `${x.id}/v${x.version}`).join(','))

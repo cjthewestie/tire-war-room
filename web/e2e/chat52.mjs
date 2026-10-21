@@ -82,7 +82,7 @@ await p.screenshot({ path: `${OUT}/agent-chat-1440-light.png`, fullPage: false }
 await p.click('[data-testid="tab-agent"]')
 await p.waitForSelector('[data-testid="plan-area"]')
 const side = p.locator('[data-testid="plan-area"]')
-check('主控台 shows the v2 card', await until(async () => (await side.locator('[data-testid="card-version-tag"]').innerText().catch(() => '')) === 'v2', 60))
+check('主控台 shows the v2 card', await until(async () => (await side.locator('[data-testid="card-version-tag"]').getAttribute('data-version').catch(() => '')) === '2', 60))
 check('主控台 shows the same message (one 主 agent thread)', await until(async () => (await p.locator('[data-testid="transcript"] [data-testid="sc-me"]', { hasText: '9 號機今晚要保養' }).count()) >= 1))
 // and back: an ask typed on 主控台 shows on the Agent page
 await p.locator('[data-testid="chat-input"]').fill('9 號機下一模是哪張訂單？')

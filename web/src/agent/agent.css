@@ -417,6 +417,8 @@
 .apv-steps > summary::after { content: '▸'; color: var(--ink-faint); margin-left: 2px; }
 .apv-steps[open] > summary::after { content: '▾'; }
 .apv-steps[open] > summary { margin-bottom: 8px; }
+.apv-moves { margin-top: 4px; }
+.apv-moves > summary { cursor: pointer; font-size: 13px; color: var(--ink-dim); }
 
 /* 核准之後的結果條 (ResultStrip): decision → 執行中 → 驗證中 → ✓ 已結案, above the plan board and atop 今日工廠概況 */
 .rs { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 8px 12px; border-radius: 10px; border: 1px solid var(--border); border-left: 3px solid var(--info); background: var(--panel-2); font-size: 13.5px; line-height: 1.45; }

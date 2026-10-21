@@ -149,3 +149,32 @@ export function whoRows(req: ApprovalRequest, ev: Event | null, tasks: WorkTask[
   }
   return rows
 }
+
+/** A re-issued card (已重算) in one sentence (veteran 10-22): 「10 號硫化機的排程先生效了，3 號硫化機這張已依新排程重算：
+ *  4 張訂單換機台，人力照你上次選的方案 B。請再核准一次。」 The per-order moves stay as the folded detail. Built from the
+ *  card's code-built change lines (warroom/agent/state_machine.py card changes); a line it does not know is detail. */
+export function changesLine(req: ApprovalRequest): { line: string; moves: string[] } {
+  let head = '已照你說的重算'
+  const moves: string[] = []
+  const tail: string[] = []
+  const orders = new Set<string>()
+  for (const c of req.changes ?? []) {
+    let rest = c
+    const re = /^(.+?)排程先生效；(.+?)依現行排程重算：(.*)$/.exec(c)
+    if (re) {
+      const name = (s: string) => { const n = /^(\d+) 號機?$/.exec(s.trim()); return n ? `${n[1]} 號硫化機` : plain(s) }
+      head = `${name(re[1])}的排程先生效了，${name(re[2])}這張已依新排程重算`
+      rest = re[3]
+    }
+    const staff = /^人力沿用主管上次的選擇：\s*([A-Z])/.exec(rest)
+    if (staff) { tail.push(`人力照你上次選的方案 ${staff[1]}`); continue }
+    const rec = /^建議方案：.*→\s*([A-Z])/.exec(rest)
+    if (rec) { tail.push(`系統建議改成方案 ${rec[1]}`); continue }
+    for (const part of rest.split('；').map((s) => s.trim()).filter(Boolean)) {
+      const mv = /^(#?\p{Lu}+-\d+)：/u.exec(part)
+      if (mv) { orders.add(mv[1]); moves.push(plain(part)) } else if (!/共 \d+ 模改機台$/.test(part)) moves.push(plain(part))
+    }
+  }
+  const what = [orders.size ? `${orders.size} 張訂單換機台` : '排程內容相同', ...tail].join('，')
+  return { line: `${head}：${what}。請再核准一次。`, moves }
+}
