@@ -68,7 +68,8 @@ export function Phone() {
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
   const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines)], connected && !lanDown)
   const bctx = useBriefCtx()
-  const idleBrief = useMemo(() => (pending.length === 0 ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [pending.length, ev, bctx])
+  const idle = pending.length === 0
+  const idleBrief = useMemo(() => (idle ? buildBriefing({ ev, req: null, chosen: null, ...bctx }) : null), [idle, ev, bctx])
   return (
     <div className="phone-wrap">
       <div className="phone">
