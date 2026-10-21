@@ -131,7 +131,9 @@ function closedPhase(ev: Event, repair: WorkTask[], repairOpen: WorkTask[]): str
 
 const BEFORE_APPROVAL = new Set(['detected', 'classify', 'plan', 'simulate', 'gate', 'replan', 'await_approval'])
 
-export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null) {
+/** `fastS`: REPAIR_FAST_S from /api/health. A fast repair runs on the wall clock, so while the crew works its ETA is the
+ *  wall seconds left (「預計約 8 秒後完成」), not factory time (at 10× a 12-second repair read 「約 2 分鐘」). */
+export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null, fastS: number | null = null) {
   const what = plain(firstDetection(ev)).replace(/^異常[：:]\s*/, '')
   const sub = state.subagents?.items.find((s) => s.id === ev.id)
   // Kyle 10-21: the single agent is called NemoClaw on screen; the kind of work stays in brackets
@@ -158,7 +160,10 @@ export function aiStatusParts(ev: Event, state: WarRoom, runtime: string | null)
   const repairEta = repairing ? latestEta(repairOpen, est.now) : null
   const doneBy = ev.state === 'safe_stop' || recovering ? null : repairEta ? ms(repairEta) : ev.state === 'closed' ? null : est.doneBy
   let eta = ''
-  if (doneBy) {
+  if (fastS && fastS > 0 && ev.state !== 'closed' && !recovering && repairing && repairOpen.length) {
+    const left = Math.max(...repairOpen.map((t) => (1 - Math.min(1, Math.max(0, t.progress ?? 0))) * fastS))
+    eta = `預計約 ${Math.max(1, Math.round(left))} 秒後完成`
+  } else if (doneBy) {
     const s = est.now ? (doneBy - ms(est.now)) / 1000 : null
     const left = s == null ? '' : s <= 0 ? '即將完成' : s < 60 ? `約 ${Math.max(1, Math.round(s))} 秒` : `約 ${Math.round(s / 60)} 分鐘`
     eta = `預計 ${fmtMD(doneBy)} ${fmtHM(doneBy)} 完成${left ? `（${left}）` : ''}`

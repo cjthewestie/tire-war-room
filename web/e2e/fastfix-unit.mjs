@@ -47,6 +47,8 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const p = aiStatusParts(ev, stateOf([ev], [repair, slow]), null)
   check('verify + 檢修 running → 專人維修中（1/2）', p.phase === '專人維修中（1/2）', line(p))
   check('… ETA from the repair task (30 s), not the 20-minute window', /約 30 秒/.test(p.eta), p.eta)
+  const fast = aiStatusParts(ev, stateOf([ev], [repair, slow]), null, 12)
+  check('… with REPAIR_FAST_S (wall clock): 預計約 10 秒後完成 (20 % of 12 s done)', fast.eta === '預計約 10 秒後完成', fast.eta)
   const done = { ...repair, status: '完成', done_at: iso(now), progress: 1 }
   const warm = { ...base, state: 'verify', closed_at: null, outcome: null, repaired_at: iso(now), recovered_at: null, review: null }
   const w = aiStatusParts(warm, stateOf([warm], [done, slow]), null)
