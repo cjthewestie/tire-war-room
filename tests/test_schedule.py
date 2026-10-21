@@ -349,6 +349,26 @@ def test_page11_against_factory_sim(tmp_path):
     assert res.solve_ms < 10_000
 
 
+def test_cpsat_same_request_gives_the_same_plan():
+    """The CP-SAT stop is deterministic (fixed workers and seed, interleaved search, DET_TIME budget), not a
+    wall-clock stall: the page-11 round-1 solve gives the same plan every time, whatever the machine load
+    (the wall cap is raised here so a loaded test machine cannot cut it short)."""
+    sim_mod = pytest.importorskip("warroom.sim")
+    from warroom.contracts import ScenarioName
+    from warroom.schedule import seed_schedule
+    sim = sim_mod.Factory(scenario=ScenarioName.PRESS7_TEMP_DROP)
+    now = sim.clock.now()
+    seed = seed_schedule(now, sim.orders(), sim.shifts(), sim.machines(), next_on={"CURE-07": "#A-311"})
+    req = SolveRequest(now=now + timedelta(seconds=145), orders=sim.orders(), shifts=sim.shifts(), previous=seed,
+                       cure_overrides_h={"CURE-07": 28.5}, time_limit_s=120)
+    plans = []
+    for _ in range(3):
+        res = CpSatScheduler().solve(req)
+        assert res.status in (SolveStatus.OPTIMAL, SolveStatus.FEASIBLE), res.gaps
+        plans.append(sorted((j.id, j.press_id, j.mold_in) for j in res.schedule.jobs))
+    assert plans[0] == plans[1] == plans[2]
+
+
 # ---------------------------------------------------------------- review fixes (r2)
 def _sim_seed():
     sim_mod = pytest.importorskip("warroom.sim")

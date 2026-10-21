@@ -45,7 +45,9 @@ Model, shared by both solvers (built in `_prepare`):
 - deliveries_met means no order ends later than in the previous plan (交期不受影響); every
   late order is still listed in late_orders, pre-existing ones also as a warning. It covers
   only the tires in this plan, not tires of open orders beyond the horizon.
-CP-SAT is primary (15-min grid; stops at the time limit or after STALL_S without improvement);
+CP-SAT is primary (15-min grid; deterministic: fixed workers and seed, interleaved search, stops at
+DET_TIME of deterministic time, so the same request gives the same plan under any machine load;
+time_limit_s is only a wall-clock safety cap);
 HeuristicScheduler is the page-7 backup solver; FallbackScheduler switches on
 timeout/error/infeasible and sets fell_back=True.
 """
@@ -99,7 +101,14 @@ PEN_DISTURB = 4 * 60 * W_DEMOLD      # repair: changing a tire on a press the ev
 PEN_SAME_HEADER = 12 * 60 * W_DEMOLD  # moving work onto the affected press's steam pipe (page 11: 6, 8 share 7's pipe)
 EXTRA_DAYS = 4          # jobs may finish this many days past the horizon
 REL_GAP = 0.002         # stop when within 0.2 % of the proven bound
-STALL_S = 1.5           # or when the best plan has not improved for this long (weak bounds)
+# Deterministic budget (CP-SAT deterministic-time units). The old stop (no improvement for 1.5 s of WALL time)
+# returned whichever incumbent the machine load happened to reach: the page-11 round-1 card was 「無機台異動」 in
+# one run and #A-311 → 6 號 in the next, round 2 differed run to run, and concurrent_3 once kept the greedy hint
+# with #A-311 129 h late. The interleaved search (fixed workers + seed) is reproducible and stops at the first
+# batch boundary past this budget: 0.5 sits between the hint batch (~0.35) and the next (~1.8-2.6), so it
+# includes the first improving batch of every demo solve. On the page-11 solves it ends in about the same
+# wall time as the old stall stop.
+DET_TIME = 0.5
 GRID_MIN = 15           # mold-in times on a 15-min wall-clock grid (both solvers)
 MIN_HORIZON_DAYS = 1    # a degenerate horizon is clamped (and CP-SAT is skipped for it)
 MAX_HORIZON_DAYS = 28
@@ -896,9 +905,9 @@ class CpSatScheduler:
     de-mold/mold-in inside staffed windows, one op per crew at a time. Soft: lateness, mold
     changes, press moves, short-staffed ops, early de-mold. Page 6 principles 1–5."""
 
-    def __init__(self, num_workers: int = 8, stall_s: float | None = STALL_S):
+    def __init__(self, num_workers: int = 8, det_time: float = DET_TIME):
         self.num_workers = num_workers
-        self.stall_s = stall_s
+        self.det_time = det_time
 
     def solve(self, req: SolveRequest) -> SolveResult:
         t_start = _time.perf_counter()
@@ -1033,12 +1042,16 @@ class CpSatScheduler:
                 m.AddNoOverlap(op_iv)
             m.Minimize(sum(obj))
             solver = cp_model.CpSolver()
-            solver.parameters.max_time_in_seconds = max(0.001, float(req.time_limit_s))
+            solver.parameters.max_time_in_seconds = max(0.001, float(req.time_limit_s))   # wall-clock safety cap
+            solver.parameters.max_deterministic_time = self.det_time   # the real stop: same plan under any load
             solver.parameters.num_workers = self.num_workers
             solver.parameters.random_seed = 7
             solver.parameters.interleave_search = True   # reproducible plans for the same input
+            # the 'fixed' worker counts far less deterministic time than the wall time it takes (8 s for 0.17 on
+            # the page-11 round-2 solve), so it stretched every interleaved batch; the others find the plans
+            solver.parameters.ignore_subsolvers.append("fixed")
             solver.parameters.relative_gap_limit = REL_GAP
-            st = _solve_with_stall_stop(cp_model, solver, m, self.stall_s)
+            st = solver.Solve(m)
             if st in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 assign = {}
                 for j in ctx.free:
@@ -1117,43 +1130,6 @@ def _bad_request(req: SolveRequest) -> str | None:
         if not math.isfinite(h) or not 0 < h <= 96:
             return f"cure override {p}={h} h outside (0, 96]"
     return None
-
-
-def _solve_with_stall_stop(cp_model, solver, model, stall_s: float | None):
-    """Solve; stop early once the incumbent has not improved for `stall_s` seconds. CP-SAT finds
-    its final plan in ~1 s on the demo but cannot prove optimality quickly (staffed-window
-    domains give a weak bound), so waiting for the full time limit buys nothing."""
-    if not stall_s:
-        return solver.Solve(model)
-    import threading
-
-    class _CB(cp_model.CpSolverSolutionCallback):
-        def __init__(self):
-            super().__init__()
-            self.best = None
-            self.last = _time.perf_counter()
-
-        def on_solution_callback(self):
-            v = self.ObjectiveValue()
-            if self.best is None or v < self.best - 1e-6:
-                self.best, self.last = v, _time.perf_counter()
-
-    cb = _CB()
-    done = threading.Event()
-
-    def watch():
-        while not done.wait(0.05):
-            if cb.best is not None and _time.perf_counter() - cb.last > stall_s:
-                solver.StopSearch()
-                return
-
-    th = threading.Thread(target=watch, daemon=True)
-    th.start()
-    try:
-        return solver.Solve(model, cb)
-    finally:
-        done.set()
-        th.join(timeout=1)
 
 
 def _merge(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:
