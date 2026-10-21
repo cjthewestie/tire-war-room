@@ -1,5 +1,5 @@
-"""Issue #104 一早訂單湧入 (morning_rush), the finals demo, cut to ~3 real minutes at 30×: 07:00–07:07 eight orders
-arrive (SO-012 can never make its due date, SO-017 is the rush order), 07:15 page 11 on press 7 (H1 rejected -> H2,
+"""Issue #104 一早訂單湧入 (morning_rush), the finals demo, cut to ~3 real minutes at 40×: 07:00–07:07 eight orders
+arrive (SO-012 can never make its due date, SO-017 is the rush order), 07:12 page 11 on press 7 (H1 rejected -> H2,
 fixed by H2's 停用檢修 also under fast repair); 10:00 the truck leaves. MORNING_RUSH_LEAK=0 drops the leak,
 MORNING_RUSH_SAFETY=1 adds the 08:30 Safety Core stop on B 線開煉機 (no false 溫度下降 card while it is stopped).
 
@@ -56,14 +56,14 @@ def test_scenario_loads_with_its_beats(monkeypatch):
     assert len(orders) == 7 and len(rush) == 1 and rush[0].plant.order.id == MR_RUSH_ORDER
     assert 6 <= len(orders) + len(rush) <= 10
     assert all(_at(7, 0) <= START + timedelta(seconds=st.at_offset_s) <= _at(7, 7) for st in orders + rush)
-    assert _faults(sc) == {"CURE-07": [_at(7, 15), _at(7, 24, 40)]}     # the 3-minute cut: no Safety Core step
+    assert _faults(sc) == {"CURE-07": [_at(7, 12), _at(7, 21, 40)]}     # the 3-minute cut: no Safety Core step
 
 
 def test_leak_and_safety_steps_are_toggleable(monkeypatch):
     monkeypatch.setenv("MORNING_RUSH_LEAK", "0")
     monkeypatch.setenv("MORNING_RUSH_SAFETY", "1")
     f = _faults(get_scenario(ScenarioName.MORNING_RUSH))
-    assert f["CURE-07"] == [_at(7, 15)] and f["B-OPEN"] == [_at(8, 30)]
+    assert f["CURE-07"] == [_at(7, 12)] and f["B-OPEN"] == [_at(8, 30)]
 
 
 def test_orders_arrive_at_their_times_and_only_the_rush_order_is_a_plant_event():
@@ -124,7 +124,7 @@ async def _run_day(tmp_path, until: datetime, fast_s: float):
 
 async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
     """The 3-minute cut under fast repair: the rush re-plan makes SO-012 a 交期風險 item and the pre-plan starts on it
-    without anyone asking; page 11 fires at 07:15; H1's approved 檢修 finishes fast but the press keeps leaking, so
+    without anyone asking; page 11 fires at 07:12; H1's approved 檢修 finishes fast but the press keeps leaking, so
     VERIFY still reads 119.5 °C and H1 is rejected; H2's 停用檢修 then fixes it fast; the 10:00 truck leaves."""
     monkeypatch.delenv("MORNING_RUSH_LEAK", raising=False)
     monkeypatch.delenv("MORNING_RUSH_SAFETY", raising=False)
@@ -136,7 +136,7 @@ async def test_morning_rush_end_to_end(tmp_path, monkeypatch):
     rush = next(e for e in events if e.anomaly.message.startswith(f"急單 {MR_RUSH_ORDER}"))
     assert _at(7, 7) <= rush.opened_at < _at(7, 8)
     p11 = next(e for e in events if e.machine_id == "CURE-07")
-    assert _at(7, 15) < p11.opened_at < _at(7, 17)
+    assert _at(7, 12) < p11.opened_at < _at(7, 14)
     h1 = p11.hypotheses[0]
     assert h1.status.value == "rejected" and any("119.5" in x for x in h1.evidence), h1.evidence
     assert len(p11.hypotheses) >= 2 and p11.state is EventState.CLOSED

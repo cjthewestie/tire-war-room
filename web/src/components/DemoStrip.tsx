@@ -5,7 +5,7 @@ import { useWarRoom } from '../useWarRoom'
 import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
 
-const SPEEDS = [1, 5, 10, 30, 60]   // 30×: 一早訂單湧入's demo speed
+const SPEEDS = [1, 5, 10, 40, 60]   // 40×: 一早訂單湧入's demo speed
 const Q = new URLSearchParams(location.search)
 /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
 export const DEMO_MODE = Q.get('demo') === '1'

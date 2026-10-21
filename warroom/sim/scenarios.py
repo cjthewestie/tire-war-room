@@ -89,10 +89,11 @@ P2_FLOW_DROP_OFFSET_S = 135.0
 
 # issue #104 一早訂單湧入 (the finals demo). CJ, 2026-10-22: 「因為我demo 是以一天的開始就是訂單湧進來 然後事件」.
 # The 3D guided demo gives the story ~3 real minutes (orders by ~0:15, a planned card by ~0:45, the p.11 card by ~1:15,
-# the H2 card by ~2:00, press 7 fixed by ~2:30), so the default cut is: orders 07:00–07:07, page 11 on press 7 at 07:15
-# (steam drop, then the leak: H1 rejected -> H2, fixed by H2's 停用檢修). Demo speed 30× (web/src/mock/engine.ts SCENARIOS); a demo button's preroll lands 15 s
-# before 07:00. The sim clock also waits while the model plans (Runtime._hold_for_compute): the rush plan and the p.11
-# plan add their model time (~10 s each on the Mac) on top. Offsets are from 06:59.
+# the H2 card by ~2:00, press 7 fixed by ~2:30), so the default cut is: orders 07:00–07:07, page 11 on press 7 at 07:12
+# (steam drop, then the leak: H1 rejected -> H2, fixed by H2's 停用檢修). Demo speed 40× (web/src/mock/engine.ts
+# SCENARIOS); a demo button's preroll lands 15 s before 07:00. The sim clock also waits while the model plans
+# (Runtime._hold_for_compute): the rush plan, the pre-plan and each p.11 plan add their model time (~12–19 s each on
+# the Mac) on top. Offsets are from 06:59.
 # The order flood: (offset s, id, customer, size, qty, due in days, priority, rush). Ids continue the team dataset's
 # orders.csv (SO-001..SO-009, customers 客戶A–G). A re-solve keeps the active plan's tyres and adds only orders of
 # priority >= 2 it does not carry (solver._prepare), so the normal orders wait for the next full plan and SO-012,
@@ -114,11 +115,11 @@ MR_ORDERS: tuple[tuple[float, str, str, TireSize, int, int, int, bool], ...] = (
 )
 MR_AT_RISK_ORDER = "SO-012"
 MR_RUSH_ORDER = "SO-017"
-# 07:15 the page-11 steam drop on press 7 (the press is curing EV-2's S-027 until ~11:50); detected ~45 s later. Page
+# 07:12 the page-11 steam drop on press 7 (the press is curing EV-2's S-027 until ~11:50); detected ~45 s later. Page
 # 11's leak follows 580 s later, so H1 (extend the cure) fails at verify ~17 min after the drop and H2 follows; fast
 # repair leaves a leaking press alone until H2's 停用檢修 (Runtime._apply_repairs). MORNING_RUSH_LEAK=0 drops the leak:
 # then H1's 檢修 fixes the press and closes the event.
-MR_P11_OFFSET_S = 960.0
+MR_P11_OFFSET_S = 780.0
 # 08:30, MORNING_RUSH_SAFETY=1 only: B 線開煉機 loses its cooling and the compound climbs past 120 °C; the Safety Core
 # stops the machine on the reading (SR-COMPOUND-120), without waiting for the AI
 MR_SAFETY_OFFSET_S = 5460.0
