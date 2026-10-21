@@ -93,7 +93,8 @@ export function HomeOverview({ onMonitor, onFull }: { onMonitor?: () => void; on
           <Sec title="人力・出貨・品質" testId="ov-world">
             <p className="ov-line">
               <span>在廠 <b>{w.people.on_duty}</b>/{w.people.total} 人</span>
-              <span>待出貨 <b>{w.finished_goods.waiting_ship}</b> 條{w.dock.next_departure && ms(w.dock.next_departure) > now ? `・下一車 ${when(ms(w.dock.next_departure), now)}` : ''}</span>
+              <span>待出貨 <b>{w.finished_goods.waiting_ship}</b> 條</span>
+              {w.dock.next_departure && ms(w.dock.next_departure) > now && <span>下一車 {when(ms(w.dock.next_departure), now)}</span>}
               <span>良率 <b>{w.quality.yield_pct != null ? `${fmtNum(w.quality.yield_pct)}%` : '—'}</b>・今日不良 {w.quality.defects_today} 條（已檢 {w.quality.inspected_today}）</span>
             </p>
           </Sec>

@@ -62,5 +62,6 @@ export function upcoming(schedule: ScheduleVersion | null, world: WorldSnapshot 
   }
   // presses are many: keep room for the shift / truck / maintenance lines
   const picked = [...press.sort((a, b) => a.t - b.t).slice(0, Math.max(2, n - other.length)), ...other]
-  return picked.sort((a, b) => a.t - b.t).slice(0, n)
+  const end = factoryMidnight(now) + 86_400_000          // 「接下來」只列今天
+  return picked.filter((u) => u.t < end).sort((a, b) => a.t - b.t).slice(0, n)
 }

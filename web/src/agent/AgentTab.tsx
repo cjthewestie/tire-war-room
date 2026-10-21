@@ -13,7 +13,6 @@ import { STATE_LABEL } from '../components/common'
 import { ApprovalList } from './ApprovalList'
 import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
-import { nextUp } from './homeItems'
 import { useHomeSelection } from './homeSelection'
 import { PlanArea } from './PlanArea'
 import { isDialogue, withAsks, type Item, type LocalItem } from './transcript'
@@ -35,12 +34,11 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
   onFocus?: (machine?: string, line?: Line) => void
 }) {
   const { state } = useWarRoom()
-  const { events, list, sel, ev, now } = useHomeSelection(picked)
+  const { events, list, sel, ev } = useHomeSelection(picked)
   const { items } = useTranscript(ev)
   const [all, setAll] = useState(false)
   const [focus, setFocus] = useState<BarFocus | null>(null)
   const chat = (mode?: BarMode, text?: string) => { setAll(false); setFocus((f) => ({ mode, text, n: (f?.n ?? 0) + 1 })) }
-  const next = useMemo(() => nextUp(state.schedule, state.world, now), [state.schedule, state.world, now])
   // 「請 AI 重排」: when the task's approval card arrives, select it so the plan area shows 核准 / 討論
   const replans = useReplans()
   const arrived = Object.values(replans).find((r) => r.state === 'planning' && r.eventId && state.pending.some((p) => p.event_id === r.eventId))
@@ -60,7 +58,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
-      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} next={next} />
+      <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
       <PlanArea sel={sel} ev={ev} items={items} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console ev={ev} events={events} onPick={setPicked} items={items} asks={asks} setAsks={setAsks} all={all} setAll={setAll} focus={focus} onFull={onFull} />
     </div>

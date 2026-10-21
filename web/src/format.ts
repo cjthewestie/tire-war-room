@@ -1,32 +1,39 @@
 // Factory-time formatting. All API datetimes are ISO strings with a +08:00 offset (Asia/Taipei).
 export const TZ = 'Asia/Taipei'
 
-const hm = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false })
 const hms = new Intl.DateTimeFormat('en-GB', {
   timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
 })
-const md = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, month: '2-digit', day: '2-digit' })
 const wd = new Intl.DateTimeFormat('zh-TW', { timeZone: TZ, weekday: 'short' })
 
 export const ms = (iso: string | null | undefined): number => (iso ? new Date(iso).getTime() : NaN)
 
+// Display rule (issue #100): every time is 12-hour with AM/PM ("07:00 AM"), every date is year/month/day
+// ("2026/10/21"). hms stays 24-hour: hourOfDay() and other code that does arithmetic on the parts need it.
+const hm12d = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: true })
+const hms12d = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })
+const ymd = new Intl.DateTimeFormat('en-GB', { timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit' })
+const clean = (s: string) => s.replace(/[\u202f\u00a0]/g, ' ')
+
+/** "07:00 AM" */
 export function fmtHM(iso: string | number | null | undefined): string {
   if (iso == null) return '—'
-  const d = typeof iso === 'number' ? new Date(iso) : new Date(iso)
-  return isNaN(d.getTime()) ? '—' : hm.format(d)
+  const d = new Date(iso)
+  return isNaN(d.getTime()) ? '—' : clean(hm12d.format(d))
 }
+/** "07:00:05 AM" */
 export function fmtHMS(iso: string | number | null | undefined): string {
   if (iso == null) return '—'
   const d = new Date(iso)
-  return isNaN(d.getTime()) ? '—' : hms.format(d)
+  return isNaN(d.getTime()) ? '—' : clean(hms12d.format(d))
 }
-/** "10/22" */
+/** "2026/10/22" (the name is from when it was month/day only) */
 export function fmtMD(iso: string | number | null | undefined): string {
   if (iso == null) return '—'
   const d = new Date(iso)
   if (isNaN(d.getTime())) return '—'
-  const [dd, mm] = md.format(d).split('/')
-  return `${mm}/${dd}`
+  const [dd, mm, yy] = ymd.format(d).split('/')
+  return `${yy}/${mm}/${dd}`
 }
 export function fmtWeekday(iso: string | number): string {
   return wd.format(new Date(iso))
@@ -64,10 +71,5 @@ export function fmtNum(n: number | null | undefined, digits = 1): string {
 /** A tool call's duration: 840 ms, 2.3 s. */
 export function fmtMs(n: number): string { return n >= 1000 ? `${(n / 1000).toFixed(1)} s` : `${Math.round(n)} ms` }
 
-const hm12 = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: true })
-/** "07:00 AM" (12-hour, for the 主控台 「接下來」 list) */
-export function fmtHM12(iso: string | number | null | undefined): string {
-  if (iso == null) return '—'
-  const d = new Date(iso)
-  return isNaN(d.getTime()) ? '—' : hm12.format(d).replace(/\u202f/g, ' ')
-}
+/** kept for existing callers: fmtHM is 12-hour now */
+export const fmtHM12 = fmtHM
