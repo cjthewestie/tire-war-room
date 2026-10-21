@@ -28,7 +28,7 @@ const want = {
   event: ['agent', 'plan-area', 'AI 只在規劃時被叫醒'],
   phone: ['agent', 'approve-bar', '📱 主管手機核准（R2 以上一定要人）'],
   worker: ['agent', 'result-strip', '員工完成，程式驗證讀值'],
-  agent: ['console', 'trace-body', '每一步都在稽核鏈上'],
+  agent: ['console', 'hyp-rejected', '每一步都在稽核鏈上'],
   robot: ['sm', 'sm-stages', '只有「規劃」和「換假設」會叫 AI'],
   rush: ['agent', 'approve-bar', '急單進來：先核准'],
   h1: ['agent', 'approve-bar', '核准 H1（第一個假設）'],
@@ -61,7 +61,8 @@ const before = B.beatView('event', { snapshot: { events: events.filter((e) => e.
 check('event beat before the incident: no order plan in the spotlight, the status strip', before.anchors[0] === '[data-testid="status-strip"]' && before.eventId === null, before.anchors.join(' | '))
 check('event beat with the incident: its plan', B.beatView('event', { snapshot: { events } }).anchors[0] === '[data-testid="plan-area"]')
 check('phone beat with the incident: the 核准 bar', B.beatView('phone', { snapshot: { events } }).anchors[0] === '[data-demo-anchor="approve-bar"]')
-check('agent beat spotlights the trace and the task log together', B.BEATS.agent.anchors[0] === '[data-testid="trace-body"] & [data-testid="tasklog"]')
+check('agent beat: H1 rejected → verdict → H2 first', B.BEATS.agent.anchors[0].startsWith('[data-testid="think-block"][data-hyp-status="rejected"] & [data-demo-anchor="hyp-rejected"] & '))
+check('agent beat falls back to the trace and the task log', B.BEATS.agent.anchors.includes('[data-testid="trace-body"] & [data-testid="tasklog"]'))
 check('agent beat opens the incident', B.beatView('agent', { snapshot: { events } }).eventId === 'EV-7')
 
 // what each beat waits for
