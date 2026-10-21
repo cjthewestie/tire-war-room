@@ -5,6 +5,7 @@
 import type { Event } from '../contracts'
 import type { Tab } from '../components/Header'
 import type { WarRoomState } from '../store'
+import { CUES } from './cues'
 import { isMachine } from './signals'
 import type { DemoWaiting } from './state'
 
@@ -26,47 +27,47 @@ export interface Beat {
 const H1_REJECTED = '[data-testid="think-block"][data-hyp-status="rejected"]'
 const VERDICT_ROW = '[data-demo-anchor="hyp-rejected"]'
 
-export const BEATS: Record<string, Beat> = {
+export const BEATS: Record<string, Omit<Beat, 'caption'>> = {
   start: {
-    tab: 'agent', focus: null, caption: '訂單湧進來',
+    tab: 'agent', focus: null, 
     anchors: ['[data-testid="home-overview"]', '[data-testid="approval-list"]', '[data-testid="status-strip"]'],
   },
   rush: {
-    tab: 'agent', focus: 'order', caption: '急單進來：先核准',
+    tab: 'agent', focus: 'order', 
     anchors: ['?[data-demo-anchor="approve-bar"]', '[data-testid="home-item-{id}"]', '[data-testid="approval-list"]'],
   },
   console: {
-    tab: 'agent', focus: 'order', caption: '計劃已經先擬好，只等核准或討論',
+    tab: 'agent', focus: 'order', 
     anchors: ['[data-testid="home-item-{id}"]', '[data-testid="approval-list"]', '[data-testid="plan-area"]'],
   },
   event: {
-    tab: 'agent', focus: 'incident', caption: 'AI 只在規劃時被叫醒',
+    tab: 'agent', focus: 'incident', 
     anchors: ['?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]', '[data-testid="status-strip"]'],
   },
   phone: {
-    tab: 'agent', focus: 'incident', caption: '📱 主管手機核准（R2 以上一定要人）',
+    tab: 'agent', focus: 'incident', 
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]', '[data-testid="status-strip"]'],
   },
   // AI 猜錯換假設 H1→H2 (CJ, 2026-10-22): the H1 card, the code's verdict on it, the H2 card
   h1: {
-    tab: 'agent', focus: 'incident', caption: '核准 H1（第一個假設）',
+    tab: 'agent', focus: 'incident', 
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]', '[data-testid="status-strip"]'],
   },
   verify: {
-    tab: 'agent', focus: 'incident', caption: '程式驗證讀值：H1 不成立',
+    tab: 'agent', focus: 'incident', 
     anchors: ['?[data-testid="result-strip"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
   },
   h2: {
-    tab: 'agent', focus: 'incident', caption: 'AI 換假設：程式驗證失敗才會換',
+    tab: 'agent', focus: 'incident', 
     anchors: ['?[data-demo-anchor="approve-bar"]', '?[data-testid="plan-area"]', '[data-testid="home-item-{id}"]'],
   },
   // 員工完成 → 變綠: the press tile on 產線監控 turns green 「檢修完成・待恢復運轉」 (morning_rush, machines[].repaired)
   worker: {
-    tab: 'monitor', focus: 'incident', caption: '員工完成，程式驗證讀值',
+    tab: 'monitor', focus: 'incident', 
     anchors: ['[data-machine="{machine}"]', '[data-testid="early-warnings"]'],
   },
   agent: {
-    tab: 'console', focus: 'incident', caption: '每一步都在稽核鏈上',
+    tab: 'console', focus: 'incident', 
     // AI 猜錯換假設: the H1 plan the readings overturned, the code's verdict and the H2 plan after it; before the H1→H2
     // turn (or in a story without it) the whole trace and 今天處理過的任務
     anchors: [
@@ -76,18 +77,21 @@ export const BEATS: Record<string, Beat> = {
     ],
   },
   robot: {
-    tab: 'sm', focus: null, caption: '只有「規劃」和「換假設」會叫 AI',
+    tab: 'sm', focus: null, 
     anchors: ['[data-testid="sm-stages"]', '[data-testid="sm-board"]', '[data-testid="sm-page"]'],
   },
-  pitch: { tab: 'agent', focus: null, caption: 'Pitch 中', anchors: [], pitch: true },
-  warn: { tab: 'agent', focus: null, caption: 'Pitch 中・剩 1 分鐘', anchors: [], pitch: true },
-  end: { tab: 'agent', focus: null, caption: '謝謝', anchors: [], pitch: true },
+  pitch: { tab: 'agent', focus: null, anchors: [], pitch: true },
+  warn: { tab: 'agent', focus: null, anchors: [], pitch: true },
+  end: { tab: 'agent', focus: null, anchors: [], pitch: true },
 }
 
 /** An unknown cue (a new one in cues.ts the war room has no beat for yet): stay on 主控台, caption only. */
 export function beatFor(cueId: string | null | undefined): Beat | null {
   if (!cueId) return null
-  return BEATS[cueId] ?? { tab: 'agent', focus: null, caption: '', anchors: [] }
+  // the caption is the cue's own title (cues.ts): one wording per beat for the war room and the 3D
+  const caption = CUES.find((c) => c.id === cueId)?.title ?? ''
+  const b = BEATS[cueId]
+  return b ? { ...b, caption } : { tab: 'agent', focus: null, caption, anchors: [] }
 }
 
 const isOpen = (e: Event) => e.state !== 'closed' && e.state !== 'safe_stop'

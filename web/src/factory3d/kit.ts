@@ -72,6 +72,7 @@ export type Figure = {
 export function makeFigure(look: FigureLook): Figure {
   const skin = look.skin ?? '#e8b98f'
   const root = new THREE.Group()
+  root.userData.figure = true   // FigureFade (the demo keeps people out of the foreground of a framed shot)
   const body = new THREE.Group()
   body.position.y = 0.36
   root.add(body)

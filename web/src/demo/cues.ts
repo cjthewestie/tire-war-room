@@ -54,6 +54,8 @@ export type Wait = 'continue' | 'approval' | 'auto'
 
 export interface Cue {
   id: string
+  /* `title` is the one wording for the beat on every screen: the 3D cue card and the war room's spotlight caption
+     (demo/beats.ts reads it from here), so the two never say different things. */
   /** planned time (s from the start), for the bar's 「下一步」 and the planned-vs-actual table */
   at: number
   title: string
@@ -86,29 +88,29 @@ export interface Cue {
 export const CUES: Cue[] = [
   { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有一般單、有交期很趕的單，還有急單。',
     hold: { wait: 'continue', min: 12 }, shot: { kind: 'establish' } },
-  { id: 'rush', at: 20, title: '📋 先核准急單', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
+  { id: 'rush', at: 20, title: '📋 急單進來：先核准', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
     hold: { wait: 'approval', approval: 'rushApproved', card: 'rushCard' }, shot: { kind: 'overview' } },
-  { id: 'console', at: 40, title: '👉 主控台：趕不上的單已先擬好方案', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],
+  { id: 'console', at: 40, title: '👉 主控台：計劃已先擬好，只等核准或討論', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],
     hold: { wait: 'continue', until: 'preplan', untilTimeout: 25 }, shot: { kind: 'overview' } },
-  { id: 'event', at: 75, enter: { on: 'event', timeout: 60 }, title: '⚠ 事件：7 號機溫降', body: '偵測器（不是 AI）先從讀值發現溫度往下掉，才喚醒 AI 規劃。巡檢車也開過去了。',
+  { id: 'event', at: 75, enter: { on: 'event', timeout: 60 }, title: '⚠ 7 號機溫降：AI 只在規劃時被叫醒', body: '偵測器（不是 AI）先從讀值發現溫度往下掉，才喚醒 AI 規劃。巡檢車也開過去了。',
     hold: { wait: 'continue' }, shot: { kind: 'incident' } },
-  { id: 'h1', at: 70, enter: { on: 'approval', timeout: 40 }, title: '📱 拿起手機，核准 H1', body: 'AI 的第一個假設 H1：蒸汽壓不足，延長硫化就好。修正計劃要主管核准（R2 以上一定要人）。', links: ['phone'],
+  { id: 'h1', at: 70, enter: { on: 'approval', timeout: 40 }, title: '📱 核准 H1（第一個假設）', body: 'AI 的第一個假設 H1：蒸汽壓不足，延長硫化就好。修正計劃要主管核准（R2 以上一定要人）。', links: ['phone'],
     hold: { wait: 'approval', approval: 'approved', card: 'approval' }, shot: { kind: 'incident', close: true } },
-  { id: 'verify', at: 95, enter: { on: 'rejected', timeout: 60 }, title: '❌ 讀值 119.5°C，H1 不成立', body: '程式比對預期：溫度沒回來，還在往下掉。AI 猜錯了，不是程式放過它，是讀值推翻它。',
+  { id: 'verify', at: 95, enter: { on: 'rejected', timeout: 60 }, title: '❌ 程式驗證讀值：H1 不成立（119.5°C）', body: '程式比對預期：溫度沒回來，還在往下掉。AI 猜錯了，不是程式放過它，是讀值推翻它。',
     hold: { wait: 'continue' }, shot: { kind: 'incident', close: true } },
-  { id: 'h2', at: 105, enter: { on: 'approval2', timeout: 40 }, title: '🔁 AI 換假設 H2：核准', body: '驗證失敗才換假設：H2 是蒸汽洩漏，停用 7 號機檢修、訂單移到別台。再核准一次。', links: ['phone'],
+  { id: 'h2', at: 105, enter: { on: 'approval2', timeout: 40 }, title: '🔁 AI 換假設 H2：程式驗證失敗才會換', body: '驗證失敗才換假設：H2 是蒸汽洩漏，停用 7 號機檢修、訂單移到別台。再核准一次。', links: ['phone'],
     hold: { wait: 'approval', approval: 'approved2', card: 'approval2' }, shot: { kind: 'incident', close: true } },
-  { id: 'worker', at: 120, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
+  { id: 'worker', at: 120, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修，程式驗證讀值', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
     hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
-  { id: 'robot', at: 135, title: '🤖 巡檢機器人：程式巡檢、不用叫醒 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
+  { id: 'robot', at: 135, title: '🤖 巡檢機器人：只有「規劃」和「換假設」會叫 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
     hold: { wait: 'continue', min: 8 }, shot: { kind: 'robot' } },
-  { id: 'agent', at: 158, title: '🧠 回頭看 Agent 頁面：H1 為什麼被推翻', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
+  { id: 'agent', at: 158, title: '🧠 Agent 頁面：每一步都在稽核鏈上', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
     hold: { wait: 'continue' }, shot: { kind: 'overview' } },
   { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
     hold: { wait: 'continue', autoAfter: 8 }, shot: { kind: 'whiteboard' } },
   { id: 'warn', at: STORY_TARGET + 120, enter: { after: 120 }, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。',
     hold: { wait: 'auto', min: 0 }, shot: { kind: 'whiteboard' } },
-  { id: 'end', at: DEMO_TOTAL, enter: { after: 60 }, title: '結束', body: '謝謝！', big: true,
+  { id: 'end', at: DEMO_TOTAL, enter: { after: 60 }, title: '結束・謝謝', body: '謝謝！', big: true,
     hold: { wait: 'continue', pauseSim: false }, shot: { kind: 'whiteboard' } },
 ]
 export const PITCH_INDEX = CUES.findIndex((c) => c.id === 'pitch')
@@ -118,7 +120,7 @@ export const LAST_STORY_INDEX = PITCH_INDEX - 1
  *  extra stop between ① and ②). */
 export const CHECKPOINTS = ['start', 'console', 'event', 'h1', 'verify', 'h2', 'worker', 'robot', 'agent', 'pitch']
 
-export type Reason = 'time' | 'event' | 'continue' | 'auto' | 'skip'
+export type Reason = 'time' | 'event' | 'continue' | 'auto' | 'skip' | 'follow'
 export interface Fired { id: string; t: number; reason: Reason; /** when its hold ended, and how */ out?: number; outBy?: Reason }
 export interface Timeline {
   index: number

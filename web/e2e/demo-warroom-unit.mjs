@@ -21,26 +21,19 @@ await vite.close()
 // every shared cue has a war room beat
 for (const c of C.CUES) check(`beat for cue ${c.id}`, !!B.BEATS[c.id])
 
-// beat → tab + first anchor + caption
+// beat → tab + first anchor; the caption is the cue's title (one wording per beat, cues.ts)
 const want = {
-  start: ['agent', 'home-overview', '訂單湧進來'],
-  console: ['agent', 'home-item-{id}', '計劃已經先擬好，只等核准或討論'],
-  event: ['agent', 'plan-area', 'AI 只在規劃時被叫醒'],
-  phone: ['agent', 'approve-bar', '📱 主管手機核准（R2 以上一定要人）'],
-  worker: ['monitor', 'data-machine', '員工完成，程式驗證讀值'],
-  agent: ['console', 'hyp-rejected', '每一步都在稽核鏈上'],
-  robot: ['sm', 'sm-stages', '只有「規劃」和「換假設」會叫 AI'],
-  rush: ['agent', 'approve-bar', '急單進來：先核准'],
-  h1: ['agent', 'approve-bar', '核准 H1（第一個假設）'],
-  verify: ['agent', 'result-strip', '程式驗證讀值：H1 不成立'],
-  h2: ['agent', 'approve-bar', 'AI 換假設：程式驗證失敗才會換'],
+  start: ['agent', 'home-overview'], console: ['agent', 'home-item-{id}'], event: ['agent', 'plan-area'],
+  worker: ['monitor', 'data-machine'], agent: ['console', 'hyp-rejected'], robot: ['sm', 'sm-stages'],
+  rush: ['agent', 'approve-bar'], h1: ['agent', 'approve-bar'], verify: ['agent', 'result-strip'], h2: ['agent', 'approve-bar'],
 }
-for (const [id, [tab, anchor, caption]] of Object.entries(want)) {
-  const b = B.BEATS[id]
+for (const [id, [tab, anchor]] of Object.entries(want)) {
+  const b = B.beatFor(id)
   check(`${id} → ${tab}`, b.tab === tab, b.tab)
   check(`${id} anchor ${anchor}`, b.anchors[0].includes(anchor), b.anchors[0])
-  check(`${id} caption`, b.caption === caption, b.caption)
+  check(`${id} caption = the 3D title`, b.caption === C.CUES.find((c) => c.id === id).title, b.caption)
 }
+check('worker wording agreed for both screens', B.beatFor('worker').caption.includes('員工完成維修，程式驗證讀值'))
 for (const id of ['pitch', 'warn', 'end']) check(`${id} is the calm pitch card`, B.BEATS[id].pitch === true && B.BEATS[id].anchors.length === 0)
 check('unknown cue → caption only on 主控台', B.beatFor('nope').tab === 'agent' && B.beatFor('nope').anchors.length === 0)
 check('no cue → no beat', B.beatFor(null) === null)

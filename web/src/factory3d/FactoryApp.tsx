@@ -437,7 +437,7 @@ export function FactoryApp() {
         <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
         <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
-          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} alarms={alarmMap} arrows={!demoOn && scene === 'factory'} />
+          board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} alarms={alarmMap} arrows={!demoOn && scene === 'factory'} quiet={demo.quiet} />
         {scene === 'break' && <BreakRoom />}
         {scene === 'toilet' && <Restroom />}
         <Player
@@ -474,10 +474,11 @@ export function FactoryApp() {
           {/* the header's link chip wording (linkStatus.ts); .live = connected to the backend (e2e waits on it) */}
           <span className={`f3-conn t-${link.tone} ${transport?.mode === 'live' && connected ? 'live' : ''}`} title={link.title} data-testid="f3-conn" role="status">{link.text}</span>
         </div>
-        <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
+        {!demo.quiet && <div className={`f3-ev ${evOpen ? 'open' : ''}`} data-testid="f3-event">
           {ev ? <AiStatusLine ev={ev} className="f3-ai" /> : '目前無事件'}
-        </div>
-        <div className={`f3-pend ${pending.length || repairing || unread ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{repairing ? `・維修中 ${repairing} 件` : ''}{unread ? `・報告待讀 ${unread} 件` : ''}{pending.length || unread ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
+        </div>}
+        {/* the pitch: a minimal HUD, so the slide reads clean */}
+        {!demo.quiet && <div className={`f3-pend ${pending.length || repairing || unread ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{repairing ? `・維修中 ${repairing} 件` : ''}{unread ? `・報告待讀 ${unread} 件` : ''}{pending.length || unread ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>}
         {!demoOn && (
           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
         )}
@@ -505,7 +506,7 @@ export function FactoryApp() {
         <div key={success.latest.key} className="f3-success" role="status" data-testid="f3-success">{successTitle(success.latest)}</div>
       )}
       {demoNote && <div key={demoNote.at} className="f3-demo-note" role="status" data-testid="f3-demo-note">{demoNote.text}</div>}
-      {toast && (
+      {toast && !demo.quiet && (
         <div className="f3-toast" role="status" data-testid="f3-toast" onClick={() => raisePhone(true)}>
           <b>📱 {toast.title}</b><span>{toast.body}</span><i>{TOUCH_DEVICE ? '點這裡拿起手機' : '按 P 拿起手機'}{toast.notice ? '查看' : '核准'}</i>
         </div>
