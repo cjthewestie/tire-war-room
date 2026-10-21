@@ -44,22 +44,23 @@ function paint(s: Slot, x: Shown) {
   s.dot.scale.setScalar(idle ? 0.7 : 1)
 }
 
-export function MachineRings({ tiles, world }: { tiles: Record<string, MachineTile>; world: WorldSnapshot | null }) {
+/** `now` (factory ms, from the clock: steadier than the world's 10-second steps) and `speed` feed machineRing. */
+export function MachineRings({ tiles, world, now: clockNow, speed = 1 }: { tiles: Record<string, MachineTile>; world: WorldSnapshot | null; now?: number; speed?: number }) {
   // three.js objects live in a ref and are changed only in the frame loop
   const slots = useRef<Slot[] | null>(null)
   const group = useRef<THREE.Group>(null)
-  const now = world ? Date.parse(world.factory_time) : 0
+  const now = clockNow || (world ? Date.parse(world.factory_time) : 0)
   const goodsAt = useMemo(() => {
     const n: Record<string, number> = {}
     for (const g of world?.goods?.items ?? []) if (g.machine_id) n[g.machine_id] = (n[g.machine_id] ?? 0) + 1
     return n
   }, [world?.goods])
   const shown = useMemo<Shown[]>(() => PLACED.map((p) => {
-    const ring = machineRing(p.id, tiles[p.id], world, now)
+    const ring = machineRing(p.id, tiles[p.id], world, now, speed)
     const k = Math.min(goodsAt[p.id] ?? 0, MAX_GOODS)
     const visible = k === 0 || ring.kind === 'task' || ring.kind === 'maint' || ring.kind === 'alarm'
     return { id: p.id, ring, visible, y: k > 0 ? p.h + GOODS_BASE + k * GOODS_STEP : p.h + LAMP_POST + 0.5 }   // clear of the status lamp and its glow
-  }), [tiles, world, now, goodsAt])
+  }), [tiles, world, now, speed, goodsAt])
   const latest = useRef(shown)
   const dirty = useRef(true)
   useEffect(() => { latest.current = shown; dirty.current = true }, [shown])

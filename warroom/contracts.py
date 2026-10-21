@@ -482,6 +482,9 @@ class Anomaly(_M):
     message: str                       # "7 號 128 → 122°C，預測穩定在 122±1°C"
     related_machines: list[str] = Field(default_factory=list)
     detection_latency_s: float | None = None   # fault start -> anomaly (sim knows fault start)
+    # issue #54: the detector's pre-classification before any LLM: which rule fired, the signals and thresholds,
+    # the validation the readings passed, the forecast model (warroom/detect/detector.py _make)
+    preclass: dict[str, Any] | None = None
 
 
 # =====================================================================================
@@ -928,6 +931,19 @@ class StepRound(_M):
     steps: list[StepRun] = Field(default_factory=list)
 
 
+class EventReview(_M):
+    """主管覆核 of an event closed after a repair: pending (「請主管覆核」) until the supervisor confirms."""
+    status: Literal["pending", "done"]
+    requested_at: datetime
+    done_at: datetime | None = None
+    by: str | None = None
+
+
+class ReviewRequest(_M):
+    """POST /api/events/{event_id}/review (主管覆核)."""
+    note: str | None = Field(default=None, max_length=300)
+
+
 class Event(_M):
     id: str                           # "EV-20261003-021400-CURE-07"
     opened_at: datetime
@@ -953,6 +969,10 @@ class Event(_M):
     command: str | None = None
     constraints: list["PlanConstraint"] = Field(default_factory=list)
     discuss_replans: int = 0
+    # fast repair (Kyle 10-21): every repair task of this event (檢修 / 停用檢修 / 放慢投料 / 暫停投料) finished and the
+    # machine's fault was cleared; review: 「請主管覆核」 once it closed after that repair, done when the supervisor confirms
+    repaired_at: datetime | None = None
+    review: EventReview | None = None
 
 
 # =====================================================================================
@@ -1066,6 +1086,7 @@ class WsType(StrEnum):
     AUDIT = "audit"                     # data: AuditEntry
     CLOCK = "clock"                     # data: {"factory_time": iso, "speed": float, "paused": bool}
     WORLD = "world"                     # data: {"full": bool, "rev": int, "factory_time": iso, <changed WorldSnapshot sections>}
+    SUBAGENTS = "subagents"             # issue #54: {"items": subagent rows, "queue": model queue} (warroom/agent/orchestrator.py)
 
 
 class WsMessage(_M):
@@ -1112,6 +1133,8 @@ class HealthStatus(_M):
     sim_running: bool
     factory_time: datetime
     uptime_s: float
+    agent_runtime: str | None = None   # WARROOM_AGENT_RUNTIME, e.g. 「NemoClaw 沙箱」 when the app runs inside OpenShell
+    repair_fast_s: float = 0.0         # REPAIR_FAST_S (read only): wall seconds a repair task takes; 0 = real durations
 
 
 # REST surface (warroom/api implements; web/src/contracts.ts mirrors). method, path, request, response
@@ -1140,6 +1163,7 @@ REST_ENDPOINTS: tuple[tuple[str, str, str | None, str], ...] = (
     ("GET", "/api/world", None, "WorldSnapshot"),                 # the whole plant: orders, materials, dock, people, energy, quality, maintenance
     ("POST", "/api/command", "CommandRequest", "CommandReply"),     # issue #10: 下新任務 (opens an event)
     ("POST", "/api/events/{event_id}/discuss", "DiscussRequest", "DiscussReply"),  # 討論這個計劃
+    ("POST", "/api/events/{event_id}/review", "ReviewRequest", "Event"),  # 主管覆核 (an event closed after a repair)
     ("WS", "/ws", None, "WsMessage stream"),                      # dashboard + phone share one stream
 )
 
@@ -1268,7 +1292,7 @@ class Detector(Protocol):
     def validate(self, reading: SensorReading) -> DataQuality: ...
     def ingest(self, readings: list[SensorReading]) -> list[Anomaly]: ...   # returns NEW anomalies only (debounced)
     def predict(self, machine_id: str, channel: Channel = Channel.TEMP, horizon_s: float = 1800) -> Prediction: ...
-    def reset(self, machine_id: str | None = None) -> None: ...
+    def reset(self, machine_id: str | None = None, *, repaired: bool = False) -> None: ...
 
 
 @runtime_checkable

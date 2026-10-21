@@ -2,9 +2,9 @@
 // Mock mode syncs tabs over BroadcastChannel, so approving on /phone updates the dashboard.
 import {
   API, apiPath,
-  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply,
+  type ApprovalDecision, type ApprovalRequest, type AskAnswer, type AuditEntry, type CapacityReport, type CommandReply, type DashboardSnapshot, type DiscussReply, type Event,
   type MachineDetail, type OverlayResult, type ScenarioName, type ScheduleVersion, type Shift, type SimControl, type SimEventFired, type SimEventsBody,
-  type SimEventsView, type WorldSnapshot, type WsMessage,
+  type SimEventsView, type SubagentsView, type MainReply, type WorldSnapshot, type WsMessage,
 } from './contracts'
 import { MockEngine, type Network } from './mock/engine'
 import { CURRENT_SHIFTS } from './factory'
@@ -57,6 +57,13 @@ export interface Transport {
   command?(text: string): Promise<CommandReply>
   /** Live only (issue #10): 討論這個計劃, talk about an event's waiting plan (POST /api/events/{id}/discuss). */
   discuss?(eventId: string, text: string): Promise<DiscussReply>
+  /** Live only (fast repair): 覆核完成, the supervisor confirms a repaired event (POST /api/events/{id}/review), PIN like
+   *  approvals. 409 when the event has no pending review. */
+  review?(eventId: string, note?: string): Promise<Event>
+  /** Live only (issue #54): stop a subagent safely (POST /api/subagents/{id}/interrupt). */
+  interrupt?(eventId: string): Promise<Record<string, unknown>>
+  /** Live only (issue #54): one input to the 主 agent, which classifies the message (POST /api/main/message). */
+  message?(text: string, eventId: string | null): Promise<MainReply>
   /** Live only (issue #36 模擬事件): the generator's settings and log, change them, fire one event now. */
   simEvents?(): Promise<SimEventsView>
   setSimEvents?(b: SimEventsBody): Promise<SimEventsView>
@@ -142,12 +149,21 @@ export class LiveTransport implements Transport {
     // the whole plant: full state from GET /api/world (start and every reconnect), then WS "world" deltas
     const pullWorld = () => getJSON<WorldSnapshot>(API.world)
       .then((w) => onMsg({ type: 'world', ts: w.factory_time, data: { ...w, full: true } })).catch(() => {})
+    // the active schedule: at start and on every reconnect (a scenario switch while disconnected sent its WS "schedule"
+    // to nobody, and the previous scenario's version stayed on screen), then WS "schedule" messages
+    const pullSchedule = () => getJSON<ScheduleVersion>(API.schedule)
+      .then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
     let soon: ReturnType<typeof setTimeout> | undefined
     const soonSnapshot = () => { if (!soon) soon = setTimeout(() => { soon = undefined; pullSnapshot() }, 250) }
+    // issue #54: the main agent's subagents (status follows every state change; the server also pushes WS "subagents")
+    const pullSubagents = () => getJSON<SubagentsView>('/api/subagents')
+      .then((d) => onMsg({ type: 'subagents', ts: new Date().toISOString(), data: d })).catch(() => {})
+    let soonS: ReturnType<typeof setTimeout> | undefined
+    const soonSubagents = () => { if (!soonS) soonS = setTimeout(() => { soonS = undefined; pullSubagents() }, 300) }
     const connect = () => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws'
       ws = new WebSocket(`${proto}://${location.host}${API.ws}`)
-      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld() }
+      ws.onopen = () => { onConn(true); retry = 0; pullSnapshot(); pullWorld(); pullSchedule(); pullSubagents() }
       ws.onclose = () => {
         onConn(false)
         if (!closed) timer = setTimeout(connect, Math.min(5000, 500 * 2 ** retry++))
@@ -159,19 +175,23 @@ export class LiveTransport implements Transport {
         // the focus panel (③) is server-built: refresh it as soon as an event or approval changes
         if (m.type === 'event' || m.type === 'approval_request' || m.type === 'approval_resolved' ||
             m.type === 'anomaly' || m.type === 'safety_action') soonSnapshot()
+        if (m.type === 'event' || m.type === 'approval_request' || m.type === 'approval_resolved') soonSubagents()
       }
     }
     pullSnapshot()
-    getJSON<ScheduleVersion>(API.schedule).then((v) => onMsg({ type: 'schedule', ts: v.created_at, data: v })).catch(() => {})
+    pullSchedule()
     connect()
     // safety net: focus panel and counts come from snapshots; refresh in case the server only sends deltas
-    const poll = setInterval(pullSnapshot, 4000)
+    const poll = setInterval(() => { pullSnapshot(); pullSubagents() }, 4000)   // subagent progress follows worker tasks too
     return () => { closed = true; clearTimeout(timer); clearInterval(poll); ws?.close() }
   }
   decide(d: ApprovalDecision) { return postJSON<ApprovalRequest>(apiPath(API.approvalDecision, { request_id: d.request_id }), d) }
   ask(question: string) { return postJSON<AskAnswer>(API.ask, { question }) }
   command(text: string) { return postJSON<CommandReply>(API.command, { text }) }
   discuss(eventId: string, text: string) { return postJSON<DiscussReply>(apiPath(API.discuss, { event_id: eventId }), { text }) }
+  review(eventId: string, note?: string) { return postJSON<Event>(apiPath(API.review, { event_id: eventId }), note ? { note } : {}) }
+  message(text: string, eventId: string | null) { return postJSON<MainReply>('/api/main/message', { text, event_id: eventId }) }
+  interrupt(eventId: string) { return postJSON<Record<string, unknown>>(`/api/subagents/${encodeURIComponent(eventId)}/interrupt`, {}) }
   async control(c: SimControl) { await postJSON(API.simControl, c) }
   async overlay(scenario: ScenarioName) {
     return (await postJSON<{ overlay: OverlayResult }>(API.simControl, { action: 'overlay', scenario } satisfies SimControl)).overlay

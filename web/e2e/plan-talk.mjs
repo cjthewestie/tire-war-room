@@ -49,18 +49,18 @@ try {
   check('v1 is version 1 and sends #A-311 to press 9', v1?.version === 1 && (v1?.actions ?? []).some((a) => a.includes('#A-311 改 9 號')), (v1?.actions ?? [])[0])
 
   // ---------------- (a) discuss the waiting plan
-  check('input defaults to 討論這個計劃 while a plan waits', (await d.locator('[data-testid=mode-discuss]').getAttribute('aria-checked')) === 'true')
+  check('one 主 agent input (no mode switch) that knows the waiting plan', (await d.locator('[data-testid=mode-discuss]').count()) === 0 && (await d.locator('.console [data-testid=chat-input][data-plan=waiting]').count()) === 1)
   await d.locator('[data-testid=chat-input]').fill('9 號機今晚要保養')
   await d.locator('[data-testid=chat-input]').press('Enter')
   const gotV2 = await until(d, async () => (await side.locator('[data-testid=card-version-tag]').innerText().catch(() => '')) === 'v2')
   check('card v2 replaced v1 in the side column', gotV2)
   const tr = d.locator('[data-testid=transcript]')
   await d.waitForTimeout(1500)
-  const me = await tr.locator('[data-testid=chat-me]').last().innerText().catch(() => '')
+  const me = await tr.locator('[data-testid=sc-me]').last().innerText().catch(() => '')
   check('transcript shows the supervisor message', me.includes('9 號機今晚要保養'), me.slice(0, 60))
-  const reply = await tr.locator('[data-testid=chat-reply]').last().innerText().catch(() => '')
+  await until(d, async () => !(await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')).includes('思考中'))
+  const reply = await tr.locator('[data-testid=sc-agent]').last().innerText().catch(() => '')
   check('agent reply names v2 and the code check', /v2|第 2 版/.test(reply) && reply.includes('程式已檢查'), reply.replace(/\n/g, ' ').slice(0, 160))
-  check('agent posted a plain summary for v2', (await tr.locator('[data-testid=chat-summary]', { hasText: '我建議' }).count()) >= 2)
   // issue #37: chips, the replan row and the card version are steps, shown on the Agent page (看完整過程)
   await d.locator('[data-testid=see-full]').click()
   await d.waitForSelector('[data-testid=trace-body] [data-kind=state]', { timeout: 10000 }).catch(() => {})
@@ -69,6 +69,7 @@ try {
     const chips = await tr.locator('[data-testid=constraint-chips]').last().innerText().catch(() => '')
     check('transcript shows the constraint chip 「9 號機 今晚不可用」', chips.includes('9 號機 今晚不可用'), chips.replace(/\n/g, ' ').slice(0, 80))
     check('transcript shows a replan row', (await tr.locator('[data-kind=state][data-to=replan]').count()) >= 1)
+    check('the subagent posted a plain summary for v2 (Agent page)', (await tr.locator('[data-testid=chat-summary]', { hasText: '請核准：' }).count()) >= 2)
     const ver = await tr.locator('[data-testid=card-version]').last().innerText().catch(() => '')
     check('transcript shows card v1 → v2 with what changed', ver.includes('v1 → v2') && /#A-311：9 號 →/.test(ver), ver.replace(/\n/g, ' | ').slice(0, 160))
   }
@@ -109,7 +110,6 @@ try {
   check('v2 approved from the card', approved)
 
   // ---------------- (b) a new task in plain Chinese
-  await d.locator('[data-testid=mode-command]').click()
   await d.locator('[data-testid=chat-input]').fill('通知維修組明早檢查 3 號機')
   await d.locator('[data-testid=chat-input]').press('Enter')
   let cmd = null
@@ -124,8 +124,8 @@ try {
   const cc = ((await api(d, '/api/approvals?status=pending')).json ?? []).find((x) => x.event_id === cmd?.id)
   check('card is R3 (free-text notice needs the supervisor) and names the command', cc?.risk === 'R3' && (cc?.reason ?? '').includes('主管指令'), `${cc?.risk} ${cc?.reason}`)
   await d.waitForTimeout(1200)
-  const cmdMe = await tr.locator('[data-testid=chat-me]', { hasText: '通知維修組明早檢查 3 號機' }).count()
-  check('transcript switched to the task and shows it', cmdMe >= 1)
+  const cmdMe = await tr.locator('[data-testid=sc-me]', { hasText: '通知維修組明早檢查 3 號機' }).count()
+  check('a new task goes to the 主 agent conversation (the panel switches back to 主 agent)', cmdMe >= 1)
   await d.screenshot({ path: `${OUT}/plan-talk-command-1440.png` })
   const res = await api(d, `/api/approvals/${cc.id}/decision`, { request_id: cc.id, decision: 'approve', via: 'dashboard' })
   check('task card approved', res.status === 200, `${res.status}`)

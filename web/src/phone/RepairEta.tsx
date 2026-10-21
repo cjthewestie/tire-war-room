@@ -4,30 +4,14 @@
 // - 預計完成: the approval time (or now, before approval) + that window, or the latest field-task ETA if later
 // Read-only: everything comes from the event, the world's task board and the SOP; nothing is invented here.
 import { useEffect, useState } from 'react'
-import type { Channel, Event, Expectation, WorkTask } from '../contracts'
-import { fmtHM, fmtMD, ms } from '../format'
+import type { Event, Expectation } from '../contracts'
+import { CH_LABEL, repairEstimate, targetText } from '../aiStatus'
+import { fmtHM, fmtMD } from '../format'
 import { loadSopSteps, type SopSteps } from '../sop'
 import { useWarRoom } from '../useWarRoom'
 
-const CH: Record<Channel, { label: string; unit: string }> = {
-  temp_c: { label: '溫度', unit: '°C' },
-  pressure_kgf_cm2: { label: '壓力', unit: ' kgf/cm²' },
-  water_flow_lpm: { label: '水流', unit: ' L/min' },
-  steam_kgf_cm2: { label: '蒸汽壓', unit: ' kgf/cm²' },
-}
-
-/** The expectation the event will be verified against: the plan's hypothesis first, else any open one. */
-function expectationOf(ev: Event | null): Expectation | null {
-  if (!ev) return null
-  return ev.plan?.hypothesis.expectation
-    ?? ev.hypotheses.find((h) => h.status !== 'rejected' && h.expectation)?.expectation
-    ?? null
-}
-
 function expectationText(x: Expectation): string {
-  const c = CH[x.channel]
-  const target = x.op === 'between' ? `${x.value}–${x.value_hi}${c.unit}` : `${x.op === '>=' ? '≥' : '≤'}${x.value}${c.unit}`
-  return `${x.within_min} 分內${c.label}回到 ${target}`
+  return `${x.within_min} 分內${CH_LABEL[x.channel]}回到 ${targetText(x)}`
 }
 
 export function RepairEta({ ev }: { ev: Event | null }) {
@@ -39,21 +23,12 @@ export function RepairEta({ ev }: { ev: Event | null }) {
     let alive = true
     loadSopSteps(machine, ev).then((s) => { if (alive) setSop(s) }, () => alive && setSop(null))
     return () => { alive = false }
-    // the SOP depends on which event this is, not on every refresh of it
+    // the SOP depends on which event and round this is (round 2 of p.11 → SOP-CP-01), not on every refresh of it
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ev?.id, machine])
+  }, [ev?.id, ev?.replans, machine])
   if (!ev) return null
-  const now = state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? null
-  const x = expectationOf(ev)
-  const tasks: WorkTask[] = (state.world?.tasks.items ?? []).filter((t) => t.event_id === ev.id)
-  const open = tasks.filter((t) => t.status !== '完成')
-  const lastEta = open.map((t) => t.eta).filter((e): e is string => !!e).sort().at(-1) ?? null
   // once approved, the window runs from the decision; before that, from now (「現在核准的話」)
-  const decided = state.resolved.filter((r) => r.event_id === ev.id && r.status === 'approved' && r.decision?.decided_at)
-    .map((r) => r.decision!.decided_at).sort().at(-1) ?? null
-  const from = decided ?? now
-  const byWindow = x && from ? ms(from) + x.within_min * 60_000 : null
-  const doneBy = lastEta ? Math.max(ms(lastEta), byWindow ?? 0) : byWindow
+  const { x, tasks, lastEta, decided, doneBy } = repairEstimate(ev, state)
   if (!x && !tasks.length && !sop?.steps.length) return null
   return (
     <div className="ph-eta" data-testid="phone-eta">
