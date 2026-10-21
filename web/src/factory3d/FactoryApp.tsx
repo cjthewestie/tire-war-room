@@ -4,7 +4,8 @@
 // (separate spaces), and raise the real /phone page (P) wherever you are. V switches to the diorama overview.
 // F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo
-// never has to leave the 3D view; ?demo=1 also lists them in the key strip.
+// never has to leave the 3D view; ?demo=1 also lists them in the key strip. #71: the ⚡ 觸發異常 button (or T) does
+// the same with a click, for presenters and touch devices.
 // Phones and tablets (#26) start in the overview, with a stick and buttons on screen (TouchControls).
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
@@ -19,6 +20,7 @@ import { alertText, diffPending, type PushState } from '../phone/alert'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
+import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
 import { successTitle, useSuccessMoments } from './success'
@@ -103,6 +105,7 @@ export function FactoryApp() {
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number } | null>(null)
+  const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
   const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -219,8 +222,9 @@ export function FactoryApp() {
           (err) => { console.warn(err); setDemoNote({ text: '隨機事件：沒有成功', at: Date.now() }) })
         return
       }
+      if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
-      if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
+      if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
         if (panel) { closePanel(); return }
@@ -234,7 +238,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -311,11 +315,12 @@ export function FactoryApp() {
           {ev ? <>事件：{machineLabel(ev.machine_id)}・{STATE_LABEL[ev.state]}{ev.alert_card ? `・${ev.alert_card.title}` : ''}</> : '目前無事件'}
         </div>
         <div className={`f3-pend ${pending.length ? 'has' : ''}`} data-testid="f3-pending">待核准 {pending.length} 件{pending.length ? (TOUCH_DEVICE ? '・點「手機」' : '・按 P 拿手機') : ''}</div>
+        {started && !phoneUp && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text) => setDemoNote({ text, at: Date.now() })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span>
         {SHOW_DEMO_KEYS && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>4</kbd> 隨機事件 <kbd>0</kbd> 暫停／播放</span>}
       </div>
       {success.latest && shown !== success.latest.key && (
