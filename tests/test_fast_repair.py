@@ -181,6 +181,14 @@ async def test_concurrent_3_b_open_fast_repair(tmp_path):
     async def check(rt, app, ev):
         assert "B 線開煉機 膠溫回到" in ev.outcome
         assert {e.machine_id for e in rt.events()} >= {"CURE-03", "B-OPEN", "CURE-10"}
+        # 10-22 稽核 (older build): the mill closed before its 維修完成 and its report's 結果 had no reading
+        assert ev.repaired_at <= ev.recovered_at <= ev.closed_at
+        for _ in range(100):
+            if rt.state_machine.get(ev.id).ai_report is not None:
+                break
+            await asyncio.sleep(0.05)
+        last = rt.state_machine.get(ev.id).ai_report.text.splitlines()[-1]
+        assert last.startswith("結果：B 線開煉機膠溫回到 ") and last.endswith(" 恢復正常）"), last
     await _fast_flow(tmp_path, "concurrent_3", 5.0, "B-OPEN", check)
 
 
