@@ -58,7 +58,7 @@ export const BOARD: EventState[] = ['detected', 'classify', 'plan', 'simulate', 
 // supervisor can read at a glance; the 11-state board stays behind 「看細節」.
 export type Stage = 'ai' | 'you' | 'run' | 'end'
 export const STAGES: { key: Stage; label: string; meaning: string; states: EventState[] }[] = [
-  { key: 'ai', label: 'AI 處理中', meaning: 'AI 在查資料、想原因、排計劃', states: ['detected', 'classify', 'plan', 'simulate', 'gate'] },
+  { key: 'ai', label: '處理中', meaning: '程式查資料、AI 想原因排計劃', states: ['detected', 'classify', 'plan', 'simulate', 'gate'] },
   { key: 'you', label: '等你決定', meaning: '計劃好了，等你核准或討論', states: ['await_approval'] },
   { key: 'run', label: '執行與確認', meaning: '照核准的做，程式確認有沒有效；沒效會換假設重來', states: ['execute', 'verify', 'replan'] },
   { key: 'end', label: '結束', meaning: '結案，或 AI 停手交給人', states: ['closed', 'safe_stop'] },
