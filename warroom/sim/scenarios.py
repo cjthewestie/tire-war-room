@@ -163,9 +163,9 @@ def _build(name: ScenarioName, start: datetime) -> Scenario:
                       "核准後：暖機、補料、宣達任務由人員執行，全部完成才結案"])
     if name is ScenarioName.STAFFING:
         return Scenario(
-            name=name, title="人力調度：加硫組 S13 來電請病假，硫化機組早班缺 1 人", start_at=start,
+            name=name, title="人力調度：S13 來電請病假，硫化機組早班缺 1 人", start_at=start,
             steps=[ScenarioStep(at_offset_s=STAFFING_OFFSET_S, note="07:30 S13 來電請病假",
-                                plant=PlantInput(kind="absence", text=f"{SICK_STAFF_ID}（加硫組）來電請病假，硫化機組早班缺 1 人",
+                                plant=PlantInput(kind="absence", text=f"{SICK_STAFF_ID} 來電請病假，硫化機組早班缺 1 人",
                                                  staff_id=SICK_STAFF_ID, team=TeamId.CURING, shift_name="早班",
                                                  note="來電請病假"))],
             expected=["07:30 人力事件：硫化機組早班缺 1 人", "求解器提出 A 加班 / B 從 2 線調 1 人", "核准後被指派的人走到硫化區報到"])
