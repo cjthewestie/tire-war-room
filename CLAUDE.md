@@ -25,3 +25,5 @@ Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` sectio
 ## Notes for CJ's sessions
 
 - The team guide is `CONTRIBUTING.md` (Traditional Chinese); keep it, `.github/` templates and `docs/onboarding/` in step when the workflow changes.
+
+- Work dispatch: from now on, send work through `/dispatch` and report results only; do not run long work in CJ's main session (CJ, 2026-10-20: 「從現在開始都用/dispatch 派發工作不要佔用我這邊主頁面」「回報結果就好了」).
