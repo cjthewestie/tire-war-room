@@ -53,7 +53,7 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
     <>
     <HomeStatus onMonitor={onMonitor} onFocus={onFocus} />
     <div className="home">
-      {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
+      {!sel && <HomeOverview onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
       <Console planEv={ev} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} />

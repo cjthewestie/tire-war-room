@@ -440,19 +440,13 @@
 
 /* 今日工廠概況 (HomeOverview): the plan column when nothing needs a human — summaries and links, never blank */
 .home-ov .po-body { gap: 14px; }
-.ov-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
-.ov-head h2 { margin: 0; font-size: 16px; font-weight: 700; }
+.ov-head { display: grid; gap: 4px; }
+.ov-head h2 { margin: 0; font-size: 19px; font-weight: 700; color: var(--accent); }
+.ov-next1 { margin: 0; font-size: 14px; color: var(--ink); }
 .ov-sec { display: grid; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
 .ov-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-faint); letter-spacing: .04em; }
-.ov-h .panel-link { letter-spacing: 0; font-weight: 500; }
 .ov-empty { margin: 0; font-size: 13.5px; }
-.ov-prog { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.ov-prog li { display: grid; grid-template-columns: 3.5em minmax(60px, 1fr) auto auto; align-items: center; gap: 4px 10px; font-size: 13.5px; }
-.ov-prog .ov-pn { font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ov-prog .ov-pn b { font-size: 15px; }
-.ov-prog .ov-pr { font-size: 12.5px; white-space: nowrap; min-width: 9.5em; text-align: right; }
 .ov-line { margin: 0; display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: 14px; }
-.ov-line.has-bad span:last-child { color: var(--ink); }
 .ov-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; }
 .ov-list > li { display: grid; grid-template-columns: 4.2em minmax(0, 1fr); gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border); font-size: 13.5px; }
 .ov-list > li:last-child { border-bottom: 0; }
@@ -473,8 +467,6 @@ a.ov-row:hover { background: var(--panel-2); }
 .ov-tag.t-decide { background: var(--panel-3); color: var(--info); }
 @media (max-width: 759px) {
   .home > .home-ov .po-body { overflow: visible; }
-  .ov-prog li { grid-template-columns: 3.5em minmax(0, 1fr) auto; }
-  .ov-prog .ov-pr { grid-column: 2 / -1; text-align: left; min-width: 0; }
   .ov-row { grid-template-columns: 3.6em minmax(0, 1fr); }
   .ov-row .ov-tags { grid-column: 2; justify-content: flex-start; }
   .rs-link { margin-left: 0; }

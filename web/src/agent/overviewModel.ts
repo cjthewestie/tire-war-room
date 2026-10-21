@@ -1,25 +1,8 @@
 // 今日工廠概況 (HomeOverview) data, built by code from what the state already carries — no new API:
-// the machine one-liner (detail stays on 產線監控) and 接下來 (prototype v12: 「告訴你下一件會發生的事」).
-import type { MachineTile, ScheduleVersion, Shift, WorldSnapshot } from '../contracts'
-import { STATUS_LABEL } from '../components/common'
+// 接下來 (prototype v12: 「告訴你下一件會發生的事」).
+import type { ScheduleVersion, Shift, WorldSnapshot } from '../contracts'
 import { TEAM_LABELS, machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, fmtMD, ms } from '../format'
-import { isAbnormal } from '../store'
-
-const ORDER: MachineTile['status'][] = ['running', 'idle', 'warning', 'alarm', 'stopped', 'out_of_service', 'offline']
-
-/** 「硫化機 11 台：運轉 10・停用 1」 and 「其他機台 17 台：正常 16・異常 1」. */
-export function machineSummary(tiles: MachineTile[]): { press: string | null; other: string | null; bad: number } {
-  const press = tiles.filter((m) => m.line === 'CURE')
-  const other = tiles.filter((m) => m.line !== 'CURE')
-  const counts = ORDER.map((s) => [s, press.filter((m) => m.status === s).length] as const).filter(([, n]) => n > 0)
-  const otherBad = other.filter((m) => isAbnormal(m.status)).length
-  return {
-    press: press.length ? `硫化機 ${press.length} 台：${counts.map(([s, n]) => `${STATUS_LABEL[s]} ${n}`).join('・')}` : null,
-    other: other.length ? `其他機台 ${other.length} 台：正常 ${other.length - otherBad}${otherBad ? `・異常 ${otherBad}` : ''}` : null,
-    bad: tiles.filter((m) => isAbnormal(m.status)).length,
-  }
-}
 
 export interface Upcoming { key: string; t: number; when: string; text: string }
 
