@@ -96,6 +96,7 @@ export class DemoCamera {
   /** test hook: every frame's largest step (to prove there are no cuts) */
   maxStep = 0
   private last = new THREE.Vector3()
+  trace: [number, number, number, number][] = []
 
   setShot(shot: Shot, machine: string | null) {
     const key = `${shot.kind}|${'close' in shot && shot.close ? 1 : 0}|${shot.kind === 'incident' ? machine ?? '' : ''}`
@@ -112,6 +113,7 @@ export class DemoCamera {
     this.flight = null
     this.key = ''
     this.maxStep = 0
+    this.trace = []
   }
 
   update(camera: THREE.PerspectiveCamera, now: number) {
@@ -149,6 +151,8 @@ export class DemoCamera {
       if (u >= 1) this.flight = null
     }
     this.maxStep = Math.max(this.maxStep, pos.distanceTo(this.last))
+    // test trace (e2e: no cuts): the camera's own clock and position, so a stalled frame is not mistaken for a jump
+    if (this.trace.length < 20000) this.trace.push([now, pos.x, pos.y, pos.z])
     this.last.copy(pos)
     camera.position.copy(pos)
     this.look.copy(look)
