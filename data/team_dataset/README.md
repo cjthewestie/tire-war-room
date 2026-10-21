@@ -70,6 +70,20 @@ d8fd4158eca460a646363aa632edc26301465b2909914ffff2547ee1abe77ede  ../orders_seed
 26469f052fb2f0878bd703a27919a6292d1e9e53b79d4f5f52f32cc9278f52fe  ../orders_synthetic.xlsx
 ```
 
+A third, independent set lives in the built-in seed of `warroom/kb/orders_db.py` (used only when no workbook is imported and there is no sim) and in `data/make_orders_seed.py`. Its 9 older names, which resembled real companies, were replaced too (#A-311 uses 永固機械股份有限公司, the same customer as in the dataset). `make_orders_seed.py` is out of date and was edited but **not run**; no dataset was regenerated.
+
+| Was | Now |
+|---|---|
+| 南亞堆高機 (#S-101) | 興旺堆高機股份有限公司 |
+| 台灣搬運車 (#S-102) | 阿財搬運車行 |
+| 中部物流設備 (#S-103) | 順手物流設備有限公司 |
+| 台塑工業車輛 (#A-311) | 永固機械股份有限公司 |
+| 高雄港機具 (#A-309) | 港都機具工業有限公司 |
+| 東元物流 (#A-315) | 元氣滿滿物流股份有限公司 |
+| 長榮貨櫃場 (#A-318) | 海派貨櫃場有限公司 |
+| 台中港務 (#B-207) | 青海碼頭作業有限公司 |
+| 中鋼運輸 (#B-212) | 鋼鐵人運輸股份有限公司 |
+
 Not changed, so they may still hold the old names: the uncommitted `synthetic_factory_1.db` (its orders table), `data/runtime/` (history.sqlite, audit.jsonl and the memory files derived from it), and the historical logs in `bench/results/`.
 
 ## How the war room uses it

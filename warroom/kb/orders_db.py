@@ -200,17 +200,17 @@ class OrdersDB:
         D = lambda d=0, h=0, m=0: datetime.combine(ref + timedelta(days=d), time(h, m), tzinfo=F.TZ)
         orders = [
             # small 38/100
-            ("#S-101", "S", 40, 30, ref + timedelta(days=4), "南亞堆高機", "S-24A", 1),
-            ("#S-102", "S", 30, 8, ref + timedelta(days=9), "台灣搬運車", "S-24B", 0),
-            ("#S-103", "S", 26, 0, ref + timedelta(days=16), "中部物流設備", "S-24A", 0),
-            ("#A-311", "S", 4, 0, ref + timedelta(days=3), "台塑工業車輛", "S-24A", 3),   # next mold on CURE-07, due in 3 days (page 11)
+            ("#S-101", "S", 40, 30, ref + timedelta(days=4), "興旺堆高機股份有限公司", "S-24A", 1),
+            ("#S-102", "S", 30, 8, ref + timedelta(days=9), "阿財搬運車行", "S-24B", 0),
+            ("#S-103", "S", 26, 0, ref + timedelta(days=16), "順手物流設備有限公司", "S-24A", 0),
+            ("#A-311", "S", 4, 0, ref + timedelta(days=3), "永固機械股份有限公司", "S-24A", 3),   # next mold on CURE-07, due in 3 days (page 11)
             # medium 12/100
-            ("#A-309", "M", 20, 12, ref + timedelta(days=12), "高雄港機具", "M-28A", 1),
-            ("#A-315", "M", 40, 0, ref + timedelta(days=40), "東元物流", "M-28B", 0),
-            ("#A-318", "M", 40, 0, ref + timedelta(days=60), "長榮貨櫃場", "M-28B", 0),
+            ("#A-309", "M", 20, 12, ref + timedelta(days=12), "港都機具工業有限公司", "M-28A", 1),
+            ("#A-315", "M", 40, 0, ref + timedelta(days=40), "元氣滿滿物流股份有限公司", "M-28B", 0),
+            ("#A-318", "M", 40, 0, ref + timedelta(days=60), "海派貨櫃場有限公司", "M-28B", 0),
             # large 8/100: 大胎 #07 belongs to #B-207 (page 2)
-            ("#B-207", "L", 50, 8, ref + timedelta(days=45), "台中港務", "L-34A", 2),
-            ("#B-212", "L", 50, 0, ref + timedelta(days=80), "中鋼運輸", "L-34A", 0),
+            ("#B-207", "L", 50, 8, ref + timedelta(days=45), "青海碼頭作業有限公司", "L-34A", 2),
+            ("#B-212", "L", 50, 0, ref + timedelta(days=80), "鋼鐵人運輸股份有限公司", "L-34A", 0),
         ]
         self._insert("orders", EXCEL_SHEETS["訂單"][1],
                      [(o[0], o[1], o[2], o[3], o[4].isoformat(), o[5], o[6], o[7]) for o in orders])
