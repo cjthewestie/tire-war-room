@@ -1,7 +1,8 @@
 """問戰情室的對話記憶 (issue #95): what one conversation was just talking about, so 「那張單呢？」 can be answered.
 
 What is kept (and only this): the order ids and event ids most recently talked about, which single order was the
-focus, and the date scope ("today" and its date). NO order data: no quantity, progress, machine or due time is ever
+focus, the date scope ("today" and its date), and the last machine question: its text, its read steps (tool + args)
+and the machine ids it asked about, so 「那 8 號呢？」 repeats that question for 8 號 (issue #182). NO order data: no quantity, progress, machine or due time is ever
 stored here. Every follow-up looks the order up again (query_orders_shifts), so a reschedule, an inserted order or
 progress since the last answer shows up in the next one, and nothing here can go stale.
 
@@ -32,13 +33,19 @@ class ConvContext:
     event_ids: list[str] = field(default_factory=list)        # event ids named in the conversation, most recent first
     date_scope: str | None = None                  # ISO date the last order answer was about ("today" at that time)
     updated: float = 0.0
+    # issue #182: the last question and, for a machine question, its read steps and machines (ids and args only, no
+    # readings): a follow-up 「那 8 號呢？」 runs the same steps for the new machine, looked up again
+    last_question: str | None = None
+    last_steps: list[dict[str, Any]] = field(default_factory=list)
+    last_machines: list[str] = field(default_factory=list)
 
     def empty(self) -> bool:
         return not (self.focus_order or self.recent_orders or self.event_ids)
 
     def as_dict(self) -> dict[str, Any]:
         return {"focus_order": self.focus_order, "recent_orders": list(self.recent_orders),
-                "event_ids": list(self.event_ids), "date_scope": self.date_scope}
+                "event_ids": list(self.event_ids), "date_scope": self.date_scope, "last_question": self.last_question,
+                "last_machines": list(self.last_machines)}
 
 
 class AskMemory:
@@ -65,12 +72,16 @@ class AskMemory:
             c = self._conv.get(key) if key else None
             if c is None:
                 return ConvContext()
-            return ConvContext(c.focus_order, list(c.recent_orders), list(c.event_ids), c.date_scope, c.updated)
+            return ConvContext(c.focus_order, list(c.recent_orders), list(c.event_ids), c.date_scope, c.updated,
+                               c.last_question, [dict(x) for x in c.last_steps], list(c.last_machines))
 
     def remember(self, actor: str, conversation_id: str | None, *, orders: list[str] | None = None,
-                 focus: str | None = None, events: list[str] | None = None, date_scope: str | None = None) -> None:
+                 focus: str | None = None, events: list[str] | None = None, date_scope: str | None = None,
+                 question: str | None = None, steps: list[dict[str, Any]] | None = None,
+                 machines: list[str] | None = None) -> None:
         """Record what the last answer was about. `orders` replaces the recent order ids (an answer about one
-        order sets `focus` too); event ids accumulate."""
+        order sets `focus` too); event ids accumulate. `question` replaces the last question, and with it the last
+        read steps and machines (an order or machine-less question leaves none to repeat)."""
         key = self._key(actor, conversation_id)
         if key is None:
             return
@@ -84,6 +95,10 @@ class AskMemory:
             for e in events or []:
                 c.event_ids = [e] + [x for x in c.event_ids if x != e]
             c.event_ids = c.event_ids[:MAX_IDS]
+            if question is not None:
+                c.last_question = question[:300]
+                c.last_steps = [dict(x) for x in (steps or [])][:8]
+                c.last_machines = list(dict.fromkeys(machines or []))[:MAX_IDS]
             c.updated = self._clock()
             self._conv[key] = c
             if len(self._conv) > self.max_conversations:

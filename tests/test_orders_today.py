@@ -332,7 +332,8 @@ def test_memory_holds_ids_only_and_expires():
     mem = AskMemory(ttl_s=10, max_conversations=2, clock=lambda: t[0])
     mem.remember("u", "a", orders=["#A-311"], focus="#A-311", events=["EV-20261003-021420-CURE-07"], date_scope="2026-10-03")
     assert mem.get("u", "a").as_dict() == {"focus_order": "#A-311", "recent_orders": ["#A-311"],
-                                          "event_ids": ["EV-20261003-021420-CURE-07"], "date_scope": "2026-10-03"}
+                                          "event_ids": ["EV-20261003-021420-CURE-07"], "date_scope": "2026-10-03",
+                                          "last_question": None, "last_machines": []}   # issue #182: no readings
     t[0] = 11
     assert mem.get("u", "a").empty()                                  # idle past the TTL: gone
     t[0] = 12
