@@ -4,7 +4,6 @@ import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
 import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
-import { useDemoCtx } from '../demo/useDemo'
 
 const Q = new URLSearchParams(location.search)
 /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
@@ -33,7 +32,6 @@ export function DemoStrip() {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
   const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
-  const guided = useDemoCtx()      // the war room's guided demo, shared with the 3D factory (null inside the 3D page)
   if (!transport) return null
   const mock = transport.mode === 'mock'
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
