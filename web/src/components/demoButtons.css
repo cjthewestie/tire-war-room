@@ -10,6 +10,8 @@
 .dbtn-row button.busy { opacity: 1; border-color: var(--accent, #76b900); }
 .dbtn-toast { position: absolute; left: 0; bottom: calc(100% + 6px); padding: 4px 10px; border-radius: 8px; background: var(--accent-soft, #1e3309); color: var(--ink, #eee); border: 1px solid var(--accent, #76b900); white-space: nowrap; max-width: calc(100vw - 20px); overflow: hidden; text-overflow: ellipsis; }
 .dbtn-toast.bad { background: rgb(var(--alarm-rgb, 195 48 42) / .18); border-color: rgb(var(--alarm-rgb, 195 48 42)); }
+/* the guided demo bar sits in the same corner: step above it */
+.demo-on .dbtn-warroom { bottom: calc(var(--nav-h, 0px) + 58px + env(safe-area-inset-bottom)); }
 /* /factory：右下角（左上是 HUD、左下是按鍵提示；手機畫面升起時蓋在它上面） */
 .dbtn-factory { left: auto; right: 12px; bottom: 12px; flex-direction: row-reverse; z-index: 12; }
 .dbtn-factory .dbtn-pill { order: 1; background: var(--c-paper-solid, #fff); color: var(--c-ink, #333); border-color: transparent; }
