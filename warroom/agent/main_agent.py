@@ -254,7 +254,9 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
 # the supervisor in the third person: the model's reading of the message written as the reply (issue #195)
-_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|主管(?:要|說|希望|打算)|(?:問|跟|向)主管|(?:你|您)說的「[^」]*」(?:是|應該|可能)")
+_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|主管(?:要|說|希望|打算)|(?:問|跟|向)主管|(?:你|您)說的「[^」]*」(?:是|應該|可能)"
+                       # and its input's field names (「根據 context，目前沒有 waiting_plan（是 null）」, live run 10-22)
+                       r"|waiting_plan|earlier_messages|previous_turn|pinned_constraints|根據 ?context|null")
 MAX_TOKENS = 350           # a reply is cut at MAX_CHARS anyway; 500 let it write 400-token lists (6–8 s, real run 10-22)
 MAX_CHARS = 260            # a chat bubble, not a report; the full data stays in the reply's tool line
 MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
