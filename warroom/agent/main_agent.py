@@ -1427,6 +1427,14 @@ class MainAgent:
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": f"回覆裡的 {'、'.join(bad[:5])} 不在查到的資料裡。只用上面工具結果的數字重寫回覆，不要自己算或猜。"}]
                 continue
+            if bad and not regrounded and not last and not out["steps"] and "一般知識" not in reply:
+                # issue #195: no keyword asks for a read before the model, so the check is on its reply: a plant number
+                # with nothing looked up (「7 號機目前溫度 135°C」, live run 10-22) → once: look it up, then answer
+                regrounded = True
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": f"回覆裡的 {'、'.join(bad[:5])} 不在任何查到的資料裡。先呼叫工具查"
+                          "（機台現況、溫度用 read_sensors），再只依查到的結果回答，不要猜。"}]
+                continue
             want = control_intent(t) if self._control is not None else None
             if (want == "replan_task" and _BARE_CMD_RX.match(t) and not out["event_id"]
                     and self._control.resolve("") is None and not getattr(self._control, "candidates", list)()):
