@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import json
 import math
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -158,6 +159,12 @@ def sop_search(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     return sop_search_tool(ctx, args)
 
 
+def _norm_order(oid: Any) -> str:
+    """An order id compared the way people write it: '#a-311', 'A311', ' SO-004 ' -> 'A-311' / 'SO-004'."""
+    s = re.sub(r"\s", "", str(oid)).lstrip("#").upper()
+    return re.sub(r"^([A-Z]+)(\d)", r"\1-\2", s)
+
+
 def query_orders_shifts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any]:
     """Orders/shifts DB. With a live sim (the plant's truth) the answer comes from the sim's orders
     and shifts plus the ACTIVE schedule's upcoming jobs, so it agrees with what the solver sees.
@@ -173,7 +180,9 @@ def query_orders_shifts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
     t_from = a.from_ts or now - timedelta(hours=12)
     t_to = a.to_ts or now + timedelta(days=3)
     sim = ctx.sim
-    orders = [o for o in sim.orders() if not a.order_ids or o.id in a.order_ids]
+    # issue #182: 「SO-004」「#so-004」「A-311」 name the same orders as the plant's ids (case, '#' and spaces ignored)
+    want = {_norm_order(o) for o in a.order_ids or []}
+    orders = [o for o in sim.orders() if not want or _norm_order(o.id) in want]
     shifts = [s for s in sim.shifts() if s.end > t_from and s.start < t_to]
     gaps, gap_details = [], []
     for s in sorted(shifts, key=lambda s: s.start):
@@ -197,7 +206,7 @@ def query_orders_shifts(ctx: ToolContext, args: dict[str, Any]) -> dict[str, Any
                               key=lambda j: j.mold_in)
             next_jobs += upcoming[:2]
         if a.order_ids:
-            next_jobs = [j for j in next_jobs if j.order_id in a.order_ids]
+            next_jobs = [j for j in next_jobs if _norm_order(j.order_id) in want]
         next_jobs.sort(key=lambda j: j.mold_in)
     out = {"orders": [o.model_dump(mode="json") for o in orders],
            "shifts": [s.model_dump(mode="json") for s in shifts],

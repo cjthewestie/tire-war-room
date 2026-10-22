@@ -62,16 +62,25 @@ _MACHINES = "；".join(
 PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一個問題，你只決定要查哪些資料，不回答、不做任何變更。
 只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
 規則：
+0. 只有打招呼、道謝、閒聊、看不懂的字才把 steps 留空陣列。人力、班表、加班、缺人、交期、訂單、核准、事件、通知、
+   怎麼處理都是工廠的問題，一定要查。
 1. 最多 {ASK_MAX_STEPS} 步，只能用下列唯讀工具；你沒有任何寫入、排程或通知的權限。
-0. 不是工廠的問題（打招呼、道謝、閒聊、看不懂的字）時，steps 留空陣列，不要查任何機台。
 2. 機台用代號（例如 CURE-07）。問題沒指名機台時，查「目前異常機台」。
-3. 問到人力、班表、交期、下一模 → query_orders_shifts；問到怎麼處理 → sop_search。
+3. 問到人力、班表、加班、缺誰、交期、下一模 → 只用 query_orders_shifts 一步；問到怎麼處理、過熱怎麼辦 → sop_search，
+   再加 read_sensors 讀該機台現況；問核准、事件進度 → steps 留空（程式會附上進行中的事件）。
+4. 只查回答這個問題需要的資料，不要順便多查：問溫度、讀值 → read_sensors；問會不會再掉、接下來 → read_sensors 加
+   predict_anomaly；問硫化要多久、會延長多久 → cure_formula（只給 press_id）。問溫度不要去查排程或硫化時數。
+5. 有 previous_question 且這題是接續（例如「那 8 號呢？」）時，照上一題的意圖只換對象，不要擴大查詢。
 工具：
 {_CATALOGUE}
 機台代號：{_MACHINES}"""
 
-ANSWER_SYSTEM = """你是實心胎工廠戰情室的查詢助理。只根據「查詢結果」用繁體中文回答主管，最多 3 句。
-數字照抄查詢結果，不估算、不補充結果裡沒有的事；查不到就直說查不到。你不能做任何變更，需要變更時請主管走事件核准流程。"""
+ANSWER_SYSTEM = """你是實心胎工廠戰情室的查詢助理。只根據「查詢結果」用繁體中文回答主管的問題，最多 3 句。
+1. 第一句就直接回答主管問的那件事，並說出主詞（哪台機台、哪張訂單）：問溫度就答溫度，問何時完成就答預計完成，問有沒有就先答有或沒有，問怎麼處理就先講 SOP 的處置步驟。
+2. 只用和問題有關的查詢結果；和問題無關的結果（例如問溫度時的硫化時數、排程、人力）不要提。
+3. 數字照抄查詢結果，不估算、不補充結果裡沒有的事（沒有讀值就不要說溫度高低或正不正常）；不要加「目前無…資訊」「如需…請…」這類填充句。
+4. 結果裡的「無」也是答案（「人力缺口：無」就是沒有缺人）。被問的資料真的不在結果裡時，具體說查不到什麼（例如「查詢結果裡沒有核准卡的資料」），不要只回「查不到」。
+5. 你不能做任何變更；主管要求變更時，請他走事件核准流程。"""
 
 
 def ask_plan_schema() -> dict[str, Any]:
@@ -104,22 +113,35 @@ _STATUS_RX = re.compile(r"狀況|狀態|怎樣|怎麼樣|如何|溫度|異常|�
 
 
 # ------------------------------------------------------------------ mock planner (no model)
-ORDER_RX = re.compile(r"#\s?[A-Z]-?\d{2,4}", re.IGNORECASE)
+# issue #182: the plant has '#A-311' and the team dataset's 'SO-004' / 'SO-017'; both are order ids ('#' optional when
+# written with a hyphen). CURE-07 / BOND-01 are machines (4 letters), never orders.
+ORDER_RX = re.compile(r"#\s?[A-Z]{1,2}-?\d{2,4}\b|(?<![A-Z0-9-])[A-Z]{1,2}-\d{2,4}\b", re.IGNORECASE)
 
 
 def orders_in(text: str) -> list[str]:
-    """Order ids named in a text, written the way the plant writes them: '#A-311', '#a311', '# A-311' -> '#A-311'."""
+    """Order ids named in a text, written the way the plant writes them: '#A-311', '#a311', '# A-311' -> '#A-311';
+    'SO-004', 'so-004', '#SO004' -> 'SO-004' (one-letter ids carry the '#', the dataset's two-letter ones do not)."""
     out: list[str] = []
     for m in ORDER_RX.findall(text):
-        s = re.sub(r"\s", "", m).upper()
-        if "-" not in s:
-            s = f"{s[:2]}-{s[2:]}"
+        s = re.sub(r"^([A-Z]+)(\d)", r"\1-\2", re.sub(r"\s", "", m).upper().lstrip("#"))
+        s = f"#{s}" if len(s.split("-")[0]) == 1 else s
         if s not in out:
             out.append(s)
     return out
 
 
 _CHANGE_RX = re.compile(r"停掉|停機|關掉|重排|調人|調 ?\d* ?人|加班|核准|改成|設定|通知")
+# a request tells the plant to do it (「把 7 號機停掉」「幫我重排」「通知維修組」); a question asks about it
+# (「核准卡在等什麼？」「今天有加班嗎？」「誰通知了維修組？」) and gets a normal grounded answer (issue #182)
+_IMPERATIVE_RX = re.compile(r"^\s*(?:請(?!問)|麻煩(?!問)|現在就|直接)|把|(?:幫我|幫忙|給我)(?!查|看|確認|找|問|說)|馬上|立刻|趕快")
+_QUESTION_RX = re.compile(r"[?？]\s*$|嗎|什麼|甚麼|什摸|啥|誰|哪|幾|多少|有沒有|有無|是否|是不是|為什麼|為何|怎麼|如何|了沒|沒有|狀態|進度|在等")
+
+
+def change_request(question: str) -> bool:
+    """A question that asks for a change (facts only, the approval flow note), not one that asks about a change."""
+    if not _CHANGE_RX.search(question):
+        return False
+    return bool(_IMPERATIVE_RX.search(question)) or not _QUESTION_RX.search(question)
 _PRESS_RX = re.compile(r"(\d{1,2})\s*號(?:硫化)?機?")
 _ID_RX = re.compile(r"\b(?:CURE-\d{2}|[A-D]-[A-Z]+|BOND-01)\b")
 
@@ -157,7 +179,7 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
     q = question
     named = machines_in(q)
     # 「#A-311 會不會晚交？」 was answered 查不到 with no tool: the order words and the order ids it names
-    orders = re.search(r"訂單|交期|班|人力|缺|排程|下一模|延誤|遲交|晚交|會不會晚|出貨|交貨", q)
+    orders = re.search(r"訂單|交期|班|人力|人手|缺|排程|下一模|延誤|遲交|晚交|會不會晚|出貨|交貨", q)
     order_ids = orders_in(q)
     sop = re.search(r"SOP|sop|怎麼處理|處置|怎麼辦|步驟|程序", q)
     # no machine named: the abnormal ones, but only for a status question (not staffing or SOP). Text
@@ -181,6 +203,135 @@ def mock_plan(question: str, context: dict[str, Any]) -> AskPlan:
         steps.append(AskStep(tool=ToolName.QUERY_ORDERS_SHIFTS.value, args={}))
     return AskPlan(steps=steps[:ASK_MAX_STEPS],
                    rationale="規則模式：依問題關鍵字選工具" if steps else "規則模式：看不出要查什麼，不猜機台")
+
+
+# ------------------------------------------------------------------ follow-ups: 「那 8 號呢？」 (issue #182)
+_FOLLOW_FILLER_RX = re.compile(r"[那麼么換還有再看來和跟與及也呢勒咧嘞哩的?？。!！~～,，、\s]*")
+
+
+def follow_up_machines(question: str) -> list[str]:
+    """The machines of a bare follow-up (「那8號呢」「8號機呢？」「換 CURE-09」): the question is only machine names and
+    filler. A question that says anything more (「8號會不會掉？」) is not a bare follow-up: [] (the usual planner)."""
+    mids = machines_in(question)
+    if not mids:
+        return []
+    rest = _PRESS_RX.sub("", question)
+    rest = re.sub(_ID_RX.pattern, "", rest, flags=re.IGNORECASE)
+    compact = rest.replace(" ", "")
+    for m in sorted(F.MACHINES, key=lambda m: -len(m.name)):
+        compact = compact.replace(machine_label(m.id).replace(" ", ""), "").replace(m.name, "")
+    compact = re.sub(r"[A-D]線", "", compact)
+    return mids if _FOLLOW_FILLER_RX.fullmatch(compact) else []
+
+
+def _step_machines(steps: list[AskStep] | list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    for s in steps:
+        args = (s.args if isinstance(s, AskStep) else s.get("args")) or {}
+        for k in ("machine_ids", "press_ids"):
+            out += [str(x) for x in args.get(k) or []]
+        for k in ("machine_id", "press_id"):
+            if args.get(k):
+                out.append(str(args[k]))
+    return [m for m in dict.fromkeys(out) if m in F.MACHINE_BY_ID]
+
+
+def follow_up_plan(conv: ConvContext, mids: list[str]) -> AskPlan | None:
+    """The last machine question's read steps again, for the follow-up's machines. Only the machine args change; a step
+    that cannot apply to them (cure_formula for a mill) is left out. None: nothing to repeat."""
+    if not conv.last_steps or not mids:
+        return None
+    presses = [m for m in mids if m in F.CURE_PRESS_IDS]
+    steps: list[AskStep] = []
+    for s in conv.last_steps:
+        tool, args = s.get("tool"), dict(s.get("args") or {})
+        if tool == ToolName.READ_SENSORS.value:
+            args["machine_ids"] = list(mids)
+        elif tool == ToolName.PREDICT_ANOMALY.value:
+            args["machine_id"] = mids[0]
+        elif tool == ToolName.CURE_FORMULA.value:
+            if not presses:
+                continue
+            args = {"press_id": presses[0]}
+        elif tool == ToolName.QUERY_ORDERS_SHIFTS.value and "press_ids" in args:
+            if not presses:
+                continue
+            args["press_ids"] = presses
+        steps.append(AskStep(tool=str(tool), args=args))
+    if not steps:
+        return None
+    labels = "、".join(machine_label(m) for m in mids)
+    return AskPlan(steps=steps[:ASK_MAX_STEPS], rationale=f"接續上一題「{conv.last_question}」，只把對象換成 {labels}")
+
+
+# ------------------------------------------------------------------ the plan holds only what the question needs
+# Spark 10-22: for 「現在7號機溫度」 the real model planned sensors + forecast + cure_formula + orders. A step is kept only
+# when the question asks for its kind of fact; a plan the rules would empty stays as the model gave it (issue #182)
+_NEEDS: dict[str, re.Pattern[str]] = {
+    ToolName.PREDICT_ANOMALY.value: re.compile(r"預測|會不會|接下來|之後|趨勢|多久|再掉|還會|穩不穩|風險"),
+    ToolName.CURE_FORMULA.value: re.compile(r"硫化|多久|幾小時|時數|延長|完成|做好|出模|補償|公式"),
+    ToolName.QUERY_ORDERS_SHIFTS.value: re.compile(
+        r"訂單|交期|班|人力|人手|缺|排程|下一模|入模|延誤|遲交|晚交|出貨|交貨|影響|單|生產|工單|進度"),
+    ToolName.SOP_SEARCH.value: re.compile(r"SOP|sop|處理|處置|怎麼辦|步驟|程序|規定|標準|該怎麼"),
+}
+
+
+def prune_plan(question: str, plan: AskPlan) -> tuple[AskPlan, list[dict[str, Any]]]:
+    """(the plan with only the steps the question needs, the steps left out)."""
+    named = bool(machines_in(question)) or bool(_STATUS_RX.search(question))
+    keep: list[AskStep] = []
+    dropped: list[dict[str, Any]] = []
+    for st in plan.steps:
+        rx = _NEEDS.get(st.tool)
+        need = (named or not _NEEDS[ToolName.QUERY_ORDERS_SHIFTS.value].search(question))             if st.tool == ToolName.READ_SENSORS.value else (rx is None or bool(rx.search(question)))
+        (keep if need else dropped).append(st if need else st.model_dump(mode="json"))
+    if not keep or not dropped:
+        return plan, []
+    return plan.model_copy(update={"steps": keep}), dropped
+
+
+# ------------------------------------------------------------------ what the answer may use
+_EVENT_Q_RX = re.compile(r"核准|事件|通知|卡在|在等|處理中|異常|維修|待辦")
+_STATE_ZH = {"detected": "剛偵測到", "classify": "判讀中", "plan": "規劃中", "simulate": "模擬中", "gate": "安全檢查中",
+             "await_approval": "等待主管核准", "execute": "執行中", "verify": "驗證中", "replan": "重新規劃中",
+             "closed": "已結案", "safe_stop": "安全停止"}
+
+
+def context_facts(question: str, context: dict[str, Any]) -> list[str]:
+    """Code-written lines from the plant context the answer may use, only when the question is about events /
+    approvals (「核准卡在等什麼？」): the open events and their state. Nothing else is added."""
+    if not _EVENT_Q_RX.search(question):
+        return []
+    evs = context.get("open_events") or []
+    if not evs:
+        return ["進行中事件：無（目前沒有任何事件在等待核准或處理中）"]
+    return ["進行中事件：" + "；".join(
+        f"{e.get('id')}（{machine_label(e['machine_id']) if e.get('machine_id') else '無機台'}，"
+        f"{_STATE_ZH.get(str(e.get('state')), str(e.get('state')))}"
+        + (f"，目標：{e['goal']}" if e.get("goal") else "") + "）" for e in evs[:5])]
+
+
+def relevant_results(question: str, results: list[AskStepResult], mids: list[str] | None = None) -> list[AskStepResult]:
+    """The results about what the question names (its machines / orders); all of them when it names neither.
+    A machine's part of a multi-machine reading is cut out, so 8 號's answer never carries 7 號's numbers."""
+    mids = mids or machines_in(question)
+    oids = {o.lstrip("#") for o in orders_in(question)}
+    if not mids and not oids:
+        return [r for r in results if r.ok]
+    out: list[AskStepResult] = []
+    for r in results:
+        if not r.ok:
+            continue
+        a = r.args or {}
+        named = set(_step_machines([{"args": a}]))
+        if oids and {str(o).lstrip("#").upper() for o in a.get("order_ids") or []} & oids:
+            out.append(r)
+        elif mids and named & set(mids):
+            if r.tool == ToolName.READ_SENSORS.value and len(named) > 1:
+                parts = [p for p in r.summary.split("；") if any(p.startswith(machine_label(m)) for m in mids)]
+                r = r.model_copy(update={"summary": "；".join(parts) or r.summary})
+            out.append(r)
+    return out or [r for r in results if r.ok]
 
 
 # ------------------------------------------------------------------ result -> one line
@@ -220,7 +371,7 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
         if tool is ToolName.QUERY_ORDERS_SHIFTS:
             bits = []
             gaps = data.get("gaps") or []
-            bits.append("人力缺口：" + ("、".join(gaps) if gaps else "無"))
+            bits.append("人力缺口：" + ("、".join(gaps) if gaps else "無（各班排班人數都達到需求，沒有缺人）"))
             jobs = data.get("next_jobs") or []
             if jobs:
                 bits.append("下一模（共 %d 筆，列前 3）：" % len(jobs) + "、".join(
@@ -254,14 +405,16 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
 def _orders_line(data: dict[str, Any], want: list[str]) -> str:
     """The asked orders: done/qty, due date and their next mold-in / de-mold; an id the plant does not have
     says 沒有這張訂單 (never another order's due date)."""
-    have = {str(o.get("id")): o for o in data.get("orders") or []}
+    key = lambda s: str(s).replace(" ", "").lstrip("#").upper()        # 'SO-004' == '#so-004' (issue #182)
+    have = {key(o.get("id")): o for o in data.get("orders") or []}
     bits = []
-    for oid in want:
-        o = have.get(oid)
+    for asked in want:
+        o = have.get(key(asked))
         if o is None:
-            bits.append(f"沒有這張訂單：{oid}")
+            bits.append(f"沒有這張訂單：{asked}")
             continue
-        jobs = [j for j in data.get("next_jobs") or [] if j.get("order_id") == oid][:2]
+        oid = str(o.get("id"))
+        jobs = [j for j in data.get("next_jobs") or [] if key(j.get("order_id")) == key(oid)][:2]
         when = "、".join(f"{machine_label(j['press_id'], short=True)} {str(j['mold_in'])[5:16].replace('T', ' ')} 入模"
                          f"・{str(j['demold'])[5:16].replace('T', ' ')} 出模" for j in jobs if j.get("demold"))
         bits.append(f"{oid}（{o.get('size', '')}，{o.get('done', 0)}/{o.get('qty', '')}，交期 {o.get('due')}）"
@@ -318,20 +471,44 @@ def bind_cure_formula(tools: Any, args: dict[str, Any], press_hint: str | None =
 _NUM_RX = re.compile(r"\d+(?:\.\d+)?")
 
 
-def ungrounded_numbers(answer: str, question: str, results: list[AskStepResult]) -> list[str]:
-    """Numbers in the answer that appear neither in the tool summaries nor in the question.
-    Code checks the model: one invented number and the model's answer is not used."""
-    source = question + " " + " ".join(r.summary for r in results if r.ok)
+def ungrounded_numbers(answer: str, question: str, results: list[AskStepResult], facts: list[str] | None = None
+                       ) -> list[str]:
+    """Numbers in the answer that appear neither in the tool summaries, the code's facts nor in the question.
+    Code checks the model: an invented number never reaches the supervisor."""
+    source = question + " " + " ".join(r.summary for r in results if r.ok) + " " + " ".join(facts or [])
     known = set(_NUM_RX.findall(source))
     known |= {n.split(".")[0] for n in known}            # "122.3" also vouches for "122"
     return [n for n in _NUM_RX.findall(answer) if n not in known]
 
 
-def template_answer(results: list[AskStepResult]) -> str:
-    ok = [r.summary for r in results if r.ok and r.summary]
+def template_answer(results: list[AskStepResult], facts: list[str] | None = None) -> str:
+    ok = [r.summary for r in results if r.ok and r.summary] + list(facts or [])
     if not ok:
         return "查不到資料：本次查詢的工具都沒有成功。"
     return "查詢結果：" + "。".join(ok) + "。"
+
+
+_SENTENCE_RX = re.compile(r"[^。！？!?\n]+[。！？!?]?")
+_BARE_NONE_RX = re.compile(r"^[\s「」]*(?:查不到|查無資料|沒有資料|無資料|不知道|無法回答)[^\d]{0,6}$")
+
+
+_CLAIMS_MISSING_RX = re.compile(r"查不到|查無|沒有[^，。；]{0,14}(?:資料|資訊|紀錄|數據)|無[^，。；]{0,6}(?:資料|資訊)")
+
+
+def claims_missing(answer: str) -> bool:
+    """The answer says the data is not there (「查詢結果裡沒有缺人資訊」)."""
+    return bool(_CLAIMS_MISSING_RX.search(answer))
+
+
+def bare_none(answer: str) -> bool:
+    """「查不到。」 with nothing said about what: not an answer when the results hold data (issue #182)."""
+    return bool(_BARE_NONE_RX.match(answer.strip()))
+
+
+def drop_ungrounded(answer: str, question: str, results: list[AskStepResult], facts: list[str] | None = None) -> str:
+    """The answer without its sentences that carry an invented number ('' when none is left)."""
+    return "".join(s for s in _SENTENCE_RX.findall(answer)
+                   if not ungrounded_numbers(s, question, results, facts)).strip()
 
 
 # ------------------------------------------------------------------ the agent
@@ -354,8 +531,12 @@ class AskAgent:
         extra = thinking_off(self.server_kind)
         return {"extra_body": extra} if extra else {}
 
-    async def _llm_plan(self, question: str, context: dict[str, Any]) -> AskPlan:
-        user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
+    async def _llm_plan(self, question: str, context: dict[str, Any], previous: str | None = None) -> AskPlan:
+        # the planner picks tools; it gets no readings to copy into args (Spark 10-03: 7 號's 115.11 °C went into
+        # 8 號's cure_formula). The previous question lets 「那 8 號呢？」 keep its intent (issue #182)
+        now = {k: v for k, v in context.items() if k != "abnormal_temp_c"}
+        user = json.dumps({"question": question, **({"previous_question": previous} if previous else {}), "now": now},
+                          ensure_ascii=False, default=str)
         r = await budget.create(  # metered; over the day's budget it raises and the keyword rules plan
             self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=400,
             messages=[{"role": "system", "content": PLAN_SYSTEM + plant.section()}, {"role": "user", "content": user}],
@@ -365,17 +546,68 @@ class AskAgent:
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
         return AskPlan.model_validate_json(text)
 
-    async def _llm_answer(self, question: str, results: list[AskStepResult]) -> str:
-        lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
+    async def _llm_answer(self, question: str, results: list[AskStepResult], facts: list[str] | None = None,
+                          feedback: tuple[str, str] | None = None) -> str:
+        """`feedback` = (the model's last answer, what was wrong with it): one rewrite, from the same results."""
+        lines = "\n".join([f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results]
+                          + [f"- 現場: {f}" for f in facts or []])
+        messages = [{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
+                    {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}]
+        if feedback:
+            messages += [{"role": "assistant", "content": feedback[0]},
+                         {"role": "user", "content": f"這個回答不能用：{feedback[1]}請只根據上面的查詢結果重寫，直接回答問題。"}]
         r = await budget.create(
             self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=300,
-            messages=[{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
-                      {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
-            **self._extra())
+            messages=messages, **self._extra())
         text = (r.choices[0].message.content or "").strip()
         if not text:
             raise ValueError("empty answer")
         return text
+
+    async def _checked_answer(self, question: str, results: list[AskStepResult], facts: list[str],
+                              mids: list[str]) -> tuple[str, dict[str, Any]]:
+        """The model's answer, checked by code (issue #182). An invented number, or a bare 「查不到」 while the results
+        hold data, gets one rewrite with the reason; a rewrite that still invents keeps only its sentences without an
+        invented number; the last resort is the results about what was asked (not every tool's summary). Exceptions
+        from the first call propagate (the caller's fallback / --strict)."""
+        has_data = any(r.ok and r.summary for r in results) or bool(facts)
+        rec: dict[str, Any] = {"ungrounded": [], "repair": None}
+
+        def problem(text: str, first: bool = False) -> str | None:
+            bad = ungrounded_numbers(text, question, results, facts)
+            if bad:
+                rec["ungrounded"] = sorted(set(rec["ungrounded"]) | set(bad))
+                return f"這些數字不在查詢結果裡：{'、'.join(bad)}。"
+            if has_data and bare_none(text):
+                return "查詢結果裡有資料，只回「查不到」沒有回答問題；結果真的沒有被問的資料時，請具體說查不到什麼。"
+            if first and has_data and claims_missing(text):
+                # Spark 10-22: 「今晚夜班缺誰？」 -> 「查詢結果裡沒有缺人資訊」 while the result said 人力缺口：無. One more look;
+                # a rewrite that still finds nothing stands (it says what is missing)
+                return ("你說查不到，但查詢結果裡有資料。請再看一次：其中若有回答問題的內容（「無」也是答案），就直接用它回答；"
+                        "真的沒有才說查不到什麼。")
+            return None
+
+        answer = await self._llm_answer(question, results, facts)
+        why = problem(answer, first=True)
+        if why is None:
+            return answer, rec
+        rec["first_answer"], rec["first_problem"] = answer, why
+        try:
+            retry = await self._llm_answer(question, results, facts, feedback=(answer, why))
+        except Exception as e:  # noqa: BLE001 - the rewrite failed: repair the first answer instead
+            rec["retry_error"] = f"{type(e).__name__}: {e}"[:200]
+            retry = answer
+        else:
+            rec["retry_answer"] = retry
+            if problem(retry) is None:
+                rec["repair"] = "retry"
+                return retry, rec
+        kept = drop_ungrounded(retry, question, results, facts)
+        if kept and not (has_data and bare_none(kept)):
+            rec["repair"] = "dropped_sentences"
+            return kept, rec
+        rec["repair"] = "template_relevant"
+        return template_answer(relevant_results(question, results, mids), facts), rec
 
     def _strict_answer(self, e: Exception, phase: str, error: str, ask_id: str, question: str, audit: AuditLog,
                        now: Any, t0: float, tp: float, results: list[AskStepResult] | None = None) -> AskAnswer:
@@ -409,8 +641,8 @@ class AskAgent:
             "memory": conv.as_dict(), "memory_generation": memory.generation if memory is not None else None},
             event_id=ask_id)
         ms = lambda: round((time.perf_counter() - t0) * 1000, 1)        # noqa: E731
-        if memory is not None and intent.events:
-            memory.remember(actor, conversation_id, events=list(intent.events))
+        if memory is not None:     # an order question leaves no machine steps for 「那 8 號呢？」 to repeat
+            memory.remember(actor, conversation_id, events=list(intent.events), question=question)
         if res.needs:                                    # nothing is guessed: the user says which order
             text = order_ask.need_text(res)
             audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": text, "intent": f"orders:{res.needs}",
@@ -453,13 +685,35 @@ class AskAgent:
             return await self._order_question(question, intent, conv, tools=tools, audit=audit, now=now, actor=actor,
                                               conversation_id=conversation_id, memory=memory, ask_id=ask_id, t0=t0)
         cold = False
+        # issue #182: 「那 8 號呢？」 right after 「現在 7 號機溫度」 is the same question for 8 號: code repeats the last
+        # question's read steps for the new machine (no broad lookup), and the answer is told what was asked
+        follow_mids = follow_up_machines(question)
+        follow = follow_up_plan(conv, follow_mids) if follow_mids else None
+        answer_q = question
+        if follow is not None:
+            answer_q = (f"{question}（接續上一題「{conv.last_question}」，只是對象換成"
+                        f"{'、'.join(machine_label(m) for m in follow_mids)}）")
+            audit.append(AuditKind.SYSTEM, "ask", {"msg": "follow-up", "previous_question": conv.last_question,
+                                                   "previous_steps": conv.last_steps, "machines": follow_mids},
+                         event_id=ask_id)
 
         # 1. PLAN
         tp = time.perf_counter()
         error: str | None = None
-        if self.mode is LLMMode.LLM:
+        if follow is not None:
+            plan = follow
+        elif self.mode is LLMMode.LLM:
             try:
-                plan = await self._llm_plan(question, context)
+                plan = await self._llm_plan(question, context, previous=conv.last_question)
+                plan, pruned = prune_plan(question, plan)
+                if pruned:
+                    audit.append(AuditKind.SYSTEM, "ask", {"msg": "plan pruned: steps the question does not ask for",
+                                                           "dropped": pruned}, event_id=ask_id)
+                if not plan.steps and (rules := mock_plan(question, context)).steps:
+                    # Spark 10-22: 「今晚夜班缺誰？」 planned as small talk. A question the keyword rules can look up
+                    # is never answered 「我不確定要查什麼」 (issue #182)
+                    error = f"model planned no step ({plan.rationale}): keyword rules used"
+                    plan = rules
             except Exception as e:  # noqa: BLE001 - model down / invalid JSON
                 error = f"{type(e).__name__}: {e}"[:300]
                 if not self.settings.llm_fallback_to_mock:
@@ -469,7 +723,10 @@ class AskAgent:
         else:
             plan = mock_plan(question, context)
         audit.append(AuditKind.LLM_CALL, "ask", {
-            "phase": "plan", "mode": self.mode.value, "model": self.settings.model if self.mode is LLMMode.LLM else None,
+            "phase": "plan", "mode": self.mode.value,
+            "model": self.settings.model if self.mode is LLMMode.LLM and follow is None else None,
+            "planner": "follow-up rule" if follow is not None else (
+                "llm" if self.mode is LLMMode.LLM and not fell_back and not error else "rules"),
             "total_ms": round((time.perf_counter() - tp) * 1000, 1), "fell_back_to_mock": fell_back, "error": error,
             "steps": [s.model_dump(mode="json") for s in plan.steps], "rationale": plan.rationale,
             "plant_sha256": plant.active_sha()}, event_id=ask_id)
@@ -477,6 +734,7 @@ class AskAgent:
         # 2. RUN: only ASK_TOOLS, at most ASK_MAX_STEPS
         press_hint = next((m for m in machines_in(question) if m in F.CURE_PRESS_IDS), None)
         results: list[AskStepResult] = []
+        ran: list[AskStep] = []
         intercepted: list[dict[str, Any]] = []
         for i, step in enumerate(plan.steps, start=1):
             why = None
@@ -495,10 +753,17 @@ class AskAgent:
                 audit.append(AuditKind.INTERCEPTED, "ask", rec, event_id=ask_id)
                 continue
             res = await self._run(tools, audit, ask_id, i, tool, step.args, press=press_hint)
+            ran.append(step)
             results.append(AskStepResult(tool=tool.value, args=step.args, ok=res.ok, error=res.error,
                                          summary=summarize(tool, res.data, step.args) if res.ok else ""))
 
-        if not plan.steps and not intercepted:
+        if memory is not None:
+            # the root question is kept through a chain of follow-ups (7 號 -> 那 8 號呢 -> 那 9 號呢)
+            memory.remember(actor, conversation_id, question=conv.last_question if follow is not None else question,
+                            steps=[st.model_dump(mode="json") for st in ran], machines=_step_machines(ran))
+
+        facts = context_facts(question, context)
+        if not plan.steps and not intercepted and not facts:
             # nothing to look up: say so (or that the model is still loading), never guess a machine
             intent = "model_cold" if cold else "unclear"
             answer = COLD_REPLY if cold else UNCLEAR_REPLY
@@ -512,22 +777,26 @@ class AskAgent:
         error = None
         answer_fell_back = False
         ungrounded: list[str] = []
-        change = bool(_CHANGE_RX.search(question))
-        # a change request gets the facts only: the model never phrases what "will happen" to the plant
+        repair: dict[str, Any] = {}
+        mids = follow_mids or machines_in(question)
+        # a change request gets the facts only: the model never phrases what "will happen" to the plant. A question
+        # about a change (「核准卡在等什麼？」「今天有加班嗎？」) is answered like any other (issue #182)
+        change = change_request(question)
         if self.mode is LLMMode.LLM and not fell_back and not change:
             try:
-                answer = await self._llm_answer(question, results)
-                ungrounded = ungrounded_numbers(answer, question, results)
-                if ungrounded:
-                    error = f"ungrounded numbers {ungrounded}: model answer replaced by the results"
-                    answer = template_answer(results)
+                answer, repair = await self._checked_answer(answer_q, results, facts, mids)
+                ungrounded = repair.get("ungrounded") or []
+                if repair.get("repair"):
+                    why = f"ungrounded numbers {ungrounded}" if ungrounded else "bare 查不到"
+                    error = f"{why}: answer repaired by {repair['repair']}"
             except Exception as e:  # noqa: BLE001 - model down / empty answer
                 error = f"{type(e).__name__}: {e}"[:300]
                 if not self.settings.llm_fallback_to_mock:
                     return self._strict_answer(e, "answer", error, ask_id, question, audit, now, t0, ta, results)
-                answer, answer_fell_back = template_answer(results), True
+                answer, answer_fell_back = template_answer(relevant_results(question, results, mids), facts), True
         else:
-            answer = template_answer(results)
+            # mock mode and change requests: the facts, about what the question names (issue #182)
+            answer = template_answer(relevant_results(question, results, mids), facts)
         fell_back = fell_back or answer_fell_back
         if cold:
             answer += "（AI 模型還在載入，這次依關鍵字規則查詢）"
@@ -538,6 +807,9 @@ class AskAgent:
         audit.append(AuditKind.LLM_CALL, "ask", {
             "phase": "answer", "mode": self.mode.value, "total_ms": round((time.perf_counter() - ta) * 1000, 1),
             "fell_back_to_mock": answer_fell_back, "error": error, "ungrounded": ungrounded,
+            "repair": repair.get("repair"),
+            "repair_detail": {k: v for k, v in repair.items() if k not in ("repair", "ungrounded")},
+            "facts": facts,
             "skipped": "change request: facts only" if change and self.mode is LLMMode.LLM else None,
             "plant_sha256": plant.active_sha()},
             event_id=ask_id)
