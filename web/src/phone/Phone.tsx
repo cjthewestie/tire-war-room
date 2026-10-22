@@ -28,8 +28,9 @@ import { RepairNotice } from './RepairNotice'
 import { CUES } from '../demo/cues'
 import { isMachine } from '../demo/signals'
 import { APPROVAL_CUES } from '../demo/beats'
-import { autoApproves } from '../demo/auto'
+import { autoApproves, autoApprovesLive } from '../demo/auto'
 import { AutoCard } from './AutoCard'
+import { useSessionNo } from '../agent/sessionStore'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
@@ -50,6 +51,10 @@ function PhoneFull() {
     ? pending.filter((p) => isMachine(state.snapshot?.events.find((e) => e.id === p.event_id)?.machine_id)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]
     : undefined
   const top = pending.find((p) => p.id === pick) ?? demoCard ?? pending[0]
+  // auto demo on the real backend: the demo taps 核准 for the 7 號機 card; show 「✓ 已核准」 for 5 s after it went through
+  const autoLive = autoApprovesLive(transport?.mode)
+  const justOk = autoLive ? state.resolved.find((r) => r.decision?.via === 'phone' && r.decision?.reason === 'Demo 自動核准'
+    && Date.now() - Date.parse(r.decision?.decided_at ?? '') < 5000) : undefined
   // kept here, not in the card: the card is replaced by its new version once the agent has replanned
   const [sent, setSent] = useState<string | null>(null)
   const net = state.snapshot?.header.network ?? 'online'
@@ -137,6 +142,11 @@ function PhoneFull() {
         {/* the notices go under a waiting card: with 3 件同時異常 a 維修完成 notice above pushed 核准 off the screen
             (review 10-21); with nothing to approve they lead */}
         {pending.length === 0 && noticeCards}
+        {justOk && (
+          <div className="ph-card ph-auto-ok" role="status" data-testid="phone-auto-ok">
+            <b>✓ 已核准</b><span>{plain(justOk.title)}</span><small className="muted">主管・手機・Demo 自動核准</small>
+          </div>
+        )}
         {pending.length === 0 ? (
           <div className="ph-card idle">
             {idleBrief ? null : <h2>目前沒有待核准事項</h2>}
@@ -171,6 +181,8 @@ const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '�
 function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: boolean; onSent: (text: string) => void }) {
   const { transport, state } = useWarRoom()
   const ev = state.snapshot?.events.find((e) => e.id === a.event_id) ?? null
+  // the task's session number, exactly as on the 主控台 task card
+  const no = useSessionNo(a.event_id)
   const [opt, setOpt] = useState<string | null>(null)
   const [talk, setTalk] = useState(false)
   const [text, setText] = useState('')
@@ -208,9 +220,11 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     <div className="ph-card ph-approval">
       <div className="ph-col-a">
       <p className="ph-meta" data-testid="phone-meta">
+        {no?.session_short && <span className="ph-no" title={no.session ?? a.event_id} data-testid="phone-session-no">{no.session_short}</span>}
         <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>・{ROUND[a.round] ?? `第${a.round}輪`}核准
         {(a.version ?? 1) > 1 && <b data-testid="phone-version">・v{a.version}（最新）</b>}
       </p>
+      {autoApprovesLive(transport?.mode) && <p className="ph-auto-tap" data-testid="phone-auto-tap">Demo 會替主管按「核准」</p>}
       {brief && <div className={`br br-${brief.state}`}><BriefTop b={brief} />{!staffing.length && <BriefSections b={brief} only={['advice']} />}</div>}
       {(a.version ?? 1) > 1 && (
         <div className="ph-changed" data-testid="phone-changes">

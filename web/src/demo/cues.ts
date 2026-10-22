@@ -138,6 +138,8 @@ export interface Timeline {
   releasedAt: number
   /** demo second the deck started (the pitch checkpoint passed; null = not yet) */
   pitchAt: number | null
+  /** auto-play: when the current hold's `until` signal first came in (for its `untilDwell`) */
+  untilAt?: number | null
   fired: Fired[]
 }
 export const startTimeline = (): Timeline => ({ index: 0, enteredAt: 0, released: false, releasedAt: 0, pitchAt: null, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] })
@@ -151,7 +153,7 @@ export function latch(seen: Signals, now: Signals): Signals {
 
 function enter(tl: Timeline, i: number, t: number, reason: Reason): Timeline {
   return {
-    ...tl, index: i, enteredAt: t, released: false, releasedAt: t,
+    ...tl, index: i, enteredAt: t, released: false, releasedAt: t, untilAt: null,
     fired: [...tl.fired, { id: CUES[i].id, t, reason }],
   }
 }
@@ -191,7 +193,9 @@ export function autoHoldDone(tl: Timeline, t: number, sig: Signals): boolean {
   if (e < h.min) return false
   if (h.timeout != null && e >= h.timeout) return true
   if (h.needArrive && sig.arrived === false) return false
+  if (h.until && sig[h.until] && h.untilDwell) return t - (tl.untilAt ?? t) >= h.untilDwell
   if (!h.until || sig[h.until]) return true
+  // the card never showed (cardTimeout s; 0 = the scenario has none: do not wait for it)
   return !!h.card && !sig[h.card] && e >= (h.cardTimeout ?? Infinity)
 }
 
@@ -199,6 +203,8 @@ function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
   const cur = CUES[tl.index]
   if (!tl.released) {
     if (cur.id === AUTO_FINAL) return { tl }
+    const u = AUTO_STEPS[cur.id]?.hold.until
+    if (u && sig[u] && tl.untilAt == null) tl = { ...tl, untilAt: t }
     return autoHoldDone(tl, t, sig) ? { tl: release(tl, t, 'auto') } : { tl }
   }
   const i = nextAuto(tl.index)
@@ -206,6 +212,7 @@ function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
   if (!next) return { tl }
   const en = AUTO_STEPS[next.id]?.enter, since = t - tl.releasedAt
   if (en) {
+    if (en.min != null && since < en.min) return { tl }
     if (sig[en.on]) return { tl: enter(tl, i, t, 'event') }
     return since >= en.timeout ? { tl: enter(tl, i, t, 'time') } : { tl }
   }

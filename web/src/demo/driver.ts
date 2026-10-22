@@ -16,6 +16,8 @@ import type { DemoCommand, DemoState } from './state'
 export interface DemoIO {
   mode: string
   control(c: SimControl): Promise<void>
+  /** 自動播放：關掉隨機模擬事件（整段只有 7 號機） */
+  setSimEvents?(b: { enabled?: boolean }): Promise<unknown>
   demo?(c: DemoCommand): Promise<DemoState>
   /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到（真實後端一律人按）。 */
   decide?(d: ApprovalDecision): Promise<ApprovalRequest | null>
@@ -85,10 +87,28 @@ export class DemoRun {
       const mine = pending.filter((p) => p.event_id === id)
       if (f?.state === 'closed') this.autoStatus = '處理完成'
       else if (f?.state === 'execute' || f?.state === 'verify') this.autoStatus = '執行中'
-      else if (mine.length) this.autoStatus = this.autoApprove ? (this.decided.size ? 'Demo 自動核准' : 'Agent 分析中') : '等主管在手機核准'
+      else if (mine.length) this.autoStatus = this.autoApprove ? (this.decided.size ? 'Demo 自動核准' : 'Agent 分析中') : 'Demo 替主管在手機核准'
       else this.autoStatus = '事件偵測'
     }
-    // 絕不對真實後端（Action Gate）自動核准；回到戰情室（AUTO_FINAL）後也不再自動做任何事
+    // 真實後端（CJ 10-22：「3d 工廠 demo 核准要自動核准」）：只核准 Demo 自己追的 7 號機事件的卡（event id 相符），在手機段
+    // （h1）卡出現 AUTO.liveApproveS 秒後；同一件事後來的新版卡（AI 換假設 H2）在維修段也一樣。用主管手機同一支 API
+    // （decided_by 主管、via phone），過 Action Gate、寫稽核。其他卡一律不碰；回到戰情室（AUTO_FINAL）後什麼都不做。
+    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && id && (cue === 'h1' || cue === 'worker')) {
+      for (const p of pending.filter((x) => x.event_id === id)) {
+        const first = this.approveAt.get(p.id)
+        if (first == null) { this.approveAt.set(p.id, now); continue }
+        if (now - first < AUTO.liveApproveS * 1000 || this.decided.has(p.id)) continue
+        this.decided.add(p.id)
+        const opt = p.options.find((o) => o.recommended) ?? p.options[0]
+        console.info(`[demo] auto approve ${p.id} (${p.event_id})`)
+        void this.io.decide({
+          request_id: p.id, decision: 'approve', option_id: opt?.id ?? null, reason: 'Demo 自動核准',
+          modified_args: null, decided_by: '主管', via: 'phone',
+        }).catch((e) => { this.decided.delete(p.id); console.warn('[demo] auto approve', e) })
+      }
+      return
+    }
+    // Mock：本機記憶體的自動核准（急單、7 號機）；回到戰情室（AUTO_FINAL）後也不再自動做任何事
     if (!this.autoApprove || !this.io.decide || cue === AUTO_FINAL) return
     const due = cue === 'rush' ? { cards: rushCards, wait: AUTO.ordersApproveS } : cue === 'h1' && id ? { cards: pending.filter((p) => p.event_id === id), wait: AUTO.analysisS } : null
     if (!due) return
@@ -133,6 +153,7 @@ export class DemoRun {
       this.loads = [this.io.mode === 'live' ? { at: 0, scenario: live, speed: live === AUTO_LIVE_SCENARIO ? AUTO_LIVE_SPEED : AUTO.speed } : { at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
       this.fallback = false
       this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'
+      if (this.io.mode === 'live') await this.io.setSimEvents?.({ enabled: false }).catch((e) => console.warn('[demo] sim events off', e))
     } else {
       if (this.io.mode === 'live') {
         try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { known = true }

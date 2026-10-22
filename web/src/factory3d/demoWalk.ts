@@ -59,6 +59,8 @@ class Walker {
   speed = 0
   run = false
   done = true
+  /** auto-play: a calmer walk and turn (CJ: 「要順暢」); kept across reset() */
+  calm = false
   /** walk to a station along its waypoints (from wherever the lead is now) */
   go(to: StationId, opts: { run?: boolean } = {}) {
     const g = STATIONS[to]
@@ -73,12 +75,12 @@ class Walker {
   /** One frame; returns whether the lead is walking (for the head-bob and the walk cycle). */
   update(dt: number): boolean {
     if (!this.goal) return false
-    const top = this.run ? RUN : WALK
+    const top = this.calm ? (this.run ? RUN * 0.7 : WALK * 0.72) : this.run ? RUN : WALK
     if (this.path.length) {
       const [gx, gz] = this.path[0]
       const dx = gx - player.x, dz = gz - player.z, len = Math.hypot(dx, dz)
       const want = Math.atan2(-dx, -dz)
-      player.yaw += wrap(want - player.yaw) * Math.min(1, dt * 8)
+      player.yaw += wrap(want - player.yaw) * Math.min(1, dt * (this.calm ? 4 : 8))
       player.pitch += (0 - player.pitch) * Math.min(1, dt * 3)
       // ease in from standing, slow into the last point
       const left = this.path.reduce((a, p, i) => a + (i === 0 ? len : Math.hypot(p[0] - this.path[i - 1][0], p[1] - this.path[i - 1][1])), 0)
@@ -94,8 +96,8 @@ class Walker {
     this.speed = 0
     player.running = false
     const dy = wrap(this.goal.yaw - player.yaw), dp = this.goal.pitch - player.pitch
-    player.yaw += dy * Math.min(1, dt * 6)
-    player.pitch += dp * Math.min(1, dt * 6)
+    player.yaw += dy * Math.min(1, dt * (this.calm ? 3.5 : 6))
+    player.pitch += dp * Math.min(1, dt * (this.calm ? 3.5 : 6))
     if (Math.abs(dy) < 0.05 && Math.abs(dp) < 0.05) this.done = true
     return false
   }
