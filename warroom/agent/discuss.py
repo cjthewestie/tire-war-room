@@ -38,7 +38,8 @@ from warroom.contracts import (
 from warroom.factory import CURE_PRESS_IDS
 
 CLASSIFY_SYSTEM = """你是實心胎工廠戰情室的計劃討論助理。主管正在看一張「等待核准」的處置計劃，他說了一句話。
-判斷這句話是 chitchat（打招呼、道謝、閒聊）、question（問工廠或計劃的問題、要解釋，不改計劃）、change（要求改計劃的條件）或 other（看不懂、與工廠無關）。
+判斷這句話是 chitchat（打招呼、道謝、閒聊）、question（問工廠或計劃的問題、要解釋，不改計劃）、change（要求改計劃的條件，能轉成下面四種）、
+unsupported（要改的東西不在下面四種裡，例如改溫度、改硫化時間、直接動機台）或 other（看不懂、與工廠無關）。沒有程式先幫你分類，由你決定。
 change 時把條件轉成 constraints，只能用這四種：
 - machine_unavailable：某台機某段時間不能用（保養、維修、停機）。machine 用代號：硫化機 CURE-01..CURE-11（「9 號機」= CURE-09）。when 用 tonight|tomorrow_night|tomorrow_morning|tomorrow|today|now|this_week|unspecified。
 - no_overtime：不要加班。
@@ -52,7 +53,7 @@ def classify_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "intent": {"type": "string", "enum": ["chitchat", "question", "change", "other"]},
+            "intent": {"type": "string", "enum": ["chitchat", "question", "change", "unsupported", "other"]},
             "constraints": {"type": "array", "items": {
                 "type": "object",
                 "properties": {
@@ -99,7 +100,7 @@ class PlanTalk:
         raw = (r.choices[0].message.content or "").strip()
         raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw)
         out = json.loads(raw)
-        if not isinstance(out, dict) or out.get("intent") not in ("chitchat", "question", "change", "other"):
+        if not isinstance(out, dict) or out.get("intent") not in ("chitchat", "question", "change", "unsupported", "other"):
             raise ValueError(f"bad classification {raw[:200]!r}")
         out["_raw"] = raw[:600]
         return out
@@ -108,7 +109,8 @@ class PlanTalk:
         """{intent, constraints, why, by, fell_back, error, model_output, dropped}"""
         res: dict[str, Any] = {"by": "rules", "fell_back": False, "error": None, "model_output": None, "dropped": []}
         from warroom.agent.ask import smalltalk_reply
-        if smalltalk_reply(text) is not None:          # a greeting / thanks: code answers, no model, no tool
+        if self.mode is not LLMMode.LLM and smalltalk_reply(text) is not None:
+            # rule mode only (issue #195): with a model, the model reads the message itself
             return {**res, "intent": "chitchat", "constraints": [], "why": None}
         if self.mode is LLMMode.LLM:
             try:
@@ -121,27 +123,17 @@ class PlanTalk:
                         cons.append(c)
                     elif why:
                         res["dropped"].append({"constraint": raw, "why": why})
+                # the model's intent stands (issue #195: no keyword reading overrides it); code still validates every
+                # constraint it encoded (the press the supervisor named, the window from the words)
                 intent = got["intent"]
-                rules_say = rule_intent(text)
-                if intent != "change" and rules_say == "change" and rule_constraints(text, now)[0]:
-                    # code decides: words the rules read as an explicit, enforceable change (「9 號機今晚要
-                    # 保養」) are never dropped because the model misread them as small talk or a question
-                    res["fell_back"] = True
-                    res["error"] = f"model said {intent!r} for an explicit change: rules used"
-                    intent = "change-by-rules"
-                elif intent == "chitchat" and rules_say != "chitchat" and rules_say != "unclear":
-                    res["fell_back"] = True
-                    res["error"] = f"model said chitchat for a factory message: rules used ({rules_say})"
-                    intent = "change-by-rules"
                 if intent == "change" and cons:
                     return {**res, "intent": "change", "constraints": cons, "why": None, "by": "model"}
                 if intent == "question":
                     return {**res, "intent": "question", "constraints": [], "why": None, "by": "model"}
                 if intent == "chitchat":
                     return {**res, "intent": "chitchat", "constraints": [], "why": None, "by": "model"}
-                if intent == "other":
-                    ri = rule_intent(text)
-                    return {**res, "intent": "unsupported" if ri == "unsupported" else "unclear", "constraints": [],
+                if intent in ("other", "unsupported"):
+                    return {**res, "intent": "unsupported" if intent == "unsupported" else "unclear", "constraints": [],
                             "why": None, "by": "model"}
                 # a change the model could not encode (or encoded wrongly): the rules get one try
                 res["fell_back"] = True

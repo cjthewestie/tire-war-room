@@ -62,6 +62,7 @@ from warroom.contracts import (
     CommandReply,
     CommandRequest,
     DiscussReply,
+    LLMMode,
     DiscussRequest,
     ApprovalDecision,
     ApprovalRequest,
@@ -1020,7 +1021,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕下指令")
         _sm_ready(r)
         from warroom.agent.ask import smalltalk_reply
-        chat = smalltalk_reply(body.text)
+        # issue #195: the keyword greeting check is the rule mode's; with a model the commander reads the command
+        chat = smalltalk_reply(body.text) if r.llm_mode is not LLMMode.LLM else None
         if chat is not None:       # a greeting is not a task: no event, no tool; still audited
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
@@ -1029,7 +1031,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         # 「我只需要一個幫忙分類的，現在先不要派發」); the same path as Agent Nemo's propose_plan
         ev = r.start_command(body.text.strip(), session.actor)
         from warroom.agent.talk import physical_request
-        refusal = physical_request(body.text)
+        refusal = physical_request(body.text) if r.llm_mode is not LLMMode.LLM else None
         return CommandReply(event_id=ev.id, accepted=refusal is None,
                             reply=refusal or "已開新任務：計劃擬好會送到計劃區給你核准，核准後才執行。")
 
@@ -1129,9 +1131,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             if card is not None:
                 # the card as the supervisor sees it: title, what it does and the A／B staffing options (the title alone
                 # let the model invent changes: 「調低到 118°C、縮短硫化時間」, real run 2026-10-21)
-                opts = "；".join(f"{o.id} {o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
+                opts = "；".join(f"方案 {o.id}：{o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
+                # issue #195: 「A 夜班加班加上 B 線調 1 人」 (real run 10-22) — the options are alternatives, say so
                 waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(card.actions) or '無'}"
-                           + (f"。人力方案：{opts}" if opts else ""))
+                           + (f"。人力方案（{len(card.options)} 選 1，不是加在一起）：{opts}" if opts else ""))
         from warroom.agent.ask import AskAgent
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult

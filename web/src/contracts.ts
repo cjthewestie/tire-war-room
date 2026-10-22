@@ -235,7 +235,7 @@ export interface AskAnswer {
   total_ms: number
   // issue #95: needs_choice / needs_order = the question pointed at an order (「那張單」「它」) and the conversation
   // does not say which one, so nothing was looked up; `choices` lists the orders it could be
-  intent?: 'query' | 'chitchat' | 'unclear' | 'model_cold' | 'needs_choice' | 'needs_order'
+  intent?: 'query' | 'chitchat' | 'unclear' | 'model_cold' | 'needs_choice' | 'needs_order' | 'change_request'
   conversation_id?: string | null
   choices?: string[]
 }
