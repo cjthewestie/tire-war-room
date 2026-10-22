@@ -7,7 +7,7 @@
 // Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DemoFollow, DemoRun, type LogRow } from '../demo/driver'
-import { AUTO, autoActive } from '../demo/auto'
+import { AUTO_FINAL, autoActive } from '../demo/auto'
 import { beatOf, setDemoBeat, type DemoBeat } from '../demo/beat'
 import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
 import type { WarRoomState } from '../store'
@@ -39,7 +39,9 @@ function chime(loud = false) {
 }
 
 /** Which page the war-room computer shows at a beat (the lead has to be at the desk). */
-function monitorFor(cueId: string, eventId: string | null): string | null {
+function monitorFor(cueId: string, eventId: string | null, auto = false): string | null {
+  // auto-play (CJ 10-22: 「進去電腦講訂單，但是畫面任務都不是訂單」): the 訂單 tab for the orders, the 主控台 at the end
+  if (auto) return cueId === 'rush' ? '#orders' : cueId === 'agent' ? '#agent' : null
   if (cueId === 'rush' || cueId === 'console') return '#agent'
   if (cueId === 'agent') return eventId ? `#console?event=${encodeURIComponent(eventId)}` : '#console'
   return null
@@ -54,7 +56,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
   onWalk: () => void
   /** the demo starts: leave first person, close panels */
   onBegin: () => void
-  onEnd: () => void
+  /** `atDesk`: the auto demo ended at the war-room computer (open the desk monitor on the 主控台) */
+  onEnd: (atDesk?: boolean) => void
   /** auto-play: the supervisor's phone comes up / goes down */
   onPhone?: (up: boolean) => void
   nSlides: number
@@ -90,7 +93,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
 
   /** the demo this screen just left (its started_at): not re-joined while the server's push catches up */
   const left = useRef<string | null>(null)
-  const stop = useCallback(() => {
+  const stop = useCallback((atDesk = false) => {
     left.current = stateRef.current.demo?.started_at ?? null
     run.current = null
     setSnap(null)
@@ -104,7 +107,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
     director.on = false
     director.clearRadius = 0
     setFollowing(false)
-    onEnd()
+    onEnd(atDesk === true)   // (a click handler passes its event: only a real true counts)
   }, [onEnd])
 
   /** The 3D's own setup for a demo, whoever drives it. */
@@ -129,6 +132,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
     if (run.current) await run.current.exit()
     setup()
     const isAuto = autoActive(transport.mode)
+    walker.calm = isAuto; demoCam.calm = isAuto
     const r = new DemoRun(transport, '3d', isAuto)
     run.current = r
     setAuto(isAuto)
@@ -203,6 +207,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
         if (c.id === 'pitch') setSlide(0)
         w.enteredAt = now
         w.station = stationFor(c.id, c.shot)
+        // auto-play: the 7 號機 alarm and the phone are seen from the lookout behind the desk (first person, no walk)
+        if (isAuto && (c.id === 'event' || c.id === 'h1')) w.station = 'lookout'
         // the robot comes over to the lead at 7 號機, then plays its show facing the camera
         // the robot heads over while the crew repairs 7 號機, so at its beat it is already there for the show
         if (c.id === 'worker') robot.visitReq = ROBOT_MEET
@@ -217,9 +223,12 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
           if (!demoCam.flying && now - w.enteredAt > 300) { director.mode = 'walk'; onWalk() }
         }
       }
+      // auto-play: the order is done (the 急單 hold is over) → the lead leaves the computer and walks out to 7 號機; the
+      // anomaly comes in on the way (CJ 10-22: 「訂單結束之後我要離開電腦然後走向工廠，然後手機才響」)
+      if (isAuto && c.id === 'rush' && r.tl.released && w.station === 'desk') w.station = 'lookout'
       if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
       // the war-room computer: open at the desk once the lead has arrived (主控台 for the orders, Agent page later)
-      const want = monitorFor(c.id, r.seen.id)
+      const want = monitorFor(c.id, r.seen.id, isAuto)
       const atDesk = director.mode === 'walk' && walker.at === 'desk' && walker.done
       const show = want && atDesk ? want : null
       if (show !== monitorRef.current) { monitorRef.current = show; setMonitor(show); w.monitorAt = now }
@@ -231,25 +240,31 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       const monitorDone = !want || (!!show && now - w.monitorAt > 300)
       r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
       // the doorway view of 7 號機: nobody walks through the foreground between the camera and the press
-      director.clearRadius = director.mode === 'walk' && walker.at === 'doorway' && walker.done ? 3.2 : 0
-      // auto-play: the supervisor's phone comes up shortly after the event appears and stays up for the approval (the real
-      // backend: someone taps it, also for the rush order's card), then goes down so the repair can be seen
+      director.clearRadius = director.mode === 'walk' && (walker.at === 'doorway' || walker.at === 'lookout') && walker.done ? 3.2 : 0
+      // auto-play: the supervisor's phone rings (FactoryApp: buzz + ring) and comes up only at the phone beat (h1), after
+      // the lead has walked out and looked at 7 號機; it stays up for the approval (the real backend: someone taps it),
+      // then goes down so the repair can be seen. The rush order is resolved on the war-room computer, not the phone.
       if (isAuto && r instanceof DemoRun) {
-        const sg = r.latched
-        const up = (c.id === 'event' && now - w.enteredAt > AUTO.phoneAfterS * 1000) || c.id === 'h1'
-          || (!r.autoApprove && c.id === 'rush' && !!sg.rushCard && !sg.rushApproved)
+        const up = c.id === 'h1'
         if (up !== phoneWant.current) {
           phoneWant.current = up
           if (up !== phoneUpRef.current) { phoneUpRef.current = up; phoneShown.current ||= up; onPhoneRef.current?.(up) }
         }
       }
-      // the beat the prompter reads (demo/beat.ts): walk until the lead stands at the war-room computer, then orders
-      const beat = isAuto ? beatOf(c.id, director.mode === 'walk' && walker.at === 'desk' && walker.done) : null
+      // the beat the prompter reads (demo/beat.ts): walk until the lead stands at the war-room computer, then orders,
+      // then leave once the order's hold is over
+      const beat = isAuto ? beatOf(c.id, director.mode === 'walk' && walker.at === 'desk' && walker.done, r.tl.released) : null
       setDemoBeat(beat)
       if (!isAuto && r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt
         const w = waiting(r.tl, r.t, r.latched)
         setNote(w === 'approval' ? '要先核准（手機或核准卡），才能往下' : r.arrived === false ? '還在走過去，到了再按' : '等工廠下一件事發生，不能跳過')
+      }
+      // auto-play's end (CJ: 「這邊開始就不用自動了」): back at the desk with the 主控台 up → finish (1×, faults cleared,
+      // random events off) and leave the demo: no pitch, no more cues, the lead sits at the war-room computer
+      if (isAuto && r instanceof DemoRun && c.id === AUTO_FINAL && r.arrived && !r.finished) {
+        void r.finish().then(() => r.exit()).finally(() => stop(true))
+        return
       }
       const d = stateRef.current.demo
       if (d?.running && d.paused !== paused) setPaused(d.paused)

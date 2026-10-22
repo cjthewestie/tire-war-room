@@ -3,7 +3,8 @@
 // Pages: 系統健康 (one plain-language card per subsystem, HealthPage.tsx), 稽核紀錄 (read-only audit viewer,
 // AuditPage.tsx), 系統參數 (live parameters, ParamsPage.tsx), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
 // tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes; since 「接記憶」 the
-// commander gets a machine's notes and last 3 past events on every plan, previewed here) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
+// commander gets a machine's notes and last 3 past events on every plan, previewed here), 執行紀錄 (events, tasks and questions) and 效能與追蹤
+// (bench results + live model trace and load, PerfPage.tsx, issue #199). Server: warroom/api/admin.py — supervisor PIN, factory
 // network only, every write audited.
 import { useEffect, useMemo, useState } from 'react'
 import { MACHINES, machineLabel } from '../factory'
@@ -18,11 +19,12 @@ import { AuditPage } from './AuditPage'
 import { HealthPage } from './HealthPage'
 import { MemoryTimeline } from './MemoryTimeline'
 import { ParamsPage } from './ParamsPage'
+import { PerfPage } from './PerfPage'
 import './admin.css'
 
-type Page = 'status' | 'audit' | 'params' | 'rag' | 'plant' | 'memory' | 'runs'
+type Page = 'status' | 'audit' | 'params' | 'perf' | 'rag' | 'plant' | 'memory' | 'runs'
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'status', label: '狀態' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
+  { id: 'status', label: '狀態' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'perf', label: '效能與追蹤' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
 interface Doc { file: string; sop_id: string; title: string; chunks: number; bytes: number; modified: string; sections: string[]; error: string | null }
@@ -58,7 +60,7 @@ export function AdminPage() {
         </nav>
         <span className="muted small">只限廠內網路・每次寫入都記稽核</span>
       </header>
-      {page === 'status' ? <HealthPage /> : page === 'audit' ? <AuditPage /> : page === 'params' ? <ParamsPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
+      {page === 'status' ? <HealthPage /> : page === 'audit' ? <AuditPage /> : page === 'params' ? <ParamsPage /> : page === 'perf' ? <PerfPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
     </div>
   )
 }

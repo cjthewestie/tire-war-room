@@ -4,6 +4,7 @@
 // button here or anywhere. StopFollowUp: a SAFE_STOP's plain reason and its three buttons 請 AI 重新規劃 / 交給現場處理 / 確認結案.
 // Used on the 主控台 (red banner + the selected item's plan area) and on the phone.
 import { useState } from 'react'
+import { SHOW_SAFETY_CASES } from '../safetyFlag'
 import type { Event, SafetyCase, SafetyDecision } from '../contracts'
 import { fmtHM, fmtHMS } from '../format'
 import { plain } from '../plain'
@@ -120,7 +121,7 @@ export function SafetyCaseCard({ c, compact = false, disabled = false }: { c: Sa
 export function SafetyBanner() {
   const { state, connected } = useWarRoom()
   const cases = openCases(state.snapshot?.safety_cases)
-  if (!cases.length) return null
+  if (!SHOW_SAFETY_CASES || !cases.length) return null
   return (
     <section className="rs-banner" aria-label="安全核心處置" data-testid="safety-banner">
       {cases.map((c) => <SafetyCaseCard key={c.id} c={c} disabled={!connected} />)}

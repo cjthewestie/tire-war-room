@@ -98,6 +98,8 @@ export class DemoCamera {
   private look = new THREE.Vector3()
   private started = false
   reduced = false
+  /** auto-play: slower, calmer flights */
+  calm = false
   /** test hook: every frame's largest step (to prove there are no cuts) */
   maxStep = 0
   private last = new THREE.Vector3()
@@ -135,7 +137,7 @@ export class DemoCamera {
       }
       const from = camera.position.clone()
       const d = from.distanceTo(target.pos)
-      this.flight = { curve: routeBetween(from, target.pos), fromLook: this.look.clone(), t0: now, dur: flightTime(d) }
+      this.flight = { curve: routeBetween(from, target.pos), fromLook: this.look.clone(), t0: now, dur: flightTime(d) * (this.calm ? 1.5 : 1) }
     }
     const s = now - this.shotT0
     const target = poseOf(frameFor(this.shot, this.machine, s, this.reduced))
