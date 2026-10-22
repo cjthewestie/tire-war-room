@@ -28,7 +28,7 @@ import { RepairNotice } from './RepairNotice'
 import { CUES } from '../demo/cues'
 import { isMachine } from '../demo/signals'
 import { APPROVAL_CUES } from '../demo/beats'
-import { autoActive } from '../demo/auto'
+import { autoApproves } from '../demo/auto'
 import { AutoCard } from './AutoCard'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
@@ -36,7 +36,8 @@ const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.
 
 export function Phone() {
   const { transport } = useWarRoom()
-  return autoActive(transport?.mode) ? <AutoCard /> : <PhoneFull />
+  // auto-play: the button-less card only when the mock approves by itself; on the real backend someone taps the real phone
+  return autoApproves(transport?.mode) ? <AutoCard /> : <PhoneFull />
 }
 
 function PhoneFull() {

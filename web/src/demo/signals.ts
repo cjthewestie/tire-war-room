@@ -50,6 +50,8 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     orders: (state.world?.orders.items.length ?? 0) > 0,
     rushCard: state.pending.some((p) => isRush(p.event_id)) || fresh.some((r) => isRush(r.event_id)),
     rushApproved: fresh.some((r) => isRush(r.event_id)),
+    // auto-play's 訂單 beat: this run's rush plan approved and its event done (plan → approved → done)
+    rushDone: fresh.some((r) => isRush(r.event_id) && events.some((e) => e.id === r.event_id && (e.state === 'closed' || e.state === 'safe_stop'))),
     // the SO-012 pre-plan (a supervisor command event): in and done
     preplan: cmd.length > 0 && cmd.every((e) => e.state === 'closed' || e.state === 'safe_stop'),
     event: !!ev,
@@ -64,6 +66,9 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     // 停用檢修, so 「all done」 alone would fire early). Never on status running: 7 號機 stays 停用 until 恢復運轉.
     workerDone: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))),
     closed,
+    // auto-play's 維修 beat: the crew's repair done, or (the mock: no crew) the incident closed with the press running again
+    repaired: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))
+      || (closed && tile?.status === 'running')),
     // the walk to 7 號機 starts as soon as the last repair is approved (the crew works while the lead runs there)
     fixing: (rejected && mine.length >= 2) || (approved && (!!tile?.repaired || closed)),
   }
