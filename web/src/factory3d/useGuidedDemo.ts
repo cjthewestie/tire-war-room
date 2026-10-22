@@ -7,8 +7,8 @@
 // Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DemoFollow, DemoRun, type LogRow } from '../demo/driver'
-import { AUTO, autoActive } from '../demo/auto'
-import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
+import { AUTO, autoActive, fullRequested } from '../demo/auto'
+import { AUTO_PITCH, CHECKPOINTS, CUES, PITCH_INDEX, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
 import type { WarRoomState } from '../store'
 import type { Transport } from '../transport'
 import { demoCam } from './demoCamera'
@@ -75,6 +75,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
   const autoStarted = useRef(false)
   const phoneShown = useRef(false)
   const phoneUpRef = useRef(false)
+  /** 完整自動播放：手機是這裡升起的（沒有卡在等了由這裡放下），和放下的時間 */
+  const fullPhoneUp = useRef(false)
+  const fullPhoneDownAt = useRef<number | null>(null)
   const onPhoneRef = useRef(onPhone)
   useEffect(() => { onPhoneRef.current = onPhone })
   const lastRefused = useRef(0)
@@ -124,7 +127,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
     if (run.current) await run.current.exit()
     setup()
     const isAuto = autoActive(transport.mode)
-    const r = new DemoRun(transport, '3d', isAuto)
+    const r = new DemoRun(transport, '3d', isAuto, !isAuto && fullRequested())
+    fullPhoneUp.current = false; fullPhoneDownAt.current = null
     run.current = r
     setAuto(isAuto)
     setFollowing(false)
@@ -138,7 +142,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
   const beginRef = useRef(begin)
   useEffect(() => { beginRef.current = begin })
   useEffect(() => {
-    if (!transport || !autoActive(transport.mode) || autoStarted.current) return
+    if (!transport || !(autoActive(transport.mode) || fullRequested()) || autoStarted.current) return
     const id = setTimeout(() => {
       if (autoStarted.current) return
       autoStarted.current = true
@@ -236,6 +240,21 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       // auto-play: the supervisor's phone comes up shortly after the event appears
       if (isAuto && c.id === 'event' && !phoneUpRef.current && now - w.enteredAt > AUTO.phoneAfterS * 1000 && !phoneShown.current) {
         phoneShown.current = true; phoneUpRef.current = true; onPhoneRef.current?.(true)
+      }
+      // 完整自動播放：走到核准點（急單、H1、H2）卡一出現手機就升起，主管只要按核准；故事在等工廠時，這件事故又出了卡
+      // （AI 重擬的新版）也升起。沒有卡在等了就放下，故事接著走。其他步驟不升（H2 的卡在「驗證」時就會出現，留到 H2 那步）。
+      if (r instanceof DemoRun && r.full) {
+        const st = stateRef.current
+        const atApproval = !r.tl.released && c.hold.wait === 'approval'
+        const ours = (id: string) => (atApproval ? id === r.seen.id || id.endsWith('-RUSH') || id.endsWith('-CMD') : r.tl.released && id === r.seen.id)
+        const waitCard = r.tl.index < PITCH_INDEX && st.pending.some((p) => ours(p.event_id))
+        if (waitCard && !fullPhoneUp.current) { fullPhoneUp.current = true; fullPhoneDownAt.current = null; onPhoneRef.current?.(true) }
+        else if (waitCard) fullPhoneDownAt.current = null
+        else if (fullPhoneUp.current) {
+          // 按完核准讓手機上的「已核准」留 1.5 秒再放下
+          fullPhoneDownAt.current ??= now + 1500
+          if (now >= fullPhoneDownAt.current) { fullPhoneUp.current = false; fullPhoneDownAt.current = null; onPhoneRef.current?.(false) }
+        }
       }
       if (!isAuto && r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt

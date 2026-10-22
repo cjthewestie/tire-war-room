@@ -16,6 +16,16 @@ export const autoActive = (mode: string | undefined): boolean => autoRequested()
 
 if (autoRequested() && typeof document !== 'undefined') document.documentElement.dataset.demoAuto = '1'
 
+// 完整自動播放（Kyle 2026-10-22：「一鍵Demo完全不對…我們是要包含全部的完整Demo」）：網址 ?demo=full。
+// 跑的就是 ▶ Demo（6 分鐘）整段（一早訂單湧入：急單 → 預排 → 7 號機溫降 → H1 → 推翻 → H2 → 維修 → 機器人 → Agent 頁 → Pitch），
+// 只是繼續點不用人按：畫面到位後停 FULL_DWELL 秒就自己往下。核准不代按（真實後端一律人工），核准點手機自己升起，按完自己放下。
+// 例：/factory?demo=full
+export const FULL_VAL = 'full'
+export const fullRequested = (): boolean => q()?.get(AUTO_Q) === FULL_VAL
+/** 繼續點到位（ready）之後停幾秒才自動往下，讓觀眾看清楚畫面和字卡；end 停住不動 */
+export const FULL_DWELL: Record<string, number> = { start: 4, console: 8, event: 7, verify: 8, worker: 6, robot: 3, agent: 10, end: Infinity }
+export const FULL_DWELL_DEFAULT = 6
+
 /** 時間表（秒，Demo 時鐘）。事件在 Mock 情境裡的時間見 mock/scripts.ts（single 版）。 */
 export const AUTO = {
   /** 3D 工廠開場 */

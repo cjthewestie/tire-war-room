@@ -41,7 +41,7 @@ import { BTN, approach, usePad, type Btn, type PadFrame } from './gamepad'
 import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
-import { autoActive } from '../demo/auto'
+import { autoActive, fullRequested } from '../demo/auto'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
@@ -521,7 +521,7 @@ export function FactoryApp() {
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
 
-      {!started && !autoMode && (
+      {!started && !autoMode && !fullRequested() && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
             <h1>迷你工廠・戰情室</h1>

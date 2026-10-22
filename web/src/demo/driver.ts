@@ -6,10 +6,10 @@
 import type { ApprovalDecision, ApprovalRequest, ScenarioName, SimControl } from '../contracts'
 import type { WarRoomState } from '../store'
 import {
-  BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
+  BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, canContinue, plantWait, clockPause, clockRead, clockResume, clockStart, latch, ready, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_SCENARIO } from './auto'
+import { AUTO, AUTO_SCENARIO, FULL_DWELL, FULL_DWELL_DEFAULT } from './auto'
 import { freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
@@ -59,9 +59,27 @@ export class DemoRun {
   private approveAt = new Map<string, number>()
   private decided = new Set<string>()
 
+  /** 完整自動播放（?demo=full）：繼續點到位後停 FULL_DWELL 秒自己往下；核准不代按（等人在手機上按） */
+  full: boolean
+  /** 目前這個繼續點從第幾秒（Demo 時鐘）開始到位；換一步就重算 */
+  private readyAt: { index: number; t: number } | null = null
+
   private io: DemoIO
   private driver: string
-  constructor(io: DemoIO, driver: string, auto = false) { this.io = io; this.driver = driver; this.auto = auto && io.mode === 'mock' }
+  constructor(io: DemoIO, driver: string, auto = false, full = false) {
+    this.io = io; this.driver = driver; this.auto = auto && io.mode === 'mock'; this.full = full && !this.auto
+  }
+
+  /** 完整自動播放：這一步該不該自己按繼續？繼續點到位後停夠 FULL_DWELL 秒；核准點只在卡片 25 秒都沒出現（模型失敗）時放行。 */
+  private fullContinue(t: number, sig: Signals): boolean {
+    const tl = this.tl
+    if (!this.full || tl.released) { this.readyAt = null; return false }
+    const c = CUES[tl.index]
+    if (c.hold.wait === 'approval') return canContinue(tl, t, sig)
+    if (c.hold.wait !== 'continue' || !ready(tl, t, sig)) { if (this.readyAt?.index !== tl.index) this.readyAt = null; return false }
+    if (this.readyAt?.index !== tl.index) this.readyAt = { index: tl.index, t }
+    return t - this.readyAt.t >= (FULL_DWELL[c.id] ?? FULL_DWELL_DEFAULT)
+  }
 
   /** 自動核准的狀態推進：事件的核准卡出現後讓觀眾看 AUTO.analysisS 秒，再用 Mock 引擎核准一次。 */
   private autoStep(now: number, state: WarRoomState) {
@@ -174,6 +192,7 @@ export class DemoRun {
     const sig = this.arrived === undefined ? this.latched : { ...this.latched, arrived: this.arrived }
     const before = this.tl
     this.autoStep(now, state)
+    if (this.fullContinue(t, sig)) this.contReq = true
     let r = advance(before, t, sig, this.contReq && !this.auto, this.auto)
     this.contReq = false
     // a continue that ends a hold whose next beat starts right away: take that step in the same tick, so the server
