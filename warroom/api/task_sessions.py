@@ -52,6 +52,18 @@ def _orders(text: str | None) -> list[str]:
     return orders_in(text or "")
 
 
+# query_plant topics that list every task: the 總覽 / 新對話 session's, never a task session's (issue #195)
+TASK_LIST_TOPICS = frozenset({"open_events", "tasks", "questionable", "task_search", "handled_today"})
+
+
+def scope_context(context: dict[str, Any], event_id: str) -> dict[str, Any]:
+    """The chat context of one task's session: its own open event only, no plant overview, no other task (issue #195:
+    「這個排程目前有兩件待核准的事件…」 in a task session, live run 10-22)."""
+    out = {k: v for k, v in context.items() if k not in ("today", "overview", "today_index", "earlier_days")}
+    out["open_events"] = [e for e in context.get("open_events") or [] if isinstance(e, dict) and e.get("id") == event_id]
+    return out
+
+
 def session_label(day: str | None, no: int | None) -> dict[str, str | None]:
     """「Nemo-1022-#01」 (full: Agent page, tooltip, search) and 「Nemo#01 · 10/22」 (task card, chat header). #00 is the
     新對話 / 總覽 session of that day."""
