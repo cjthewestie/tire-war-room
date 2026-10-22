@@ -853,9 +853,15 @@ class Runtime:
         Extension point for the agent: World.add_listener (warroom/sim/world.py) sees every world event;
         nothing here wakes the state machine yet."""
         w = getattr(self.sim, "world", None)
-        if w is None or (w is self._world_obj and w.rev == self._world_rev):
+        if w is None:
             return
-        if callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open():
+        # a fast repair runs on the wall clock, also while the factory clock is held (no world step, no new rev): its
+        # crew and ring are sent anyway, or the 3D showed the crew 4–5 s late and the machine fixed before anyone came
+        # (呱呱 10-22). Only the sections that changed go out.
+        fast = callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open()
+        if w is self._world_obj and w.rev == self._world_rev and not fast:
+            return
+        if fast:
             self._fast_world_until = now + 1.0   # a fast repair's ring fills smoothly, up to its 完成
         if not force and now - self._last_world_pub < (0.25 if now < self._fast_world_until else 1.0):
             return

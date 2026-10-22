@@ -8,6 +8,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import type { WorldSnapshot, WorldTruck, WorldWorker } from '../contracts'
 import { box, cyl, makeFigure, rbox, restPose, walkCycle, type Figure } from './kit'
+import { REPAIR_KINDS } from '../aiStatus'
 import { DESK, DOCK, PLACED_BY_ID, STAFF_SPOTS, WALL_DOORS } from './layout'
 
 type P = [number, number]
@@ -97,8 +98,13 @@ const ROLE_LOOK: Record<string, number> = { 主管: 2, 維修: 4, 品管: 5 }
 
 interface Walker {
   f: Figure; path: P[]; yaw: number; key: string; phase: 'to' | 'at' | 'back'; task: THREE.Object3D
-  ring: THREE.Mesh; progress: number; target: P; taskId: string
+  ring: THREE.Mesh; progress: number; target: P; taskId: string; rush: boolean
 }
+
+/** A worker sent on a repair (檢修, 放慢投料…) hurries there at RUSH× walking speed: standby → 7 號 is ~17 units, ~15 s
+ *  at SPEED, longer than the 12-second fast repair (REPAIR_FAST_S), so the machine came back before anyone reached it
+ *  (呱呱 10-22). At RUSH× they are there in ~5 s, about when the server turns the task 執行中. */
+const RUSH = 3.5
 
 /** One frame of a task walker (kept out of the hooks: the walker lives in a ref, not in React state). True when a
  *  worker walking back has reached standby and leaves the scene (they are one of the staff corner again). */
@@ -110,13 +116,15 @@ function stepWalker(wk: Walker, t: number, dt: number, i: number, camQ: THREE.Qu
     const [tx, tz] = wk.path[0]
     const dx = tx - r.position.x, dz = tz - r.position.z
     const d = Math.hypot(dx, dz)
-    const step = SPEED * dt
+    const fast = wk.rush && wk.phase === 'to'
+    // the server already has them there (執行中): catch up at once
+    const step = SPEED * dt * (fast ? (wk.key.startsWith('執行中') ? RUSH * 2 : RUSH) : 1)
     if (d <= step) { r.position.set(tx, 0, tz); wk.path.shift() } else {
       r.position.x += (dx / d) * step
       r.position.z += (dz / d) * step
       r.rotation.y = Math.atan2(dx, dz)
     }
-    walkCycle(wk.f, t, 10, 0.5)
+    walkCycle(wk.f, t, fast ? 16 : 10, 0.5)
     if (!wk.path.length) {
       restPose(wk.f)
       if (wk.phase === 'back') return true
@@ -166,7 +174,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
         f.root.add(ring)
         group.add(f.root)
         f.root.position.set(STANDBY[0], 0, STANDBY[1])
-        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id }
+        wk = { f, path: route(STANDBY, s.p), yaw: s.yaw, key: '', phase: 'to', task, ring, progress: -1, target: s.p, taskId: t.id, rush: false }
         walkers.current.set(w.id, wk)
       } else if (wk.phase === 'back' || wk.taskId !== t.id || wk.target[0] !== s.p[0] || wk.target[1] !== s.p[1]) {
         // a new task (or the same one again after starting back): head for its place from where they are
@@ -177,6 +185,7 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
       }
       wk.yaw = s.yaw
       wk.key = `${w.state}|${t.id}`
+      wk.rush = REPAIR_KINDS.has(t.kind)
       ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
