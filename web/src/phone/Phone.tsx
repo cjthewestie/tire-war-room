@@ -4,7 +4,7 @@
 // Fast repair (Kyle 10-21 flow): after 核准 the AI line says 專人維修中（n/m）; at Event.repaired_at a 「維修完成：…，溫度回升中」
 // notice, at close 「已恢復正常・異常報告已產生」 with 看報告 / 知道了 (RepairNotice), one per event (3 件同時異常: one after
 // another), each ringing once; nothing waits for them. 「主管已讀」 joins the history.
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { TodayOrders } from '../components/TodayOrders'
 import type { ApprovalRequest, Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
