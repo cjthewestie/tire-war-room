@@ -163,6 +163,15 @@ def test_remote_writes_need_pin_and_auto_is_server_only(frt):
         assert dec["actor"] == "supervisor" and dec["payload"]["via"] == "dashboard"
 
 
+def test_no_pin_makes_every_client_the_supervisor_seat(frt, monkeypatch):
+    _request(frt)
+    monkeypatch.setenv("WARROOM_NO_PIN", "1")       # 決賽展示：不問主管 PIN
+    with TestClient(create_app(frt, supervisor_pin="s3cret-pin"), client=LAN_PHONE) as phone:
+        assert phone.post("/api/sim/control", json={"action": "pause"}).status_code == 200
+        r = phone.post("/api/approvals/AP-1/decision", json=_body(via="phone"))
+        assert r.status_code == 200 and r.json()["decision"]["decided_by"] == "supervisor"
+
+
 def test_demo_controls_can_be_switched_off(frt):
     with TestClient(create_app(frt, demo_controls=False)) as c:
         assert c.post("/api/sim/step", json={"seconds": 5}).status_code == 403
