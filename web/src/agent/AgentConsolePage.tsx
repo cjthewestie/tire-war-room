@@ -22,14 +22,15 @@ import { useWarRoom } from '../useWarRoom'
 import { ToolIcon } from './ToolIcon'
 import { withAsks, type ApprovalItem, type Item, type LocalItem, type ToolItem } from './transcript'
 import { Row } from './TranscriptRows'
-import { ChatBar } from './ChatBar'
-import { anomalyWhat, backTo, endedText, isOpen, plainStatus, whatOf, workerName } from './subagents'
-import { Bubbles } from './SimpleChat'
+import { ChatBar, type BarFocus } from './ChatBar'
+import { anomalyWhat, backTo, endedText, eventOpen, plainStatus, whatOf, workerName } from './subagents'
+import { BubbleRow, Bubbles } from './SimpleChat'
 import { useMainThread } from './mainThread'
 import { TaskList } from '../components/TaskList'
 import { useTranscript } from './useTranscript'
 import { ReportBlock } from './ReportBlock'
 import { TaskLog } from './TaskLog'
+import { TodaySummary } from './TodaySummary'
 import './agent.css'
 
 type Kind = 'all' | 'think' | 'data' | 'approval'
@@ -53,6 +54,8 @@ function inKind(i: Item, k: Kind): boolean {
 
 
 const MAIN = '__main'
+/** 總覽 questions (CJ 2026-10-22: 統合整理進行中的任務、查詢過去資料、列出有疑問的任務) */
+const OVERVIEW_QUESTIONS = ['現在所有任務狀況', '哪些任務有問題', '今天處理過什麼', '#A-311 之前怎麼了']
 
 export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; initial: string | null
@@ -74,20 +77,24 @@ export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
   }
   const subs = new Map((state.subagents?.items ?? []).map((x) => [x.id, x]))
   const tasks = state.world?.tasks?.items ?? []
-  const openOf = (e: Event) => { const sa = subs.get(e.id); return sa ? isOpen(sa) : e.state !== 'closed' && e.state !== 'safe_stop' }
+  // open / ended by the event's state and the World's worker tasks, as 主控台 lists it (not the subagent status: a fast
+  // repair's closed event stayed under 處理中 as 「等現場完成（1/5）」 while 主控台 said it had ended, #92 review)
+  const openOf = (e: Event) => eventOpen(e, tasks.filter((t) => t.event_id === e.id))
   // a card waiting first (concurrent_3: the waiting B 線開煉機, third by time, was cut off at the bottom of the list)
   const waits = new Set(state.pending.map((p) => p.event_id))
   const listed = events.filter((e) => scope === 'all' || (scope === 'open') === openOf(e))
     .sort((a, b) => Number(waits.has(b.id)) - Number(waits.has(a.id)))
-  const thread = useMainThread(asks, true)
+  // 總覽: Agent Nemo over every task — its own conversation (mode overview), no task selected (CJ 2026-10-22)
+  const thread = useMainThread(asks, 'overview')
+  const [focus, setFocus] = useState<BarFocus | null>(null)
   if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
   return (
     <>
     <ModelQueueBar />
     <div className="trace" data-testid="agent-page">
-      <aside className="trace-side panel" aria-label="Agent Nemo 與處理中的事件">
+      <aside className="trace-side panel" aria-label="總覽與處理中的事件">
         <button type="button" className={`tree-root ${main ? 'on' : ''}`} onClick={() => pick(MAIN)} data-testid="tree-root" aria-pressed={main}>
-          <span className="tree-title"><span className="tree-dot" aria-hidden />Agent Nemo 對話</span>
+          <span className="tree-title"><span className="tree-dot" aria-hidden />總覽</span>
         </button>
         <div className="trace-side-bar">
           <div className="seg sm" role="group" aria-label="事件範圍">
@@ -96,9 +103,9 @@ export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
             ))}
           </div>
           <select className="trace-pick" value={main ? MAIN : ev?.id ?? MAIN} onChange={(e) => pick(e.target.value)} aria-label="Agent Nemo 或事件">
-            <option value={MAIN}>Agent Nemo 對話</option>
+            <option value={MAIN}>總覽</option>
             {/* the event on screen stays in the picker when it leaves the scope (closed while watched): the phone never
-                shows 「Agent Nemo 對話」 over an event */}
+                shows 「總覽」 over an event */}
             {(ev && !listed.includes(ev) ? [ev, ...listed] : listed).map((e) => { const sa = subs.get(e.id); return <option key={e.id} value={e.id}>{sa ? `${whatOf(sa, e)}・${plainStatus(sa, e, tasks)}` : evName(e)}</option> })}
           </select>
         </div>
@@ -119,12 +126,18 @@ export function AgentConsolePage({ asks, setAsks, initial, onApprove }: {
         <TaskLog onPick={pick} />
       </aside>
       {main ? (
-        <section className="panel trace-main main-thread" aria-label="Agent Nemo" data-testid="main-thread">
-          <h2 className="trace-h">Agent Nemo</h2>
-          <Bubbles items={thread} empty="跟 Agent Nemo 說要做的事，或問工廠現在的狀況。" />
-          <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={null} /></div>
+        <section className="panel trace-main main-thread" aria-label="總覽" data-testid="main-thread" data-mode="overview">
+          <h2 className="trace-h">總覽</h2>
+          <TodaySummary />
+          <Bubbles items={thread} empty="問全部任務的狀況、哪些有問題、過去的紀錄，或工廠的任何事。" onLink={pick} guide={(
+            <div className="con-guide" data-testid="overview-guide">
+              <p className="muted small">我看得到所有進行中的任務、過去的紀錄和工廠資料。提到的任務會附連結，點了直接打開那件的任務版。</p>
+              {OVERVIEW_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" onClick={() => setFocus((f) => ({ text: q, send: true, n: (f?.n ?? 0) + 1 }))}>{q}</button>)}
+            </div>
+          )} />
+          <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={null} waiting={false} setAsks={setAsks} focus={focus} mode="overview" /></div>
         </section>
-      ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onPick={pick} onApprove={onApprove} /> : (
+      ) : ev ? <Trace ev={ev} asks={asks} setAsks={setAsks} onApprove={onApprove} /> : (
         <section className="panel trace-main"><p className="muted">找不到這個事件。</p></section>
       )}
     </div>
@@ -261,14 +274,15 @@ function evName(e: Event): string {
   return e.source === 'supervisor' ? '主管指令' : e.source === 'plant' ? '工廠事件' : machineLabel(e.machine_id)
 }
 
-function Trace({ ev, asks, setAsks, onPick, onApprove }: {
-  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; onPick: (id: string) => void
+function Trace({ ev, asks, setAsks, onApprove }: {
+  ev: Event | null; asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   onApprove?: (eventId: string) => void
 }) {
   const { state } = useWarRoom()
   const { items: evItems, source } = useTranscript(ev)
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
   const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])   // a subagent shows its own run only
+  const talk = useMainThread(asks, 'task', ev?.id ?? '')    // what was said with this task selected
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const ended = !!ev && (ev.state === 'closed' || ev.state === 'safe_stop')
   const [kind, setKind] = useState<Kind>('all')
@@ -306,7 +320,9 @@ function Trace({ ev, asks, setAsks, onPick, onApprove }: {
         </div>
         <p className="muted small trace-note">每一列都來自稽核紀錄{source === 'event' ? '（瀏覽器模擬模式：由事件重建）' : ''}。</p>
       </section>
-      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} focus={null} onSent={(about) => { if (!about) onPick(MAIN) }} /></div>
+      {/* what was said with this task selected, right above the box it was typed in */}
+      {talk.length > 0 && <div className="sc sp-talk" data-testid="trace-talk">{talk.map((b) => <BubbleRow key={b.key} b={b} />)}</div>}
+      <div className="trace-chat" data-testid="trace-chat"><ChatBar ev={ev} waiting={waiting} setAsks={setAsks} focus={null} /></div>
     </section>
   )
 }

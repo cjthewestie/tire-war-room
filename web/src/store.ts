@@ -2,6 +2,7 @@
 import type {
   ApprovalRequest, AuditEntry, DashboardSnapshot, Event, EventState, RandomEventsClock, ScheduleVersion, SubagentsView, WorldDelta, WorldSnapshot, WsMessage,
 } from './contracts'
+import type { DemoState } from './demo/state'
 
 export interface ClockState {
   factory_time: string; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock
@@ -23,11 +24,15 @@ export interface WarRoomState {
   world: WorldSnapshot | null
   /** issue #54: the main agent's subagents and the model queue (WS "subagents", GET /api/subagents). Live only. */
   subagents: SubagentsView | null
+  /** the guided demo's shared cue (WS "demo", GET /api/demo/state); null = never started on this server */
+  demo: DemoState | null
+  /** 模型用量: the latest cap crossing (audit SYSTEM row, actor "budget"; warroom/agent/budget.py) */
+  budgetAlert: { text: string; cap: string; ts: string } | null
 }
 
 export const initialState: WarRoomState = {
   snapshot: null, pending: [], resolved: [], clock: null, schedule: null, scheduleRev: 0,
-  audit: [], visited: {}, lastMessageAt: 0, world: null, subagents: null,
+  audit: [], visited: {}, lastMessageAt: 0, world: null, subagents: null, demo: null, budgetAlert: null,
 }
 
 /** Apply a WS "world" message: a full one replaces, a delta overwrites only the sections it carries.
@@ -105,8 +110,12 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
       }
     case 'schedule':
       return { ...base, schedule: msg.data, scheduleRev: s.scheduleRev + 1 }
-    case 'audit':
-      return { ...base, audit: [...s.audit, msg.data].slice(-300) }
+    case 'audit': {
+      const p = msg.data.payload ?? {}
+      const cap = msg.data.actor === 'budget' && typeof p.cap === 'string' && typeof p.text === 'string'
+        ? { text: p.text, cap: p.cap, ts: msg.data.ts } : null
+      return { ...base, audit: [...s.audit, msg.data].slice(-300), budgetAlert: cap ?? s.budgetAlert }
+    }
     case 'clock':
       return {
         ...base,
@@ -117,6 +126,8 @@ export function reduce(s: WarRoomState, a: Action): WarRoomState {
       return { ...base, subagents: msg.data }
     case 'world':
       return { ...base, world: mergeWorld(s.world, msg.data) }
+    case 'demo':
+      return !s.demo || msg.data.rev >= s.demo.rev || !msg.data.running ? { ...base, demo: msg.data } : base
     case 'anomaly':
       return base
     default:

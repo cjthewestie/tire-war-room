@@ -11,7 +11,7 @@ import { LINE_LABELS, type Line, type MachineTile } from '../contracts'
 import { STATUS_LABEL } from '../components/common'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { LINES, ML_PRESSES, machineLabel } from '../factory'
-import type { WarRoomState } from '../store'
+import { primaryEvent, type WarRoomState } from '../store'
 import { embedSearch } from '../transport'
 import { ball, belt, box, bulbs, cyl, gear, makeFigure, mat, mergeStatic, mesh, rbox, restPose, trusses, walkCycle } from './kit'
 import { DockTruck, WorldPeople } from './People'
@@ -21,9 +21,14 @@ import { MachineRings } from './MachineRings'
 import { machineRing } from './machineRing'
 import { useRingRecoveries } from './recovery'
 import { DockCelebration } from './DockCelebration'
+import { PatrolRobot } from './PatrolRobot'
+import { director } from './pose'
+import { Whiteboard } from './Whiteboard'
+import { Alarms } from './Alarms'
+import type { Alarm } from './alarm'
 import {
   BUILDING, DESK, DOCK, DOCK_PROPS, DOOR, DOOR_H, DOOR_W, INNER_WALLS, LAMP_POST, LIGHT_HEX, LINE_HEX, OUTER_WALLS, PALLETS, PLACED, ROOMS, ROOM_X,
-  ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
+  PLACED_BY_ID, ROW_X0, ROW_Z, SCREEN, STAFF_SPOTS, WALKER_LOOPS, WALL_DOORS, WALL_T, lampPos, statusLight, type Box, type Light, type Placed,
 } from './layout'
 
 const CREAM = '#f3ead8', STEEL = '#a9b2ba', DARK = '#5d636b', YELLOW = '#f2c14e', ROLL = '#6b7078', WOOD = '#c89a6a'
@@ -165,7 +170,8 @@ function LateHtml(props: ComponentProps<typeof Html>) {
 /** Status lamp on a post above the machine, a soft glow sprite behind it, a tinted shell over an abnormal machine,
  *  the event ring, and the reading tag (only for the machine the lead is at; it floats above the lamp). */
 function MachineStatus({ p, tile, hot, focus, work, warm = false }: { p: Placed; tile: MachineTile | undefined; hot: boolean; focus: boolean; work: string | null; warm?: boolean }) {
-  const light: Light = statusLight(tile?.status)
+  // repaired (「檢修完成・待恢復運轉」): green, though the machine stays 停用 until the supervisor's 恢復運轉 (CJ: 圈圈變綠)
+  const light: Light = tile?.repaired ? 'green' : statusLight(tile?.status)
   useEffect(() => { DRAWN_LIGHT[p.id] = light }, [p.id, light])
   const lampRef = useRef<THREE.MeshStandardMaterial>(null)
   const lampMesh = useRef<THREE.Mesh>(null)
@@ -746,16 +752,55 @@ const RULER = new Set([PRESSES[0].id, PRESSES[PRESSES.length - 1].id])
  *  sat at 99% for seconds; the tag says 維修中 instead (the ring keeps its %). */
 const FIX_PCT = /^(檢修|停用檢修|放慢投料|暫停投料) \d+%$/
 
+/** The guided demo frames a shot (the doorway view of 7 號機): people walking between the camera and the subject
+ *  are hidden while they are within director.clearRadius of the camera. Figures are found by userData.figure. */
+function FigureFade() {
+  const figs = useRef<THREE.Object3D[]>([])
+  const lastScan = useRef(-10)
+  const v = useMemo(() => new THREE.Vector3(), [])
+  useFrame(({ scene, camera, clock }) => {
+    const r = director.on ? director.clearRadius : 0
+    if (clock.elapsedTime - lastScan.current > 2) {
+      lastScan.current = clock.elapsedTime
+      const out: THREE.Object3D[] = []
+      scene.traverse((o) => { if (o.userData.figure) out.push(o) })
+      figs.current = out
+    }
+    for (const f of figs.current) {
+      if (r <= 0) { if (f.userData.faded) { f.visible = true; f.userData.faded = false } continue }
+      f.getWorldPosition(v)
+      const near = Math.hypot(v.x - camera.position.x, v.z - camera.position.z) < r
+      if (near && f.visible) { f.visible = false; f.userData.faded = true }
+      else if (!near && f.userData.faded) { f.visible = true; f.userData.faded = false }
+    }
+  })
+  return null
+}
+
 /** Live light per machine as last drawn (read by the e2e test hook). */
 export const DRAWN_LIGHT: Record<string, Light> = {}
 
 /** The factory hall. `active` false hides it (the lead is in another space) without unmounting the big screen.
  *  `pinId` (demo): the story event's machine keeps its reading tag up without the lead standing at it; one machine only,
  *  so the three events of concurrent_3 do not stack three tags. */
-export function World({ state, focusId, pinId = null, active, fp, celebrate = null }: { state: WarRoomState; focusId: string | null; pinId?: string | null; active: boolean; fp: boolean; celebrate?: number | null }) {
+export function World({ state, focusId, pinId = null, active, fp, celebrate = null, board, alarms, arrows, quiet = false }: {
+  state: WarRoomState; focusId: string | null; pinId?: string | null; active: boolean; fp: boolean; celebrate?: number | null
+  /** the pitch whiteboard's deck and current slide; clicking the board opens the full-screen view */
+  board: { slides: string[]; index: number; onOpen: () => void }
+  /** abnormal machines (alarm.ts) for the stack lights, beacons and labels; arrows = the off-screen indicators */
+  alarms: Record<string, Alarm>
+  arrows: boolean
+  /** the demo's pitch: the board is the subject, so the floating signs and labels (which draw over it) are hidden */
+  quiet?: boolean
+}) {
   const tiles = useMemo(() => Object.fromEntries((state.snapshot?.machines ?? []).map((m) => [m.machine_id, m])), [state.snapshot?.machines])
   const hot = useMemo(() => new Set((state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop').map((e) => e.machine_id)), [state.snapshot?.events])
   // rings follow the clock (every 0.5 s), not only the world's steps, so a fast repair fills smoothly
+  // the patrol robot goes to the newest open event's machine
+  const incident = useMemo(() => {
+    const open = (state.snapshot?.events ?? []).filter((e) => e.state !== 'closed' && e.state !== 'safe_stop' && !!PLACED_BY_ID[e.machine_id])
+    return primaryEvent(open)?.machine_id ?? null
+  }, [state.snapshot?.events])
   const now = Date.parse(state.clock?.factory_time ?? state.world?.factory_time ?? '') || 0
   const speed = state.clock?.speed ?? 1
   const recs = useRingRecoveries(state.snapshot?.events, now, speed)   // 回溫中 / 已恢復 after a fast repair
@@ -778,7 +823,7 @@ export function World({ state, focusId, pinId = null, active, fp, celebrate = nu
         return <MachineStatus key={p.id} p={p} tile={tiles[p.id]} hot={hot.has(p.id)} focus={tag} work={work}
           warm={ring?.kind === 'recover' && ring.label !== '已恢復'} />
       })}
-      {active && <>
+      {active && !quiet && <>
         {LINES.map((l) => { const [x, z] = signSpot(l); return <LineSign key={l} line={l} x={x} z={z} fp={fp} /> })}
         {DEMO_MODE && PRESSES.filter((p) => RULER.has(p.id) || hot.has(p.id)).map((p) => (
           <PressNo key={p.id} p={p} hot={hot.has(p.id)} warm={hot.has(p.id) && statusLight(tiles[p.id]?.status) === 'amber'} />
@@ -807,6 +852,10 @@ export function World({ state, focusId, pinId = null, active, fp, celebrate = nu
       <DockTruck trucks={state.world ? state.world.dock.trucks : null} />
       {/* demo: no confetti over an open anomaly, and no chimney steam (smoke off a press that is fine reads as trouble) */}
       <DockCelebration at={celebrate} quiet={DEMO_MODE && hot.size > 0} />
+      <PatrolRobot incident={incident} />
+      <FigureFade />
+      {active && <Alarms alarms={alarms} labels={!fp && !quiet} arrows={arrows} />}
+      {active && <Whiteboard slides={board.slides} index={board.index} onOpen={board.onOpen} />}
       {!DEMO_MODE && <Ambient />}
     </group>
   )

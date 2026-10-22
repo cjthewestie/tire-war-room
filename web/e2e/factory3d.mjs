@@ -165,6 +165,8 @@ try {
   check('F at the desk opens the real dashboard full-size', deskH1.includes('實心胎智慧製造戰情室') && tabs.join(' ').includes('人力排程'), `${deskH1} · ${tabs.slice(0, 4).join(' / ').replace(/\n/g, ' ')}`)
   const frames = await page.evaluate(() => ({ big: document.querySelectorAll('[data-testid=f3-bigscreen] iframe').length, all: [...document.querySelectorAll('iframe')].map((f) => f.getAttribute('src')) }))
   check('one big-screen iframe, one desk iframe, one phone iframe', frames.big === 1 && frames.all.length === 3, frames.all.join(' , '))
+  // the scenario buttons sit behind ⚙ 展示控制 (the strip shows only Demo / QA)
+  await desk.locator('[data-testid="demo-more"]:not([open]) > summary').click().catch(() => {})
   await desk.locator('.demo button:has-text("7 號硫化機溫降")').click()
   await sleep(600)
   // the 展示列 has no speed buttons since #100: 10× over the API, as the presenter's server setting would

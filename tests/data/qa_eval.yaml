@@ -1,0 +1,72 @@
+# QA 模式 eval: judge-style questions about the agent framework (scripts/qa_eval.py).
+# Each in-scope question lists key facts; a fact is a list of acceptable spellings (any one counts). An answer is
+# correct when every fact appears. out_of_scope: true means the answer must be the fallback
+# 「這部分我們文件裡沒有，現場由 CJ 補充」 (or a safety-filter line), and must not invent an answer.
+# Facts are graded against docs/qa/framework-qa.md and the code it cites.
+questions:
+  - q: 狀態機裡到底有幾個地方會呼叫大模型？
+    facts: [[PLAN], [REPLAN]]
+  - q: 你們的 agent 是模型自己決定下一步，還是程式決定？
+    facts: [[程式, 轉移表, ALLOWED_TRANSITIONS], [PLAN]]
+  - q: 事件狀態機總共有幾個狀態？
+    facts: [["11"], [SAFE_STOP], [EXECUTE]]
+  - q: 寫入的動作會在哪個狀態發生？
+    facts: [[EXECUTE], [confirm_schedule, set_cure_time, notify_teams, 三個寫入]]
+  - q: agent 一共可以用幾個工具？能直接寫 PLC 嗎？
+    facts: [["9", 九], [PLC, 致動器]]
+  - q: Action Gate 的風險分級是怎麼分的？
+    facts: [[R0], [R2], [R3], [主管核准, 核准]]
+  - q: 哪些動作一定要主管按核准才會執行？
+    facts: [[R2], [R3]]
+  - q: 安全核心有哪些規則？
+    facts: [[SR-COMPOUND-120], [SR-CURE-LOW-120, SR-CURE-HIGH-130, SR-CURATIVE-110]]
+  - q: 安全核心的反應時間是多少？
+    facts: [["0.2"]]
+  - q: 連續失敗會怎樣？會不會把已經核准的排程退回去？
+    facts: [[SAFE_STOP], [不會回滾, 不回滾, 保留, 不會]]
+  - q: 你們的 log 被人改掉的話看得出來嗎？
+    facts: [[HMAC], [雜湊鏈, hash chain, 鏈]]
+  - q: NVIDIA 的 NeMo Agent Toolkit 你們用在哪裡？
+    facts: [[profiler, 量測, 評測, eval]]
+  - q: 為什麼狀態機不直接用 NAT 來做？
+    facts: [[依賴, pandas, overlay, 確定性]]
+  - q: 沙箱是怎麼隔離的？
+    facts: [[OpenShell], [Landlock, 網路, 唯讀]]
+  - q: 你們用哪個模型，跑在什麼硬體上？
+    facts: [[Nemotron], [DGX Spark, Spark], [NVFP4, 30B]]
+  - q: 送進模型的上下文太長時怎麼辦？
+    facts: [[TRIM_STEPS, 裁], [system prompt]]
+  - q: 有人在 SOP 文件裡藏惡意指令怎麼辦？
+    facts: [[DATA, 分隔, 資料不是指令, 移除], [Gate, 核准]]
+  - q: 工廠可以自己改 system prompt 嗎？會不會把安全規則改掉？
+    facts: [[PLANT.md], [核心, 不能改, 不得覆蓋, 改不了]]
+  - q: Agent Nemo 對話會不會陷入無限迴圈？
+    facts: [["6", MAX_STEPS], ["60"]]
+  - q: agent 的記憶怎麼設計？
+    facts: [["20"], [摘要], [釘選, pins]]
+  - q: LLM 回傳壞掉的 JSON 會怎樣？
+    facts: [[MockCommander, 規則指揮官, 備援, fallback, 退回]]
+  - q: 網路斷掉系統還能動嗎？
+    facts: [[可以, 離線], [Ollama, vLLM, 本地]]
+  - q: 只有一顆模型，同時三件事故怎麼排？
+    facts: [[ModelQueue, 優先], [safety, 安全, 事故, 機台]]
+  - q: AI 會不會自己去動產線上的機台？
+    facts: [[不會], [Gate, 核准]]
+  - q: 你們跟 Claude Code 這種 agent 最大差別？
+    facts: [[事件驅動, event-driven], [程式, 轉移表]]
+  - q: 指揮官可以做哪些事？做不到什麼？
+    facts: [[計劃, 計畫], [confirm_schedule, set_cure_time, notify_teams, 三個寫入, 三種寫入]]
+  - q: AI 能直接叫料或改交期嗎？
+    facts: [[不能, 做不到, 不會, 沒辦法], [叫料, 交期, 供應商]]
+  - q: 為什麼只有三種寫入？
+    facts: [[confirm_schedule, set_cure_time, notify_teams], [管住, 掌控, 限縮, 模組]]
+  - q: 你們公司估值多少？
+    out_of_scope: true
+  - q: 這套系統一套賣多少錢？
+    out_of_scope: true
+  - q: 你們團隊有幾個人、誰負責什麼？
+    out_of_scope: true
+  - q: 今天台北天氣如何？
+    out_of_scope: true
+  - q: 你們打算什麼時候上市？
+    out_of_scope: true

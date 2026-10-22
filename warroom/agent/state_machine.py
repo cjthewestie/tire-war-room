@@ -110,6 +110,7 @@ from warroom.contracts import (
     NotifyKind,
     PlanConstraint,
     PlanStep,
+    PreviousRun,
     RiskLevel,
     SafetyAction,
     Severity,
@@ -127,6 +128,7 @@ from warroom.contracts import (
 )
 from warroom.agent.gate import cure_notice_press
 from warroom.agent.strict import failure_cause, strict_reason
+from warroom.data import machine_memory as MM
 from warroom.factory import (
     CURE_PRESS_IDS,
     CURE_TEMP_MAX_C,
@@ -256,6 +258,7 @@ class _Run:
     newly_rejected: str | None = None                        # hypothesis VERIFY rejected just before this replan
     sop_handoff: bool = False                                # tools failed: the plan hands the event to people (SOP)
     commander_error: str | None = None                       # why the latest commander call produced no plan
+    memory_ids: dict[str, Any] | None = None                 # 「接記憶」: note / past-event ids last put in the context
     current_req: ApprovalRequest | None = None               # the approval whose writes are executing now
     approved_sig: dict[str, Any] | None = None               # what that approval put in force (content signature)
     stale_approval: dict[str, Any] | None = None             # approved, but its schedule went stale before confirm
@@ -307,6 +310,7 @@ class StateMachine:
         self._max_kept = max_events_kept
         self._events: dict[str, Event] = {}
         self._runs: dict[str, _Run] = {}         # open event id -> its run (issue #10: discussion)
+        self._task_reports: dict[str, tuple[str, bool]] = {}  # event id -> (人員回報完成 line, a repair) for VERIFY
         self._plant_inputs: dict[str, Any] = {}  # issue #17: plant event id -> its PlantInput
         self._open: dict[str, str] = {}          # machine_id -> open event id
         self._activated_by: dict[int, str] = {}  # schedule version -> the event whose approval put it in force
@@ -315,7 +319,11 @@ class StateMachine:
         self.on_open: Callable[[Event], None] | None = None
         self.on_end: Callable[[Event], None] | None = None
         self._interrupt: dict[str, str] = {}
+        self._cure_rechecked: set[tuple[str, str]] = set()   # (event, press) whose cure extension was withdrawn
         self.compute_inflight = 0                # solver / LLM calls running now (Runtime may hold sim time)
+        # 「接記憶」: machine_id, event id -> that machine's notes and past events (warroom/data/machine_memory.py), set by
+        # the Runtime; None = no memory. Read-only; it goes in the per-event context, never in the system prompt.
+        self.memory: Callable[[str, str], dict[str, Any] | None] | None = None
         try:
             self._commander_streams = "on_alert" in inspect.signature(commander.plan).parameters
         except (TypeError, ValueError):
@@ -356,9 +364,51 @@ class StateMachine:
         ev.repaired_at = at
         self._note(ev, "系統", f"[人工] 維修完成：{machine_label(machine_id)}故障排除", "human", ts=at)
         self._set_status(machine_id, MachineStatus.WARNING, "回溫中")
+        self.withdraw_cure_extension(event_id, machine_id, at)
         run = self._runs.get(event_id)
         if run is not None:
             run.repaired.set()
+
+    def withdraw_cure_extension(self, event_id: str, press: str, at: datetime) -> None:
+        """#92 review: after the repair, the round's 「設定硫化時間 28.5 h（+4.5 h）」 and its 宣達 were still carried out,
+        and +4.5 h was computed for a press stuck at 122 °C: an over-cure risk once it is warm again. Code withdraws the
+        not-yet-done ones and posts a recheck task with the formula recomputed from the reading now (no model). Audited.
+        Called by on_repaired (fast repair) and by the runtime when a repair finishes at real durations; once per event
+        and press, so the recheck never posts twice."""
+        ev = self._events.get(event_id)
+        if ev is None or (event_id, press) in self._cure_rechecked:
+            return
+        board = self._board()
+        mdef = MACHINE_BY_ID.get(press)
+        if board is None or mdef is None or mdef.line is not Line.CURE \
+                or not callable(getattr(board, "withdraw_cure_extension", None)):
+            return
+        gone = board.withdraw_cure_extension(ev.id, press, at)
+        if not gone:
+            return
+        self._cure_rechecked.add((event_id, press))
+        st = self._machine_state(press)
+        job, reading = (st.cure_job, st.last_reading) if st is not None else (None, None)
+        recomputed: dict[str, Any] | None = None
+        title = "硫化機已回溫，請依公式重新確認硫化時數"
+        if job is not None and reading is not None and reading.temp_c is not None:
+            from warroom.contracts import CureFormulaArgs
+            from warroom.factory import ACTIVATION_ENERGY_KJ_MOL, CURE_HOURS
+            from warroom.tools.cure import arrhenius_cure
+            args = CureFormulaArgs(size=job.size, ref_temp_c=float(job.setpoint_c),
+                                   actual_temp_c=max(float(reading.temp_c), CURE_TEMP_MIN_C),
+                                   elapsed_h=float(job.cure_elapsed_h), ref_cure_h=float(CURE_HOURS[job.size]),
+                                   activation_energy_kj_mol=float(ACTIVATION_ENERGY_KJ_MOL))
+            d = arrhenius_cure(args)
+            recomputed = {"args": args.model_dump(mode="json"), "total_cure_h": d.total_cure_h, "extra_h": d.extra_h}
+            title += f"（現在 {fmt_num(reading.temp_c)}°C，公式 {fmt_num(d.total_cure_h)} h）"
+        from warroom.sim.work import _spec
+        added = board.add_specs(ev.id, [_spec("設定硫化時間", f"{machine_label(press)}：{title}", TeamId.CURING, press)], at)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"cure_extension_withdrawn": gone, "press": press, "recheck_task": [t.id for t in added],
+                           "recomputed": recomputed}, event_id=ev.id)
+        self._note(ev, "系統", f"{machine_label(press)}已修復：撤回尚未完成的延長硫化設定與宣達，改請依公式重新確認"
+                   + (f"（{fmt_num(recomputed['total_cure_h'])} h）" if recomputed else ""), "info", ts=at)
 
     def on_recovered(self, event_id: str, machine_id: str, at: datetime, reading: Any = None) -> None:
         """Fast repair: the repaired machine's readings are back to nominal (the runtime's ramp ended; it audits
@@ -382,6 +432,22 @@ class StateMachine:
             self._set_status(machine_id, MachineStatus.RUNNING, ev.anomaly.message)
         if ev.state is EventState.CLOSED:
             self._report_ready(ev)
+
+    def task_reported(self, event_id: str, text: str, at: datetime) -> None:
+        """人員回報 (runtime, report mode): a worker's 開始 / 完成, the supervisor's 代為完成 or an overdue reminder goes
+        on the event's timeline. A 完成 line is kept so VERIFY can say what the reading confirmed."""
+        ev = self._events.get(event_id)
+        if ev is None:
+            return
+        self._note(ev, "系統", f"[人工] {text}", "human", ts=at)
+        if "回報完成" in text or "代為完成" in text:
+            # VERIFY quotes the repair's report (檢修 …) over a later 宣達 / 設定 report of the same event
+            from warroom.sim.work import REPAIR_KINDS
+            repair = any(f"：{k}［" in text or f"的{k}（" in text for k in REPAIR_KINDS)
+            prev = self._task_reports.get(event_id)
+            if repair or prev is None or not prev[1]:
+                head = text.split("（原因")[0] if "代為完成" in text else text.split("：")[0]
+                self._task_reports[event_id] = (head, repair)
 
     def review(self, event_id: str, by: str, note: str | None = None) -> Event:
         """主管已讀報告 (POST /api/events/{id}/review): the supervisor read the incident report of an event closed
@@ -429,12 +495,32 @@ class StateMachine:
                 self._safe_stop(run, f"內部錯誤：{type(e).__name__}")
         finally:
             self._settle_discussion(run, None)
+            self._retire_cards(run)
             self._runs.pop(ev.id, None)
             if self._open.get(ev.machine_id) == ev.id:
                 del self._open[ev.machine_id]
             self._hook(self.on_end, ev)
             self._trim()
         return ev
+
+    def _retire_cards(self, run: _Run) -> None:
+        """Audit N9 (Spark 10-21): an event that ends while a card of it is still PENDING (cancelled or crashed in
+        AWAIT_APPROVAL) supersedes that card, so no one can approve a plan whose event is gone."""
+        ev = run.ev
+        pending = getattr(self.approvals, "pending", None)
+        supersede = getattr(self.approvals, "supersede", None)
+        if not callable(pending) or not callable(supersede) or ev.id in self._interrupt:
+            return        # a supervisor interrupt: the orchestrator supersedes the cards itself and reports them
+        for req in [r for r in pending() if r.event_id == ev.id]:
+            try:
+                supersede(req.id, by="state_machine", reason=f"事件已結束（{ev.state.value}），此卡作廢")
+            except Exception as e:  # noqa: BLE001 - decided meanwhile; never break the run's cleanup
+                self.audit.append(AuditKind.SYSTEM, "state_machine",
+                                  {"retire_card_error": f"{type(e).__name__}: {e}"[:300], "request_id": req.id},
+                                  event_id=ev.id)
+                continue
+            self._note(ev, "系統", f"事件已結束，待核准卡 v{req.version} 作廢", "info")
+        run.waiting_req = None
 
     def _hook(self, fn: Callable[[Event], None] | None, ev: Event) -> None:
         if fn is not None:
@@ -825,6 +911,13 @@ class StateMachine:
                 self.bus.publish(kind, data)
             except Exception:  # noqa: BLE001
                 pass
+
+    def add_note(self, event_id: str, actor: str, text: str, tag: str = "human") -> Event | None:
+        """A line on an event's timeline from outside a run (a supervisor's resolution step); publishes the event."""
+        ev = self._events.get(event_id)
+        if ev is not None:
+            self._note(ev, actor, text, tag)
+        return ev
 
     def _note(self, ev: Event, actor: str, text: str, tag: str = "info", ts: datetime | None = None) -> None:
         ev.timeline.append(TimelineItem(ts=ts or self._now(), actor=actor, text=text, tag=tag))
@@ -1264,16 +1357,15 @@ class StateMachine:
         return [m.id for m in MACHINES if m.line is mdef.line]
 
     # ------------------------------------------------------------------ PLAN / REPLAN
-    async def _ask(self, run: _Run, phase: str, extra: dict[str, Any]) -> CommanderPlan | None:
+    async def _commander_call(self, run: _Run, phase: str, req: CommanderRequest
+                              ) -> tuple[CommanderPlan, Any] | None:
+        """One commander call, audited (LLM_CALL, plus INTERCEPTED for dropped steps). None when it raised: the
+        reason is in run.commander_error."""
         ev = run.ev
-        allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
-        rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
-        req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
-                               context={**run.base_context, **extra}, rejected=rejected)
+        mem = (req.context or {}).get("machine_memory")         # 「接記憶」: which notes / past events went in (audited)
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
-        llm_started = self._now()
         self.compute_inflight += 1                   # LLM thinking time: Runtime may hold sim time
         try:
             if self._commander_streams:
@@ -1288,12 +1380,15 @@ class StateMachine:
             self.audit.append(AuditKind.LLM_CALL, "commander",
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
                                "fell_back_to_mock": False, "plan_source": None, "strict": strict,
-                               "reason": run.commander_error, "plant_sha256": self._plant_sha()}, event_id=ev.id)
+                               "reason": run.commander_error, "plant_sha256": self._plant_sha(),
+                               "machine_memory": MM.attached(mem)}, event_id=ev.id)
             self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
             self.compute_inflight -= 1
-        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha()}
+        payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha(),
+                                   "machine_memory": {**MM.attached(mem),
+                                                      "trimmed": "context.machine_memory" in (info.trimmed or [])}}
         if info.fell_back_to_mock:
             # the model's output was rejected: what runs is the deterministic fallback's plan, and the
             # record says so (never credit the mock's steps to the model), with why and what it sent
@@ -1305,6 +1400,9 @@ class StateMachine:
                             "cause": getattr(self.commander, "last_cause", None),
                             "raw_sha256": hashlib.sha256(raw.encode("utf-8")).hexdigest(),
                             "raw_chars": len(raw), "raw_excerpt": raw[:600]})
+            if payload["cause"] == "budget":     # warroom/agent/budget.py: the supervisor sees why it is the rule plan
+                self._note(ev, "指揮官", f"{getattr(self.commander, 'last_error', '') or ''}".split(": ", 1)[-1]
+                           + "：這次改用規則計劃", "dynamic")
         else:
             payload.update({"plan_source": "commander", "hypothesis": plan.hypothesis.id,
                             "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],
@@ -1315,10 +1413,53 @@ class StateMachine:
                               {"step": s, "reason": "tool not on the allow-list (dropped from plan)"
                                + ("; the rest of the model's plan was invalid, fallback plan used"
                                   if info.fell_back_to_mock else "")}, event_id=ev.id)
+        return plan, info
+
+    def _machine_memory(self, run: _Run) -> dict[str, Any] | None:
+        """The event machine's notes and last past events for this plan / replan, or None. A timeline line says what
+        was attached whenever it differs from the last one this event got."""
+        ev = run.ev
+        if self.memory is None or ev.source == "plant":
+            return None
+        try:
+            mem = self.memory(ev.machine_id, ev.id)
+        except Exception as e:  # noqa: BLE001 - memory is reference only: a plan never waits on it
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"machine_memory_error": f"{type(e).__name__}: {e}"[:200]}, event_id=ev.id)
+            return None
+        ids = MM.attached(mem)
+        if mem and ids != run.memory_ids:
+            self._note(ev, "系統", MM.timeline_line(mem), "info")
+        run.memory_ids = ids
+        return mem
+
+    async def _ask(self, run: _Run, phase: str, extra: dict[str, Any]) -> CommanderPlan | None:
+        ev = run.ev
+        allowed = sorted(TOOLS_BY_STATE[EventState.SIMULATE] | WRITE_TOOLS, key=lambda t: t.value)
+        rejected = [h for h in ev.hypotheses if h.status is HypothesisStatus.REJECTED]
+        ctx = {**run.base_context, **extra}
+        if ev.previous is not None:              # 「請 AI 重新規劃」: why the last run of this ended in SAFE_STOP
+            ctx["previous_run"] = {"event_id": ev.previous.event_id, "stop_reason": ev.previous.reason_text}
+        mem = self._machine_memory(run)
+        if mem:
+            ctx["machine_memory"] = mem
+        req = CommanderRequest(phase=phase, event_id=ev.id, anomaly=ev.anomaly, allowed_tools=allowed,
+                               context=ctx, rejected=rejected)
+
+        llm_started = self._now()
+        got = await self._commander_call(run, phase, req)
+        if got is None:
+            return None
+        plan, info = got
+        total_ms = info.total_ms
         # the repeat check runs on what the commander proposed, before code bounds the expectation
         # (bounding maps every cure-press temperature test onto the same line, so a genuinely new
         # hypothesis would otherwise look like the rejected one)
         again = self._repeats_rejected(plan.hypothesis, rejected)
+        rules_note = False
+        if again and not plan.safe_stop:
+            plan, again, more_ms, rules_note = await self._retry_repeat(run, phase, req, plan, again, rejected)
+            total_ms += more_ms
         run.sop_handoff = phase == "replan" and bool(extra.get("sop_path"))
         exp, fixes = self._code_expectation(ev, plan, handoff=run.sop_handoff)
         if fixes:
@@ -1336,6 +1477,7 @@ class StateMachine:
             plan = plan.model_copy(update={"safe_stop": True})
         if ev.source == "plant":
             plan = self._plant_plan_guard(run, plan)
+        plan = self._bind_takeout(run, plan)
         hyp = plan.hypothesis.model_copy(update={"status": HypothesisStatus.ACTIVE})
         cur = ev.hypotheses[-1] if ev.hypotheses else None
         if phase == "replan" and cur is not None and cur.status is HypothesisStatus.ACTIVE \
@@ -1359,11 +1501,88 @@ class StateMachine:
                                              goal=ev.goal, steps=ev.steps))
         ev.plan, ev.goal = plan, plan.goal
         ev.steps = [StepRun(step=s, state="pending") for s in plan.steps]
+        if rules_note and not plan.safe_stop:
+            self._note(ev, "指揮官", f"AI 兩次重提已否決的假設，改用規則假設 {hyp.id}", "dynamic")
         self._narrate_hypothesis(run, phase, rejected)
         if not plan.safe_stop:
-            await self._pace(llm_started, max(MODEL_LLM_PLAN_S, info.total_ms / 1000.0))
+            await self._pace(llm_started, max(MODEL_LLM_PLAN_S, total_ms / 1000.0))
             self._narrate_steps(run)
         return plan
+
+    REPEAT_RETRIES = 1      # extra asks of the same replan after a repeated rejected hypothesis (not a replan)
+
+    async def _retry_repeat(self, run: _Run, phase: str, req: CommanderRequest, plan: CommanderPlan, again: str,
+                            rejected: list[Hypothesis]) -> tuple[CommanderPlan, str | None, float, bool]:
+        """The commander re-proposed a rejected hypothesis (Spark 10-21, p.11 4/4: 「蒸汽壓不足」 again with the same
+        「CURE-07 ≥121°C」 test). Ask once more within the same replan, the repeat flagged in the user message
+        (context.repeated_rejected -> replan_feedback); a second repeat takes the rule commander's hypothesis for this
+        phase (page 11: H2 leak / sensor drift, press out of service). Neither ask counts as a replan (max_replans
+        counts _replan calls only). Returns (plan, repeat match or None, extra model ms, rules used). With --strict
+        (no rule plan) or a rule plan that repeats too, the match stays set and the caller safe-stops."""
+        ev = run.ev
+        extra_ms = 0.0
+        for _ in range(self.REPEAT_RETRIES):
+            h = plan.hypothesis
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"error": "commander re-proposed a rejected hypothesis", "match": again,
+                               "cause_code": h.cause_code, "action": "retry_with_feedback"}, event_id=ev.id)
+            self._note(ev, "指揮官", f"新假設重提已否決的假設（{h.statement}）→ 附上否決證據再問一次", "dynamic")
+            rep = {"cause_code": h.cause_code, "statement": h.statement, "match": again,
+                   "expectation": h.expectation.model_dump(mode="json") if h.expectation else None}
+            req = req.model_copy(update={"context": {**req.context, "repeated_rejected": rep}})
+            got = await self._commander_call(run, phase, req)
+            if got is None:
+                break                                   # the model failed on the retry: rules below
+            plan, info = got
+            extra_ms += info.total_ms
+            again = self._repeats_rejected(plan.hypothesis, rejected)
+            if plan.safe_stop or not again:
+                return plan, again, extra_ms, False
+        if getattr(getattr(self.commander, "settings", None), "llm_fallback_to_mock", True) is False:
+            return plan, again or "repeat (strict: no rule plan)", extra_ms, False
+        from warroom.agent.commander import MockCommander
+        rules, _ = await MockCommander().plan(req)
+        again_rules = self._repeats_rejected(rules.hypothesis, rejected)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"fell_back_to_rules": "repeated_rejected_hypothesis", "phase": phase, "match": again,
+                           "model_cause_code": plan.hypothesis.cause_code, "plan_source": "rules",
+                           "hypothesis": rules.hypothesis.id, "cause_code": rules.hypothesis.cause_code,
+                           "steps": [st.id for st in rules.steps], "safe_stop": rules.safe_stop,
+                           "rules_repeat": again_rules}, event_id=ev.id)
+        run.commander_error = None
+        return rules, again_rules, extra_ms, True
+
+    def _bind_takeout(self, run: _Run, plan: CommanderPlan) -> CommanderPlan:
+        """A plan that takes the event press out (machine_out for it) re-solves without THAT press. Mac 10-22, p.11 H2:
+        Lightning wrote unavailable_presses ["CURE-09"] (the system prompt's example press) next to 「7 號機停用」; the
+        gate then blocked the machine_out (no feasible solve without CURE-07) and the approved H2 safe-stopped 3 of 5
+        runs. A solve that names presses but not the event press gets it, and loses a press that is running normally
+        (not out, not held); a solve naming none is left alone (the gate decides, test_agent_review_r4)."""
+        ev = run.ev
+        mid = ev.machine_id
+        out = any(st.tool is ToolName.NOTIFY_TEAMS and st.args.get("kind") == NotifyKind.MACHINE_OUT.value
+                  and st.args.get("machine_id") in (None, mid) for st in plan.steps)
+        if not out or mid not in MACHINE_BY_ID or MACHINE_BY_ID[mid].line is not Line.CURE:
+            return plan
+
+        def keep(p: str) -> bool:
+            st = self._machine_state(p)
+            return st is None or st.status not in (MachineStatus.RUNNING, MachineStatus.IDLE)
+        steps, changed = [], []
+        for st in plan.steps:
+            was = list(st.args.get("unavailable_presses") or []) if st.tool is ToolName.SOLVE_SCHEDULE else []
+            if was and mid not in was:     # names presses, not this one (a solve with none is left to the gate)
+                now = [mid, *(p for p in was if keep(p))]
+                if now != was:
+                    changed.append({"step_id": st.id, "from": was, "to": now})
+                    st = st.model_copy(update={"args": {**st.args, "unavailable_presses": now}})
+            steps.append(st)
+        if not changed:
+            return plan
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"unavailable_presses_bound": changed, "reason": "machine_out of the event press"},
+                          event_id=ev.id)
+        return plan.model_copy(update={"steps": steps})
 
     # ---- VERIFY must test the event, not whatever the LLM picked ----
     EXPECT_MARGIN_C = 1.0
@@ -1430,6 +1649,12 @@ class StateMachine:
             return (">=" if a.value < a.baseline else "<="), a.value           # at least no worse than now
         return None, None
 
+    @staticmethod
+    def _exact_bound(ev: Event, channel: Channel) -> bool:
+        """The code's threshold is the test itself, not a floor: temperature on a curing press."""
+        mdef = MACHINE_BY_ID.get(ev.machine_id)
+        return channel is Channel.TEMP and mdef is not None and mdef.line is Line.CURE
+
     def _default_expectation(self, ev: Event, channel: Channel, within: float) -> Expectation:
         a = ev.anomaly
         op, bound = self._bound_for(ev, channel)
@@ -1466,6 +1691,12 @@ class StateMachine:
                 op = need_op
             if bound is not None and (value < bound if op == ">=" else value > bound):
                 fixes.append(f"value {value:g} -> {bound:g}")
+                value = bound
+            elif bound is not None and value != bound and self._exact_bound(ev, channel):
+                # a press temperature test is the cure band (page 11: H1 holds while 7 號 stays ≥121). A higher bar
+                # (Mac 10-22: Lightning asked ≥123 with the prediction at 122±1) rejected H1 at once at 122 °C, before
+                # the leak, so the demo never read 119.5
+                fixes.append(f"value {value:g} -> {bound:g} (cure band)")
                 value = bound
         if op != exp.op:
             upd["op"] = op
@@ -3263,7 +3494,8 @@ class StateMachine:
                 return "contained", None
             self._note(ev, "驗證（程式）", f"{machine_label(ev.machine_id)}未進入停用狀態 → {h.id} 未完成", "dynamic")
             return "rejected", None
-        start = run.plan_at or self._now()
+        reported_at = await self._await_reports(run)
+        start = reported_at or run.plan_at or self._now()
         deadline = start + timedelta(minutes=exp.within_min)
         violated_since: datetime | None = None
         last: float | None = None
@@ -3332,6 +3564,30 @@ class StateMachine:
         except Exception:  # noqa: BLE001 - a board without tasks: nothing to wait for
             return False
 
+    async def _await_reports(self, run: _Run) -> datetime | None:
+        """人員回報 mode (TaskBoard.report_mode): nobody's timer finishes a task, so VERIFY first waits until the people
+        reported every task of this event done (or the supervisor completed it for them), at most TASK_VERIFY_MAX_MIN;
+        then code tests the reading. Returns when the wait ended (the expectation's window starts there), None when
+        there was nothing to wait for."""
+        board = self._board()
+        if board is None or not getattr(board, "report_mode", False):
+            return None
+        ev = run.ev
+        open_ = [t for t in board.for_event(ev.id) if t.status != "完成"]
+        if not open_:
+            return None
+        self._note(ev, "驗證（程式）", f"等待現場人員回報完成 {len(open_)} 項任務，再由程式確認讀值", "info")
+        deadline = self._now() + timedelta(minutes=TASK_VERIFY_MAX_MIN)
+        while any(t.status != "完成" for t in board.for_event(ev.id)) and self._now() < deadline:
+            await self._sleep(1.0)
+        left = [t.id for t in board.for_event(ev.id) if t.status != "完成"]
+        self.audit.append(AuditKind.TASK, "verifier", {"waited_for_reports": [t.id for t in open_], "open": left,
+                                                       "ok": not left}, event_id=ev.id)
+        if left:
+            self._note(ev, "驗證（程式）", f"人員回報逾時：{len(left)} 項未回報完成，交主管追蹤；改以目前讀值驗證",
+                       "dynamic")
+        return self._now()
+
     async def _verify_wait(self, run: _Run, seconds: float) -> None:
         """VERIFY's wait between reads (sim seconds). A repair reported meanwhile (on_repaired) cuts it short; after
         it, reads come every sim second until one taken after the fix is in."""
@@ -3381,6 +3637,9 @@ class StateMachine:
         elif ok:
             h.evidence.append(f"{ch}維持 {fmt_num(v)}{unit}，符合預期 {expectation_text(exp)}")
             self._note(ev, "驗證（程式）", f"比對預期：{ch} {fmt_num(v)}{unit} → {h.id} 成立", "dynamic")
+            said = self._task_reports.pop(ev.id, (None, False))[0]
+            if said:                             # 人員回報: who said it was fixed, and what code checked
+                self._note(ev, "驗證（程式）", f"{said} → 程式確認讀值回到 {fmt_num(v)}{unit}", "dynamic")
         else:
             h.evidence.append(f"{ch}續降至 {fmt_num(v)}{unit}" if exp.op == ">=" else f"{ch}達 {fmt_num(v)}{unit}")
             verb = "降到" if exp.op == ">=" else "升到"
@@ -3441,10 +3700,69 @@ class StateMachine:
             if h.status is HypothesisStatus.ACTIVE:
                 h.status = HypothesisStatus.PROPOSED
         ev.outcome = f"安全中止：{reason}；{kept}"
+        ev.stop_reason, ev.stop_reason_text = reason, self.stop_reason_text(reason)
         self._to(ev, EventState.SAFE_STOP, reason)
         ev.closed_at = self._now()
         self._note(ev, "系統", ev.outcome, "dynamic")
 
+
+    def stop_reason_text(self, reason: str) -> str:
+        """The SAFE_STOP reason in the supervisor's words (shown on the card next to the resolution buttons)."""
+        if reason == "核准逾時":
+            s = self.approval_timeout_s
+            return f"{s / 60:.0f} 分鐘內沒核准" if s >= 60 and s % 60 == 0 else f"{s:.0f} 秒內沒核准"
+        m = re.match(r"連續 (\d+) 次失敗", reason)
+        if m:
+            return f"連續失敗 {m.group(1)} 次"
+        m = re.match(r"已重新規劃 (\d+) 次仍未解決", reason)
+        if m:
+            return f"重新規劃 {m.group(1)} 次仍無法驗證"
+        if reason == "指揮官要求安全中止":
+            return "AI 判斷沒有安全的處置方案"
+        if reason.startswith("指揮官") or "模型" in reason or "LLM" in reason:
+            return "AI 模型沒有回應"
+        if reason.startswith("內部錯誤"):
+            return "系統內部錯誤"
+        if reason == "事件處理被取消":
+            return "處理被取消（切換情境或重新啟動）"
+        return reason
+
+    # ------------------------------------------------------------------ SAFE_STOP → 請 AI 重新規劃
+    def open_replan(self, event_id: str, actor: str = "supervisor") -> Event:
+        """「請 AI 重新規劃」 of an event that ended in SAFE_STOP: a NEW event for the same machine, supervisor command or
+        plant input, opened here (DETECTED) and run by the caller (run_event / run_command / run_plant) through the
+        normal state machine, gate and approval. Its `previous` carries the stopped event and why it stopped, and the
+        commander gets it as context.previous_run. Nothing here touches a machine's status beyond what any new event
+        does (_set_status never lifts STOPPED / OUT_OF_SERVICE). KeyError: no such event; ValueError: not safe-stopped,
+        or the machine has another open event, or a plant input that is no longer kept."""
+        old = self._events[event_id]
+        if old.state is not EventState.SAFE_STOP:
+            raise ValueError(f"{event_id} 不是安全停止的事件")
+        prev = PreviousRun(event_id=old.id, reason=old.stop_reason or "",
+                           reason_text=old.stop_reason_text or self.stop_reason_text(old.stop_reason or ""))
+        if old.source == "supervisor":
+            ev = self.open_command(old.command or old.anomaly.message, actor)
+        elif old.source == "plant":
+            pin = self._plant_inputs.get(old.id)
+            if pin is None:
+                raise ValueError("這件工廠事件的原始輸入已不在記憶體，請改用「交給現場處理」")
+            ev = self.open_plant_event(pin)
+        else:
+            if self.open_event_for(old.machine_id) is not None:
+                raise ValueError(f"{machine_label(old.machine_id)}已有處理中的事件")
+            now = self._now()
+            a = old.anomaly.model_copy(update={"id": f"{old.anomaly.id}-R{now.astimezone(TZ):%H%M%S}", "ts": now})
+            ev = self._open_event(a)
+        ev.previous = prev
+        self.audit.append(AuditKind.SYSTEM, actor, {"msg": "請 AI 重新規劃", "previous_event_id": old.id,
+                                                    "stop_reason": prev.reason, "stop_reason_text": prev.reason_text},
+                          event_id=ev.id)
+        self._note(ev, "主管", f"[人工] 主管要求 AI 重新規劃（上一輪 {old.id} 安全停止：{prev.reason_text}）", "human")
+        return ev
+
+    async def run_event(self, event_id: str) -> Event:
+        """Run a detector event opened outside handle() (open_replan)."""
+        return await self._drive(self._events[event_id], self._run)
 
     def _safe_stop_schedule(self, run: _Run, reason: str) -> str:
         """SAFE_STOP never rolls the store back. Every version this event activated was approved by

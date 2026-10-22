@@ -1,0 +1,18 @@
+[02:49:18] load 200 {"ok":true,"factory_time":"2026-10-03T02:13:00+08:00","speed":10.0,"paused":false,"scenario":"press7_temp_drop","day_loop":null,"overlays":[],"random_events":{"enabled":false,"every_min":30.0,"seed":3
+[02:49:25] STATE classify
+[02:49:25] STATE plan
+[02:49:36] STATE simulate
+[02:49:45] STATE await_approval
+[02:49:45] CARD AP-EV-20261003-021400-CURE-07-1 round 1 7 號機溫度下降 | hyps [('H1', 'single_press_issue', 'active')] | actions ['S4 排程 v2 生效（7 號硫化 28.5 h；#A-311 改 6 號）', 'S4b 7 號機硫化總時數 28.5 h（公式 28.5 h）', '人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）']
+[02:49:45]   approve B 200
+[02:49:45] STATE verify
+[02:51:25] STATE replan
+[02:51:25] H1REJ 比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置
+[02:51:35] STATE simulate
+[02:51:41] STATE await_approval
+[02:51:41] CARD AP-EV-20261003-021400-CURE-07-2 round 2 CURE-07溫度下降，停用重排 | hyps [('H1', 'single_press_issue', 'rejected'), ('H2', 'steam_leak_or_sensor_drift', 'active')] | actions ['人力：第 1 輪已核准並執行「從 2 線調 1 人」（本輪改選其他方案會撤回並通知）', 'S2 排程 v3 生效（7 號停用；SO-006 ×1 → 1 號、×2 → 2 號、×1 → 5 號；SO-004 ×1 → 1 號、×2 → 2 號、×1 → 3 號、×1 → 4 號；SO-001 改 5 號）', 'S3 機台停用 → 硫化機組、維修組、品管［7 號機］：CURE-07停用：疑持續洩壓或感測器漂移，請維修檢查蒸汽管路與溫度計；在模胎交品管', '人力：依所選方案（A 夜班加班／B 從 2 線調 1 人）']
+[02:51:41] H2 CARD at 142.8 s
+[02:51:41]   approve B 200
+[02:51:42] STATE closed
+[02:51:42] END closed H2 持續洩壓或感測器漂移（未驗證：已停用該機，未以讀值驗證）：已通知維修；從 2 線調 1 人；排程 v3 生效；7 號機停用
+[02:51:42] ROW {"run": 5, "h1_rejected": "比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置", "h2_source": "model", "h2_card": true, "h2_card_s": 142.8, "end": "closed", "total_s": 143.4, "hyps": [["H1", "single_press_issue", "rejected"], ["H2", "steam_leak_or_sensor_drift", "active"]], "calls": ["plan:commander:single_press_issue:10.3s", "replan:commander:steam_leak_or_sensor_drift:9.1s"]}

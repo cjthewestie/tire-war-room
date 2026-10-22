@@ -1,0 +1,41 @@
+# SOP knowledge-base eval (issue: RAG no-answer). CJ, 2026-10-22: 「修 RAG」.
+# in_kb: the top hit of sop_search must be one of `expect` (house SOP-XX-NN or team dataset SOP-NN).
+# out_of_kb: sop_search must return no hit (「知識庫沒有相關 SOP」).
+# Run: uv run python scripts/rag_eval.py
+in_kb:
+  - {q: 開煉機過熱怎麼辦, expect: [SOP-OM-01, SOP-01]}
+  - {q: 蒸汽壓不足怎麼處理, expect: [SOP-ST-01, SOP-06]}
+  - {q: 冷卻水異常, expect: [SOP-CW-01]}
+  - {q: 硫化機溫度掉下來怎麼處理, expect: [SOP-CP-02, SOP-05]}
+  - {q: 安全核心停機後怎麼復機, expect: [SOP-SD-01]}
+  - {q: 品管扣模判定, expect: [SOP-QC-02, SOP-QC-01, SOP-11]}
+  - {q: 員工請假怎麼調人, expect: [SOP-HR-01, SOP-12]}
+  - {q: 缺料怎麼辦, expect: [SOP-MT-01]}
+  - {q: 原料不足要怎麼處理, expect: [SOP-MT-01]}
+  - {q: 硫化中斷處置, expect: [SOP-CP-01]}
+  - {q: 密煉機異常怎麼處理, expect: [SOP-MX-01, SOP-02]}
+  - {q: 換模要注意什麼, expect: [SOP-MC-01, SOP-04]}
+  - {q: 感測器讀值是不是漂移, expect: [SOP-SN-01]}
+  - {q: 夜班缺人怎麼辦, expect: [SOP-HR-01, SOP-12]}
+  - {q: 品質抽驗怎麼做, expect: [SOP-QC-01, SOP-11]}
+  - {q: 週末不斷火出模怎麼排, expect: [SOP-CP-03]}
+  - {q: 胎側膠怎麼做, expect: [SOP-08]}
+  - {q: 鋼絲圈製作步驟, expect: [SOP-09]}
+  - {q: 尼龍布裁切, expect: [SOP-10, SOP-MT-01]}
+  - {q: 疏水閥要怎麼檢查, expect: [SOP-06, SOP-ST-01]}
+out_of_kb:
+  - 叉車壞了
+  - 怎麼做蛋糕
+  - 停車場在哪
+  - 年終獎金什麼時候發
+  - 印表機壞了
+  - 今天天氣如何
+  - 員工餐廳菜單
+  - 電腦中毒怎麼辦
+  - 冷氣不冷怎麼辦
+  - 怎麼申請停車證
+  - 公司尾牙在哪裡辦
+  - wifi 密碼多少
+  - 廁所漏水怎麼辦
+  - 電梯故障怎麼處理
+  - 台積電股價多少

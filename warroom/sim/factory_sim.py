@@ -142,6 +142,10 @@ class Factory:
             ((t0 + timedelta(seconds=s.at_offset_s), s.plant) for s in sc.steps if s.plant is not None),
             key=lambda x: x[0])
         self._plant_fired: list[tuple[datetime, PlantInput]] = []
+        # issue #104: normal order arrivals (no plant event) join the order book at their scripted time
+        self._order_pending: list[tuple[datetime, Order]] = sorted(
+            ((t0 + timedelta(seconds=s.at_offset_s), s.order) for s in sc.steps if s.order is not None),
+            key=lambda x: x[0])
         self._absences: list[tuple[TeamId, date, str, int]] = []
         self.safety_log = []
         self._m: dict[str, _Mach] = {}
@@ -162,7 +166,8 @@ class Factory:
         # page 11 seeds "10/03 夜班缺 1 人" on the scenario date; the issue #17 plant scenarios start clean (their
         # staffing gap, if any, is the scripted sick call)
         from warroom.sim.scenarios import PLANT_SCENARIOS
-        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS or sc.name is ScenarioName.DAY_LOOP \
+        self._gap_date: date | None = None if sc.name in PLANT_SCENARIOS or \
+            sc.name in (ScenarioName.DAY_LOOP, ScenarioName.MORNING_RUSH) \
             else t0.date()
         if self.backfill_min > 0:
             self._backfill(t0, self.backfill_min)
@@ -500,6 +505,9 @@ class Factory:
         while self._plant_pending and self._plant_pending[0][0] <= now:
             at, pin = self._plant_pending.pop(0)
             self.apply_plant_input(pin, at)
+        while self._order_pending and self._order_pending[0][0] <= now:
+            at, order = self._order_pending.pop(0)
+            self.receive_order(order, at)
         n_sub = min(MAX_SUBSTEPS, max(1, math.ceil(dt))) if dt > 0 else 0
         h = dt / n_sub if n_sub else 0.0
         for k in range(n_sub):
@@ -812,6 +820,16 @@ class Factory:
         out, self._plant_fired = self._plant_fired, []
         return out
 
+    def receive_order(self, order: Order, at: datetime | None = None) -> None:
+        """Issue #104: a normal order arrives. It joins the order book (the scheduler sees it on the next solve) and
+        the world feed; no plant event, no machine touched."""
+        at = at or self._t
+        self.add_order(order)
+        try:
+            self.world.on_order_arrival(order, at)
+        except Exception:  # noqa: BLE001 - the world view must never break the plant loop
+            log.exception("world order arrival failed")
+
     def add_order(self, order: Order) -> None:
         if order.id in self._orders:
             return
@@ -823,6 +841,34 @@ class Factory:
         m.status = MachineStatus(status)
         if note is not None:
             m.note = note
+
+    def needs_takeout(self, machine_id: str) -> bool:
+        """A steam leak on the machine, running or scripted and still to come (page 11's 持續洩壓): an inspection (檢修)
+        does not stop it, only taking the press out and fixing the line (停用檢修) does. Fast repair keys on this."""
+        leak = FaultKind.STEAM_LEAK
+        return any(f.spec.machine_id == machine_id and f.spec.kind is leak for f in self._faults) or \
+            any(st.fault is not None and st.fault.machine_id == machine_id and st.fault.kind is leak
+                for _, st in self._pending)
+
+    def status_of(self, machine_id: str) -> MachineStatus:
+        """The machine's current status (KeyError for an unknown id)."""
+        return self._m[machine_id].status
+
+    def scrap_held_job(self, press_id: str) -> str | None:
+        """QC 報廢 of the tyre a CURE_HOLD kept in the mold (supervisor decision, warroom/api/resolve.py): the job
+        leaves the press, the order counts it as not made, and the press goes idle for the next mold-in after the usual
+        de-mold / mold-in time. Returns the scrapped job id (None: no job in the press)."""
+        ps = self._press.get(press_id)
+        if ps is None or ps.job is None:
+            return None
+        job = ps.job
+        if job.order_id in self._in_press:
+            self._in_press[job.order_id] = max(0, self._in_press[job.order_id] - 1)
+        ps.job = None
+        ps.idle_until = self._t + timedelta(minutes=DEMOLD_MOLDIN_MIN)
+        m = self._m[press_id]
+        m.status, m.note = MachineStatus.IDLE, f"QC 報廢 {job.order_id}，換模入模中"
+        return job.job_id
 
     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
         self._m[machine_id].active_event_id = event_id

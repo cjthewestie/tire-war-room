@@ -1,9 +1,11 @@
-// 後台 (#admin, issue #37), first version. CJ, 2026-10-20: 「後台的話我是希望可以存取一些 memory 或者是 RAG 資料庫的維護」.
-// Four pages: 狀態 (health, model, audit chain), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
-// tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes the agent does not
-// read yet) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
+// 後台 (#admin, issue #37). CJ, 2026-10-20: 「後台的話我是希望可以存取一些 memory 或者是 RAG 資料庫的維護」; 2026-10-22:
+// 「稽核紀錄跟系統運作基本參數需要在這裡 狀態欄有點意義不明可以怎麼修改」.
+// Pages: 系統健康 (one plain-language card per subsystem, HealthPage.tsx), 稽核紀錄 (read-only audit viewer,
+// AuditPage.tsx), 系統參數 (live parameters, ParamsPage.tsx), RAG 知識庫 (SOP files + team chunks, upload, re-index, search
+// tester, delete with confirm), 記憶 (past incidents + closed events per machine, memory notes; since 「接記憶」 the
+// commander gets a machine's notes and last 3 past events on every plan, previewed here) and 執行紀錄 (events, tasks and questions). Server: warroom/api/admin.py — supervisor PIN, factory
 // network only, every write audited.
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { MACHINES, machineLabel } from '../factory'
 import { fmtHM, fmtMD } from '../format'
 import { plain } from '../plain'
@@ -11,25 +13,28 @@ import { API, type HealthStatus } from '../contracts'
 import { headline, outcomeText, stateLabel } from '../report/build'
 import { adminFetch } from '../transport'
 import { useWarRoom } from '../useWarRoom'
+import { Err } from './adminCommon'
+import { useLoad, type Job } from './adminData'
+import { AuditPage } from './AuditPage'
+import { HealthPage } from './HealthPage'
+import { MemoryTimeline } from './MemoryTimeline'
+import { ParamsPage } from './ParamsPage'
 import './admin.css'
 
-type Page = 'status' | 'rag' | 'plant' | 'memory' | 'runs'
+type Page = 'status' | 'audit' | 'params' | 'rag' | 'plant' | 'memory' | 'runs'
 const PAGES: { id: Page; label: string }[] = [
-  { id: 'status', label: '狀態' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
+  { id: 'status', label: '狀態' }, { id: 'audit', label: '稽核紀錄' }, { id: 'params', label: '系統參數' }, { id: 'rag', label: 'SOP 知識庫' }, { id: 'plant', label: '工廠指示' }, { id: 'memory', label: '記憶' }, { id: 'runs', label: '執行紀錄' },
 ]
 
-interface Job { state: 'idle' | 'running' | 'done' | 'failed'; phase: string; files: number; chunks: number | null; team_chunks: number | null; mode: string | null; error: string | null; started_at: number | null; elapsed_s: number | null }
-interface Status {
-  llm_mode: string; model: string; llm_host: string | null; llm_reachable: boolean; kb_ok: boolean; kb_mode: string
-  audit_chain_ok: boolean; audit_entries: number; degraded: Record<string, string>; network: string
-}
 interface Doc { file: string; sop_id: string; title: string; modified: string; error: string | null }
 interface Rag { docs: Doc[]; team: { sop_id: string; title: string }[]; kb_mode: string; indexed_chunks: number; folder_chunks: number; reindex: Job }
 interface Hit { sop_id: string; title: string; source: string; score: number; text: string }
 interface Incident { id: string; date: string; machine_id: string | null; equipment: string; symptom: string; action: string; downtime_min: number; outcome: string }
 interface Closed { id: string; machine_id: string | null; closed_at: string; state: string; what: string | null; outcome: string | null }
 interface Note { id: string; machine_id: string; text: string; author: string; created_at: string }
-interface Memory { incidents: Incident[]; closed_events: Closed[]; notes: Note[]; agent_reads_notes: boolean }
+interface Memory { incidents: Incident[]; closed_events: Closed[]; notes: Note[]; agent_reads_notes: boolean; agent_uses?: string }
+interface PastItem { id: string; date: string; symptom?: string; cause?: string; action?: string; outcome?: string; source: string }
+interface MachineMemory { machine_id: string; use: string; notes: { id: string; date: string; by: string; text: string }[]; past: PastItem[]; days?: { from: string; line: string }[] }
 interface Run { id: string; kind: 'event' | 'command' | 'ask' | 'chat'; ts: string; by?: string; machine_id?: string; state?: string; title?: string | null; question?: string | null; answer?: string | null; outcome?: string | null; replans?: number }
 
 export function AdminPage() {
@@ -51,77 +56,8 @@ export function AdminPage() {
         </nav>
         <span className="muted small">只在廠內網路可用・每次修改都記入稽核紀錄</span>
       </header>
-      {page === 'status' ? <StatusPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
+      {page === 'status' ? <HealthPage /> : page === 'audit' ? <AuditPage /> : page === 'params' ? <ParamsPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
     </div>
-  )
-}
-
-function useLoad<T>(path: string): { data: T | null; err: string | null; reload: () => void } {
-  const [data, setData] = useState<T | null>(null)
-  const [err, setErr] = useState<string | null>(null)
-  const [n, setN] = useState(0)
-  useEffect(() => {
-    let off = false
-    adminFetch<T>(path).then((d) => { if (!off) { setData(d); setErr(null) } }).catch((e) => { if (!off) setErr(String(e).replace(/^Error: /, '')) })
-    return () => { off = true }
-  }, [path, n])
-  return { data, err, reload: useCallback(() => setN((x) => x + 1), []) }
-}
-
-function Err({ err }: { err: string | null }) {
-  if (!err) return null
-  return <p className="note admin-err" role="alert">{/^40[13]/.test(err) ? '沒有權限。後台只在廠內網路可用，遠端要輸入主管 PIN。' : `讀取失敗：${err}`}</p>
-}
-
-// ---------------------------------------------------------------- 狀態
-/** The answer first (人力排程 v2), true to the mode: rules mode (LLM_MODE=mock) never says the model is connected. An
- *  index not loaded yet (kb_mode unloaded: the start-up ingest is still running, kb_ok false until it ends) is not a
- *  fault: the first search loads it (kb/store.py _ensure_ready). */
-function statusLead(s: Status): { text: string; ok: boolean } {
-  const unloaded = s.kb_mode === 'unloaded'
-  const issues = [
-    s.llm_mode !== 'mock' && !s.llm_reachable ? '模型連不上，Agent Nemo 先用規則產生計畫' : '',
-    !unloaded && !s.kb_ok ? 'SOP 知識庫不能用，Agent Nemo 查不到 SOP' : '',
-    !s.audit_chain_ok ? '稽核紀錄驗證失敗，請通知主管' : '',
-    s.network === 'lan_down' ? '網路斷線' : '',
-  ].filter(Boolean)
-  if (issues.length) return { text: `要處理 ${issues.length} 件：${issues.join('；')}。`, ok: false }
-  const sop = unloaded ? 'SOP 還沒載入（第一次查詢時自動載入）' : 'SOP 查得到'
-  return s.llm_mode === 'mock'
-    ? { text: `Agent Nemo 用規則模式運作（沒有呼叫模型）；${sop}、稽核紀錄完整。`, ok: true }
-    : { text: `Agent Nemo 正常：模型已連線、${sop}、稽核紀錄完整。`, ok: true }
-}
-
-const KB_MODE: Record<string, string> = { vector: '向量＋字詞混合搜尋', lexical: '只有字詞搜尋（嵌入模型未載入）', unloaded: '還沒載入（第一次查詢時自動載入）' }
-
-function StatusPage() {
-  const { data: s, err, reload } = useLoad<Status>('/api/admin/status')
-  const lead = s && statusLead(s)
-  return (
-    <section className="admin-body">
-      <Err err={err} />
-      {lead && <p className={`admin-lead ${lead.ok ? 't-ok' : 't-bad'}`} data-testid="admin-lead">{lead.text}</p>}
-      {s && (
-        <div className="admin-cards">
-          <Card title="模型" tone={s.llm_mode === 'mock' ? 'muted' : s.llm_reachable ? 'ok' : 'bad'}>
-            <b>{s.llm_mode === 'llm' ? `Nemotron・${s.model}` : '規則模式（沒有用模型）'}</b>
-            <span>{s.llm_mode === 'mock' ? 'Agent Nemo 用規則產生計畫' : `${s.llm_host ?? ''}・${s.llm_reachable ? '連得上' : '連不上'}`}</span>
-          </Card>
-          <Card title="SOP 知識庫" tone={s.kb_mode === 'unloaded' ? 'muted' : s.kb_ok ? 'ok' : 'bad'}>
-            <b>{KB_MODE[s.kb_mode] ?? s.kb_mode}</b>
-          </Card>
-          <Card title="稽核紀錄" tone={s.audit_chain_ok ? 'ok' : 'bad'}>
-            <b data-testid="audit-chain">{s.audit_chain_ok ? '紀錄完整，沒有被改過' : '紀錄驗證失敗'}</b>
-            <span>共 {s.audit_entries} 筆</span>
-          </Card>
-        </div>
-      )}
-      {s && Object.keys(s.degraded).length > 0 && (
-        <details className="admin-deg"><summary>降級中的元件（{Object.keys(s.degraded).length}）</summary>
-          <ul>{Object.entries(s.degraded).map(([k, v]) => <li key={k}><b>{k}</b> <span className="muted">{v}</span></li>)}</ul></details>
-      )}
-      <button className="btn-ghost admin-reload" onClick={reload}>重新整理</button>
-    </section>
   )
 }
 
@@ -317,9 +253,14 @@ function MemoryPage() {
   }, [m, query, mid])
   return (
     <section className="admin-body">
+      <MemoryTimeline />
       <Err err={err} />
-      <p className="note">過去的異常和處理結果，依機台排列。{m?.agent_reads_notes ? '機台筆記 Agent Nemo 規劃時會讀。' : '機台筆記目前只給人看，Agent Nemo 不會讀。'}</p>
+      {m?.agent_reads_notes
+        ? <p className="note" data-testid="memory-agent-reads">過去的異常和處理結果，依機台排列。<b>{m.agent_uses ?? 'Agent Nemo 規劃時會參考：機台筆記、最近 3 件過去事件'}</b>。某台機台出異常時，Agent Nemo 擬計畫會帶上那台的筆記（最新 5 則）和最近 3 件過去事件（處理完的事件＋團隊資料集），問到那台也查得到；只當參考，數字仍以工具查到的為準。這裡唯讀，不會改任何東西。</p>
+        : <p className="note">過去的異常和處理結果，依機台排列。機台筆記目前只給人看，Agent Nemo 不會讀。</p>}
       <NoteForm onDone={reload} />
+      {m?.agent_reads_notes && <MemoryPreview stamp={m.notes.length} />}
+      <DailyList />
       <div className="order-tools">
         <form className="order-search" role="search" onSubmit={(e) => e.preventDefault()}>
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="搜尋症狀、處置、結果，例如 蒸汽、溫度" aria-label="搜尋記憶" data-testid="memory-q" />
@@ -343,6 +284,49 @@ function MemoryPage() {
           </section>
         ))}
       </div>
+    </section>
+  )
+}
+
+// 每日摘要 (「加每日摘要」): one per day or 一日循環 cycle, rolled up weekly / monthly; all rebuilt from the audit
+interface DailyDoc { name: string; label: string; sentences: string[]; source: 'model' | 'code'; tasks: number; by_final: Record<string, number>; carried_over: string[]; machines: Record<string, string> }
+function DailyList() {
+  const { data, err } = useLoad<{ daily: DailyDoc[]; weekly: string[]; monthly: string[] }>('/api/memory/daily?limit=7')
+  return (
+    <section className="panel mem-g" data-testid="memory-daily">
+      <header className="panel-h"><h2>每日摘要</h2>
+        <span className="muted small">每週 {data?.weekly.length ?? 0} 份・每月 {data?.monthly.length ?? 0} 份・原始稽核紀錄不刪不壓縮，可重建</span></header>
+      <Err err={err} />
+      {data && !data.daily.length && <p className="muted small">還沒有每日摘要：一天結束（或一日循環換日）時自動產生。</p>}
+      <ul className="mem-list">
+        {(data?.daily ?? []).map((d) => (
+          <li key={d.name} className="k-ev"><span className="mem-k">{d.label}</span>
+            <span>{d.sentences.join('')}<small className="muted">{d.tasks} 件任務・{Object.entries(d.by_final).map(([k, v]) => `${k} ${v}`).join('・')}・{d.source === 'model' ? 'Agent Nemo 依事實寫成' : '程式整理'}</small></span></li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+// what the commander would get as context.machine_memory for one machine, right now
+function MemoryPreview({ stamp }: { stamp: number }) {
+  const [mid, setMid] = useState('CURE-07')
+  const { data, err } = useLoad<{ machine_id: string; machine_memory: MachineMemory | null }>(`/api/admin/memory/preview?machine_id=${encodeURIComponent(mid)}&n=${stamp}`)
+  const mm = data?.machine_id === mid ? data.machine_memory : undefined
+  return (
+    <section className="panel mem-g" data-testid="memory-preview">
+      <header className="panel-h"><h2>Agent Nemo 會看到什麼</h2>
+        <select value={mid} onChange={(e) => setMid(e.target.value)} aria-label="預覽的機台">{MACHINES.map((x) => <option key={x.id} value={x.id}>{machineLabel(x.id)}</option>)}</select>
+      </header>
+      <Err err={err} />
+      {mm === null && <p className="muted small">{machineLabel(mid)}沒有筆記，也沒有過去事件：規劃時不帶記憶。</p>}
+      {mm && (
+        <ul className="mem-list">
+          {mm.notes.map((n) => <li key={n.id} className="k-note"><span className="mem-k">筆記</span><span>{n.text}<small className="muted">{n.date}・{n.by}</small></span></li>)}
+          {(mm.days ?? []).map((d) => <li key={d.from} className="k-inc"><span className="mem-k">每日摘要</span><span>{plain(d.line)}<small className="muted">{d.from}</small></span></li>)}
+          {mm.past.map((p) => <li key={p.id} className="k-ev"><span className="mem-k">過去事件</span><span>{p.date}・{plain(p.symptom ?? p.id)}{p.cause ? `；原因 ${plain(p.cause)}` : ''}{p.action ? `；處置 ${plain(p.action)}` : ''}{p.outcome ? `；結果 ${plain(p.outcome)}` : ''}<small className="muted">{p.id}・{p.source === 'team_dataset' ? '團隊資料集' : '稽核紀錄'}</small></span></li>)}
+        </ul>
+      )}
     </section>
   )
 }

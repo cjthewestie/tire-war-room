@@ -14,10 +14,12 @@ import type { ApprovalRequest, AskAnswer, Event } from '../contracts'
 import { TemperatureTrend } from '../components/Trend'
 import { plain } from '../plain'
 import { MACHINE_META, machineLabel } from '../factory'
-import { fmtHM, fmtMD } from '../format'
+import { fmtHM, fmtHMS, fmtMD } from '../format'
 import { useHealth } from '../health'
 import { useWarRoom } from '../useWarRoom'
-import { repairNotices, useApprovalAlerts } from './alert'
+import { repairNotices, resolveAlerts, useApprovalAlerts } from './alert'
+import { SafetyCaseCard, StopFollowUp } from '../components/Resolve'
+import { openCases } from '../resolveText'
 import { ThemeToggle } from '../components/ThemeToggle'
 import { RepairEta } from './RepairEta'
 import { Txt } from '../components/BriefingView'
@@ -27,13 +29,22 @@ import { optionChoices } from '../optionGuide'
 import { RepairNotice } from './RepairNotice'
 import { fastRepairOf, isRepairTask } from './fastEta'
 import { cardSentence, cardTitle, deadlineText, doLines, gapNote, liveLine, problemText, rebasedText, staffNote, type LiveLine } from './cardText'
+import { CUES } from '../demo/cues'
+import { isMachine } from '../demo/signals'
+import { APPROVAL_CUES } from '../demo/beats'
+
+const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
 
 export function Phone() {
   const { state, transport, connected } = useWarRoom()
   // the most urgent card first: R3 before R2, then the newest
   const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))
   const [pick, setPick] = useState<string | null>(null)
-  const top = pending.find((p) => p.id === pick) ?? pending[0]
+  // the guided demo's approval beat is about the machine incident: its card first, whatever else is waiting
+  const demoCard = state.demo?.running && APPROVAL_CUES.has(state.demo.cue_id ?? '')
+    ? pending.filter((p) => isMachine(state.snapshot?.events.find((e) => e.id === p.event_id)?.machine_id)).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0]
+    : undefined
+  const top = pending.find((p) => p.id === pick) ?? demoCard ?? pending[0]
   // kept here, not in the card: the card is replaced by its new version once the agent has replanned
   const [sent, setSent] = useState(false)
   const net = state.snapshot?.header.network ?? 'online'
@@ -59,11 +70,16 @@ export function Phone() {
     ...readReports.map((e) => ({ at: e.review?.done_at ?? e.closed_at ?? e.opened_at, key: `rv-${e.id}`, text: `已讀 ${machineLabel(e.machine_id)}報告`, tid: 'phone-report-done' })),
   ].sort((a, b) => (a.at < b.at ? 1 : -1)).slice(0, 6)
   const ft = state.clock?.factory_time ?? state.snapshot?.header.factory_time
+  // CJ 2026-10-22: a Safety Core stop and a SAFE_STOP each get a card with the way back (components/Resolve.tsx)
+  const cases = openCases(state.snapshot?.safety_cases)
+  const stops = events.filter((e) => e.state === 'safe_stop' && (!e.follow_up || e.follow_up.status === 'manual'))
+    .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
   const noticeCards = notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
   // a report rings once Agent Nemo wrote it (Event.ai_report comes a moment after the close; until then the card says 整理中)
-  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices.filter((e) => e.state !== 'closed' || e.ai_report), state.snapshot?.machines)],
-    connected && !lanDown)
+  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices.filter((e) => e.state !== 'closed' || e.ai_report), state.snapshot?.machines),
+    ...resolveAlerts(cases, events)], connected && !lanDown)
+  const demo = state.demo
   // 「已核准 10 號硫化機」 for 3 s, only once the server confirmed it (a stale card can still come back to be approved again)
   const [flash, setFlash] = useState<{ id: string; text: string } | null>(null)
   const decided = useRef<Set<string> | null>(null)
@@ -82,7 +98,7 @@ export function Phone() {
   }, [flash])
   // watching: one line per event still being handled (open, closed while its crew still repairs, or safely stopped with
   // its machine not back to normal: a safe stop ends the flow, not the fault), 3 at most, newest first; an event whose
-  // 維修完成 notice is up is said there
+  // 維修完成 notice or 安全停止 card is up is said there
   const tasks = state.world?.tasks.items ?? []
   const fast = fastRepairOf(useHealth())
   const tiles = state.snapshot?.machines ?? []
@@ -91,7 +107,7 @@ export function Phone() {
   const handling = events.filter((e) => (e.state !== 'closed' && e.state !== 'safe_stop') || stopped(e)
     || tasks.some((t) => t.event_id === e.id && isRepairTask(t) && t.status !== '完成'))
     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))
-  const lines = handling.filter((e) => !notices.includes(e)).slice(0, 3).map((e) => liveLine(e, tasks, fast))
+  const lines = handling.filter((e) => !notices.includes(e) && !stops.includes(e)).slice(0, 3).map((e) => liveLine(e, tasks, fast))
   return (
     <div className="phone-wrap">
       <div className="phone">
@@ -107,6 +123,18 @@ export function Phone() {
           )}
           <ThemeToggle className="ph-tog" />
         </div>
+        {/* the guided demo (shared with the war room and the 3D factory): the sound needs one tap first, then the
+            approval beat says 現在核准 in big letters; 繼續 here moves every screen on */}
+        {demo?.running && (
+          <div className="ph-demo" data-testid="phone-demo">
+            <span>🎬 Demo・{APPROVAL_CUES.has(demo.cue_id ?? '') ? '核准時間' : CUE_TITLE[demo.cue_id ?? ''] ?? demo.cue_id}</span>
+            {transport?.demo && !APPROVAL_CUES.has(demo.cue_id ?? '') && <button onClick={() => void transport.demo!({ action: 'continue' }).catch(() => {})} data-testid="phone-demo-continue">繼續 ▶</button>}
+          </div>
+        )}
+        {demo?.running && !alerts.armed && (
+          <button className="ph-arm ph-demo-arm" data-testid="phone-demo-arm" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>🔔 點一下啟用提示音</button>
+        )}
+        {demoCard && top?.id === demoCard.id && <div className="ph-demo-now" role="status" data-testid="phone-demo-now">現在核准 ↓</div>}
         {!alerts.enabled ? (
           <button className="ph-arm" data-testid="phone-alerts-on" onClick={() => { alerts.setEnabled(true); void alerts.arm() }}>開啟核准提醒（聲音・震動{alerts.permission === 'unsupported' ? '' : '・通知'}）</button>
         ) : !alerts.armed && (
@@ -124,12 +152,20 @@ export function Phone() {
         {alerts.held > 0 && <div className="ph-banner">{alerts.held} 件通知暫存中，網路恢復後補送。</div>}
         {lanDown && <div className="ph-banner">廠內網路斷線：請到現場觸控螢幕核准（警示燈已亮）。</div>}
         {flash && <p className="ph-flash" role="status" data-testid="phone-approved">{flash.text}</p>}
+        {cases.map((c) => <div key={c.id} className="ph-card ph-safety" data-testid="phone-safety"><SafetyCaseCard c={c} compact disabled={lanDown || !transport} /></div>)}
+        {stops.map((e) => (
+          <div key={e.id} className="ph-card ph-stop" data-testid="phone-stop" data-event={e.id}>
+            <div className="ph-top"><span className="ph-risk">安全停止</span><span className="muted small">{e.closed_at ? `${fmtHMS(e.closed_at)} 停止` : ''}</span></div>
+            <h2 className="ph-title">{e.source === 'supervisor' ? '主管指令' : machineLabel(e.machine_id)}：{plain(e.alert_card?.title ?? e.command ?? e.anomaly.message)}</h2>
+            <StopFollowUp ev={e} compact disabled={lanDown || !transport} />
+          </div>
+        ))}
         {/* the notices go under a waiting card: with 3 件同時異常 a 維修完成 notice above pushed 核准 off the screen
             (review 10-21); with nothing to approve they lead */}
         {pending.length === 0 && noticeCards}
         {pending.length === 0 ? (
           <div className="ph-card idle" data-testid="phone-idle">
-            {handling.length ? <p className="ph-none muted">沒有要你核准的事</p> : <>
+            {handling.length || stops.length || cases.length ? <p className="ph-none muted">沒有要你核准的事</p> : <>
               <h2 className="ph-title">全廠正常</h2>
               <p className="ph-lead muted">沒有要你核准的事；有新的待核准會提醒你。</p>
             </>}

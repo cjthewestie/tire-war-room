@@ -8,7 +8,7 @@ import { SCENARIOS } from '../mock/engine'
 
 export interface TaskRow {
   id: string; opened_at: string; closed_at: string | null; machine_id: string | null; order_id: string | null
-  title: string | null; final: string; outcome: string | null; scenario: string | null; loop: number | null; report: string
+  title: string | null; final: string; qa_demo?: boolean; outcome: string | null; scenario: string | null; loop: number | null; report: string
   approvals: { decision: string; by: string; version: number }[]
 }
 export interface TaskDay { date: string; count: number; groups: { loop: number | null; scenario: string | null; rows: TaskRow[] }[] }

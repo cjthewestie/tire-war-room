@@ -1,14 +1,16 @@
 // War room home 主控台 (was 對話台; CJ, 2026-10-20: 「這個 page 改成主控台名字」): the 核准區 list, the 計劃板 of the selected item and the docked Agent dialogue;
 // 產線監控 (proposal page 2 + the whole plant, which was 工廠全貌), 人力排程 (pages 4, 6, 11), 訂單, Agent (the full
 // transcript), 狀態機 (live board + 每日事件紀錄) and 後台 are the other tabs (#monitor, #schedule, #orders, #console, #sm, #admin); #world still opens 產線監控.
+// #qa opens QA 模式 (the judges' framework questions; its button lives in the demo controls).
 // CJ, 2026-10-20: 「產線監控跟人力排程是個別頁面」「產線監控跟工廠全貌…重複到了…可以合併一下」.
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Line } from './contracts'
 import type { LocalItem } from './agent/transcript'
-import { ALL_SCENARIOS, DEMO_MODE, DemoStrip } from './components/DemoStrip'
+import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
+import { PendingApprovalAlert } from './components/PendingApprovalAlert'
 import { ScheduleTab } from './components/ScheduleTab'
 import { OrdersTab } from './components/OrdersTab'
 import { EarlyWarnings } from './components/EarlyWarnings'
@@ -16,23 +18,26 @@ import { openFolds } from './media'
 import { useWarRoom, WarRoomProvider } from './useWarRoom'
 import { readConsoleEvent } from './agent/consoleHash'
 import { embedSearch } from './transport'
+import { DemoOverlay } from './demo/DemoOverlay'
+import { anchorsFor, focusEvent } from './demo/beats'
+import { DemoCtx, useDemo } from './demo/useDemo'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
 const StateMachinePage = lazy(() => import('./statemachine/StateMachinePage').then((m) => ({ default: m.StateMachinePage })))
 const AdminPage = lazy(() => import('./admin/AdminPage').then((m) => ({ default: m.AdminPage })))
+const QaPage = lazy(() => import('./qa/QaPage').then((m) => ({ default: m.QaPage })))
 
 /** Inside the 3D factory (wall / desk iframes) the page already is in 3D: no 「3D 工廠 ↗」 link there. */
 const EMBEDDED = (() => { try { return window.self !== window.top } catch { return true } })()
-/** 展示列 (the strip on desktop, the 展示控制 tab on phones) is the presenter's, not the supervisor's: only with ?demo=1 or
- *  ?scenarios=all. The 3D factory's iframes inherit the factory page's own query (embedSearch), so the desk screen has
- *  it when the factory was opened with ?demo=1. */
-const SHOW_DEMO = DEMO_MODE || ALL_SCENARIOS
+
+/** `#approve?event=<id>` (the 待核准 bar on /factory, /report, /handover): 主控台 with that card selected. */
+const readApproveEvent = (): string | null => (location.hash.startsWith('#approve') ? readConsoleEvent() : null)
 
 function readTab(): Tab {
   const h = `#${/^#(\w+)/.exec(location.hash)?.[1] ?? ''}`
   return h === '#schedule' ? 'schedule' : h === '#monitor' || h === '#world' ? 'monitor' : h === '#orders' ? 'orders'
-    : h === '#console' ? 'console' : h === '#sm' ? 'sm' : h === '#admin' ? 'admin' : 'agent'
+    : h === '#console' ? 'console' : h === '#sm' ? 'sm' : h === '#admin' ? 'admin' : h === '#qa' ? 'qa' : 'agent'
 }
 
 function Dashboard() {
@@ -40,8 +45,9 @@ function Dashboard() {
   const [consoleEvent, setConsoleEvent] = useState<string | null>(readConsoleEvent)
   const [machine, setMachine] = useState<string | null>(() => new URLSearchParams(location.search).get('machine'))
   const { state } = useWarRoom()
+  const [agentEvent, setAgentEvent] = useState<string | null>(readApproveEvent)
   useEffect(() => {
-    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()) }
+    const f = () => { setTab(readTab()); setConsoleEvent(readConsoleEvent()); const a = readApproveEvent(); if (a) setAgentEvent(a) }
     window.addEventListener('hashchange', f)
     return () => window.removeEventListener('hashchange', f)
   }, [])
@@ -50,7 +56,6 @@ function Dashboard() {
     setTab(t); window.scrollTo(0, 0)
   }
   const [asks, setAsks] = useState<LocalItem[]>([])
-  const [agentEvent, setAgentEvent] = useState<string | null>(null)
   const openAgent = (eventId?: string) => { if (eventId) setAgentEvent(eventId); go('agent') }
   // a ticker item: 產線監控 on that machine (its drawer) or line, scrolled into view and flashed
   const focusPlant = (m?: string, line?: Line) => {
@@ -63,28 +68,61 @@ function Dashboard() {
       el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
     }, 120)
   }
+  // the 待核准 bar: 主控台 with the oldest card selected, its row scrolled into view and flashed
+  const goApprove = (eventId: string) => {
+    openAgent(eventId)
+    setTimeout(() => {
+      const el = document.querySelector(`[data-testid="home-item-${CSS.escape(eventId)}"]`)
+      el?.scrollIntoView({ block: 'nearest' })
+      el?.classList.add('flash'); setTimeout(() => el?.classList.remove('flash'), 1600)
+    }, 120)
+  }
   const openConsole = (eventId?: string) => { setConsoleEvent(eventId ?? null); go('console', eventId ? `?event=${encodeURIComponent(eventId)}` : '') }
   const [demoOpen, setDemoOpen] = useState(false)
+  // the guided demo (CJ, 2026-10-22: 「戰情室也要幫我弄一個demo模式」): each beat opens its page and selects its event;
+  // the presenter can still click around, and the next beat re-asserts the page
+  const demo = useDemo()
+  const beat = demo.beat
+  const focusEv = beat ? focusEvent(beat.focus, state.snapshot?.events) : null
+  const focusId = focusEv?.id ?? null
+  useEffect(() => {
+    if (!beat) return
+    setDemoOpen(false); setMoreOpen(false); setMachine(null)
+    if (beat.tab === 'console') openConsole(focusId ?? undefined)
+    else go(beat.tab)
+    if (beat.tab === 'agent' && focusId) setAgentEvent(focusId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demo.demo?.cue_id, demo.running, focusId])
   const [moreOpen, setMoreOpen] = useState(false)   // phones: 狀態機 and 後台 live under 「更多」 (issue #52)
   const lanDown = state.snapshot?.header.network === 'lan_down'
   const pendingN = state.pending.length
+  const [budgetSeen, setBudgetSeen] = useState<string | null>(null)
+  const budget = state.budgetAlert && state.budgetAlert.ts !== budgetSeen ? state.budgetAlert : null
   return (
-    <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''}`}>
+    <DemoCtx.Provider value={demo}>
+    <div className={`app ${lanDown ? 'lan-down' : ''} ${demoOpen ? 'demo-open' : ''} ${demo.running ? 'demo-on' : ''}`}>
+      {demo.running && <DemoOverlay d={demo} anchors={beat ? anchorsFor(beat, focusEv) : []} caption={beat?.caption ?? ''} />}
       <Header tab={tab} onTab={go} />
-      {SHOW_DEMO && (
-        <div className="demo-sheet" role="region" aria-label="展示控制">
-          <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
-          <DemoStrip />
-        </div>
-      )}
+      <PendingApprovalAlert variant={tab === 'agent' ? 'compact' : 'bar'} onGo={goApprove} stickyBelow=".topbar" />
+      <div className="demo-sheet" role="region" aria-label="展示控制">
+        <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
+        <DemoStrip />
+      </div>
       {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
       {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
       {lanDown && <div className="banner">廠內網路斷線：手機收不到通知，請到現場觸控螢幕核准（{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}）。Agent Nemo 與安全核心照常在廠內主機運作。</div>}
+      {budget && (
+        <div className="banner budget-banner" role="status" data-testid="budget-alert">
+          {budget.text.startsWith('模型用量') ? budget.text : `模型用量：${budget.text}`}
+          <button className="x" onClick={() => setBudgetSeen(budget.ts)} aria-label="關閉模型用量提醒">✕</button>
+        </div>
+      )}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
         : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} onApprove={openAgent} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
+        : tab === 'qa' ? <Suspense fallback={<div className="loading">載入 QA 模式…</div>}><QaPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
       {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}
@@ -109,11 +147,9 @@ function Dashboard() {
         <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={EMBEDDED ? '更多：狀態機、後台' : '更多：狀態機、後台、3D 工廠'} onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
           <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>{tab === 'sm' ? '狀態機' : tab === 'admin' ? '後台' : '更多'}
         </button>
-        {SHOW_DEMO && (
-          <button className={`nav-demo ${demoOpen ? 'on' : ''}`} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
-            <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
-          </button>
-        )}
+        <button className={`nav-demo ${demoOpen ? 'on' : ''}`} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
+          <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
+        </button>
       </nav>
       {moreOpen && (
         <>
@@ -137,6 +173,7 @@ function Dashboard() {
         </>
       )}
     </div>
+    </DemoCtx.Provider>
   )
 }
 

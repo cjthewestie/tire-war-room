@@ -23,7 +23,7 @@ from collections.abc import Callable
 from typing import Any
 
 from warroom import factory as F
-from warroom.agent import order_ask, plant
+from warroom.agent import budget, order_ask, plant
 from warroom.agent.convo import AskMemory, ConvContext
 from warroom.agent.commander import detect_server_kind, thinking_off
 from warroom.agent.narrate import fmt_num, machine_label
@@ -51,13 +51,14 @@ ContextFn = Callable[[], dict[str, Any]]
 _CATALOGUE = """\
 - read_sensors {machine_ids: [id], minutes: float=30} 讀感測器：現值、30 分最低、趨勢
 - predict_anomaly {machine_id, channel='temp_c', horizon_min=30} 時序預測：未來的穩定值與區間
-- cure_formula {size:'S'|'M'|'L', actual_temp_c, elapsed_h} Arrhenius 硫化時間（需要尺寸、實際溫度、已硫化時數）
+- cure_formula {press_id} Arrhenius 硫化時間：尺寸、已硫化時數與現在溫度由程式從該硫化機現場讀取，只需給機台代號
 - query_orders_shifts {order_ids?, press_ids?} 訂單交期、班表、人力缺口、指定硫化機的下一模；也回傳今日訂單（今日生產、今日交貨、遲交風險）
 - sop_search {query, k=3} SOP 知識庫"""
 
 _MACHINES = "；".join(
     [f"{m.id}={machine_label(m.id)}" for m in F.MACHINES if m.line is not F.Line.CURE]
-    + ["CURE-01..CURE-11 = 1..11 號硫化機（8-11 號可做中大胎，1-7 號只做小胎）"])
+    + [(f"CURE-01..CURE-11 = 1..11 號硫化機（{F.ML_RANGE} 號可做中大胎），"
+        f"{int(F.SMALL_ONLY_PRESSES[0][5:])}–{int(F.SMALL_ONLY_PRESSES[-1][5:])} 號只做小胎")])
 
 PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一個問題，你只決定要查哪些資料，不回答、不做任何變更。
 只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
@@ -211,7 +212,12 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
             return (f"{machine_label(data['machine_id'])} 預測 {mins} 分後 {fmt_num(data['predicted_value'])}"
                     f"（區間 {fmt_num(data['band_lo'])}–{fmt_num(data['band_hi'])}，現值 {fmt_num(data['now_value'])}）")
         if tool is ToolName.CURE_FORMULA:
-            return f"硫化總時數 {fmt_num(data['total_cure_h'])} h（多 {fmt_num(data['extra_h'])} h）"
+            line = f"硫化總時數 {fmt_num(data['total_cure_h'])} h（多 {fmt_num(data['extra_h'])} h）"
+            inp = data.get("inputs") or {}
+            if inp.get("press_id"):        # the plant's inputs (bind_cure_formula), so the answer can say them
+                line = (f"{machine_label(inp['press_id'])}（{inp['size']} 胎，已硫化 {fmt_num(inp['elapsed_h'])} h，"
+                        f"現在 {fmt_num(inp['actual_temp_c'])}°C）" + line)
+            return line
         if tool is ToolName.QUERY_ORDERS_SHIFTS:
             bits = []
             gaps = data.get("gaps") or []
@@ -236,11 +242,11 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
             return "；".join(bits)
         if tool is ToolName.SOP_SEARCH:
             hits = data.get("hits") or []
-            if not hits:
-                return "SOP：查無相關 SOP"
-            # the text itself, so the answer can quote it instead of inventing steps
-            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{' '.join(str(h.get('text', '')).split())[:160]}"
-                                       for h in hits[:2])
+            if not hits:                      # the KB's no-answer gate: say so, never the nearest unrelated SOP
+                return "知識庫沒有相關 SOP"
+            # the text itself, so the answer can quote it instead of inventing steps; the source says house or team SOP
+            return "SOP：" + "；".join(f"{h['sop_id']}〈{h['title']}〉{'（' + h['source_label'] + '）' if h.get('source_label') else ''}"
+                                       f"{' '.join(str(h.get('text', '')).split())[:160]}" for h in hits[:2])
     except (KeyError, TypeError, ValueError):
         pass
     return json.dumps(_brief(data, 300), ensure_ascii=False, default=str)[:300]
@@ -262,6 +268,52 @@ def _orders_line(data: dict[str, Any], want: list[str]) -> str:
         bits.append(f"{oid}（{o.get('size', '')}，{o.get('done', 0)}/{o.get('qty', '')}，交期 {o.get('due')}）"
                     + (f"：{when}" if when else "：排程裡還沒有它的下一模"))
     return "；".join(bits)
+
+
+_PRESS_ARG_RX = re.compile(r"(?:CURE[-_ ]?)?0*(\d{1,2})(?:\s*號.*)?", re.IGNORECASE)
+
+
+def _press_arg(v: Any) -> str | None:
+    """「CURE-07」「cure7」「7」「7 號機」 → CURE-07; anything else None."""
+    m = _PRESS_ARG_RX.fullmatch(str(v).strip()) if v is not None else None
+    mid = f"CURE-{int(m.group(1)):02d}" if m else None
+    return mid if mid in F.CURE_PRESS_IDS else None
+
+
+def bind_cure_formula(tools: Any, args: dict[str, Any], press_hint: str | None = None
+                      ) -> tuple[dict[str, Any], dict[str, Any] | None, str | None]:
+    """Spark 10-21: the model filled cure_formula's actual_temp_c itself (165 °C while 7 號 read 128 °C) and the made-up
+    hours passed the number check. Physics inputs come from the plant, as in the state machine's _bind_physics: the
+    press is press_id / machine_id in the args, else the question's press, else the one press with an open event;
+    size, setpoint, hours cured and the temperature now are that press's live cure job and reading. Returns
+    (args to call with, the inputs used or None, error). With no plant to read (offline rig) the args stand."""
+    sim = getattr(getattr(tools, "ctx", None), "sim", None)
+    rest = {k: v for k, v in (args or {}).items() if k not in ("press_id", "machine_id")}
+    if sim is None or not callable(getattr(sim, "machine", None)):
+        return rest, None, None
+    press = _press_arg(args.get("press_id")) or _press_arg(args.get("machine_id")) or press_hint
+    if press is None:
+        try:
+            open_presses = [m for m in F.CURE_PRESS_IDS if sim.machine(m).active_event_id]
+        except Exception:  # noqa: BLE001
+            open_presses = []
+        press = open_presses[0] if len(open_presses) == 1 else None
+    if press is None:
+        return rest, None, "cure_formula 需要 press_id（哪一台硫化機）；尺寸、溫度、時數由程式從現場讀取"
+    try:
+        st = sim.machine(press)
+    except Exception as e:  # noqa: BLE001
+        return rest, None, f"讀不到 {press}：{type(e).__name__}"
+    job, reading = st.cure_job, st.last_reading
+    if job is None:
+        return rest, None, f"{machine_label(press)}目前沒有在硫化的模次，無法計算硫化時間"
+    if reading is None or reading.temp_c is None:
+        return rest, None, f"{machine_label(press)}沒有溫度讀值，無法計算硫化時間"
+    size = job.size.value if hasattr(job.size, "value") else str(job.size)
+    bound = {"size": size, "ref_temp_c": float(job.setpoint_c), "actual_temp_c": round(float(reading.temp_c), 1),
+             "elapsed_h": round(float(job.cure_elapsed_h), 2), "ref_cure_h": float(F.CURE_HOURS[job.size]),
+             "activation_energy_kj_mol": float(F.ACTIVATION_ENERGY_KJ_MOL)}
+    return bound, {"press_id": press, **bound}, None
 
 
 _NUM_RX = re.compile(r"\d+(?:\.\d+)?")
@@ -305,8 +357,8 @@ class AskAgent:
 
     async def _llm_plan(self, question: str, context: dict[str, Any]) -> AskPlan:
         user = json.dumps({"question": question, "now": context}, ensure_ascii=False, default=str)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=400,
+        r = await budget.create(  # metered; over the day's budget it raises and the keyword rules plan
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=400,
             messages=[{"role": "system", "content": PLAN_SYSTEM + plant.section()}, {"role": "user", "content": user}],
             response_format={"type": "json_schema", "json_schema": {"name": "AskPlan", "schema": ask_plan_schema()}},
             **self._extra())
@@ -316,8 +368,8 @@ class AskAgent:
 
     async def _llm_answer(self, question: str, results: list[AskStepResult]) -> str:
         lines = "\n".join(f"- {r.tool}: {r.summary if r.ok else '失敗：' + (r.error or '')}" for r in results)
-        r = await self.client.chat.completions.create(
-            model=self.settings.model, temperature=0.0, max_tokens=300,
+        r = await budget.create(
+            self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=300,
             messages=[{"role": "system", "content": ANSWER_SYSTEM + plant.section()},
                       {"role": "user", "content": f"問題：{question}\n查詢結果：\n{lines or '（無）'}"}],
             **self._extra())
@@ -424,6 +476,7 @@ class AskAgent:
             "plant_sha256": plant.active_sha()}, event_id=ask_id)
 
         # 2. RUN: only ASK_TOOLS, at most ASK_MAX_STEPS
+        press_hint = next((m for m in machines_in(question) if m in F.CURE_PRESS_IDS), None)
         results: list[AskStepResult] = []
         intercepted: list[dict[str, Any]] = []
         for i, step in enumerate(plan.steps, start=1):
@@ -442,7 +495,7 @@ class AskAgent:
                 intercepted.append(rec)
                 audit.append(AuditKind.INTERCEPTED, "ask", rec, event_id=ask_id)
                 continue
-            res = await self._run(tools, audit, ask_id, i, tool, step.args)
+            res = await self._run(tools, audit, ask_id, i, tool, step.args, press=press_hint)
             results.append(AskStepResult(tool=tool.value, args=step.args, ok=res.ok, error=res.error,
                                          summary=summarize(tool, res.data, step.args) if res.ok else ""))
 
@@ -496,7 +549,18 @@ class AskAgent:
 
     @staticmethod
     async def _run(tools: Any, audit: AuditLog, ask_id: str, i: int, tool: ToolName,
-                   args: dict[str, Any]) -> ToolResult:
+                   args: dict[str, Any], press: str | None = None) -> ToolResult:
+        inputs = None
+        if tool is ToolName.CURE_FORMULA:
+            given = dict(args or {})
+            args, inputs, err = bind_cure_formula(tools, given, press)
+            if inputs is not None and args != given:
+                audit.append(AuditKind.SYSTEM, "ask", {"cure_formula_args_from_plant": f"Q{i}", "from": given,
+                                                       "to": args, "press": inputs["press_id"]}, event_id=ask_id)
+            if err is not None:
+                audit.append(AuditKind.SYSTEM, "ask", {"cure_formula_unbound": f"Q{i}", "args": given, "error": err},
+                             event_id=ask_id)
+                return ToolResult(call_id=f"{ask_id}:Q{i}", tool=tool, ok=False, error=err)
         call = ToolCall(id=f"{ask_id}:Q{i}", event_id=ask_id, step_id=f"Q{i}", tool=tool, args=args)
         audit.append(AuditKind.TOOL_CALL, f"tool:{tool.value}",
                      {"call_id": call.id, "step_id": call.step_id, "args": args, "attempt": 1, "state": "ASK"},
@@ -508,4 +572,6 @@ class AskAgent:
         audit.append(AuditKind.TOOL_RESULT, f"tool:{tool.value}",
                      {"call_id": call.id, "step_id": call.step_id, "ok": res.ok, "error": res.error,
                       "duration_ms": res.duration_ms, "attempt": 1, "data": _brief(res.data)}, event_id=ask_id)
+        if inputs is not None and res.ok:
+            res = res.model_copy(update={"data": {**res.data, "inputs": inputs}})
         return res

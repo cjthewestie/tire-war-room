@@ -410,7 +410,8 @@ async def test_main_agent_model_loop_calls_the_knowledge_base_then_replies():
     llm = Model(("tool", "sop_search", {"query": "大開煉機過熱", "k": 2}), ("say", "依 SOP-OM-01：先降速、檢查冷卻水。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
-    assert h.tools == ["sop_search"] and out["by"] == "model" and "SOP-OM-01" in out["reply"]
+    # a how-to is searched by code first (RAG no-answer, 10-22); the model's own search runs too
+    assert h.tools[0] == "sop_search" and out["by"] == "model" and "SOP-OM-01" in out["reply"]
     assert out["steps"][0]["label"] == "查了 SOP-OM-01"
 
 
@@ -544,7 +545,7 @@ async def test_main_agent_looks_up_a_plant_question_before_answering():
                 ("say", "依 SOP-OM-01 處理。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")
-    assert h.tools == ["sop_search"] and out["reply"] == "依 SOP-OM-01 處理。" and not out["fell_back"]
+    assert h.tools[0] == "sop_search" and out["reply"] == "依 SOP-OM-01 處理。" and not out["fell_back"]
     llm = Model(("say", "我是主 agent。"), ("say", "我是主 agent。"))
     h = _Harness()
     out = await h.turn(MainAgent(_settings(), client=llm), "大開煉機過熱怎麼處理")

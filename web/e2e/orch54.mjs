@@ -83,12 +83,13 @@ await until(async () => { second = (await subs()).items.find((x) => x.source ===
 // interrupt it while it still works (do not wait for its card: a real-model run may end on its own)
 await p.goto(`${BASE}/#console?event=${encodeURIComponent(second.id)}`, { waitUntil: 'networkidle' })
 await p.waitForSelector('[data-testid="tree-root"]')
-check('Agent page: 「Agent Nemo 對話」 with the events under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('Agent Nemo 對話') && await p.locator('[data-testid="trace-event"]').count() >= 1)
+check('Agent page: 「總覽」 with the events under it', (await p.locator('[data-testid="tree-root"]').innerText()).includes('總覽') && await p.locator('[data-testid="trace-event"]').count() >= 1)
 check('each row is <what>, then its plain status on a second line', (await p.locator('[data-testid="sub-status"]').allInnerTexts()).every((t) => /\n(規劃中|待核准|執行中|維修中|放慢投料中|暫停投料中|維修完成|現場工作|已恢復正常|已停用|已處置|完成|已停止)/.test(t)),
   (await p.locator('[data-testid="sub-status"]').allInnerTexts()).join(' | '))
 check('no 查詢 row in the tree', (await p.locator('.trace-list').innerText()).indexOf('查詢') < 0)
 await p.click('[data-testid="tree-root"]')
-check('clicking 「主 agent」 shows the 主 agent conversation', await until(async () => (await p.locator('[data-testid="main-thread"] [data-testid="sc-agent"]').count()) >= 1, 10))
+// CJ 2026-10-22: the tree root is 總覽 (overview mode): its guide questions until somebody asks, then the answers
+check('clicking 「總覽」 shows the 總覽 conversation', await until(async () => (await p.locator('[data-testid="main-thread"][data-mode="overview"] :is([data-testid="overview-guide"], [data-testid="sc-agent"])').count()) >= 1, 10))
 await p.click('.trace-side .seg button:has-text("全部")')
 await p.locator(`[data-testid="trace-event"][data-event="${second.id}"]`).click()
 // veteran audit 10-22: the queue bar only while somebody waits for the model

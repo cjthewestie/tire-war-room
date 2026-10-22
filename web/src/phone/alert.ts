@@ -6,7 +6,8 @@
 // event closed with its report written: Event.review pending and Event.ai_report) ring once each, as notices: nothing
 // waits for them, so they do not re-ring or count as waiting in the tab title.
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { Event, MachineTile } from '../contracts'
+import type { Event, MachineTile, SafetyCase } from '../contracts'
+import { caseTitle } from '../resolveText'
 import { CH_LABEL, expectationOf, normalOf, readingText, recoverText, reportReady } from '../aiStatus'
 import { machineLabel } from '../factory'
 import { fmtHM } from '../format'
@@ -53,6 +54,16 @@ export function backText(e: Event): string {
   const normal = normalOf(e, x)
   if (!x || normal == null) return plain(e.outcome).replace(/^已修復[：:]\s*/, '') || '異常報告已產生'
   return `${CH_LABEL[x.channel]}回到 ${readingText(x.channel, normal)}${e.repaired_at ? `（${fmtHM(e.repaired_at)} 維修完成）` : ''}`
+}
+
+/** Open Safety Core cases and unresolved SAFE_STOPs ring like a new approval (CJ 2026-10-22: they need the supervisor).
+ *  No R0–R3 on the supervisor's notice, as for the approval cards. */
+export function resolveAlerts(cases: SafetyCase[] | undefined, events: Event[] | undefined): AlertItem[] {
+  return [
+    ...(cases ?? []).filter((c) => c.status === 'open').map((c) => ({ id: `safety:${c.id}`, title: caseTitle(c), reason: plain(c.message) })),
+    ...(events ?? []).filter((e) => e.state === 'safe_stop' && !e.follow_up).map((e) => ({
+      id: `stop:${e.id}`, title: `安全停止：${machineLabel(e.machine_id)}`, reason: e.stop_reason_text ?? plain(e.outcome) })),
+  ]
 }
 
 /** 「待核准」 or what the notices say, for the multi-item alert. */

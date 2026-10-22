@@ -32,6 +32,7 @@ import contextlib
 import hmac
 import logging
 import os
+import re
 import threading
 import time
 from collections import deque
@@ -51,6 +52,8 @@ from pydantic import BaseModel, Field
 from warroom import factory as F
 from warroom.api.runtime import Runtime
 from warroom.config import ROOT
+from warroom.api.tasks import install_tasks
+from warroom.data import machine_memory as MM
 from warroom.contracts import (
     Anomaly,
     AskAnswer,
@@ -78,6 +81,8 @@ from warroom.contracts import (
     ReviewRequest,
     RiskLevel,
     SafetyAction,
+    SafetyCase,
+    SafetyRelease,
     ScenarioName,
     ScheduleVersion,
     Shift,
@@ -91,11 +96,20 @@ log = logging.getLogger("warroom.api")
 DIST = ROOT / "web" / "dist"
 
 
+class QaAsk(BaseModel):
+    """QA 模式 (warroom/agent/qa.py): a judge's question about the agent framework."""
+    question: str = Field(min_length=1, max_length=300)
+    conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
+
+
 class MainMessage(BaseModel):
     """Issue #54: a message to the Agent Nemo (it classifies it itself)."""
     text: str = Field(min_length=1, max_length=300)
     event_id: str | None = None       # the item the supervisor has selected (its waiting plan, if any)
     conversation_id: str | None = Field(default=None, min_length=1, max_length=64)   # one per page load
+    # 總覽 (the Agent page's 「Agent Nemo ▸ 處理中的事件」, CJ 2026-10-22): no selected task, every task and the
+    # questionable ones in context, links to task boards in the reply, its own conversation memory
+    mode: Literal["task", "overview"] = "task"
 
 
 class RollbackBody(BaseModel):
@@ -464,6 +478,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     if runtime is not None:
         app.state.runtime = runtime
     app.state.access = access
+    app.state.pin_guard, app.state.weak_push_delay_s, app.state.holder = guard, weak_push_delay_s, holder   # 後台 系統參數 / 健康
 
     # ------------------------------------------------------------------ on-site seat pairing
     @app.get("/kiosk", include_in_schema=False)
@@ -597,6 +612,68 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise _404(event_id) from None
         except ValueError as e:
             raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.post("/api/machines/{machine_id}/return-to-service")
+    async def return_to_service(machine_id: str, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """#104 恢復運轉: the supervisor puts a machine whose 檢修 is done back in service (OUT_OF_SERVICE -> RUNNING).
+        Same session rule as approvals; 409 when it is not out of service or not repaired yet. Audited."""
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
+        try:
+            r.return_to_service(machine_id, session.actor)
+        except KeyError:
+            raise _404(machine_id) from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        return {"machine_id": machine_id, "status": "running"}
+
+    # ------------------------------------------------------------------ resolution paths (warroom/api/resolve.py)
+    # CJ, 2026-10-22: 「安全核心要設計可以被解決 安全停止也要有可以走向解決的按鈕」. Every write here is a HUMAN supervisor
+    # action (same session rule as approvals); none of it is a tool, and the agent / commander cannot reach it.
+    def _resolve_call(session: Session, fn: Callable[[], Any], what: str) -> Any:
+        r = rt()
+        if r.network == "lan_down" and not session.local:
+            raise HTTPException(status_code=409, detail=f"LAN 中斷：請至現場觸控螢幕{what}")
+        try:
+            return fn()
+        except KeyError as e:
+            raise HTTPException(status_code=404, detail=f"not found: {e.args[0] if e.args else ''}") from None
+        except ValueError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+
+    @app.get("/api/safety/cases", response_model=list[SafetyCase])
+    async def safety_cases() -> list[SafetyCase]:
+        r = rt()
+        return r.cases.view(r._board())
+
+    @app.post("/api/safety/{case_id}/dispatch", response_model=SafetyCase)
+    async def safety_dispatch(case_id: str, session: Session = Depends(supervisor)) -> SafetyCase:
+        """① 派現場檢查: worker tasks from the rule's SOP."""
+        return _resolve_call(session, lambda: rt().safety_dispatch(case_id, session.actor), "派工")
+
+    @app.post("/api/safety/{case_id}/release", response_model=SafetyCase)
+    async def safety_release(case_id: str, body: SafetyRelease, session: Session = Depends(supervisor)) -> SafetyCase:
+        """③ 確認恢復運轉 / QC 合格放行 / 報廢. 409 until the reading is back in range for the core's re-arm count AND the
+        field tasks are done (or 「已現場確認」 with a reason). Audited with the session as actor."""
+        return _resolve_call(session, lambda: rt().safety_release(case_id, body, session.actor), "確認復機")
+
+    @app.post("/api/events/{event_id}/replan", response_model=Event)
+    async def stop_replan(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「請 AI 重新規劃」: returns the NEW event (its `previous` names the stopped one and why)."""
+        return _resolve_call(session, lambda: rt().stop_replan(event_id, session.actor), "操作")
+
+    @app.post("/api/events/{event_id}/handoff", response_model=Event)
+    async def stop_handoff(event_id: str, session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「交給現場處理」: worker tasks from the SOP; the event shows 人工處理中."""
+        return _resolve_call(session, lambda: rt().stop_handoff(event_id, session.actor), "派工")
+
+    @app.post("/api/events/{event_id}/close", response_model=Event)
+    async def stop_close(event_id: str, body: ReviewRequest | None = Body(default=None),
+                         session: Session = Depends(supervisor)) -> Event:
+        """SAFE_STOP → 「確認結案」 (supervisor acknowledge; after the floor's tasks when it was handed over)."""
+        note = ((body.note or "").strip() if body is not None else "") or None
+        return _resolve_call(session, lambda: rt().stop_close(event_id, session.actor, note), "結案")
 
     # ------------------------------------------------------------------ approvals
     @app.get("/api/approvals", response_model=list[ApprovalRequest])
@@ -831,6 +908,26 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         Read-only; there is no route that deletes a row."""
         return {"days": await asyncio.to_thread(rt().tasklog.days)}
 
+    @app.get("/api/memory/daily")
+    async def memory_daily(limit: int = 7) -> dict[str, Any]:
+        """每日摘要 (「加每日摘要」), newest first: derived from the audit, read-only (/handover, 後台 記憶)."""
+        desk = rt().memory_desk
+
+        def run() -> list[dict[str, Any]]:
+            docs = desk.files.all("daily")
+            docs.sort(key=lambda d: (d["day"], d.get("loop") or 0), reverse=True)
+            return [{k: d.get(k) for k in ("name", "label", "day", "loop", "sentences", "source", "machines", "written_at")}
+                    | {"tasks": d["facts"]["tasks"], "by_final": d["facts"]["by_final"],
+                       "carried_over": d["facts"]["carried_over"]} for d in docs[:max(1, min(limit, 31))]]
+        return {"daily": await asyncio.to_thread(run),
+                "weekly": [w["name"] for w in await asyncio.to_thread(desk.files.all, "weekly")],
+                "monthly": [m["name"] for m in await asyncio.to_thread(desk.files.all, "monthly")]}
+
+    @app.get("/api/memory/today")
+    async def memory_today() -> dict[str, Any]:
+        """總覽 今日總結 and 前一日總結 (Agent page), derived from the observations and daily summaries; read-only."""
+        return await asyncio.to_thread(rt().memory_desk.today_card)
+
     @app.get("/api/daylog")
     async def daylog_days() -> dict[str, Any]:
         """Days (or demo loops) with their run counts, newest first."""
@@ -867,7 +964,10 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
     # ------------------------------------------------------------------ 後台 (issue #37): factory network + supervisor
     from warroom.api.admin import install_admin
+    from warroom.api.demo import install_demo
     install_admin(app, rt, supervisor)
+    demo_state = install_demo(app, rt, demo)
+    install_tasks(app, rt, supervisor, on_site, guard, _audit_pin)   # 人員回報 (/worker 開始・完成)
 
     # ------------------------------------------------------------------ 問戰情室 (read-only Q&A)
     @app.post("/api/ask", response_model=AskAnswer)
@@ -954,6 +1054,31 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
 
+    def _log_chat(r: Runtime, body: MainMessage, session: Session, text: str, res: dict[str, Any]) -> None:
+        """Both sides of the turn into the chat log on disk (CJ 2026-10-22: 「這些對話紀錄跟訂單紀錄都要記錄下來」)."""
+        scope = "overview" if body.mode == "overview" else "task"
+        try:
+            r.history_log.add_chat(r.clock.now(), f"{scope}|{session.actor}|{body.conversation_id or ''}", scope,
+                                   session.actor, text, res.get("reply") or "", turn_id=res.get("id"),
+                                   event_id=res.get("event_id") or body.event_id, by=res.get("by"))
+        except Exception:  # noqa: BLE001 - a log write never fails the reply
+            log.exception("chat log write failed")
+
+    @app.get("/api/history/chat")
+    async def history_chat(day: str | None = None, session_id: str | None = None, scope: str | None = None,
+                           limit: int = 200) -> dict[str, Any]:
+        """Stored Agent Nemo chat (warroom/data/history_log.py): the sessions and their turns, oldest first. Read-only;
+        no route deletes a row."""
+        h = rt().history_log
+        lim = max(1, min(limit, 1000))
+        return {"sessions": await asyncio.to_thread(h.sessions, day),
+                "turns": await asyncio.to_thread(h.chats, day, session_id, scope, lim)}
+
+    @app.get("/api/history/orders")
+    async def history_orders(day: str | None = None, kind: str | None = None, limit: int = 200) -> dict[str, Any]:
+        """Stored order events (new, rush, completed, late, shipped), oldest first. Read-only."""
+        return {"orders": await asyncio.to_thread(rt().history_log.orders, day, kind, max(1, min(limit, 1000)))}
+
     @app.post("/api/main/message")
     async def main_message(body: MainMessage, session: Session = Depends(supervisor)) -> dict[str, Any]:
         """The supervisor talks to the Agent Nemo: a bounded tool-calling loop (warroom/agent/main_agent.py) that can
@@ -964,6 +1089,9 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         if r.network == "lan_down" and not session.local:
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕操作")
         text = body.text.strip()
+        overview_mode = body.mode == "overview"
+        if overview_mode:
+            body = body.model_copy(update={"event_id": None})     # the overview is about every task, never one
         sm = r.state_machine
         waiting = None
         if body.event_id:
@@ -998,24 +1126,31 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             return r.orch.queue.slot(PRIORITY["smalltalk" if low else "task"], "main_agent", body.event_id,
                                      "Agent Nemo 閒聊" if low else "Agent Nemo 對話")
 
-        async def read_plant(topic: str, call_id: str, order_id: str | None = None) -> dict[str, Any]:
+        async def read_plant(topic: str, call_id: str, order_id: str | None = None,
+                             machine_id: str | None = None, date: str | None = None, q: str | None = None) -> dict[str, Any]:
             # query_plant (warroom/api/plant_query.py): not a ToolName, so not through the Registry (its allow-list
             # refuses it); audited here like an ask read (tool_call / tool_result, R0), read-only by construction.
             # Called on the loop, not in a thread: it walks live runtime state the loop also changes
             eid, step = call_id.split(":")[0], call_id.split(":")[-1]
             row = {"call_id": f"{eid}:Q{step[1:]}", "step_id": f"Q{step[1:]}", "attempt": 1, "risk": "R0"}
-            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": {"topic": topic, **({"order_id": order_id} if order_id else {})},
-                                                                 "state": "ASK"},
-                           event_id=eid)
+            qargs = {"topic": topic, **{k: v for k, v in (("order_id", order_id), ("machine_id", machine_id),
+                                                            ("date", date), ("q", q)) if v}}
+            r.audit.append(AuditKind.TOOL_CALL, "tool:query_plant", {**row, "args": qargs, "state": "ASK"}, event_id=eid)
             t0 = time.perf_counter()
             try:
-                data, err = plant_query.query(r, topic, order_id), None
+                data, err = plant_query.query(r, topic, order_id, machine_id, date, q), None
             except Exception as e:  # noqa: BLE001 - a failed read is said in the reply, never a 500
                 data, err = None, f"{type(e).__name__}: {e}"[:200]
             r.audit.append(AuditKind.TOOL_RESULT, "tool:query_plant",
                            {**row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
-                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else []}}, event_id=eid)
+                            "data": {"topic": topic, "keys": sorted(data) if isinstance(data, dict) else [],
+                                     # which notes / past events went to the model (「接記憶」)
+                                     **(MM.attached(data) if topic == "machine_history" and isinstance(data, dict) else {})}},
+                           event_id=eid)
+            reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
+
+        reads: list[tuple[str, Any]] = []
 
         class Control:
             """Task control from chat (CJ 2026-10-22: 「A」): only existing supervisor actions, on an event that exists,
@@ -1024,12 +1159,31 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             actor = f"{session.actor} via Agent Nemo"
 
             @staticmethod
+            def _label(e) -> str:
+                from warroom.agent.narrate import machine_label
+                return f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件"
+
+            @staticmethod
+            def candidates() -> list[tuple[str, str]]:
+                """Tasks a bare command (「重新排」「結案」) could mean: open ones, and SAFE_STOPs nobody has followed up."""
+                evs = [e for e in r.events() if e.closed_at is None
+                       or (e.state.value == "safe_stop" and (e.follow_up is None or e.follow_up.status == "manual"))]
+                return [(e.id, Control._label(e)) for e in sorted(evs, key=lambda e: e.opened_at)]
+
+            @staticmethod
             def resolve(ref: str) -> tuple[str, str] | None:
                 from warroom.agent.ask import machines_in, orders_in
-                from warroom.agent.narrate import machine_label
                 evs = list(r.events())
-                ref = (ref or body.event_id or "").strip()
-                hit = [e for e in evs if e.id == ref]
+                ref = (ref or "").strip()
+                names = bool(re.search(r"EV-\d", ref) or machines_in(ref) or orders_in(ref))
+                if not names:
+                    # 「重新排」: the selected task, else the one obvious task (CJ 10-22)
+                    sel = [e for e in evs if e.id == body.event_id]
+                    if sel:
+                        return sel[0].id, Control._label(sel[0])
+                    c = Control.candidates()
+                    return c[0] if len(c) == 1 else None
+                hit = [e for e in evs if e.id == ref or e.id in ref]
                 if not hit:
                     mids, oids = machines_in(ref), orders_in(ref)
 
@@ -1042,12 +1196,25 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                         hit = ended[-1:]
                 if len(hit) != 1:
                     return None
-                e = hit[0]
-                return e.id, (f"「{(e.command or '')[:16]}」那件" if e.source == "supervisor" else f"{machine_label(e.machine_id)}那件")
+                return hit[0].id, Control._label(hit[0])
 
             @staticmethod
             def blocked(action: str, eid: str) -> str | None:
                 """Why this action cannot run on this task now (asked before the confirmation, never after)."""
+                if action == "release_safety_stop":
+                    from warroom.agent.narrate import machine_label
+                    from warroom.contracts import SafetyRelease
+                    c = Control._case(eid)
+                    if c is not None:
+                        try:              # the button's own precondition check: ① field check, ② safe samples, decision
+                            r.cases.check_release(c, SafetyRelease(decision=c.decisions[0]), r._board())
+                        except ValueError as e:
+                            return f"{machine_label(eid)}還不能恢復：{e}。"
+                        return None
+                    tile = Control._tile(eid)
+                    if tile is not None and tile.status.value == "out_of_service":
+                        return None if tile.repaired else f"{machine_label(eid)}還沒檢修完成，不能恢復運轉。"
+                    return f"{machine_label(eid)}現在沒有安全核心停機，也不是停用狀態，不用恢復。"
                 st = sm.get(eid).state.value
                 if action == "interrupt_task" and st in ("closed", "safe_stop"):
                     return "這件已經結束了，不用中斷。"
@@ -1056,15 +1223,77 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                             "或先中斷它再重開一件。")
                 if action == "replan_task" and st not in ("closed", "safe_stop"):
                     return "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
-                if action == "hand_to_field" and not (st == "safe_stop" and callable(getattr(r, "stop_handoff", None))):
-                    return "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有。"
+                fu = getattr(sm.get(eid), "follow_up", None)
+                if action == "hand_to_field" and st != "safe_stop":
+                    return "「交給現場」只用在安全停止的任務。"
+                if action == "hand_to_field" and fu is not None:
+                    return "這件已經交給現場處理了。"
+                if action == "close_task" and st != "safe_stop":
+                    return "「確認結案」只用在安全停止的任務；其他任務驗證通過會自己結案。"
+                if action == "close_task" and fu is not None and fu.status in ("closed", "replanned"):
+                    return "這件已經處理過了（已結案或已重新規劃）。"
+                if action == "replan_task" and st == "safe_stop" and fu is not None and fu.status in ("closed", "replanned"):
+                    return "這件已經處理過了（已結案或已重新規劃）。"
                 return None
 
+            # ---- a machine's way back (CJ 2026-10-22: 「開放」): the SAME paths as the ③ 確認恢復運轉 button
+            # (warroom/api/resolve.py, every precondition) and the 恢復運轉 button (Runtime.return_to_service)
+            @staticmethod
+            def _case(mid: str):
+                """The open Safety Core case to release — none for an OUT_OF_SERVICE machine: its way back is 恢復運轉
+                (return_to_service), and the core's release never lifts OUT_OF_SERVICE (press 7 after H2 has both,
+                and the chat asked for the core's field check instead; live run 10-22)."""
+                tile = Control._tile(mid)
+                if tile is not None and tile.status.value == "out_of_service":
+                    return None
+                return r.cases.open_for(mid)
+
+            @staticmethod
+            def _tile(mid: str):
+                return next((t for t in r.machine_tiles() if t.machine_id == mid), None)
+
+            @staticmethod
+            def resolve_for(action: str, ref: str) -> tuple[str, str] | None:
+                if action != "release_safety_stop":
+                    return Control.resolve(ref)
+                from warroom.agent.ask import machines_in
+                from warroom.agent.narrate import machine_label
+                mids = machines_in(ref or "")
+                if not mids and body.event_id:
+                    ev = _safe(lambda: sm.get(body.event_id), None)
+                    mids = [ev.machine_id] if ev is not None and ev.machine_id in F.MACHINE_BY_ID else []
+                if not mids:
+                    stopped = [c.machine_id for c in r.cases.view(r._board()) if c.status == "open"]
+                    stopped += [t.machine_id for t in r.machine_tiles() if t.status.value == "out_of_service"
+                                and t.machine_id not in stopped]
+                    mids = stopped if len(stopped) == 1 else []
+                return (mids[0], machine_label(mids[0])) if len(mids) == 1 else None
+
+            @staticmethod
+            def question(action: str, target: str, label: str) -> str | None:
+                if action != "release_safety_stop":
+                    return None
+                c = Control._case(target)
+                if c is not None and "qc_pass" in c.decisions:
+                    return (f"{label}是低溫停機，要 QC 合格放行嗎？現場檢查和讀值都過了。回「好」就放行恢復運轉，"
+                            "要報廢這一模請說「報廢」，其他回覆就不做。")
+                if c is not None:
+                    return f"要恢復{label}運轉嗎？現場檢查和讀值都過了。回「好」或「確認」就恢復，其他回覆就不做。"
+                return f"要讓{label}恢復運轉嗎？檢修已經完成。回「好」或「確認」就恢復，其他回覆就不做。"
+
             def audit_request(self, action: str, eid: str) -> None:
+                if action == "release_safety_stop":   # a machine, not an event: the row names it, under the case's event
+                    c = Control._case(eid)
+                    r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
+                                                                  "confirmed": False, "machine_id": eid},
+                                   event_id=c.event_id if c is not None else None)
+                    return
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control asked", "action": action,
                                                               "confirmed": False}, event_id=eid)
 
-            async def run(self, action: str, eid: str) -> str:
+            async def run(self, action: str, eid: str, words: str = "") -> str:
+                if action == "release_safety_stop":
+                    return self._release(eid, words)
                 ev = sm.get(eid)
                 state = ev.state.value
                 try:
@@ -1072,9 +1301,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                         d = await r.orch.interrupt(eid, self.actor)
                         result = str(d.get("text") or "已中斷")
                     elif action == "replan_task":
-                        replan = getattr(r, "stop_replan", None)        # resolve-safety-paths: SAFE_STOP → 請 AI 重新規劃
-                        if state == "safe_stop" and callable(replan):
-                            nev = replan(eid, self.actor)
+                        if state == "safe_stop":                         # #105: SAFE_STOP → 請 AI 重新規劃
+                            nev = r.stop_replan(eid, self.actor)
                             result = f"已請 AI 重新規劃（新的一件 {nev.id}），計劃擬好會送你核准。"
                         elif state in ("closed", "safe_stop"):
                             what = ev.command or (ev.alert_card.title if ev.alert_card else ev.anomaly.message)
@@ -1086,18 +1314,41 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                                       "或先中斷它再重開一件。這次沒有執行。")
                         else:
                             result = "這件正在處理中，等它有計劃或結果再重新規劃，或先中斷它。"
-                    else:
-                        handoff = getattr(r, "stop_handoff", None)      # resolve-safety-paths: SAFE_STOP → 交給現場處理
-                        if state == "safe_stop" and callable(handoff):
-                            handoff(eid, self.actor)
-                            result = "已交給現場處理：依 SOP 派工，這件會顯示人工處理中。"
-                        else:
-                            result = "「交給現場」只用在安全停止的任務，而且要等 resolve-safety-paths 合併後才有；這次沒有執行。"
+                    elif action == "hand_to_field":                      # #105: SAFE_STOP → 交給現場處理
+                        e2 = r.stop_handoff(eid, self.actor)
+                        n = len(e2.follow_up.task_ids) if e2.follow_up else 0
+                        result = f"已交給現場處理：依 SOP 派了 {n} 項任務，這件顯示人工處理中；做完後說「結案」。"
+                    else:                                                # #105: SAFE_STOP → 確認結案
+                        r.stop_close(eid, self.actor)
+                        result = "已確認結案，這件安全停止處理完了。"
                 except (KeyError, ValueError) as e:
                     result = f"沒有執行：{e}"
                 r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": action, "confirmed": True,
                                                               "state_before": state, "result": result[:200]}, event_id=eid)
                 return result
+
+        def _release(self, mid: str, words: str) -> str:
+            """After the supervisor's 好 in chat: the ③ release (all its preconditions again) or the return to service."""
+            from warroom.agent.narrate import machine_label
+            from warroom.contracts import SafetyRelease
+            c = Control._case(mid)
+            try:
+                if c is not None:
+                    d = "scrap" if ("報廢" in words and "scrap" in c.decisions) else c.decisions[0]
+                    r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"), self.actor)
+                    result = (f"已報廢{machine_label(mid)}這一模，換模後再入模。" if d == "scrap"
+                              else f"已恢復{machine_label(mid)}運轉（{'QC 合格放行' if d == 'qc_pass' else '確認恢復運轉'}）。")
+                else:
+                    r.return_to_service(mid, self.actor)
+                    result = f"已讓{machine_label(mid)}恢復運轉（檢修完成）。"
+            except (KeyError, ValueError) as e:
+                result = f"沒有恢復：{e}"
+            r.audit.append(AuditKind.SYSTEM, self.actor, {"msg": "chat control", "action": "release_safety_stop",
+                                                          "confirmed": True, "machine_id": mid, "result": result[:200]},
+                           event_id=(c.event_id if c is not None else None))
+            return result
+
+        Control._release = _release
 
         def waiting_of(eid: str) -> bool:
             return getattr(sm, "waiting_card", lambda _e: None)(eid) is not None
@@ -1108,11 +1359,19 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         hit = sf.check_input(text)
         if hit is not None:
             r.audit.append(AuditKind.SYSTEM, "safety_filter", {**hit.audit(), "turn": None}, event_id=None)
-            return {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
-                    "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
+            blocked = {"id": None, "reply": hit.reply, "steps": [], "event_id": None, "by": "safety_filter",
+                       "fell_back": False, "error": None, "intent": f"blocked:{hit.category}", "ms": 0.0}
+            _log_chat(r, body, session, text, blocked)
+            return blocked
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        if overview_mode:
+            from warroom.api import overview
+            context["overview"] = {**_safe(lambda: overview.snapshot(r), {}),
+                                   "note": ("總覽模式：主管在看全部任務，不是某一件。用 overview.tasks 回答任務狀況；問哪些有問題時只列 "
+                                            "overview.questionable 的任務，每件一句原因，沒有就說沒有，不要加工廠概況；過去的資料用 query_plant（handled_today、orders_history、"
+                                            "order_lookup）。提到任務時說機台或訂單，不要寫事件編號，也不要說 topic 或欄位名稱；連結由系統附上。")}
         if body.event_id:
             # the task picked on the Agent page (or the 主控台): the chat talks about it (CJ 2026-10-22: 「A」)
             ev_sel = _safe(lambda: sm.get(body.event_id), None)
@@ -1120,10 +1379,54 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 context["selected_task"] = {"id": ev_sel.id, "state": ev_sel.state.value, "machine": ev_sel.machine_id,
                                             "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
                                                                         else ev_sel.anomaly.message))[:60]}
+        memory = None
+        if overview_mode or not body.event_id:
+            # the overview chat only (總覽, or no task selected): claude-mem style memory (CJ 2026-10-22: 「只有在Agent Nemo 對話統整區
+            # 有這個功能(非單一任務區)」). Today's observations as a compact index, the last daily summary, and two reads.
+            desk = r.memory_desk
+            index = await asyncio.to_thread(desk.day_index)
+            context["today_index"] = index or "（今天還沒有紀錄）"
+            day, loop = desk.today_key()
+            from warroom.data.memory_log import day_name
+            last = desk.daily(before=day_name(day, loop))
+            if last is not None:
+                context["earlier_days"] = [{"day": last["label"], "summary": "".join(last["sentences"])}]
+
+            class ChatMemory:
+                """memory_search / memory_get for the chat: R0 reads, audited like query_plant."""
+
+                @staticmethod
+                def _audited(tool: str, args: dict[str, Any], call_id: str, fn) -> Any:
+                    eid, step = call_id.split(":")[0], call_id.split(":")[-1]
+                    row = {"call_id": f"{eid}:M{step[1:]}", "step_id": f"M{step[1:]}", "attempt": 1, "risk": "R0"}
+                    r.audit.append(AuditKind.TOOL_CALL, f"tool:{tool}", {**row, "args": args, "state": "ASK"}, event_id=eid)
+                    t0 = time.perf_counter()
+                    try:
+                        data, err = fn(), None
+                    except Exception as e:  # noqa: BLE001 - said in the reply, never a 500
+                        data, err = None, f"{type(e).__name__}: {e}"[:200]
+                    r.audit.append(AuditKind.TOOL_RESULT, f"tool:{tool}", {
+                        **row, "ok": err is None, "error": err, "duration_ms": round((time.perf_counter() - t0) * 1000, 2),
+                        "data": {"ids": [h["id"] for h in (data.get("hits", []) if isinstance(data, dict) else data or [])]}},
+                        event_id=eid)
+                    return data if err is None else ({"found": False, "hits": []} if tool == "memory_search" else [])
+
+                def search(self, q: str, date: str | None, type_: str | None, call_id: str) -> dict[str, Any]:
+                    return self._audited("memory_search", {"q": q, "date": date, "type": type_}, call_id,
+                                         lambda: desk.search(q, day=date, type_=type_))
+
+                def get(self, ids: list[str], call_id: str) -> list[dict[str, Any]]:
+                    return self._audited("memory_get", {"ids": ids}, call_id, lambda: desk.obs.get(ids))
+            memory = ChatMemory()
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant, conversation=f"{session.actor}|{body.conversation_id or ''}",
-                                        control=Control())
+                                        read_plant=read_plant, conversation=f"{'overview|' if overview_mode else ''}{session.actor}|{body.conversation_id or ''}",
+                                        control=Control(), mode=body.mode, memory=memory)
+        if overview_mode:
+            from warroom.api import overview
+            acted = [str(s["args"]["event_id"]) for s in res["steps"] if isinstance(s.get("args"), dict) and s["args"].get("event_id")]
+            res["links"] = _safe(lambda: overview.links(r, text, res["reply"], reads, acted), [])
+            res["mode"] = "overview"
         key = getattr(r.audit, "_key", None)
         out_hit = sf.check_output(res["reply"], [access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
         if out_hit is not None:
@@ -1132,8 +1435,62 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "text": text, "reply": res["reply"], "by": res["by"],
                                                   "fell_back": res["fell_back"], "error": res["error"],
                                                   "steps": [{k: v for k, v in s.items() if k != "args"} for s in res["steps"]],
-                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"]})
+                                                  "dispatched": res["event_id"], "selected": body.event_id, "turn": res["id"],
+                                                  **({"mode": "overview", "links": res.get("links", [])} if overview_mode else {}),
+                                                  # a constraint said in chat (「不要動 9 號機」): an observation (📌)
+                                                  **({"pinned": p} if (p := _main_agent(r)._pin_of(text)) else {})})
+        _log_chat(r, body, session, text, res)
         return res
+
+    # ------------------------------------------------------------------ QA 模式: judges' framework questions (read-only)
+    def _qa_agent(r: Runtime):
+        if "qa" not in holder:
+            from warroom.agent.qa import QaAgent
+            from warroom.kb.framework import FrameworkKB
+            holder["qa"] = QaAgent(r.settings, kb=FrameworkKB.from_settings(r.settings))
+        return holder["qa"]
+
+    @app.post("/api/qa/ask")
+    async def qa_ask(body: QaAsk, session: Session = Depends(supervisor)) -> dict[str, Any]:
+        """QA 模式 (warroom/agent/qa.py): a short spoken answer to a judge's question about the agent framework, only
+        from the framework knowledge base (its own collection, not the plant SOPs), with evidence ids. No tool, no event,
+        no write; the model call waits in the ModelQueue at the plant-question priority, behind incidents."""
+        r = rt()
+        from warroom.agent.orchestrator import PRIORITY
+        key = getattr(r.audit, "_key", None)
+        return await _qa_agent(r).ask(
+            body.question, conversation_id=body.conversation_id, audit=r.audit,
+            slot=lambda: r.orch.queue.slot(PRIORITY["task"], "qa", None, "QA 模式"),
+            secrets=[access.supervisor_pin or "", key.hex() if isinstance(key, bytes) else ""])
+
+    @app.get("/api/qa/doc")
+    async def qa_doc(path: str = Query(min_length=1, max_length=200)) -> dict[str, Any]:
+        """The evidence viewer: the text of one file the framework KB indexes or a curated answer cites. Any other
+        path is a 404 (no file browsing)."""
+        from warroom.agent.qa import viewable
+        text = await asyncio.to_thread(viewable, path, _qa_agent(rt())._kb())
+        if text is None:
+            raise _404(path)
+        return {"path": path, "text": text}
+
+    # QA 模式 live proofs + 「看一次怎麼運作」 (warroom/api/qa_demo.py): demo-control rights, everything tagged 「QA 展示」
+    from warroom.api.qa_demo import CHAT_CONVERSATION, install_qa_demo
+
+    async def _qa_chat(text: str, session: Session) -> dict[str, Any]:
+        return await main_message(MainMessage(text=text, conversation_id=CHAT_CONVERSATION), session)
+
+    async def _qa_plant_ask(question: str, session: Session) -> Any:
+        return await ask(AskRequest(question=question), session)
+
+    def _qa_network(network: str, session: Session) -> None:
+        r = rt()
+        r.network = network
+        r.audit.append(AuditKind.SYSTEM, session.actor, {"msg": "network tier", "network": network, "qa_demo": True,
+                                                         "tag": "QA 展示"})
+        r.sync_warning_light()
+        r.bus.publish(WsType.SNAPSHOT, r.snapshot())
+
+    install_qa_demo(app, rt, supervisor, demo, chat=_qa_chat, ask=_qa_plant_ask, set_network=_qa_network)
 
     # ------------------------------------------------------------------ sim control (demo)
     @app.post("/api/sim/control")
@@ -1284,6 +1641,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         try:
             await _send(sock, WsType.SNAPSHOT, r.snapshot().model_dump(mode="json"), r.now())
             await _send(sock, WsType.CLOCK, r.clock_info(), r.now())
+            if demo_state.running:            # a screen opened mid-demo joins the current cue
+                await _send(sock, WsType.DEMO, demo_state.view(), r.now())
             while True:
                 done, _ = await asyncio.wait({nxt, drain}, timeout=buf.wait_s(loop.time()),
                                              return_when=asyncio.FIRST_COMPLETED)
@@ -1349,6 +1708,12 @@ def _mount_web(app: FastAPI, dist: Path = DIST) -> None:
     assets = dist / "assets"
     if assets.is_dir():
         app.mount("/assets", StaticFiles(directory=assets), name="assets")
+
+    # the 3D whiteboard's pitch deck (web/public/pitch/README.md): served straight from the source folder, so CJ's
+    # slides show without a rebuild; the built copy is the fallback
+    pitch = next((d for d in (ROOT / "web" / "public" / "pitch", dist / "pitch") if d.is_dir()), None)
+    if pitch is not None:
+        app.mount("/pitch", StaticFiles(directory=pitch), name="pitch")
 
     def page(name: str):
         p = dist / name

@@ -24,14 +24,16 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
+from warroom import __version__
 from warroom import factory as F
+from warroom.api import admin_audit as AA
+from warroom.api import admin_params as AP
 from warroom.contracts import AuditKind
+from warroom.data import memory_log as ML
 
 ALLOWED_EXT = (".md", ".txt", ".pdf")
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 _NAME_RE = re.compile(r"^[0-9A-Za-z一-鿿][0-9A-Za-z一-鿿._-]{0,80}$")
-_EV_MACHINE_RE = re.compile(r"(" + "|".join(re.escape(m) for m in sorted(F.MACHINE_IDS, key=len, reverse=True)) + r")$")
-TERMINAL = ("closed", "safe_stop")
 
 
 class UploadBody(BaseModel):
@@ -71,11 +73,6 @@ def safe_doc_name(name: str) -> str:
     if Path(base).suffix.lower() not in ALLOWED_EXT:
         raise HTTPException(status_code=400, detail=f"只接受 {'、'.join(ALLOWED_EXT)}")
     return base
-
-
-def machine_of_event(event_id: str | None) -> str | None:
-    m = _EV_MACHINE_RE.search(event_id or "")
-    return m.group(1) if m else None
 
 
 class ReindexJob:
@@ -126,9 +123,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         return supervisor(request, response)
 
     def notes():
+        r = rt()
+        if hasattr(r, "memory_notes"):            # the same notes the agents read (Runtime.memory_notes)
+            return r.memory_notes
         if "n" not in notes_holder:
             from warroom.data.memory_notes import MemoryNotes
-            notes_holder["n"] = MemoryNotes(Path(rt().settings.audit_path).parent / "memory_notes.json")
+            notes_holder["n"] = MemoryNotes(Path(r.settings.audit_path).parent / "memory_notes.json")
         return notes_holder["n"]
 
     def sop_dir() -> Path:
@@ -144,20 +144,92 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
 
     # ------------------------------------------------------------------ status, runs
     @app.get(P + "/status")
-    async def status(_: Any = ADMIN) -> dict[str, Any]:
+    async def status(request: Request, _: Any = ADMIN) -> dict[str, Any]:
         r = rt()
         kb = r.c.kb
         llm_host = urlparse(r.settings.base_url).netloc if r.llm_mode.value != "mock" else None
         chain = await asyncio.to_thread(_safe, r.audit.verify_chain, False)
-        tail = r.audit.tail(0, 1)
-        return {"llm_mode": r.llm_mode.value, "model": r.settings.model, "llm_host": llm_host,
-                "llm_reachable": await r.llm_reachable(), "kb_ok": r.kb_ok(),
-                "kb_mode": getattr(kb, "mode", "keyword"), "team_mode": getattr(kb, "team_mode", "off"),
-                "audit_chain_ok": chain, "audit_entries": len(r.audit.tail(0, 100_000)),
-                "audit_last_seq": tail[-1].seq if tail else 0,
-                "degraded": dict(r.degraded), "scenario": r.scenario.value, "factory_time": r.now().isoformat(),
-                "uptime_s": round(r.uptime_s()), "network": r.network, "memory_notes": len(notes().all()),
-                "reindex": job.as_dict()}
+        recent = r.audit.tail(0, 500)
+        last_seq = _audit_len(r.audit)
+        chunks = list(getattr(kb, "_chunks", []) or [])
+        team = list(getattr(kb, "_team_chunks", []) or [])
+        today = r.now().date()
+        main = getattr(request.app.state, "holder", {}).get("main")
+        st = {"llm_mode": r.llm_mode.value, "model": r.settings.model, "llm_host": llm_host,
+              "llm_reachable": await r.llm_reachable(), "kb_ok": r.kb_ok(),
+              "kb_mode": getattr(kb, "mode", "keyword"), "team_mode": getattr(kb, "team_mode", "off"),
+              "kb_docs": len({c.sop_id for c in chunks}), "kb_chunks": len(chunks),
+              "team_docs": len({c.sop_id for c in team}), "team_chunks": len(team),
+              "audit_chain_ok": chain, "audit_entries": last_seq,
+              "audit_last_seq": last_seq, "llm_latency": AP.llm_latency(recent),
+              "degraded": dict(r.degraded), "scenario": r.scenario.value, "factory_time": r.now().isoformat(),
+              "speed": getattr(r, "speed", None), "paused": bool(getattr(r, "paused", False)),
+              "day_loop": _safe(r.day_loop_info, None),
+              "safety_rules": [x.id for x in getattr(r.c.safety, "rules", None) or []],
+              "safety_actions_today": sum(1 for a in getattr(r, "safety_log", []) if a.ts.date() == today),
+              "conversations": len(getattr(main, "_memories", {}) or {}) + _safe(lambda: len(r.ask_memory), 0),
+              "uptime_s": round(r.uptime_s()), "network": r.network, "memory_notes": len(notes().all()),
+              "version": __version__, "commit": AP.commit_sha(), "reindex": job.as_dict()}
+        st["health"] = AP.health(st)
+        return st
+
+    @app.get(P + "/metrics")
+    async def metrics(request: Request, _: Any = ADMIN) -> dict[str, Any]:
+        """Live machine + model numbers for 狀態 (warroom/api/metrics.py); the page polls it every few seconds."""
+        from warroom.api.metrics import metrics_view
+        return await metrics_view(request.app, rt)
+
+    # ------------------------------------------------------------------ 稽核紀錄 (read-only) and 系統參數
+    def audit_filter(kind: str, actor: str, event: str, q: str, t_from: str, t_to: str) -> AA.Filter:
+        if kind and kind not in {k.value for k in AuditKind}:
+            raise HTTPException(status_code=400, detail=f"沒有這種紀錄：{kind}")
+        return AA.Filter(kind, actor, event, q, t_from, t_to)
+
+    @app.get(P + "/audit")
+    async def audit_list(kind: str = Query("", max_length=40), actor: str = Query("", max_length=80),
+                         event: str = Query("", max_length=120), q: str = Query("", max_length=200),
+                         t_from: str = Query("", alias="from", max_length=40), t_to: str = Query("", alias="to", max_length=40),
+                         cursor: int | None = Query(None, ge=1), limit: int = Query(AA.PAGE, ge=1, le=500),
+                         _: Any = ADMIN) -> dict[str, Any]:
+        flt = audit_filter(kind, actor, event, q, t_from, t_to)
+        newest, _ = AA.source(rt().audit)
+        out = await asyncio.to_thread(lambda: AA.page(newest(), flt, cursor, limit))
+        out["kinds"] = AA.kinds()
+        out["last_seq"] = _audit_len(rt().audit)
+        return out
+
+    @app.get(P + "/audit/verify")
+    async def audit_verify(_: Any = ADMIN) -> dict[str, Any]:
+        a = rt().audit
+        if hasattr(a, "verify_report"):
+            return await asyncio.to_thread(a.verify_report)
+        ok = await asyncio.to_thread(_safe, a.verify_chain, False)
+        return {"ok": ok, "checked": None, "last_seq": None, "broken_at": None, "problem": None if ok else "verify failed"}
+
+    @app.get(P + "/audit/export")
+    async def audit_export(kind: str = Query("", max_length=40), actor: str = Query("", max_length=80),
+                           event: str = Query("", max_length=120), q: str = Query("", max_length=200),
+                           t_from: str = Query("", alias="from", max_length=40), t_to: str = Query("", alias="to", max_length=40),
+                           session: Any = ADMIN) -> Response:
+        flt = audit_filter(kind, actor, event, q, t_from, t_to)
+        _, oldest = AA.source(rt().audit)
+        lines, cut = await asyncio.to_thread(lambda: AA.export_lines(oldest(), flt))
+        audit(session, {"action": "audit_export", "rows": len(lines), "cut": cut, "filter": flt.as_dict()})
+        stamp = rt().now().strftime("%Y%m%d-%H%M")
+        return Response("\n".join(lines) + ("\n" if lines else ""), media_type="application/x-ndjson; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="audit-{stamp}.jsonl"',
+                                 "X-Rows": str(len(lines)), "X-Cut": "1" if cut else "0"})
+
+    @app.get(P + "/params")
+    async def params(request: Request, _: Any = ADMIN) -> dict[str, Any]:
+        return await asyncio.to_thread(AP.params, rt(), request.app.state)
+
+    @app.get(P + "/usage")
+    async def usage(_: Any = ADMIN) -> dict[str, Any]:
+        """模型用量 (warroom/agent/budget.py): today's totals by kind, the top events and conversations, the caps, % used
+        and the degradation state."""
+        from warroom.agent import budget
+        return (getattr(rt(), "budget", None) or budget.get()).view()
 
     @app.get(P + "/runs")
     async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
@@ -180,8 +252,12 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
             t = time.perf_counter()
             hits = kb.search(q, k)
             team = kb.search_team(q, k) if hasattr(kb, "search_team") else []
+            # what the agents get: both collections on one score, through the no-answer gate
+            r = kb.retrieve(q, k) if hasattr(kb, "retrieve") else None
             return {"q": q, "hits": [h.model_dump(mode="json") for h in hits],
                     "team_hits": [h.model_dump(mode="json") for h in team],
+                    "answer": None if r is None else {"hits": [h.model_dump(mode="json") for h in r.hits],
+                                                      "reason": r.reason},
                     "mode": getattr(kb, "mode", "keyword"), "ms": round((time.perf_counter() - t) * 1000, 1)}
         return await asyncio.to_thread(run)
 
@@ -332,6 +408,46 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         r = rt()
         return await asyncio.to_thread(_memory, r, notes())
 
+    @app.get(P + "/memory/preview")
+    async def memory_preview(machine_id: str = Query(..., max_length=20), _: Any = ADMIN) -> dict[str, Any]:
+        """What the commander would get as context.machine_memory for this machine right now (read-only)."""
+        if machine_id not in F.MACHINE_IDS:
+            raise HTTPException(status_code=400, detail=f"沒有這台機台：{machine_id}")
+        from warroom.data import machine_memory as MM
+        r = rt()
+        block = await asyncio.to_thread(r.machine_memory, machine_id) if hasattr(r, "machine_memory") else \
+            await asyncio.to_thread(MM.for_machine, machine_id, notes(), r.audit, r.events())
+        return {"machine_id": machine_id, "machine_memory": block}
+
+    # 記憶時間軸 (CJ, 2026-10-22: 「不是說要跟claudemem一樣」): the observations newest first, read-only
+    @app.get(P + "/memory/observations")
+    async def observations(before: int | None = Query(None, ge=1), after: int | None = Query(None, ge=0),
+                           limit: int = Query(60, ge=1, le=200), types: str = Query("", max_length=80),
+                           machine: str = Query("", max_length=20), _: Any = ADMIN) -> dict[str, Any]:
+        desk = rt().memory_desk
+        kinds = [t for t in types.split(",") if t in ML.ICON]
+
+        def run() -> dict[str, Any]:
+            desk.sync()
+            items = [o | {"k": ML.cursor(o)} for o in desk.obs.page(before, after, limit, kinds, machine or None)]
+            days = {o["day"] for o in items}
+            cards = {d["name"]: ML.summary_card(d) for d in desk.files.all("daily") if d["name"] in days}
+            return {"items": items, "summaries": cards, "next": items[-1]["k"] if len(items) == limit else None,
+                    "last_seq": desk.obs.last_seq(), "types": {k: [ML.ICON[k], ML.TYPE_LABEL[k]] for k in ML.ICON}}
+        return await asyncio.to_thread(run)
+
+    @app.get(P + "/memory/observations/get")
+    async def observations_get(ids: str = Query(..., max_length=200), _: Any = ADMIN) -> dict[str, Any]:
+        """memory_get: full observations by id (OB-0042,OB-0043), at most 20."""
+        want = [x.strip().upper() for x in ids.split(",") if x.strip()][:20]
+        return {"items": await asyncio.to_thread(rt().memory_desk.obs.get, want)}
+
+    @app.get(P + "/memory/search")
+    async def memory_search(q: str = Query(..., min_length=1, max_length=80), type: str = Query("", max_length=10),
+                            _: Any = ADMIN) -> dict[str, Any]:
+        """memory_search with its no-answer gate: a weak best match is 「找不到」 (found false)."""
+        return await asyncio.to_thread(rt().memory_desk.search, q, None, type if type in ML.ICON else None)
+
     @app.post(P + "/memory/notes")
     async def add_note(body: NoteBody, session: Any = ADMIN) -> dict[str, Any]:
         if body.machine_id not in F.MACHINE_IDS:
@@ -344,6 +460,13 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         audit(session, {"action": "memory_note_add", "note_id": note.id, "machine_id": note.machine_id, "text": note.text})
         return {"ok": True, "note": note.__dict__}
 
+
+
+def _audit_len(a: Any) -> int:
+    """The last seq: len() of the file log, the newest entry of a log without it (the in-memory fallback)."""
+    if hasattr(a, "__len__"):
+        return len(a)
+    return max((e.seq for e in a.tail(0, 10**9)), default=0)
 
 
 def _safe(fn, default):
@@ -435,31 +558,12 @@ def _runs(r: Any, limit: int) -> dict[str, Any]:
 
 
 def _memory(r: Any, notes: Any) -> dict[str, Any]:
-    from warroom.data.team_dataset import IncidentStore
-    incidents = [{"id": i.incident_id, "date": i.date.isoformat(), "machine_id": i.machine_id, "equipment": i.equipment,
-                  "symptom": i.symptom, "action": i.action, "downtime_min": i.downtime_min, "outcome": i.outcome,
-                  "source": "team_dataset"} for i in _safe(lambda: IncidentStore().all(), [])]
-    # closed events: the audit log is the record (it outlives a scenario restart); the live event adds the outcome
-    live = {ev.id: ev for ev in r.events()}
-    closed: dict[str, dict[str, Any]] = {}
-    anomaly: dict[str, str] = {}
-    for e in r.audit.tail(0, 100_000):
-        p = e.payload or {}
-        if not e.event_id or e.event_id.startswith("ASK-"):
-            continue
-        if e.kind == AuditKind.ANOMALY and p.get("message"):
-            anomaly[e.event_id] = str(p["message"])
-        if e.kind == AuditKind.STATE_TRANSITION and p.get("to") in TERMINAL:
-            ev = live.get(e.event_id)
-            closed[e.event_id] = {"id": e.event_id, "machine_id": ev.machine_id if ev else machine_of_event(e.event_id),
-                                  "closed_at": e.ts.isoformat(), "state": p.get("to"),
-                                  "what": (ev.command or (ev.alert_card.title if ev.alert_card else None)) if ev else None,
-                                  "outcome": ev.outcome if ev else None, "source": "audit"}
-    for cid, c in closed.items():
-        c["what"] = c["what"] or anomaly.get(cid)
-    return {"incidents": incidents, "closed_events": sorted(closed.values(), key=lambda c: c["closed_at"], reverse=True),
+    from warroom.data import machine_memory as MM
+    return {"incidents": MM.incidents(), "closed_events": MM.closed_events(r.audit, r.events()),
             "notes": [n.__dict__ for n in sorted(notes.all(), key=lambda n: n.created_at, reverse=True)],
-            "agent_reads_notes": False}
+            # the commander gets context.machine_memory on every plan / replan, Agent Nemo query_plant machine_history
+            "agent_reads_notes": True,
+            "agent_uses": f"Agent 規劃時會參考：機台筆記、最近 {MM.PAST_LIMIT} 件過去事件"}
 
 
 def _line_diff(a: str, b: str) -> list[dict[str, str]]:

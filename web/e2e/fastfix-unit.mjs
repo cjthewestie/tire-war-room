@@ -169,7 +169,7 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const rep = repairNotices(closed, tiles)
   const ring = diffPending(st, rep, true)
   check('closed with its report → 已恢復正常，報告已產生：B 線開煉機 rings once', ring.fire.length === 1 && ring.fire[0].notice === 'report' && alertText(ring.fire, false).title === '已恢復正常，報告已產生：B 線開煉機', alertText(ring.fire, false).title)
-  check('… its text: 溫度回到 94°C（10:32 維修完成）, no 「已修復：」 and no machine twice', alertText(ring.fire, false).body === '溫度回到 94°C（10:32 維修完成）', alertText(ring.fire, false).body)
+  check('… its text: 溫度回到 94°C（10:32 AM 維修完成）, no 「已修復：」 and no machine twice', alertText(ring.fire, false).body === '溫度回到 94°C（10:32 AM 維修完成）', alertText(ring.fire, false).body)
   const read = repairNotices(closed.map((e, i) => (i === 0 ? { ...e, review: { ...e.review, status: 'done' } } : e)))
   check('a read report leaves the list', read.length === 2 && read.every((a) => a.notice === 'repaired'))
   const mixed = alertText([{ id: 'AP-1', title: '7 號機溫降', reason: 'x', risk: 'R2' }, items[0]], false)
@@ -269,7 +269,7 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const head = r.head.map((h) => h.text).join(' / ')
   check('report title: the alert card\'s title without 異常：', r.title === 'B 線開煉機 溫度過高', r.title)
   check('report head: one line 發生 → 維修完成 → 恢復正常・共 N 分鐘｜已恢復正常 with the reading',
-    r.head.length === 1 && /^10\/03 10:01 發生 → 10:32 維修完成 → 10:32 恢復正常・共 \d+ 分鐘｜已恢復正常，膠溫回到 101°C$/.test(head), head)
+    r.head.length === 1 && /^2026\/10\/03 10:01 AM 發生 → 10:32 AM 維修完成 → 10:32 AM 恢復正常・共 \d+ 分鐘｜已恢復正常，膠溫回到 101°C$/.test(head), head)
   check('… no 主管已讀 / 尚未讀取 on the report (the phone\'s 知道了 marks it read)', !/主管已讀|尚未讀取/.test(head))
   const tl = r.parts.find((p) => p.id === 'timeline').rows
   check('事件經過: 指揮官 shown as Agent Nemo, no [工具], no event id in front', tl[1].k === 'Agent Nemo' && tl[0].text === 'B 線開煉機 膠溫 96°C → 交給 Agent Nemo' && tl[1].text.startsWith('請核准'), tl.map((x) => `${x.k}：${x.text}`).join(' / '))

@@ -114,11 +114,19 @@ def materials(r: Any) -> dict[str, Any]:
     w = _world(r)
     if w is None:
         return {"error": "這個模擬沒有原料資料"}
-    return {"materials": [{"name": m.name, "stock": round(m.stock, 1), "unit": m.unit, "days_left": m.days_left,
-                           "reorder_point": m.reorder_point, "on_order": m.on_order, "status": m.status} for m in w.materials],
+    mats = list(w.materials)
+    pos = [p for p in w.purchase_orders if p.status in ("在途", "延遲", "卸貨中")]
+    # in transit from both sides: a purchase order on its way, or stock the World counts as on order without one
+    # (「缺料怎麼辦」 → 「在途採購：沒有進行中」 while 尼龍布 was on order, and 「12 種原料」 for 6: rag-fix, PR #122)
+    transit = [{"name": p.name, "qty": p.qty, "unit": p.unit, "eta": _hm(p.eta), "status": p.status} for p in pos]
+    named = {p.name for p in pos}
+    transit += [{"name": m.name, "qty": m.on_order, "unit": m.unit, "eta": None, "status": "已下單"}
+                for m in mats if m.on_order > 0 and m.name not in named]
+    return {"material_count": len(mats),
+            "materials": [{"name": m.name, "stock": round(m.stock, 1), "unit": m.unit, "days_left": m.days_left,
+                           "reorder_point": m.reorder_point, "on_order": m.on_order, "status": m.status} for m in mats],
             "status_meaning": {"ok": "足夠", "reorder": "該補貨", "low": "偏低", "out": "缺料"},
-            "purchase_orders": [{"name": p.name, "qty": p.qty, "unit": p.unit, "eta": _hm(p.eta), "status": p.status}
-                                for p in w.purchase_orders if p.status != "已收貨"]}
+            "in_transit": transit or "目前沒有在途的採購"}
 
 
 def open_events(r: Any) -> dict[str, Any]:
@@ -339,17 +347,21 @@ def order_lookup(r: Any, order_id: str | None = None) -> dict[str, Any]:
 
 
 def tasks(r: Any) -> dict[str, Any]:
-    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long."""
+    """現在所有任務狀況: every open event and pre-plan, in plain states, with what it waits on and for how long. A closed
+    event whose people are still at work is listed too (主控台 ④ 執行中，等確認完成; #92 review)."""
     now = r.clock.now()
     subs = {x["id"]: x for x in r.orch.subagents()}
     pending = {a.event_id: a for a in r.approvals.pending()} if r.approvals is not None else {}
     pre = getattr(r.orch, "preplan_ids", set())
     items = []
-    for e in sorted(_open_events(r), key=lambda e: e.opened_at):
+    working = [e for e in r.events() if e.state.value == "closed" and subs.get(e.id, {}).get("status") == "waiting_tasks"]
+    for e in sorted([*_open_events(r), *working], key=lambda e: e.opened_at):
         sa = subs.get(e.id, {})
         card = pending.get(e.id)
         st = e.state.value
-        if card is not None:
+        if st == "closed":
+            label, waits = f"已結案，現場 {sa['tasks_done']}/{sa['tasks_total']}", "等現場完成"
+        elif card is not None:
             label, waits = f"待核准 v{card.version}", "等主管核准"
         elif st in ("execute", "verify") and sa.get("tasks_total"):
             label = f"執行中 {sa['tasks_done']}/{sa['tasks_total']}" if st == "execute" else "驗證中"
@@ -370,10 +382,123 @@ def tasks(r: Any) -> dict[str, Any]:
     return {"count": len(items), "tasks": items}
 
 
+def safety_stops(r: Any) -> dict[str, Any]:
+    """Safety Core stops and their way back: ① 派現場檢查 ② 讀值回安全範圍 ③ 主管放行 (the button, or the chat after the
+    supervisor's 好 since CJ 2026-10-22 「開放」; ① and ② are checked either way)."""
+    board = getattr(getattr(r.sim, "world", None), "tasks", None)
+    try:
+        cases = r.cases.view(board)
+    except Exception:  # noqa: BLE001 - no Safety Core cases in this sim
+        cases = []
+    items = []
+    for c in cases:
+        if c.status != "open":
+            continue
+        items.append({"machine": c.machine_id, "what": c.message[:40], "since": _hm(c.ts),
+                      "①派現場檢查": f"{c.tasks_done}/{len(c.task_ids)} 完成" if c.task_ids else "還沒派",
+                      "②讀值回安全範圍": f"{c.safe_samples}/{c.safe_needed}" + ("（已達標）" if c.reading_ok else ""),
+                      "③主管放行": "主管在主控台按「確認恢復運轉」，或在對話說「恢復這台」再回「好」；①②沒過不能恢復"})
+    return {"count": len(items), "stops": items}
+
+
+def questionable(r: Any) -> dict[str, Any]:
+    """有疑問的任務 (warroom/api/overview.py): open tasks the code flags, each with its reasons."""
+    from warroom.api.overview import questionable as q
+    items = q(r)
+    return {"count": len(items), "questionable": items}
+
+
+# ---------------------------------------------------------------------------------- memory (CJ 2026-10-22: 「接記憶」)
+def machine_history(r: Any, machine_id: str | None = None) -> dict[str, Any]:
+    """One machine's 後台 notes and its last past events: the same block the commander gets (context.machine_memory)."""
+    if not machine_id:
+        return {"error": "要給 machine_id"}
+    if machine_id not in F.MACHINE_BY_ID:
+        return {"error": f"沒有這台機台：{machine_id}"}
+    from warroom.data import machine_memory as MM
+    desk = getattr(r, "memory_desk", None)
+    block = MM.for_machine(machine_id, getattr(r, "memory_notes", None), r.audit, r.events(),
+                           files=desk.files if desk is not None else None, levels=("daily", "weekly", "monthly"))
+    return block or {"machine_id": machine_id, "notes": [], "past": [], "note": "這台機台沒有筆記，也沒有過去事件紀錄"}
+
+
+def memory_notes(r: Any) -> dict[str, Any]:
+    """Every note the supervisor wrote in 後台 記憶, newest first (「我在後台寫了什麼」)."""
+    from warroom.agent.narrate import machine_label
+    notes = getattr(r, "memory_notes", None)
+    rows = sorted(notes.all(), key=lambda n: n.created_at, reverse=True) if notes is not None else []
+    return {"count": len(rows), "notes": [{"machine": machine_label(n.machine_id), "machine_id": n.machine_id,
+                                           "at": _hm(n.created_at), "by": n.author, "text": n.text} for n in rows]}
+
+
+def daily_summary(r: Any, day: str | None = None) -> dict[str, Any]:
+    """每日摘要 (「昨天發生什麼事」): a date (YYYY-MM-DD) or a day name; none = the latest day that ended."""
+    desk = r.memory_desk
+    if day:
+        doc = desk.daily(day)
+    else:
+        today, loop = desk.today_key()
+        from warroom.data.memory_log import day_name
+        doc = desk.daily(before=day_name(today, loop))
+    if doc is None:
+        have = [d["name"] for d in desk.files.all("daily")][-5:]
+        return {"found": False, "note": "還沒有這一天的每日摘要" + (f"；有的：{'、'.join(have)}" if have else "（還沒有任何每日摘要）")}
+    f = doc["facts"]
+    return {"found": True, "day": doc["label"], "summary": "".join(doc["sentences"]), "source": doc["source"],
+            "tasks": f["tasks"], "by_final": f["by_final"], "carried_over": f["carried_over"],
+            "safety_actions": len(f["safety"]), "orders": {k: v[:8] for k, v in f["orders"].items()},
+            "machines": doc["machines"]}
+
+
+def memory_search(r: Any, q: str | None = None) -> dict[str, Any]:
+    """Search the summaries and observations (no-answer gate: a weak match says nothing was found)."""
+    if not (q or "").strip():
+        return {"error": "要給 q（要找什麼）"}
+    return r.memory_desk.search(q)
+
+
+def _log_day(r: Any, day: str | None) -> str:
+    return (day or "").strip()[:10] or r.clock.now().astimezone(F.TZ).date().isoformat()
+
+
+def chat_history(r: Any, day: str | None = None) -> dict[str, Any]:
+    """之前聊過什麼: the stored Agent Nemo chat of a day (none = today), newest session first, from the chat log on disk
+    (warroom/data/history_log.py), which survives restarts and resets."""
+    h, d = r.history_log, _log_day(r, day)
+    sessions = h.sessions(d, limit=8)
+    turns = h.chats(day=d, limit=60)
+    by: dict[str, list[dict[str, Any]]] = {}
+    for t in turns:
+        by.setdefault(t["session_id"], []).append({"at": _hm(t["ts"]), "who": "主管" if t["role"] == "user" else "Agent Nemo",
+                                                   "text": t["text"][:120]})
+    return {"day": d, "sessions": len(sessions),
+            "conversations": [{"scope": "總覽" if s["scope"] == "overview" else "任務", "from": _hm(s["first"]),
+                               "to": _hm(s["last"]), "turns": s["turns"], "lines": by.get(s["session_id"], [])[-10:]}
+                              for s in sessions],
+            **({} if sessions else {"note": "這一天沒有對話紀錄"})}
+
+
+def orders_arrived(r: Any, day: str | None = None) -> dict[str, Any]:
+    """今天進了哪些訂單: the order log of a day (none = today): new and rush orders with customer, spec, qty, due; and
+    completed, late, shipped. From the log on disk, so a restart or reset keeps it."""
+    d = _log_day(r, day)
+    rows = r.history_log.orders(day=d, limit=200)
+    arrived = [{"id": o["order_id"], "at": _hm(o["ts"]), "rush": o["kind"] == "order_rush", "customer": o["customer"],
+                "spec": o["spec"], "qty": o["qty"], "due": o["due"]} for o in rows if o["kind"] in ("order_new", "order_rush")]
+    other = {k: sorted({o["order_id"] for o in rows if o["kind"] == k and o["order_id"]})
+             for k in ("order_completed", "delivery_late", "shipment_departed")}
+    return {"day": d, "arrived": arrived, "arrived_count": len(arrived), "completed": other["order_completed"],
+            "late": other["delivery_late"], "shipped": other["shipment_departed"],
+            **({} if rows else {"note": "這一天沒有訂單紀錄"})}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
-          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks}
+          "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
+          "safety_stops": safety_stops, "questionable": questionable,
+          "machine_history": machine_history, "memory_notes": memory_notes, "daily_summary": daily_summary,
+          "memory_search": memory_search, "chat_history": chat_history, "orders_arrived": orders_arrived}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -384,9 +509,19 @@ def _shrink(d: Any, n: int) -> Any:
     return d
 
 
-def query(r: Any, topic: str, order_id: str | None = None) -> dict[str, Any]:
+def query(r: Any, topic: str, order_id: str | None = None, machine_id: str | None = None, date: str | None = None,
+          q: str | None = None) -> dict[str, Any]:
     """{topic: data} for one topic, at most MAX_CHARS as JSON; KeyError for an unknown topic."""
-    data = TOPICS[topic](r, order_id) if topic == "order_lookup" else TOPICS[topic](r)
+    if topic == "order_lookup":
+        data = TOPICS[topic](r, order_id)
+    elif topic == "machine_history":
+        data = TOPICS[topic](r, machine_id)
+    elif topic in ("daily_summary", "chat_history", "orders_arrived"):
+        data = TOPICS[topic](r, date)
+    elif topic == "memory_search":
+        data = TOPICS[topic](r, q)
+    else:
+        data = TOPICS[topic](r)
     n = 20
     while len(json.dumps(data, ensure_ascii=False, default=str)) > MAX_CHARS and n > 1:
         n //= 2

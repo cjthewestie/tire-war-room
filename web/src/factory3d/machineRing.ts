@@ -92,7 +92,7 @@ export function machineRing(id: string, tile: MachineTile | undefined, world: Wo
     // green only once the fix landed (the lamp left 異常): the gate's R1 檢修 finishes while the card still waits and the
     // runtime lands the fix only after 主管核准, so it must not look 「檢修完成」 over a red machine. Right after 完成 (the
     // fix landing) it stays at 100% in its own colour, then the alarm ring shows again.
-    if (!ALARM.has(tile?.status ?? '')) return { kind: 'task', progress: 1, color: DONE_GREEN, label: `${fixed.kind}完成` }
+    if (!ALARM.has(tile?.status ?? '') || tile?.repaired) return { kind: 'task', progress: 1, color: DONE_GREEN, label: `${fixed.kind}完成` }
     if (now - Date.parse(fixed.done_at!) <= DONE_GRACE_WALL_S * 1000 * speed) {
       return { kind: 'task', progress: 1, color: TASK_COLOR[fixed.kind] ?? '#5db2f5', label: `${fixed.kind} 100%` }
     }
@@ -104,6 +104,8 @@ export function machineRing(id: string, tile: MachineTile | undefined, world: Wo
     return { kind: 'maint', progress: p, color: '#b39ddb', label: `${m.title} ${Math.round(p * 100)}%` }
   }
   const st = tile?.status
+  // #104: 檢修完成 on a machine that stays out of service until the supervisor's 恢復運轉 — green, not an alarm
+  if (tile?.repaired) return { kind: 'task', progress: 1, color: DONE_GREEN, label: '檢修完成・待恢復運轉' }
   if (st && ALARM.has(st)) return { kind: 'alarm', progress: 1, color: LIGHT_HEX.red, label: STATUS_ZH[st] ?? st }
   const sp = tile?.step_progress
   if ((st === 'running' || st === 'warning') && sp != null) {

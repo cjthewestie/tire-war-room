@@ -32,22 +32,31 @@ export function endedText(ev: Event): string | null {
 const DOING_NOW: Record<string, string> = { 放慢投料: '放慢投料中', 暫停投料: '暫停投料中' }
 
 /** 規劃中 / 待核准 / 執行中 / 維修中（k/n）/ 放慢投料中（k/n）/ 已恢復正常（現場工作 k/n）/ 完成 / 已停止 — <原因一句話>. With
- *  the event and the world's tasks it tells the repair still running from a machine back to normal while other field
- *  work goes on. */
+ *  the event and the World's worker tasks (as 主控台 counts them) it tells the repair still running from a machine back to
+ *  normal while other field work goes on, and an ended event reads as 主控台 shows it whatever the subagent status says:
+ *  a fast repair closed the event while the subagent still said 「等現場完成（1/5）」 under 處理中 (#92 review). */
 export function plainStatus(sa: Subagent, ev?: Event | null, tasks: WorkTask[] = []): string {
-  const repair = tasks.filter((t) => t.event_id === sa.id && REPAIR_KINDS.has(t.kind))
+  const mine = tasks.filter((t) => t.event_id === sa.id)
+  const repair = mine.filter((t) => REPAIR_KINDS.has(t.kind))
   const open = repair.filter((t) => t.status !== '完成')
   const doing = open.every((t) => t.kind === open[0]?.kind) ? DOING_NOW[open[0]?.kind ?? ''] : undefined
   const repairing = open.length ? `${doing ?? '維修中'}（${repair.length - open.length}/${repair.length}）` : null
-  const ended = ev ? endedText(ev) : null
-  switch (sa.status) {
+  const endText = ev ? endedText(ev) : null
+  if (ev && ev.state === 'closed' && sa.status !== 'interrupted') {
+    if (repairing) return repairing                 // a machine taken out: its 停用檢修 still runs
+    const left = mine.filter((t) => t.status !== '完成').length
+    const work = `現場工作 ${mine.length - left}/${mine.length}`
+    if (left) return endText ? `${endText}（${work}）` : work
+    return endText ?? '完成'
+  }
+  const status = ev && ended(ev) && isOpen(sa) ? 'failed' : sa.status
+  switch (status) {
     case 'waiting_approval': return '待核准'
     case 'waiting_tasks':
       if (repairing) return repairing
-      if (ended) return `${ended}（現場工作 ${sa.tasks_done}/${sa.tasks_total}）`
-      if (ev?.repaired_at && ev.state !== 'closed') return '維修完成，回溫中'
+      if (ev?.repaired_at) return '維修完成，回溫中'
       return `現場工作 ${sa.tasks_done}/${sa.tasks_total}`
-    case 'done': return ended ?? '完成'
+    case 'done': return endText ?? '完成'
     case 'interrupted': return '已停止 — 主管中斷'
     case 'failed': {
       const o = sa.outcome ?? ''
@@ -88,3 +97,8 @@ export const workerName = (who: string | null | undefined) => {
 }
 
 export const isOpen = (sa: Subagent) => !['done', 'failed', 'interrupted'].includes(sa.status)
+/** Ended by the event's own state (closed / safe_stop), as 主控台 and the overview's task list count it. */
+export const ended = (ev: Event) => ev.state === 'closed' || ev.state === 'safe_stop'
+/** Still 處理中 on the Agent page exactly when 主控台 lists it as open: not ended, or closed with its people still at work
+ *  (主控台 ④ 執行中，等確認完成, web/src/agent/homeItems.ts). `tasks`: the World's worker tasks of this event. */
+export const eventOpen = (ev: Event, tasks: { status: string }[]) => !ended(ev) || (ev.state === 'closed' && tasks.some((t) => t.status !== '完成'))

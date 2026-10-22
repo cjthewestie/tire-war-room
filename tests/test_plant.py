@@ -74,7 +74,7 @@ def test_seed_and_sops_name_the_presses_of_factory_py():
         assert want in (sop / name).read_text(encoding="utf-8"), name
     assert not [p.name for p in sop.glob("*.md") if "7～10" in p.read_text(encoding="utf-8")]
     from warroom.agent.ask import _MACHINES
-    assert "8-11 號可做中大胎，1-7 號只做小胎" in _MACHINES
+    assert "（8–11 號可做中大胎），1–7 號只做小胎" in _MACHINES
 
 
 def test_plant_text_cannot_change_the_gate():

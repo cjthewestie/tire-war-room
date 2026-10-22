@@ -109,7 +109,7 @@ Joy 在 8099 上問，原始紀錄在 `llm-trace.jsonl`，一行一次呼叫，�
 
 | 測試 | 問題 | 在 `afb2553`、`999c006` 上 |
 |---|---|---|
-| `test_n9_orphan_approval.py`（2 支） | 事件停在 AWAIT_APPROVAL 時被取消或丟例外，核准卡一直是 PENDING；`_drive` 的 finally 沒處理 `run.waiting_req`（`state_machine.py:347-359`） | 紅 |
+| `test_n9_orphan_approval.py`（2 支） | 事件停在 AWAIT_APPROVAL 時被取消或丟例外，核准卡一直是 PENDING；`_drive` 的 finally 沒處理 `run.waiting_req`（`state_machine.py:347-359`） | 紅；10-22 已修（`_retire_cards`），測試搬到 `tests/test_n9_orphan_approval.py` |
 | `test_n1_stream_timeout.py`（2 支） | 串流時 `LLM_TIMEOUT_S` 只限兩段資料之間的空檔，不限整次呼叫：每秒吐一段、timeout 2 s，整次 8 s 照樣成功（`commander.py:306-307`、`:342-351`）；對照組空檔 3 s 會逾時 | 紅 1、綠 1（對照組） |
 | `test_n3_empty_steps_stable.py`（2 支） | 指揮官交空步驟，或只交讀算步驟，而溫度穩在 122°C 時，事件以「H1 CONFIRMED、無需動作」結案，`set_cure_time` 一次都沒呼叫（`state_machine.py:970-971`、`:998-1001`、`:3033`）。需要你確認這是不是刻意的設計 | 紅 |
 

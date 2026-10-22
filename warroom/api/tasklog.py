@@ -108,6 +108,9 @@ class TaskLog:
                                    "scenario": self._scenario, "loop": self._loop, "rounds": 1, "source": "event",
                                    "report": f"/report?event={eid}", "last_seq": self._seq}
             self._order.append(key)
+        if kind == "system" and p.get("tag") == "QA 展示":       # opened by a QA 模式 walkthrough / proof (warroom/api/qa_demo.py)
+            r["qa_demo"] = True
+            return
         if kind == "anomaly":
             r["title"] = r["title"] or p.get("message")
             r["machine_id"] = r["machine_id"] or p.get("machine_id")

@@ -4,7 +4,7 @@
 // Display only: nothing here invents data. Nemotron runs with reasoning off, so a "思考" block shows
 // the plan and hypotheses the model returned, never a hidden chain of thought.
 import type {
-  AskAnswer, AuditEntry, Channel, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, ToolName, ToolResult,
+  AskAnswer, AuditEntry, Channel, ChatMode, Event, GateDecision, Hypothesis, PlanStep, RiskLevel, StepRun, TaskLink, ToolName, ToolResult,
 } from '../contracts'
 import { CH_LABEL, REPAIR_KINDS, expectationOf, readingText } from '../aiStatus'
 import { machineLabel } from '../factory'
@@ -58,9 +58,13 @@ export interface ChatItem extends Base {
   intent: string | null; version: number | null; changes: string[]; constraints: string[]; classifiedBy: string | null; fellBack: boolean
   pending?: boolean
   /** issue #54: a 主 agent turn — its id, the tool calls behind the reply (one grey line), a rule-fallback note */
-  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean }[]; error?: string | null
+  turn?: string; steps?: { tool: string; label: string; summary: string; ok: boolean; ids?: string[] }[]; error?: string | null
   /** the waiting plan (event id) this message was about; null = a new message to the 主 agent */
   about?: string | null
+  /** sent in the Agent page's 總覽 conversation; links: its reply's task boards */
+  mode?: ChatMode; links?: TaskLink[]
+  /** the task selected when it was sent (the request's event_id) */
+  selected?: string | null
 }
 /** Constraints the supervisor added (chips: 「9 號機 今晚不可用」). */
 export interface ChipsItem extends Base { k: 'chips'; labels: string[]; inForce: string[] }

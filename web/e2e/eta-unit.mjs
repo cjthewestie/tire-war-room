@@ -117,8 +117,8 @@ check('supervisor command → window wording', !fastApplies(evOf('supervisor', [
   check('no gap note when a 方案 covers the gap', ct.gapNote(card, true) === null)
   const ten = { ...card, gaps: [], actions: ['S4 排程 v3 生效（10 號硫化 41.1 h；無機台異動）', '人力：本次不含人力調動（10/03 夜班 從 2 線調 1 人 未列入核准，該班缺口維持原狀）'] }
   check('a card without staffing says the gap stays', ct.gapNote(ten, false) === '這次核准不含人力：10/03 夜班仍缺 1 人', ct.gapNote(ten, false))
-  check('deadline: 03:54 前 (date only on another day)', ct.deadlineText(card.expires_at, '2026-10-03T02:14:00+08:00') === '03:54 前'
-    && ct.deadlineText(card.expires_at, '2026-10-02T23:00:00+08:00') === '10/03 03:54 前')
+  check('deadline: 03:54 AM 前 (date only on another day)', ct.deadlineText(card.expires_at, '2026-10-03T02:14:00+08:00') === '03:54 AM 前'
+    && ct.deadlineText(card.expires_at, '2026-10-02T23:00:00+08:00') === '2026/10/03 03:54 AM 前')
   const ch = optionChoices(card, ev)
   check('方案 A says what it changes', ch[0]?.effect === '原班人員加班，不從別組調人' && !ch[0]?.why, JSON.stringify(ch[0]))
   check('方案 B says what it changes and why the system suggests it', ch[1]?.effect === '2 線少 1 人，可能影響產能・風險較高（跨組調人）' && ch[1]?.why === '不用加班，交期與 A 相同', JSON.stringify(ch[1]))

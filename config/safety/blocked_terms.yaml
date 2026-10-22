@@ -15,6 +15,11 @@ allow:
   - 爆炸風險
   - 殺菌
 
+# QA 模式 only (POST /api/qa/ask, warroom/agent/qa.py), INPUT side only: these words may appear in a judge's question
+# about the framework (「可以跑 bash 嗎」「HMAC 金鑰怎麼管」). CJ, 2026-10-22: 「QA 放行」. Agent Nemo's chat never uses
+# this list, and no output check does: secret values, paths, IPs and every category on the output stay blocked.
+qa_allow: [bash, shell, token, PIN, HMAC 金鑰, 跳過核准]
+
 categories:
   credentials:
     reply: 密碼、金鑰這類機密我不能提供，也不會在對話裡處理；需要的話請找系統管理員。

@@ -138,6 +138,7 @@ html, body, #root { height: 100%; overflow: hidden; }
   /* narrow screens: the HUD stack fills the top-left, so the toast drops to the bottom, full width */
   .f3-toast { top: auto; bottom: 14px; left: 14px; right: 14px; min-width: 0; max-width: none; animation-name: f3-rise; }
   .f3-root.demo .f3-toast { bottom: 150px; }   /* demo: above the stick and the 手機 button, like the success chip */
+  .f3-root.demo:has(.paa-wrap-corner) .f3-toast { bottom: 250px; }   /* and above the 待核准 corner card (index.css: bottom 150px) */
 }
 @keyframes f3-rise { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
@@ -202,3 +203,108 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-stock.green { border-top-color: #2f9e44; }
 .f3-stock.amber { border-top-color: #e08a00; } .f3-stock.amber b { color: var(--c-amber); }
 .f3-stock.red { border-top-color: #c0352a; background: #ffe9e4; } .f3-stock.red b { color: var(--c-red); }
+
+/* ▶ Demo（6 分鐘） (GuidedDemo.tsx): the start button, the cue card, the full-screen cue, the pitch clock, the control
+   bar and the full-screen slide view. Big type: the presenter reads it from a step away. */
+.f3-hud > .f3-demo-btn { pointer-events: auto; font: inherit; font-weight: 800; font-size: 15px; color: #1f3a0e; background: #8fd16a; border: 0; border-radius: 999px; padding: 9px 18px; box-shadow: 0 4px 0 #6aa84a, var(--c-shadow); cursor: pointer; }
+.f3-hud > .f3-demo-btn:hover { background: #7cc457; }
+.f3-hud > .f3-demo-btn:disabled { opacity: .5; cursor: default; }
+.f3-demo-btn kbd { margin-left: 8px; font-size: 11px; background: rgba(255, 255, 255, .45); border: 0; }
+.f3-go-demo { margin-top: 10px; background: #f2c14e; color: #4a3200; box-shadow: 0 4px 0 #c99a2a; cursor: pointer; }
+
+.f3-cue { position: absolute; z-index: 16; top: 16px; left: 50%; translate: -50% 0; width: min(660px, calc(100vw - 32px)); display: grid; gap: 6px; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 22px; padding: 16px 22px 18px; border-top: 6px solid #8fd16a; box-shadow: 0 16px 44px rgba(90, 70, 40, .28); animation: f3-drop .4s cubic-bezier(.2, .9, .3, 1.3); }
+.f3-cue i { font-style: normal; font: 700 13px ui-monospace, monospace; color: var(--c-ink-dim); }
+.f3-cue b { font-size: 32px; line-height: 1.2; }
+.f3-cue span { font-size: 18px; line-height: 1.5; color: var(--c-ink); }
+.f3-cue em { font-style: normal; font-size: 14px; color: var(--c-ink-dim); }
+.f3-cue-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+.f3-cue-links button { font: inherit; font-weight: 800; font-size: 16px; border: 0; border-radius: 999px; padding: 9px 18px; background: #6fa8dc; color: #fff; box-shadow: 0 4px 0 #4f86b8; cursor: pointer; }
+.f3-cue-links button:first-child:not(:only-child) { background: #f2c14e; color: #4a3200; box-shadow: 0 4px 0 #c99a2a; }
+/* pitch phase: a slim card at the top so the whiteboard stays in view */
+.f3-cue.pitch { top: 10px; width: min(560px, calc(100vw - 32px)); padding: 9px 18px 11px; gap: 2px; border-top-color: #f2c14e; }
+.f3-cue.pitch b { font-size: 22px; } .f3-cue.pitch span { font-size: 15px; }
+.f3-cue.warn { border-top-color: #e0665c; }
+
+.f3-cue-big { position: absolute; z-index: 30; inset: 0; display: grid; place-items: center; padding: 16px; background: rgba(40, 34, 28, .55); animation: f3-sit .35s ease-out; pointer-events: none; }
+.f3-cue-big > div { display: grid; gap: 14px; justify-items: center; text-align: center; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 32px; padding: 40px 56px; border-top: 10px solid #f2c14e; box-shadow: 0 30px 80px rgba(0, 0, 0, .35); max-width: calc(100vw - 32px); }
+.f3-cue-big b { font-size: clamp(40px, 8vw, 92px); line-height: 1.1; }
+.f3-cue-big span { font-size: clamp(16px, 2.2vw, 24px); color: var(--c-ink-dim); }
+.f3-cue-big.end > div { border-top-color: #8fd16a; }
+
+.f3-pitch-clock { position: absolute; z-index: 16; top: 14px; right: 14px; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 18px; padding: 8px 16px; font-size: 16px; box-shadow: var(--c-shadow); }
+.f3-pitch-clock b { font: 800 28px ui-monospace, monospace; margin-left: 6px; }
+.f3-pitch-clock.warn { background: #e0665c; color: #fff; animation: f3-pulse 1s ease-in-out infinite alternate; }
+@keyframes f3-pulse { from { transform: scale(1); } to { transform: scale(1.06); } }
+
+.f3-demo-bar { position: absolute; z-index: 16; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px 12px; width: max-content; max-width: calc(100vw - 32px); background: var(--c-paper-solid); color: var(--c-ink); border-radius: 18px; padding: 8px 12px; box-shadow: var(--c-shadow); font-size: 14px; }
+.f3-demo-time b { font: 800 20px ui-monospace, monospace; }
+.f3-demo-next { color: var(--c-ink-dim); } .f3-demo-next b { color: var(--c-ink); font-family: ui-monospace, monospace; }
+.f3-demo-warn { color: var(--c-amber); font-weight: 700; }
+.f3-demo-bar button { font: inherit; font-weight: 700; border: 1px solid rgba(90, 70, 40, .2); border-radius: 999px; padding: 5px 12px; background: var(--c-paper); color: var(--c-ink); cursor: pointer; }
+.f3-demo-bar button:disabled { opacity: .45; cursor: default; }
+
+.f3-slides { position: fixed; inset: 0; z-index: 40; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 10px; padding: 16px; background: rgba(20, 18, 16, .92); animation: f3-sit .25s ease-out; }
+.f3-slides img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 8px; box-shadow: 0 20px 60px rgba(0, 0, 0, .5); background: #fff; cursor: pointer; min-height: 0; }
+.f3-slides-bar { display: flex; gap: 10px; align-items: center; color: #f3ead8; font-size: 15px; }
+.f3-slides-bar button { font: inherit; font-weight: 700; border: 0; border-radius: 999px; padding: 7px 16px; background: #f3ead8; color: #3d342b; cursor: pointer; }
+.f3-slides-bar button:disabled { opacity: .4; cursor: default; }
+
+@media (max-width: 640px) {
+  .f3-cue, .f3-cue.pitch { top: auto; bottom: 120px; padding: 12px 16px 14px; }
+  .f3-cue b { font-size: 22px; } .f3-cue span { font-size: 15px; }
+  .f3-pitch-clock { top: auto; bottom: 120px; right: 16px; }
+}
+
+/* demo mode: badge, checkpoint prompt, waits, the soft-target nudge, pause, exit confirm */
+.f3-demo-badge { position: absolute; z-index: 17; left: 14px; bottom: 14px; display: flex; gap: 8px; align-items: center; background: #3d342b; color: #fff6e4; border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 700; box-shadow: var(--c-shadow); pointer-events: none; }
+.f3-demo-badge b { background: #f2c14e; color: #3d342b; border-radius: 999px; padding: 0 8px; }
+.f3-cue-go { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 17px; font-weight: 800; color: #1f3a0e; background: #e6f2d8; border-radius: 12px; padding: 7px 12px; animation: f3-breathe 1.6s ease-in-out infinite; }
+.f3-cue-go kbd { font-size: 14px; background: #8fd16a; border-color: #6aa84a; color: #1f3a0e; }
+.f3-cue-go small { font-weight: 500; color: var(--c-ink-dim); font-size: 13px; }
+@keyframes f3-breathe { 50% { background: #d3eabb; } }
+.f3-cue-wait { margin-top: 6px; font-size: 15px; font-weight: 700; color: #5a3a00; background: #fff1cc; border-radius: 12px; padding: 7px 12px; }
+.f3-pitch-nudge { position: absolute; z-index: 16; top: 14px; right: 14px; background: #fff1cc; color: #5a3a00; border: 2px solid #f2c14e; border-radius: 18px; padding: 8px 14px; font-weight: 800; box-shadow: var(--c-shadow); animation: f3-pulse 1.4s ease-in-out infinite alternate; }
+.f3-demo-time small { color: var(--c-ink-dim); font-weight: 500; font-size: 12px; }
+.f3-demo-paused { position: absolute; z-index: 18; left: 50%; top: 45%; transform: translate(-50%, -50%); background: rgba(40, 34, 28, .82); color: #fff6e4; border-radius: 22px; padding: 14px 26px; font-size: 22px; font-weight: 800; pointer-events: none; }
+.f3-confirm { position: fixed; inset: 0; z-index: 45; display: grid; place-items: center; background: rgba(40, 34, 28, .5); }
+.f3-confirm > div { display: grid; gap: 10px; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 22px; padding: 20px 24px; box-shadow: 0 20px 60px rgba(0, 0, 0, .35); max-width: calc(100vw - 32px); }
+.f3-confirm b { font-size: 22px; } .f3-confirm span { color: var(--c-ink-dim); }
+.f3-confirm div div { display: flex; gap: 10px; flex-wrap: wrap; }
+.f3-confirm button { font: inherit; font-weight: 800; border: 0; border-radius: 999px; padding: 8px 18px; cursor: pointer; background: #e0665c; color: #fff; }
+.f3-confirm button + button { background: #8fd16a; color: #1f3a0e; }
+
+/* gamepad: connected chip, the connect hint, the D-pad focus label, the mapping (View held) */
+.f3-pad-chip { position: absolute; z-index: 16; right: 14px; bottom: 74px; background: #e6f2d8; color: #1f3a0e; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 700; box-shadow: var(--c-shadow); pointer-events: none; }
+.f3-pad-hint { color: var(--c-ink-dim); }
+.f3-pad-focus { position: absolute; z-index: 16; left: 50%; top: 18%; transform: translateX(-50%); background: var(--c-paper-solid); color: var(--c-ink); border-radius: 16px; padding: 8px 16px; font-size: 16px; font-weight: 800; box-shadow: var(--c-shadow); pointer-events: none; }
+.f3-pad-help { position: fixed; z-index: 50; left: 50%; top: 50%; transform: translate(-50%, -50%); display: grid; gap: 8px; background: var(--c-paper-solid); color: var(--c-ink); border-radius: 22px; padding: 18px 22px; box-shadow: 0 20px 60px rgba(0, 0, 0, .35); max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto; }
+.f3-pad-help table { border-collapse: collapse; font-size: 14px; }
+.f3-pad-help th { text-align: left; padding: 4px 12px 4px 0; white-space: nowrap; }
+.f3-pad-help td { padding: 4px 12px 4px 0; } .f3-pad-help td.dim { color: var(--c-ink-dim); opacity: .6; }
+.f3-pad-help small { color: var(--c-ink-dim); }
+
+/* warning lights: the floating label over an abnormal machine (always faces the camera, constant size) and the
+   off-screen arrows; colours as the war room: amber anomaly, blue-amber approval, red Safety Core stop */
+.f3-alarm-tag { white-space: nowrap; padding: 5px 12px; border-radius: 12px; font-size: 15px; font-weight: 800; color: #3d2600; background: #ffd77a; border: 2px solid #f5a623; box-shadow: 0 4px 14px rgba(90, 50, 0, .3); }
+.f3-alarm-tag.approval { animation: f3-blueamber 1s steps(2, jump-none) infinite; }
+.f3-alarm-tag.stop { color: #fff; background: #e0362c; border-color: #ff7a70; }
+@keyframes f3-blueamber { 0% { background: #ffd77a; border-color: #f5a623; } 100% { background: #cfe3fb; border-color: #4f9be0; } }
+.f3-alarm-arrow { position: absolute; z-index: 14; left: 0; top: 0; align-items: center; gap: 6px; font: inherit; font-size: 13px; font-weight: 800; color: #3d2600; background: #ffd77a; border: 2px solid #f5a623; border-radius: 999px; padding: 4px 10px 4px 6px; box-shadow: var(--c-shadow); cursor: pointer; white-space: nowrap; }
+.f3-alarm-arrow i { display: inline-block; font-style: normal; transform: rotate(var(--ang, 0rad)); }
+.f3-alarm-arrow.approval { animation: f3-blueamber 1s steps(2, jump-none) infinite; }
+.f3-alarm-arrow.stop { color: #fff; background: #e0362c; border-color: #ff7a70; }
+@media (prefers-reduced-motion: reduce) {
+  .f3-alarm-tag.approval, .f3-alarm-arrow.approval { animation-duration: 3s; }
+  .f3-cue-go, .f3-pitch-nudge, .f3-pitch-clock.warn { animation: none; }
+}
+
+/* the guided demo's cards and bar stay above the war-room computer it opens (.f3-monitor-wrap is z 20) */
+.f3-cue, .f3-demo-bar, .f3-demo-badge, .f3-pitch-clock, .f3-pitch-nudge { z-index: 26; }
+.f3-cue-big { z-index: 32; }
+
+/* ③–⑥ (the doorway view of 7 號機): the card drops to just above the bar and slims down, so the alerting press
+   in the middle of the frame stays in view */
+.f3-cue.low { top: auto; bottom: 70px; width: min(560px, calc(100vw - 32px)); padding: 9px 16px 11px; gap: 3px; }
+.f3-cue.low b { font-size: 22px; } .f3-cue.low span { font-size: 14px; }
+.f3-cue.low .f3-cue-links button { font-size: 14px; padding: 6px 14px; }
+@media (max-width: 640px) { .f3-cue.low { bottom: 120px; } }

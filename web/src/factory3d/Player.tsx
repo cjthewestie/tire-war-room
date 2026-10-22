@@ -13,7 +13,9 @@ import { DEMO_MODE } from '../components/DemoStrip'
 import { HandPhone } from './HandPhone'
 import { cyl, makeFigure, mat, mesh, rbox, restPose, walkCycle } from './kit'
 import { LIGHT_HEX, OVERVIEW_CENTER, nearKey, type Near, type SceneId } from './layout'
-import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, player, stick, view } from './pose'
+import { CAM_LIMITS, OVERVIEW_DIST, TOUCH_DEVICE, cam, director, player, stick, view } from './pose'
+import { demoCam } from './demoCamera'
+import { walker } from './demoWalk'
 import { SPACES } from './spaces'
 import { lock, releaseLook, requestLook } from './look'
 
@@ -85,6 +87,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
   const bobT = useRef(0)
   const armX = useRef(-0.6)
   const doorArmed = useRef(true)
+  const demoWas = useRef(false)
   const tmp = useMemo(() => ({ op: new THREE.Vector3(), oq: new THREE.Quaternion(), ep: new THREE.Vector3(), eq: new THREE.Quaternion(), m: new THREE.Matrix4(), e: new THREE.Euler(0, 0, 0, 'YXZ'), up: new THREE.Vector3(0, 1, 0), tg: new THREE.Vector3() }), [])
 
   // switching to the overview puts the orbit camera behind the way the lead faces
@@ -182,9 +185,13 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     const k = keys.current
     const { f, phone, screenMat } = lead
     const space = SPACES[scene]
-    const first = mode === 'first'
+    // the guided demo's first-person walk (demoWalk.ts) moves the lead itself; its opening overview owns the camera
+    const demoWalk = director.on && director.mode === 'walk'
+    const first = mode === 'first' || demoWalk
     let moved = false
-    if (enabled) {
+    if (demoWalk) {
+      moved = walker.update(Math.min(dtRaw, 0.2))
+    } else if (enabled) {
       const turn = (k.has('KeyQ') || k.has('ArrowLeft') ? 1 : 0) - (k.has('KeyE') || k.has('ArrowRight') ? 1 : 0)
       if (first) player.yaw += turn * TURN * dt; else cam.yaw += turn * TURN * dt
       let fw = 0
@@ -249,6 +256,31 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     screenMat.emissive.set(buzzing && Math.sin(t * 20) > 0 ? '#ffffff' : pending > 0 ? LIGHT_HEX[DEMO_MODE ? 'red' : 'amber'] : LIGHT_HEX.green)
     screenMat.emissiveIntensity = pending > 0 ? 0.9 + Math.sin(t * 5) * 0.4 : 0.6
 
+    // the guided demo owns the camera (demoCamera.ts: one continuous take); the lead just stands where it is
+    if (director.on && director.mode === 'orbit') {
+      demoCam.update(camera as THREE.PerspectiveCamera, t)
+      if (g) g.visible = true
+      blend.current = 0
+      demoWas.current = true
+      return
+    }
+    if (demoWas.current) {
+      // the demo's overview ended (the walk begins, or the demo was left): the orbit picks up from where the demo
+      // camera is, then blends into the eyes as usual, so this is not a cut either
+      demoWas.current = false
+      const o = orbit.current
+      // walking on: the orbit is set around the lead exactly where the camera is (then the eyes take over);
+      // the demo left: the lead stands where the camera was looking
+      const lk = demoWalk ? new THREE.Vector3(player.x, 0.55, player.z) : demoCam.lookAt
+      const raw = camera.position.distanceTo(lk)
+      const d = demoWalk ? raw : Math.max(CAM_LIMITS.distMin, Math.min(CAM_LIMITS.distMax, raw))
+      if (!demoWalk) { const [lx, lz] = SPACES[scene].collide(lk.x, lk.z); player.x = lx; player.z = lz; lk.x = lx; lk.z = lz }
+      o.tx = lk.x; o.tz = lk.z; o.dist = d
+      o.yaw = Math.atan2(camera.position.x - lk.x, camera.position.z - lk.z)
+      const pitch = Math.asin(Math.min(1, Math.max(-1, (camera.position.y - 0.55) / Math.max(d, 1e-3))))
+      o.pitch = demoWalk ? pitch : Math.max(CAM_LIMITS.pitchMin, Math.min(CAM_LIMITS.pitchMax, pitch))
+      cam.yaw = o.yaw; cam.pitch = o.pitch; cam.dist = d
+    }
     // orbit camera pose: ease toward the targets (snap after a teleport)
     const vw = orbit.current
     const targetDist = !started ? OVERVIEW_DIST : phoneUp ? Math.min(cam.dist, 8) : cam.dist
@@ -293,6 +325,8 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     const fov = FOV_THIRD + (FOV_FIRST - FOV_THIRD) * b
     if (Math.abs(pc.fov - fov) > 0.01) { pc.fov = fov; pc.near = b > 0.5 ? 0.03 : 0.1; pc.updateProjectionMatrix() }
     if (g) g.visible = b < 0.8
+    // the demo's no-cut check (e2e) reads the camera's path on this clock during the walk too
+    if (demoWalk && demoCam.trace.length < 20000) demoCam.trace.push([t, camera.position.x, camera.position.y, camera.position.z])
 
     // what is within reach: in first person, a point ahead of the eyes (so it is what you face, not what is beside you)
     const ahead = first ? 0.6 : 0

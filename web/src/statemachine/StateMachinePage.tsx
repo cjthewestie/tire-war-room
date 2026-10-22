@@ -11,7 +11,7 @@ import { plain } from '../plain'
 import { STATE_LABEL } from '../components/common'
 import { apiGet } from '../transport'
 import { useWarRoom } from '../useWarRoom'
-import { BOARD, CATEGORY_LABEL, categoryOf, enteredAt, waitingOn, type Category, type Day, type DayRun } from './runs'
+import { BOARD, CATEGORY_LABEL, STAGES, categoryOf, enteredAt, stageOf, statusText, waitingOn, type Category, type Day, type DayRun } from './runs'
 import '../admin/admin.css'
 import './statemachine.css'
 
@@ -100,8 +100,37 @@ function Live() {
     closed: events.filter((e) => e.state === 'closed' && isToday(e)).length,
     stopped: events.filter((e) => e.state === 'safe_stop' && isToday(e)).length,
   }
+  const [detail, setDetail] = useState(false)
+  const stageCount = (k: (typeof STAGES)[number]['key']) => events.filter((e) => stageOf(e.state) === k && (k !== 'end' || isToday(e))).length
+  const ended = { closed: head.closed, stopped: head.stopped }
+  const rows = [...open].sort((a, b) => Number(b.state === 'await_approval') - Number(a.state === 'await_approval') || a.opened_at.localeCompare(b.opened_at))
   return (
     <>
+      <section className="sm-stages" aria-label="事件走到哪一步" data-testid="sm-stages">
+        {STAGES.map((g) => {
+          const n = stageCount(g.key)
+          return (
+            <div key={g.key} className={`sm-stage st-${g.key} ${g.key === 'you' && n ? 'hot' : ''}`} data-stage={g.key} data-testid="sm-stage">
+              <span className="sm-stage-l">{g.label}</span>
+              <span className="sm-stage-v">{n}</span>
+              {g.key === 'end'
+                ? <span className="sm-stage-s">結案 {ended.closed}・{STATE_LABEL.safe_stop} {ended.stopped}<small>（今天）</small></span>
+                : <span className="sm-stage-s">{g.meaning}</span>}
+            </div>
+          )
+        })}
+      </section>
+      <p className="sm-pitch">只有「規劃」和「換假設」會叫 AI；其他都是程式</p>
+      <section className="panel sm-rows-p" aria-label="每件事走到哪一步">
+        <header className="panel-h"><h2>處理中的事件</h2><span className="muted small">點一列看完整過程</span></header>
+        {rows.length ? (
+          <ul className="sm-rows" data-testid="sm-rows">
+            {rows.map((e) => <Row key={e.id} ev={e} run={runOf.get(e.id)} now={now} />)}
+          </ul>
+        ) : <p className="muted sm-none" data-testid="sm-empty">目前沒有事件。有事件時，這裡會顯示每件事走到哪一步。</p>}
+      </section>
+      <button className="btn-ghost sm-detail-t" aria-expanded={detail} onClick={() => setDetail((x) => !x)} data-testid="sm-detail-toggle">{detail ? '收起細節' : '看細節'}<small>（11 個內部狀態）</small></button>
+      {detail && <>
       <section className="kpis sm-kpis" aria-label="狀態機重點" data-testid="sm-counts">
         <div className={`kpi ${head.running ? 'is-live' : ''}`}><span className="kpi-l">處理中</span><span className="kpi-v">{head.running}</span><span className="kpi-s">AI 規劃、工具、驗證</span></div>
         <div className={`kpi ${head.approval ? 'is-warn' : ''}`}><span className="kpi-l">等主管核准</span><span className="kpi-v">{head.approval}</span><span className="kpi-s">待核准卡</span></div>
@@ -131,9 +160,27 @@ function Live() {
         </div>
       )}
       <p className="muted small">每張卡點進去是 Agent 頁的完整過程與狀態機圖。結案／安全停止只列今天（{day?.label ?? '目前這一天'}）。</p>
+      </>}
       <Detection events={events} today={events.filter(isToday).length} />
       <PreClassPanel />
     </>
+  )
+}
+
+function Row({ ev, run, now }: { ev: Event; run: DayRun | undefined; now: number }) {
+  const { state } = useWarRoom()
+  const mins = Math.max(0, Math.round((now - ms(enteredAt(ev, run))) / 60_000))
+  const st = stageOf(ev.state)
+  const who = ev.source === 'supervisor' ? '主管指令' : ev.source === 'plant' ? '工廠事件' : machineLabel(ev.machine_id)
+  return (
+    <li>
+      <a className={`sm-row st-${st}`} href={`#console?event=${encodeURIComponent(ev.id)}`} data-testid="sm-row" data-event={ev.id} data-state={ev.state}>
+        <b className="sm-row-who">{who}</b>
+        <span className={`sm-pill st-${st}`}>{STAGES.find((g) => g.key === st)?.label}</span>
+        <span className="sm-row-s">{plain(ev.alert_card?.title ?? ev.command ?? ev.anomaly.message)}：{statusText(ev, state.world?.tasks?.items ?? [], mins)}</span>
+        <small className="muted sm-row-t">{STATE_LABEL[ev.state]}{ev.state === 'await_approval' ? '' : `・${mins} 分`}</small>
+      </a>
+    </li>
   )
 }
 

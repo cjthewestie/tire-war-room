@@ -39,7 +39,7 @@ check('③ names the machines', note.includes('3 號硫化機') || note.includes
 const marks = await d.locator('.mdot.dq').count()
 check('machine dots carry a data mark', marks >= 3, `${marks} marked`)
 // the 異常 count left the header (it is on 主控台 now): ask the snapshot that rejected readings opened no event
-check('still 異常 0', (await (await d.request.get(BASE + '/api/snapshot')).json()).header.abnormal_count === 0)
+check('bad data is not an equipment fault: still 異常 0', (await (await d.request.get(BASE + '/api/snapshot')).json()).header.abnormal_count === 0)
 await d.screenshot({ path: `${OUT}/r4fix-baddata-1440.png` })
 await d.locator('.mdot[data-machine=CURE-03]').click()
 await d.waitForSelector('[data-testid=drawer-bad-data]', { timeout: 5000 }).catch(() => {})

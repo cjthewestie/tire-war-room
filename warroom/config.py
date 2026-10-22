@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     qdrant_url: str | None = None         # set on Spark to use the qdrant container
     embed_model: str = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
     sop_dir: Path = ROOT / "warroom" / "kb" / "sop"
+    # SOP no-answer gate (warroom/kb/store.py retrieve): a hit needs this hybrid score plus a key term of the
+    # question, or kb_strong_score alone. Calibrated on tests/data/rag_eval.yaml: scripts/rag_eval.py --curve.
+    kb_min_score: float = 0.18
+    kb_strong_score: float = 0.9
 
     audit_path: Path = ROOT / "data" / "runtime" / "audit.jsonl"
     schedule_dir: Path = ROOT / "data" / "runtime" / "schedules"
@@ -67,6 +71,13 @@ class Settings(BaseSettings):
     # vLLM serves MAX_NUM_SEQS=4 (deploy/spark/vllm-serve.sh: 3 concurrent anomalies + 1 spare); with 1 slot the
     # 3 件同時異常 plans ran one after another (real model 10-21: last card 132 s after the load, 3 slots: same second).
     model_slots: int = 3
+    # Model usage caps (warroom/agent/budget.py has the degradation order and why these numbers, from
+    # bench/results/spark-lightning-20261021): BUDGET_DAILY_TOKENS, BUDGET_DAILY_MODEL_S, BUDGET_EVENT_TOKENS,
+    # BUDGET_CONVERSATION_TOKENS. Incident plans are never blocked by them.
+    budget_daily_tokens: int = 3_000_000
+    budget_daily_model_s: float = 7200.0
+    budget_event_tokens: int = 60_000
+    budget_conversation_tokens: int = 500_000
 
     @property
     def api_key_effective(self) -> str:

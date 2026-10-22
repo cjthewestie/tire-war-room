@@ -32,6 +32,22 @@ export const UI = {
   done: { zh: '已完成', vi: 'Đã xong', id: 'Selesai' },
   live: { zh: '即時連線', vi: 'Đã kết nối', id: 'Terhubung' },
   offline: { zh: '連線中…', vi: 'Đang kết nối lại…', id: 'Menghubungkan ulang…' },
+  // 人員回報 (CJ 2026-10-22: 「加回報」)
+  start: { zh: '到達・開始', vi: 'Đã đến・Bắt đầu', id: 'Sudah tiba・Mulai' },
+  finish: { zh: '完成', vi: 'Xong việc', id: 'Selesai' },
+  note: { zh: '備註（可不填）', vi: 'Ghi chú (không bắt buộc)', id: 'Catatan (opsional)' },
+  photo: { zh: '拍照（可不拍）', vi: 'Chụp ảnh (không bắt buộc)', id: 'Foto (opsional)' },
+  photoKept: { zh: '已附照片', vi: 'Đã đính kèm ảnh', id: 'Foto terlampir' },
+  photoRemove: { zh: '移除', vi: 'Bỏ ảnh', id: 'Hapus' },
+  sending: { zh: '送出中…', vi: 'Đang gửi…', id: 'Mengirim…' },
+  verifying: { zh: '等待程式確認讀值…', vi: 'Đang chờ hệ thống kiểm tra số đo…', id: 'Menunggu sistem memeriksa pembacaan…' },
+  verified: { zh: '程式已確認讀值', vi: 'Hệ thống đã xác nhận số đo', id: 'Sistem sudah memastikan pembacaan' },
+  reportedDone: { zh: '你已回報完成', vi: 'Bạn đã báo xong', id: 'Anda sudah lapor selesai' },
+  overridden: { zh: '主管代為完成', vi: 'Quản lý đã xác nhận xong thay bạn', id: 'Supervisor menyelesaikan atas nama Anda' },
+  pickMe: { zh: '先在上方選「我是」，才能回報', vi: 'Chọn "Tôi là" ở trên để báo cáo', id: 'Pilih "Saya" di atas untuk melapor' },
+  pin: { zh: '請輸入你的人員 PIN', vi: 'Nhập mã PIN của bạn', id: 'Masukkan PIN Anda' },
+  failed: { zh: '沒送出', vi: 'Chưa gửi được', id: 'Gagal dikirim' },
+  overdue: { zh: '超過預計時間，做完請回報', vi: 'Đã quá giờ dự kiến, làm xong hãy báo', id: 'Lewat waktu perkiraan, lapor jika sudah selesai' },
 } satisfies Record<string, Tri>
 
 export const STATUS: Record<TaskStatus, Tri> = {

@@ -57,6 +57,7 @@ class SafetyFilter:
         self._lock = threading.Lock()
         self._mtime: float | None = None
         self._allow: list[str] = []
+        self.qa_allow: list[str] = []
         self._cats: list[tuple[str, str, str, list[re.Pattern[str]]]] = []
         self._out_reply = "這段回覆含有不該顯示的內容，已由系統擋下。"
         self._out: list[re.Pattern[str]] = []
@@ -79,14 +80,15 @@ class SafetyFilter:
                              [_compile(str(t)) for t in c.get("terms") or []]))
             self._cats = cats
             self._allow = [str(a) for a in data.get("allow") or []]
+            self.qa_allow = [str(a) for a in data.get("qa_allow") or []]
             self._out_reply = str(data.get("output_reply") or self._out_reply)
             self._out = [_compile(str(t)) for t in data.get("output_patterns") or []]
             self._mtime = mtime
 
-    def _scan(self, text: str, side: str) -> tuple[str, str, str] | None:
+    def _scan(self, text: str, side: str, extra_allow: list[str] | None = None) -> tuple[str, str, str] | None:
         self._load()                                            # cheap: one stat; re-read only when it changed
         t = text
-        for a in self._allow:                                   # 「安全核心是什麼」 is a plant question
+        for a in [*self._allow, *(extra_allow or [])]:                                   # 「安全核心是什麼」 is a plant question
             t = re.sub(re.escape(a), " ", t, flags=re.IGNORECASE)
         for name, reply, where, pats in self._cats:
             if where not in (side, "both"):
@@ -98,8 +100,10 @@ class SafetyFilter:
         return None
 
     # ---------------------------------------------------------------- the two sides
-    def check_input(self, text: str) -> Hit | None:
-        hit = self._scan(text, "input")
+    def check_input(self, text: str, qa: bool = False) -> Hit | None:
+        """qa=True: QA 模式 only (warroom/agent/qa.py) also allows the `qa_allow` words, e.g. 「可以跑 bash 嗎」 is a question
+        about the framework there (CJ, 2026-10-22: 「QA 放行」). Output checks never take this."""
+        hit = self._scan(text, "input", self.qa_allow if qa else None)
         return Hit(hit[0], hit[1], hit[2], "input") if hit else None
 
     def check_output(self, text: str, secrets: list[str] | None = None) -> Hit | None:

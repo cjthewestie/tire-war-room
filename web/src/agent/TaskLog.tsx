@@ -28,7 +28,7 @@ export function TaskLog({ onPick }: { onPick?: (eventId: string) => void }) {
                   <span className="tl-t">{fmtHM(r.opened_at)}{r.closed_at ? `–${fmtHM(r.closed_at)}` : ''}</span>
                   <b>{r.order_id ?? (r.machine_id ? machineLabel(r.machine_id) : '任務')}</b>
                   <span className="tl-what">{plain(r.title ?? r.id)}</span>
-                  <span className="tl-final">{r.final}</span>
+                  <span className="tl-final">{r.final}</span>{r.qa_demo && <span className="tl-final" title="QA 模式的現場展示開的事件" data-testid="tasklog-qa-demo">QA 展示</span>}
                   {r.approvals.length > 0 && <small className="muted">{decisionsText(r)}</small>}
                   {r.outcome && <small className="muted tl-out">{outcomeText(r)}</small>}
                 </button>

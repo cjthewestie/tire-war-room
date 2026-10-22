@@ -69,6 +69,14 @@ export const DOCK = { x0: 5.2, x1: 9.0, z0: 6.2, z1: 8.0 }
 /** [x, z, yaw]: yaw as for the lead (π = facing +z), so they look out over the corridor and the doors. */
 export const STAFF_SPOTS: [number, number, number][] = [[10.1, -1.3, Math.PI + 0.5], [10.85, -0.6, Math.PI - 0.3], [10.15, 0.4, Math.PI + 0.2], [10.85, 1.2, Math.PI - 0.4]]
 
+/** The pitch whiteboard (Whiteboard.tsx), CJ 2026-10-22: 「白板太遠了放在玻璃旁邊就好了」: inside the 戰情室, right in front
+ *  of its north glass wall (the lobby side), a few steps from the desk, facing south into the room (so it never blocks
+ *  the glass toward the production floor, and it clears the north doorway at x 5.3–6.3). (x, z) is the board's centre
+ *  on the ground; yaw 0 = the writing surface faces +z; w × h the surface, y its centre height. */
+export const WHITEBOARD = { x: 7.85, z: -2.0, yaw: 0, w: 2.2, h: 1.24, y: 1.08 }
+/** Where the lead stands to face the board (first person: the whole board in view). */
+export const BOARD_STAND = { x: WHITEBOARD.x + Math.sin(WHITEBOARD.yaw) * 1.9, z: WHITEBOARD.z + Math.cos(WHITEBOARD.yaw) * 1.9, yaw: WHITEBOARD.yaw }
+
 export const DESK = { x: 8.35, z: 0, w: 0.45, d: 1.5, h: 0.42 }
 export const SCREEN = { x: 9.5, z: 0, w: 2.4, h: 1.35, y: 1.2 }
 
@@ -137,6 +145,8 @@ export const COLLIDERS: Box[] = [
   around(SCREEN.x - 0.05, SCREEN.z, 0.2, SCREEN.w + 0.2),
   around(PALLETS[0][0], PALLETS[0][1], 0.7, 0.7), around(PALLETS[1][0], PALLETS[1][1], 0.7, 0.7),
   DOCK_PROPS.crates, DOCK_PROPS.forklift,
+  // the board's footprint (its feet are 0.6 deep), turned with it
+  Math.abs(Math.sin(WHITEBOARD.yaw)) > 0.5 ? around(WHITEBOARD.x, WHITEBOARD.z, 0.6, WHITEBOARD.w + 0.15) : around(WHITEBOARD.x, WHITEBOARD.z, WHITEBOARD.w + 0.15, 0.6),
   ...Object.values(OUTER_WALLS).flat(), ...INNER_WALLS.map((w) => w.box),
 ]
 

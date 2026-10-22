@@ -61,7 +61,9 @@ async def test_every_topic_returns_compact_data_and_writes_nothing(tmp_path):
         version = p.rt.c.store.current().version
         before = len(p.rt.audit.tail(0, 1_000_000))
         for topic in PLANT_TOPICS:
-            d = plant_query.query(p.rt, topic, "#W-0391" if topic == "order_lookup" else None)
+            d = plant_query.query(p.rt, topic, "#W-0391" if topic == "order_lookup" else None,
+                                  "CURE-03" if topic == "machine_history" else None,
+                                  q="7 號機" if topic == "memory_search" else None)
             text = json.dumps(d, ensure_ascii=False, default=str)
             assert d and "error" not in d, (topic, d)
             assert len(text) <= plant_query.MAX_CHARS + 60, (topic, len(text))
@@ -145,11 +147,11 @@ async def test_general_knowledge_is_answered_directly():
     assert out["reply"] == say and not f.tools and len(m.calls) == 1 and not out["fell_back"]
 
 
-async def test_a_poem_is_written_not_refused():
-    poem = "爐火映夜長\n橡膠化為鋼\n一模一模出\n輪向遠方。"
-    m = Model(("say", poem))
+async def test_a_poem_is_not_written():
+    """CJ 2026-10-22: 「不要jok」 (it was written before)."""
+    m = Model(("say", "爐火映夜長\n橡膠化為鋼"))
     out, f = await _turn(m, "幫我寫一首詩")
-    assert "爐火映夜長" in out["reply"] and "遠方" in out["reply"] and not f.tools and not f.proposed
+    assert "爐火" not in out["reply"] and out["reply"].endswith(OFFERS) and not f.tools and not f.proposed
 
 
 async def test_weather_goes_to_the_model_and_a_made_up_answer_is_replaced_after_it():
@@ -179,8 +181,9 @@ def test_prompt_and_reply_length():
 def test_approval_and_report_lines_are_plain_event_words():
     from warroom.agent.orchestrator import Orchestrator
     rows = []
-    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07", state=EventState.AWAIT_APPROVAL)
-    sm = SimpleNamespace(get=lambda _i: ev, events=list)      # (the report desk reads the state since #109)
+    # state: the reporter (warroom/agent/reporter.py) also listens to on_decided and reads it
+    ev = SimpleNamespace(id="EV-1", source="detector", machine_id="CURE-07", state=EventState.EXECUTE)
+    sm = SimpleNamespace(get=lambda _i: ev, events=list)
     o = Orchestrator(sm, SimpleNamespace(append=lambda *a, **k: rows.append(a[2])))
     o.on_decided(SimpleNamespace(event_id="EV-1", id="AP-1",
                                  decision=SimpleNamespace(decision=DecisionKind.APPROVE, option_id="A")))
@@ -394,10 +397,20 @@ async def test_query_plant_numbers_that_do_not_match_give_an_honest_line_not_raw
 async def test_query_plant_is_capped_at_two_topics_per_turn():
     m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
               ("tool", QUERY, {"topic": "overview"}), ("say", "之前沒有遲交的訂單。"))
-    reader = Reader({"late": []})
+    reader = Reader({"late": [], "n": 1})
     out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
     assert reader.topics == ["orders_history", "orders"] and "已經查了兩項" in _tool_texts(m)[-1]
     assert out["reply"] == "之前沒有遲交的訂單。" and "先只查最相關的一個 topic" in SYSTEM
+
+
+async def test_two_rounds_of_the_same_empty_answer_end_the_lookups():
+    # the loop guard (warroom/agent/budget.py Rule B): nothing new in two rounds → the next call is the text-only answer
+    m = Model(("tool", QUERY, {"topic": "orders_history"}), ("tool", QUERY, {"topic": "orders"}),
+              ("say", "之前沒有遲交的訂單。"))
+    reader = Reader({"late": []})
+    out, _ = await _turn(m, "之前有哪些訂單遲交", reader)
+    assert reader.topics == ["orders_history", "orders"] and "tools" not in m.calls[2]
+    assert out["reply"] == "之前沒有遲交的訂單。"
 
 
 def _tool_texts(m):
@@ -430,3 +443,77 @@ async def test_every_chat_and_summary_model_call_is_an_llm_call_row():
     assert first[2]["conversation"] != "sup|c1" and len(first[2]["conversation"]) == 16      # hashed
     assert first[2]["tool_calls"] == [QUERY]
     assert any(r[2]["phase"] == "summary" for r in rows)
+
+
+# ---------------------------------------------------------------- rag-fix findings (PR #122)
+def test_qing_jia_and_how_questions_are_not_task_requests():
+    from warroom.agent.main_agent import wants_task
+    for q in ("員工請假怎麼調人", "夜班有人請假要不要加班", "請問 7 號機怎麼了", "S13 請病假，人力怎麼補"):
+        assert not wants_task(q), q
+    for q in ("請安排 9 號機明天保養", "幫我通知夜班組長", "請幫我調人補夜班", "#A-311 可能晚交，請重排保交期"):
+        assert wants_task(q), q
+
+
+async def test_qing_jia_question_is_answered_not_proposed():
+    m = Model(("say", "請假時先看同組有沒有能頂的人，不夠再跨組調人或加班。"))
+    out, f = await _turn(m, "員工請假怎麼調人")
+    assert not f.proposed and out["event_id"] is None and "調人" in out["reply"]
+    rules = await MainAgent(None).turn("員工請假怎麼調人", context={"abnormal": []}, waiting_plan=None,
+                                       run_tool=f.run_tool, propose=f.propose, discuss=None)
+    assert not f.proposed and rules["event_id"] is None
+
+
+async def test_a_wrong_material_count_is_not_kept():
+    data = {"material_count": 6, "materials": [{"name": "尼龍布", "stock": 180}], "in_transit": "目前沒有在途的採購",
+            "waiting_ship_tyres": 12}
+    m = Model(("tool", QUERY, {"topic": "materials"}), ("say", "我們有 12 種原料，尼龍布 180 m。"),
+              ("say", "我們有 12 種原料。尼龍布剩 180 m。"))
+    out, _ = await _turn(m, "缺料怎麼辦", Reader(data))
+    assert "12 種" not in out["reply"]
+
+
+async def test_materials_topic_counts_and_lists_what_is_in_transit(tmp_path):
+    async with Plant(_rt(tmp_path, "normal")) as p:
+        d = plant_query.query(p.rt, "materials")
+        assert d["material_count"] == len(d["materials"]) == 6
+        assert d["in_transit"] == "目前沒有在途的採購" or all("name" in x for x in d["in_transit"])
+
+
+# ---------------------------------------------------------------- no jokes (CJ 2026-10-22: 「不要jok」), live bugs 10-22
+async def test_jokes_and_poems_get_a_polite_line_a_fact_and_an_offer():
+    from warroom.agent.main_agent import NO_FUN_LINES
+    for q in ("講個笑話", "幫我講個笑話", "寫一首詩", "說個故事"):
+        m = Model(("say", "有一天小明去上學，老師問…哈哈。"))
+        out, _f = await _turn_ctx(m, q)
+        assert out["reply"].startswith(NO_FUN_LINES) and out["reply"].endswith(OFFERS), (q, out["reply"])
+        assert "小明" not in out["reply"] and any(x in out["reply"] for x in ("16:00", "1 件事件", "7 號", "在班 10 人"))
+    assert "笑話" not in SYSTEM.split("不講笑話")[0] and "寫一首短詩" not in SYSTEM
+
+
+async def _turn_ctx(m, text):
+    f = Floor()
+    out = await MainAgent(_settings(), client=m).turn(text, context=TODAY, waiting_plan=None, run_tool=f.run_tool,
+                                                      propose=f.propose, discuss=None, read_plant=Reader())
+    return out, f
+
+
+async def test_a_degenerate_repetition_is_regenerated_once():
+    m = Model(("say", "因因因因因因因因因因"), ("say", "硫化是讓橡膠交聯的加熱步驟。"))
+    out, _ = await _turn(m, "硫化是什麼")
+    assert out["reply"] == "硫化是讓橡膠交聯的加熱步驟。" and "上一句重複" in m.calls[1]["messages"][-1]["content"]
+
+
+async def test_small_talk_is_not_carried_into_the_next_lookup():
+    m = Model(("say", "辛苦了！"), ("tool", "read_sensors", {"machine_ids": ["CURE-07"]}), ("say", "7 號機 122.3°C。"))
+    agent = MainAgent(_settings(), client=m)
+    f = Floor()
+    for q in ("今天好累喔", "7 號機現在溫度多少？"):
+        await agent.turn(q, context=TODAY, waiting_plan=None, run_tool=f.run_tool, propose=f.propose, discuss=None,
+                         read_plant=Reader())
+    sent = json.loads(m.calls[1]["messages"][1]["content"])
+    assert "previous_turn" not in sent and not sent["earlier_messages"]
+
+
+def test_no_internal_field_names_in_a_reply():
+    r = tidy("目前沒有機台停機（stops 為空、count 為 0）。雖然 earlier context 裡有兩件事件，但都在等核准。", True)
+    assert "stops" not in r and "count" not in r and "earlier" not in r and r.startswith("目前沒有機台停機")

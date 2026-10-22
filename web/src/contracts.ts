@@ -37,13 +37,14 @@ export type LLMMode = "llm" | "mock"
 export type ScenarioName = "normal" | "press7_temp_drop" | "open_mill_overheat" | "bad_data" | "concurrent_3"
   | "shift_start" | "rush_order" | "staffing"  // issue #17 plant events
   | "day_loop"  // issue #36 一日循環
+  | "morning_rush"  // issue #104 一早訂單湧入
 export type AuditKind =
   | "state_transition" | "llm_call" | "tool_call" | "tool_result" | "gate" | "intercepted"
   | "approval_request" | "approval_decision" | "safety_action" | "anomaly" | "schedule_version"
-  | "rollback" | "notify" | "system" | "task"
+  | "rollback" | "notify" | "system" | "task" | "safety_release"
 export type WsType =
   | "snapshot" | "machines" | "anomaly" | "safety_action" | "event" | "alert_card"
-  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents"
+  | "approval_request" | "approval_resolved" | "schedule" | "audit" | "clock" | "world" | "subagents" | "demo"
 
 export const MACHINE_IDS = [
   "A-MIX", "A-OPEN", "A-BIGOPEN", "A-SMALLOPEN", "A-CAL", "A-COOL", "A-WIND",
@@ -178,6 +179,40 @@ export interface SafetyAction {
   message: string
   latency_ms: number
 }
+
+/** A Safety Core stop / hold / alarm and its way back (warroom/api/resolve.py; CJ 2026-10-22 「安全核心要設計可以被解決」):
+ *  ① 派現場檢查 → ② reading back in range for `safe_needed` samples → ③ the supervisor's release (human only). */
+export type SafetyDecision = "resume" | "qc_pass" | "scrap"
+export interface SafetyCase {
+  id: string
+  machine_id: string
+  rule_id: string
+  rule_ids: string[]
+  actions: string[]
+  action: SafetyActionKind
+  message: string
+  value: number
+  threshold: number
+  ts: ISODate
+  latency_ms: number
+  status: "open" | "resolved"
+  event_id: string | null
+  sop_ids: string[]
+  task_ids: string[]
+  tasks_done: number
+  dispatched_at: ISODate | null
+  reading: number | null
+  safe_samples: number
+  safe_needed: number
+  reading_ok: boolean
+  decisions: SafetyDecision[]
+  resolved_at: ISODate | null
+  resolved_by: string | null
+  resolution: SafetyDecision | null
+  reason: string | null
+  field_confirmed: boolean
+}
+export interface SafetyRelease { decision: SafetyDecision; reason?: string; field_confirmed?: boolean }
 
 // 問戰情室: the supervisor's read-only question (POST /api/ask)
 export interface AskStepResult {
@@ -374,6 +409,23 @@ export interface Event {
   repaired_at?: ISODate | null
   recovered_at?: ISODate | null
   review?: EventReview | null
+  // SAFE_STOP → resolution (CJ 2026-10-22 「安全停止也要有可以走向解決的按鈕」)
+  stop_reason?: string | null
+  stop_reason_text?: string | null
+  follow_up?: StopFollowUp | null
+  previous?: PreviousRun | null
+}
+export interface PreviousRun { event_id: string; reason: string; reason_text: string }
+export interface StopFollowUp {
+  status: "replanned" | "manual" | "closed"
+  by: string
+  at: ISODate
+  new_event_id: string | null
+  task_ids: string[]
+  sop_ids: string[]
+  closed_at: ISODate | null
+  closed_by: string | null
+  note: string | null
 }
 export interface EventReview {
   status: "pending" | "done"
@@ -546,6 +598,8 @@ export interface MachineTile {
   temp_c: number | null
   /** issue #36: current batch / step progress 0-1 (press: cure elapsed / required); null = no batch */
   step_progress?: number | null
+  /** issue #104: 檢修完成 while still out of service (green), waiting for the supervisor's 恢復運轉 */
+  repaired?: boolean
 }
 
 export interface HeaderStatus {
@@ -575,6 +629,7 @@ export interface DashboardSnapshot {
   events: Event[]
   pending_approvals: ApprovalRequest[]
   safety_actions: SafetyAction[]
+  safety_cases?: SafetyCase[]   // open ones + the last few resolved (warroom/api/resolve.py)
 }
 
 export interface MachineDetail {
@@ -713,8 +768,11 @@ export interface WorkTask {
   zone: string; where: string; status: TaskStatus; created_at: ISODate; assigned_at: ISODate | null
   started_at: ISODate | null; done_at: ISODate | null; eta: ISODate | null; walk_min: number; work_min: number
   progress: number; after: string | null; order_ids: string[]; source: "code"
+  /** 人員回報 (WORKER_REPORT): people report 開始 / 完成 themselves; absent from older servers = auto */
+  mode?: "auto" | "report"; reported_by?: string | null; report_note?: string | null; photo_sha256?: string | null
+  override_reason?: string | null; overdue?: boolean
 }
-export interface TasksView { items: WorkTask[]; counts: Record<TaskStatus, number>; open: number }
+export interface TasksView { items: WorkTask[]; counts: Record<TaskStatus, number>; open: number; mode?: "auto" | "report" }
 export interface GoodsItem {
   id: string; order_id: string; size: TireSize; status: GoodsStatus; progress: number; machine_id: string | null
   press_id: string | null; zone: string; mold_in: ISODate | null; stage_end: ISODate | null; note: string | null
@@ -743,6 +801,7 @@ export type WsMessage =
   | { type: "clock"; ts: ISODate; data: { factory_time: ISODate; speed: number; paused: boolean; scenario?: string; random_events?: RandomEventsClock; day_loop?: { loop: number; day: string; source_day: string } | null; /** 情境疊加: scenarios overlaid since the last load */ overlays?: ScenarioName[] } }
   | { type: "world"; ts: ISODate; data: WorldDelta }
   | { type: "subagents"; ts: ISODate; data: SubagentsView }
+  | { type: "demo"; ts: ISODate; data: import("./demo/state").DemoState }
 
 // ---------------- REST ----------------
 export const API = {
@@ -772,6 +831,13 @@ export const API = {
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
   discuss: "/api/events/{event_id}/discuss", // POST {text} -> DiscussReply (討論這個計劃)
   review: "/api/events/{event_id}/review", // POST {note?} -> Event (主管已讀報告, 409 when no report is pending)
+  returnToService: "/api/machines/{machine_id}/return-to-service", // POST -> {machine_id, status} (#104 主管恢復運轉, 409 unless 檢修完成)
+  safetyCases: "/api/safety/cases", // GET SafetyCase[]
+  safetyDispatch: "/api/safety/{case_id}/dispatch", // POST -> SafetyCase (① 派現場檢查)
+  safetyRelease: "/api/safety/{case_id}/release", // POST SafetyRelease -> SafetyCase (③ 確認恢復運轉; human only)
+  stopReplan: "/api/events/{event_id}/replan", // POST -> the NEW Event (SAFE_STOP: 請 AI 重新規劃)
+  stopHandoff: "/api/events/{event_id}/handoff", // POST -> Event (SAFE_STOP: 交給現場處理)
+  stopClose: "/api/events/{event_id}/close", // POST {note?} -> Event (SAFE_STOP: 確認結案)
   ws: "/ws",
 } as const
 
@@ -797,9 +863,15 @@ export interface SubagentsView { items: Subagent[]; queue: { slots: number; runn
 
 /** POST /api/main/message: one 主 agent turn (issue #54, warroom/agent/main_agent.py). */
 export interface MainReply {
-  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string }[]
+  id: string; reply: string; steps: { tool: string; label: string; summary: string; ok: boolean; event_id?: string; ids?: string[] }[]
   event_id: string | null; by: "model" | "rules"; fell_back: boolean; error: string | null; intent: string | null; ms: number
+  /** overview mode only: links to task boards, made by code from event ids that exist (warroom/api/overview.py) */
+  mode?: ChatMode; links?: TaskLink[]
 }
+/** 'overview': the Agent page's 總覽 conversation with Agent Nemo; 'task': the chat bound to the selected task. */
+export type ChatMode = "task" | "overview"
+/** A task named in an overview reply: opens its board (#console?event=<event_id>); `reason` only for questionable ones. */
+export interface TaskLink { event_id: string; label: string; state: string; reason: string | null }
 
 /** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
  *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
