@@ -157,15 +157,16 @@ button:disabled { cursor: not-allowed; opacity: .55; }
 .paa.red .paa-go { background: var(--alarm); color: #fff; }
 .paa:hover .paa-go, .paa:focus-visible .paa-go { filter: brightness(1.08); text-decoration: underline; }
 .paa:focus-visible { outline: 3px solid var(--info); outline-offset: -3px; }
-.paa.pulse { animation: paa-pulse 1.6s ease-in-out infinite; }
+.paa.paa-pulse { animation: paa-pulse 1.6s ease-in-out infinite; }
 @keyframes paa-pulse { 50% { background: rgb(var(--alarm-rgb, 255 93 82) / .30); } }
-@media (prefers-reduced-motion: reduce) { .paa.pulse { animation: none; } }
-/* 主控台 (its 核准區 lists the cards) and the Demo spotlight: one short line, the title dropped */
+@media (prefers-reduced-motion: reduce) { .paa.paa-pulse { animation: none; } }
+/* 主控台 (its 核准區 lists the cards) and the Demo spotlight: one short line, the title dropped.
+   paa-compact sits on the .paa itself (the wrapper is .paa-wrap-compact). */
 .paa.paa-compact, html[data-demo] .paa { min-height: 30px; padding-block: 3px; font-size: 13px; }
-.paa-compact .paa-t, .paa-compact .paa-w, html[data-demo] .paa-t, html[data-demo] .paa-w { display: none; }
-.paa-compact .paa-go, html[data-demo] .paa-go { padding: 1px 10px; }
-/* Demo mode (PR #121) sets html[data-demo]; its fixed cue bar (z 90, ~56 px, ~104 px on a phone) sits on top, so the bar steps below it */
-html[data-demo] { --demo-bar-h: 0px; }   /* the cue bar is a bottom pill now (6cab4e0): nothing above the 待核准 bar to step below */
+.paa.paa-compact .paa-t, .paa.paa-compact .paa-w, html[data-demo] .paa-t, html[data-demo] .paa-w { display: none; }
+.paa.paa-compact .paa-go, html[data-demo] .paa-go { padding: 1px 10px; }
+/* Demo mode sets html[data-demo]. Its controls are a small pill at the bottom (demo.css .dm-mini), nothing on top,
+   so the bar stays right under the header (the old top cue bar offset left a gap and pushed it over the ticker). */
 /* /report and /handover: inside their sticky header */
 .paa-wrap-inline { position: static; margin: 0; }
 .paa-wrap-inline .paa { border: 1px solid; border-radius: 10px; padding: 6px 12px; flex-wrap: wrap; }
@@ -187,8 +188,7 @@ html[data-demo] { --demo-bar-h: 0px; }   /* the cue bar is a bottom pill now (6c
   .paa-t { flex: 1 1 100%; order: 3; }
   .paa-go { order: 2; }
   .paa.paa-compact, html[data-demo] .paa { flex-wrap: nowrap; }
-  html[data-demo] { --demo-bar-h: 0px; }
-  .paa-wrap-corner { top: auto; bottom: 150px; left: 12px; right: 12px; max-width: none; }
+  .paa-wrap-corner { top: auto; bottom: 150px; left: 12px; right: 12px; max-width: none; margin: 0; }
   .f3-root:has(.paa-wrap-corner) .f3-toast { top: auto; }
   /* phone width: the raised phone takes the whole width, so the card goes above it, one line shorter (title dropped) */
   .f3-root:has(.f3-phone.up) .paa-wrap-corner { top: 6px; bottom: auto; left: 12px; right: 12px; max-width: none; }

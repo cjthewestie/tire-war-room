@@ -46,7 +46,16 @@ try {
     check(`${name}: bar shown`, shown && txt.includes(`待核准 ${pending.length} 件`), txt.replace(/\s+/g, ' ').slice(0, 90))
     check(`${name}: points at the oldest card`, (await bar.getAttribute('data-event')) === oldest.event_id)
     if (['monitor', 'sm', 'admin'].includes(tab)) await d.screenshot({ path: `${OUT}/${tab}-1440.png` })
-    if (tab === 'agent') check('主控台: compact', await d.locator('.paa-wrap-compact').isVisible())
+    if (tab === 'agent') {
+      check('主控台: compact', await d.locator('.paa-wrap-compact').isVisible())
+      // issue #183: one full-width line, not squeezed by a global class (agent.css .pulse) and never over the ticker
+      const g = await d.evaluate(() => {
+        const r = (q) => document.querySelector(q)?.getBoundingClientRect()
+        const p = r('.paa'), w = r('.paa-wrap'), t = r('.tk')
+        return { pw: p?.width, ww: w?.width, ph: p?.height, bottom: p?.bottom, tk: t?.top }
+      })
+      check('主控台: full width, one line, above the ticker', g.pw === g.ww && g.ph <= 32 && (g.tk == null || g.bottom <= g.tk), JSON.stringify(g))
+    }
   }
   check('title prefix', (await d.title()).startsWith(`(${pending.length}) 待核准・`), await d.title())
   // sticky: still on screen after a long scroll
@@ -54,11 +63,12 @@ try {
   await d.mouse.wheel(0, 2400); await d.waitForTimeout(400)
   const box = await bar.boundingBox()
   check('sticky under the header after scrolling', !!box && box.y >= 0 && box.y < 140, JSON.stringify(box))
-  // Demo mode (PR #121) sets html[data-demo]: the bar goes compact and steps below the 56 px cue bar
+  // Demo mode sets html[data-demo]: the bar goes compact and stays right under the header (the demo has no top bar)
   await d.evaluate(() => document.documentElement.setAttribute('data-demo', 'test'))
   await d.waitForTimeout(300)
   const db = await bar.boundingBox()
-  check('demo: compact, below the demo cue bar', !!db && db.height <= 32 && db.y >= 56 + 60, JSON.stringify(db))
+  const hb = await d.locator('.topbar').boundingBox()
+  check('demo: compact, right under the header', !!db && !!hb && db.height <= 32 && Math.abs(db.y - (hb.y + hb.height)) <= 2, JSON.stringify(db))
   await d.screenshot({ path: `${OUT}/demo-1440.png` })
   await d.evaluate(() => document.documentElement.removeAttribute('data-demo'))
   // click → 主控台, oldest card selected

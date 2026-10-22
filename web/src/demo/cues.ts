@@ -35,8 +35,8 @@ export const PITCH_LEN = 180
 /** Kept for the war room's 「故事目標」 and older callers. */
 export const PITCH_AT = STORY_TARGET
 export const DEMO_TOTAL = STORY_TARGET + PITCH_LEN
-/** The camera's fly-in (1.5–2.5 s) plus a beat to settle, before a checkpoint is ready. */
-export const ARRIVE = 2.5
+/** The camera's fly-in (1.0–1.8 s, demoCamera.ts flightTime) plus a beat to settle, before a checkpoint is ready. */
+export const ARRIVE = 1.5
 
 export interface DemoLoad { at: number; scenario: string; speed: number }
 /** Live facts a cue can wait for (demo/signals.ts). */
@@ -91,7 +91,7 @@ export const CUES: Cue[] = [
   { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有一般單、有交期很趕的單，還有急單。',
     // ① is ready once the 急單's card is up (the orders flood in meanwhile, the sim runs fast): the plan for it is made
     // during the establishing shot instead of as dead air after it
-    hold: { wait: 'continue', min: 6, until: 'rushCard', untilTimeout: 30 }, shot: { kind: 'establish' } },
+    hold: { wait: 'continue', min: 4, until: 'rushCard', untilTimeout: 30 }, shot: { kind: 'establish' } },
   { id: 'rush', at: 20, title: '📋 急單進來：先核准', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
     hold: { wait: 'approval', approval: 'rushApproved', card: 'rushCard' }, shot: { kind: 'overview' } },
   { id: 'console', at: 40, title: '👉 主控台：計劃已先擬好，只等核准或討論', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],
@@ -107,11 +107,11 @@ export const CUES: Cue[] = [
   { id: 'worker', at: 120, enter: { on: 'fixing', timeout: 45 }, title: '👷 員工完成維修，程式驗證讀值', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
     hold: { wait: 'continue', until: 'workerDone', untilTimeout: 25 }, shot: { kind: 'incident', close: true } },
   { id: 'robot', at: 135, title: '🤖 巡檢機器人：只有「規劃」和「換假設」會叫 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
-    hold: { wait: 'continue', min: 4.5 }, shot: { kind: 'robot' } },
+    hold: { wait: 'continue', min: 3.2 }, shot: { kind: 'robot' } },
   { id: 'agent', at: 158, title: '🧠 Agent 頁面：每一步都在稽核鏈上', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
     hold: { wait: 'continue' }, shot: { kind: 'overview' } },
   { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
-    hold: { wait: 'continue', autoAfter: 8 }, shot: { kind: 'whiteboard' } },
+    hold: { wait: 'continue', autoAfter: 5 }, shot: { kind: 'whiteboard' } },
   { id: 'warn', at: STORY_TARGET + 120, enter: { after: 120 }, title: '⏱ 剩 1 分鐘', body: '收尾：講結論和要的東西。',
     hold: { wait: 'auto', min: 0 }, shot: { kind: 'whiteboard' } },
   { id: 'end', at: DEMO_TOTAL, enter: { after: 60 }, title: '結束・謝謝', body: '謝謝！', big: true,
