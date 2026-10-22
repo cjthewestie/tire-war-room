@@ -11,7 +11,7 @@ import { player } from './pose'
 export interface Stand { x: number; z: number; yaw: number; pitch: number }
 type P = [number, number]
 
-const WALK = 1.5, RUN = 2.8
+const WALK = 3.2, RUN = 5.0   // brisk: no walk between beats takes much over 2.5 s
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 /** yaw that faces from (x, z) toward (tx, tz) (forward = (−sin yaw, −cos yaw)) */
 export const yawToward = (x: number, z: number, tx: number, tz: number) => Math.atan2(-(tx - x), -(tz - z))
@@ -78,12 +78,12 @@ class Walker {
       const [gx, gz] = this.path[0]
       const dx = gx - player.x, dz = gz - player.z, len = Math.hypot(dx, dz)
       const want = Math.atan2(-dx, -dz)
-      player.yaw += wrap(want - player.yaw) * Math.min(1, dt * 5)
+      player.yaw += wrap(want - player.yaw) * Math.min(1, dt * 8)
       player.pitch += (0 - player.pitch) * Math.min(1, dt * 3)
       // ease in from standing, slow into the last point
       const left = this.path.reduce((a, p, i) => a + (i === 0 ? len : Math.hypot(p[0] - this.path[i - 1][0], p[1] - this.path[i - 1][1])), 0)
-      const target = Math.min(top, Math.max(0.35, left * 1.6))
-      this.speed += (target - this.speed) * Math.min(1, dt * 3)
+      const target = Math.min(top, Math.max(0.6, left * 2.4))
+      this.speed += (target - this.speed) * Math.min(1, dt * 6)
       const step = Math.min(len, this.speed * dt)
       if (len < 0.02) { this.path.shift(); return true }
       player.x += (dx / len) * step; player.z += (dz / len) * step
@@ -94,9 +94,9 @@ class Walker {
     this.speed = 0
     player.running = false
     const dy = wrap(this.goal.yaw - player.yaw), dp = this.goal.pitch - player.pitch
-    player.yaw += dy * Math.min(1, dt * 3)
-    player.pitch += dp * Math.min(1, dt * 3)
-    if (Math.abs(dy) < 0.02 && Math.abs(dp) < 0.02) this.done = true
+    player.yaw += dy * Math.min(1, dt * 6)
+    player.pitch += dp * Math.min(1, dt * 6)
+    if (Math.abs(dy) < 0.05 && Math.abs(dp) < 0.05) this.done = true
     return false
   }
 }

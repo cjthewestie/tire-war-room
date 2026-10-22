@@ -6,7 +6,7 @@
 import type { ScenarioName, SimControl } from '../contracts'
 import type { WarRoomState } from '../store'
 import {
-  CUES, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
+  BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
 import { freshSeen, signals, type Seen } from './signals'
@@ -42,6 +42,8 @@ export class DemoRun {
   private contReq = false
   private ack = 0
   private posted = ''
+  /** the sim speed this driver last set (BOOST_SPEED while the plant is what the demo waits for) */
+  speed = 0
   /** the server rev of this driver's own last cue post, and posts still on the way (their echo is not a continue) */
   private myRev = -1
   private inflight = 0
@@ -101,6 +103,7 @@ export class DemoRun {
 
   async exit() {
     if (this.simHeld) { this.simHeld = false; await this.io.control({ action: 'play' }).catch(() => {}) }
+    if (this.speed === BOOST_SPEED) await this.io.control({ action: 'speed', speed: this.loads[0]?.speed ?? DEMO_SPEED }).catch(() => {})
     await this.send({ action: 'exit' })
   }
 
@@ -155,13 +158,22 @@ export class DemoRun {
       this.simHeld = hold
       void this.io.control({ action: hold ? 'pause' : 'play' }).catch(() => {})
     }
+    // waiting on the plant (not on CJ): run the sim fast; back to the demo speed once the beat is there
+    const speed = hold || !this.io.demo ? null : plantWait(r.tl, sig) ? BOOST_SPEED : this.loads[0]?.speed ?? DEMO_SPEED
+    if (speed != null && speed !== this.speed && this.clock.since != null && now >= this.armedAt) {
+      this.speed = speed
+      void this.io.control({ action: 'speed', speed }).catch(() => {})
+    }
     const w = waiting(r.tl, t, sig)
-    const key = `${r.tl.index}|${w}`
+    // done with a beat and waiting for the next one's live event: the shared pointer already shows that next beat
+    // (waiting for its event), so after a continue no screen flashes back to the beat that just ended
+    const postIndex = r.tl.released && CUES[r.tl.index + 1]?.enter?.on ? r.tl.index + 1 : r.tl.index
+    const key = `${postIndex}|${w}`
     if (key !== this.posted) {
       this.posted = key
-      this.ack = r.tl.index
+      this.ack = postIndex
       this.inflight++
-      void this.send({ action: 'cue', cue_id: CUES[r.tl.index].id, cue_index: r.tl.index, waiting_for: w })
+      void this.send({ action: 'cue', cue_id: CUES[postIndex].id, cue_index: postIndex, waiting_for: w })
         .then((out) => { if (out) this.myRev = Math.max(this.myRev, out.rev) })
         .finally(() => { this.inflight-- })
     }

@@ -169,7 +169,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
         w.enteredAt = now
         w.station = stationFor(c.id, c.shot)
         // the robot comes over to the lead at 7 號機, then plays its show facing the camera
-        if (c.id === 'robot') robot.visitReq = ROBOT_MEET
+        // the robot heads over while the crew repairs 7 號機, so at its beat it is already there for the show
+        if (c.id === 'worker') robot.visitReq = ROBOT_MEET
+        if (c.id === 'robot') { if (robot.playing == null) robot.playReq = true }
       }
       // camera: the opening overview (orbit), a hand-over onto the lead, then the first-person walk between stations
       if (director.mode === 'orbit') {
@@ -189,8 +191,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       if (c.id === 'pitch' && r.tl.released && !slideOpened.current) { slideOpened.current = true; setSlideView(true) }
       if (c.id !== 'pitch' && c.id !== 'warn' && c.id !== 'end') slideOpened.current = false
       // a checkpoint is ready only once the walk (and the monitor, the robot's show) has arrived
-      const robotDone = c.id !== 'robot' || robot.played.includes('bow') || now - w.enteredAt > 30000
-      const monitorDone = !want || (!!show && now - w.monitorAt > 1500)
+      const robotDone = c.id !== 'robot' || (robot.played.includes('bow') && robot.playing == null) || now - w.enteredAt > 12000
+      const monitorDone = !want || (!!show && now - w.monitorAt > 600)
       r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
       // the doorway view of 7 號機: nobody walks through the foreground between the camera and the press
       director.clearRadius = director.mode === 'walk' && walker.at === 'doorway' && walker.done ? 3.2 : 0

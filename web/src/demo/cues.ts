@@ -43,6 +43,8 @@ export interface DemoLoad { at: number; scenario: string; speed: number }
 export type Signal =
   | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'rejected' | 'approval2' | 'approved2'
   | 'worker' | 'workerDone' | 'closed'
+  /** the last repair is under way (H2 approved) or done: the walk to 7 號機 starts, the repair is watched, not waited for */
+  | 'fixing'
   /** the 3D's own: the walk / camera has arrived and framed the beat (false holds a checkpoint's 「按 A 繼續」) */
   | 'arrived'
 export type Signals = Partial<Record<Signal, boolean>>
@@ -87,7 +89,9 @@ export interface Cue {
 
 export const CUES: Cue[] = [
   { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有一般單、有交期很趕的單，還有急單。',
-    hold: { wait: 'continue', min: 12 }, shot: { kind: 'establish' } },
+    // ① is ready once the 急單's card is up (the orders flood in meanwhile, the sim runs fast): the plan for it is made
+    // during the establishing shot instead of as dead air after it
+    hold: { wait: 'continue', min: 6, until: 'rushCard', untilTimeout: 30 }, shot: { kind: 'establish' } },
   { id: 'rush', at: 20, title: '📋 急單進來：先核准', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
     hold: { wait: 'approval', approval: 'rushApproved', card: 'rushCard' }, shot: { kind: 'overview' } },
   { id: 'console', at: 40, title: '👉 主控台：計劃已先擬好，只等核准或討論', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],
@@ -100,10 +104,10 @@ export const CUES: Cue[] = [
     hold: { wait: 'continue' }, shot: { kind: 'incident', close: true } },
   { id: 'h2', at: 105, enter: { on: 'approval2', timeout: 40 }, title: '🔁 AI 換假設 H2：程式驗證失敗才會換', body: '驗證失敗才換假設：H2 是蒸汽洩漏，停用 7 號機檢修、訂單移到別台。再核准一次。', links: ['phone'],
     hold: { wait: 'approval', approval: 'approved2', card: 'approval2' }, shot: { kind: 'incident', close: true } },
-  { id: 'worker', at: 120, enter: { on: 'workerDone', timeout: 45 }, title: '👷 員工完成維修，程式驗證讀值', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
-    hold: { wait: 'continue', min: ARRIVE + 3 }, shot: { kind: 'incident', close: true } },
+  { id: 'worker', at: 120, enter: { on: 'fixing', timeout: 45 }, title: '👷 員工完成維修，程式驗證讀值', body: '核准後維修人員到 7 號機停用檢修，做完圈圈轉綠：「檢修完成・待恢復運轉」。',
+    hold: { wait: 'continue', until: 'workerDone', untilTimeout: 25 }, shot: { kind: 'incident', close: true } },
   { id: 'robot', at: 135, title: '🤖 巡檢機器人：只有「規劃」和「換假設」會叫 AI', body: '平常巡檢是程式在做，便宜又不會累；只有規劃和換假設才叫醒 AI。',
-    hold: { wait: 'continue', min: 8 }, shot: { kind: 'robot' } },
+    hold: { wait: 'continue', min: 4.5 }, shot: { kind: 'robot' } },
   { id: 'agent', at: 158, title: '🧠 Agent 頁面：每一步都在稽核鏈上', body: '時間軸上看得到：H1 的預期、讀值 119.5°C 推翻它、換成 H2。每一步、每個工具都記在稽核鏈上。', links: ['agent'],
     hold: { wait: 'continue' }, shot: { kind: 'overview' } },
   { id: 'pitch', at: STORY_TARGET, title: '🎤 換 Pitch 了！', body: '故事講完，換到白板上的投影片。LB／RB（←／→）換頁。', big: true,
@@ -212,6 +216,17 @@ export function waiting(tl: Timeline, t: number, sig: Signals): 'continue' | 'ap
   if (h.wait === 'continue') return ready(tl, t, sig) ? 'continue' : null
   return null
 }
+
+/** Is the timeline waiting on the plant (not on CJ)? Then the driver runs the sim fast (BOOST_SPEED), so a wait
+ *  the presenter did not ask for stays short (CJ, 2026-10-22: 「demo 模式整個不順 有些地方花的時間太長了」):
+ *  the next beat's event, a hold's `until`, or an approval card that has not shown up yet. */
+export function plantWait(tl: Timeline, sig: Signals): boolean {
+  if (tl.released) { const en = CUES[tl.index + 1]?.enter; return !!en?.on && !sig[en.on] }
+  const h = CUES[tl.index].hold
+  if (h.until && !sig[h.until]) return true
+  return h.wait === 'approval' && !!h.card && !sig[h.card]
+}
+export const BOOST_SPEED = 300
 
 /** Should the sim be paused now? Only while CJ talks at a ready continue checkpoint (never at the approval: the
  *  approval and the repair need the plant running). */

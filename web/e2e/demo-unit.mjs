@@ -46,8 +46,9 @@ function drive(script, until, dt = 0.25) {
 {
   const r = drive({}, 60)
   check('① blocks: no continue → still on start at 60 s', r.tl.index === 0 && !r.tl.released)
-  check('① camera / orders first (12 s): sim runs until then', r.at(11).paused === false && r.at(11).waiting === null)
-  check('① then waits for continue with the sim paused', r.at(12).paused === true && r.at(12).waiting === 'continue')
+  check('① camera / orders first (6 s): sim runs until then', r.at(5.75).paused === false && r.at(5.75).waiting === null)
+  check('① waits for the 急單 card first (sim running, fast): not ready at 6 s without it', r.at(6).waiting === null && r.at(6).paused === false)
+  check('① then (card, or its 30 s fallback) waits for continue with the sim paused', r.at(30).paused === true && r.at(30).waiting === 'continue')
   const c = drive({ 20: { cont: true } }, 22)
   check('continue releases ① and the next cue enters', c.at(20).released && c.at(20.25).cue === 'rush', JSON.stringify(c.at(20.25)))
   check('sim resumed after continue', c.at(20).paused === false && c.at(20.25).paused === false)
@@ -57,7 +58,7 @@ function drive(script, until, dt = 0.25) {
 {
   const tl = D.startTimeline()
   check('walking: not ready while arrived is false', !D.ready(tl, 20, { arrived: false }) && !D.simPaused(tl, 20, { arrived: false }))
-  check('arrived (or no gate, the war room): ready', D.ready(tl, 20, { arrived: true }) && D.ready(tl, 20, {}))
+  check('arrived (or no gate, the war room): ready', D.ready(tl, 20, { arrived: true, rushCard: true }) && D.ready(tl, 20, { rushCard: true }))
   const r = D.advance(tl, 20, { arrived: false }, true)
   check('walking: continue waits for the arrival', r.refused && !r.tl.released)
 }
@@ -94,14 +95,15 @@ function story(times) {
 {
   // morning_rush on main at 40× (morning-scenario's live run): the presenter's checkpoints pause the plant, so these
   // are plant-clock times; story() shifts nothing, it only presses continue 4 s after each checkpoint is ready
-  const s = story({ orders: 1, rushCard: 28, rushApproved: 32, preplan: 45, event: 50, approval: 69, approved: 73, worker: 74, rejected: 93, approval2: 104, approved2: 108, workerDone: 120, closed: 109 })
+  const s = story({ orders: 1, rushCard: 28, rushApproved: 32, preplan: 45, event: 50, approval: 69, approved: 73, worker: 74, rejected: 93, approval2: 104, approved2: 108, fixing: 108, workerDone: 120, closed: 109 })
   const at = (id) => s.fired.find((f) => f[0] === id)
   check('story: every cue in order', s.fired.map((f) => f[0]).join(',') === 'rush,console,event,h1,verify,h2,worker,robot,agent,pitch,warn,end', s.fired.map((f) => f[0]).join(','))
   check('h1 / h2: button presses never skip the approvals', s.refused > 0)
   check('h1 / h2: the sim is never paused at an approval', !s.pausedWhileApproval)
   check('verify enters on the real rejection of H1', at('verify')[2] === 'event' && at('verify')[1] === 93, JSON.stringify(at('verify')))
   check('h2 enters on the second card', at('h2')[2] === 'event' && at('h2')[1] === 104, JSON.stringify(at('h2')))
-  check('⑤ worker beat on the real 停用檢修 completion (repaired), not on H1\'s 檢修', at('worker')[2] === 'event' && Math.abs(at('worker')[1] - 120) <= 0.5, JSON.stringify(at('worker')))
+  check('⑦ worker beat: the walk to 7 號機 starts on the H2 approval (fixing), not on H1\'s 檢修', at('worker')[2] === 'event' && Math.abs(at('worker')[1] - 108) <= 0.5, JSON.stringify(at('worker')))
+  check('⑦ its 「按 A 繼續」 only once 7 號機 is repaired', at('robot')[1] >= 120, JSON.stringify(at('robot')))
   check('robot beat right after the worker (at 7 號機), then the Agent page at the desk, then the pitch (CJ\'s first-person order)', s.fired.findIndex((f) => f[0] === 'robot') === s.fired.findIndex((f) => f[0] === 'worker') + 1 && s.fired.findIndex((f) => f[0] === 'pitch') === s.fired.findIndex((f) => f[0] === 'agent') + 1)
   check('the pitch starts on continue at the Agent page', at('pitch')[2] === 'continue', JSON.stringify(at('pitch')))
   const p = s.tl.pitchAt
@@ -124,7 +126,7 @@ function story(times) {
   check('3:30: a story stuck at an approval does not jump by itself', r.at(215).cue === 'rush', JSON.stringify(r.at(215)))
   const c = drive({ 1: { cont: true }, 2: { sig: { rushCard: true } }, 212: { cont: true } }, 213)
   check('after 3:30 continue still cannot pass the approval (no cutting the story)', c.at(212).cue === 'rush' && c.at(212).refused)
-  const rb = drive({ 1: { cont: true }, 2: { sig: { rushApproved: true, preplan: true, event: true, approval: true, approved: true, rejected: true, approval2: true, approved2: true, workerDone: true } }, 20: { cont: true }, 30: { cont: true }, 40: { cont: true }, 50: { cont: true }, 60: { cont: true } }, 211)
+  const rb = drive({ 1: { cont: true }, 2: { sig: { rushApproved: true, preplan: true, event: true, approval: true, approved: true, rejected: true, approval2: true, approved2: true, fixing: true, workerDone: true } }, 20: { cont: true }, 30: { cont: true }, 40: { cont: true }, 50: { cont: true }, 60: { cont: true } }, 211)
   check('at the last story beat (Agent page), 3:30 starts the pitch by itself', rb.at(209.75).cue === 'agent' && rb.at(210).cue === 'pitch', JSON.stringify([rb.at(209.75), rb.at(210)]))
   tl = { ...tl, index: D.PITCH_INDEX }
   check('no nudge once pitching', !D.overTarget(tl, 200))
@@ -178,7 +180,7 @@ function story(times) {
   let resolved = []
   const state = () => ({ demo: { ...srv }, snapshot: { events: [], machines: [] }, pending: [], resolved, world: null })
   const tickN = async (n, dt = 250) => { for (let i = 0; i < n; i++) { now += dt; run.tick(now, state()); await new Promise((r) => setTimeout(r, 0)) } }
-  await tickN(60)   // ① ready after 12 s
+  await tickN(130)   // ① ready (no 急單 card in this fake: its 30 s fallback)
   check('driver: ① waits for continue', D.CUES[run.tl.index].id === 'start' && D.waiting(run.tl, run.t, run.latched) === 'continue')
   await run.continue(); await tickN(4)
   check('driver: one continue (server) → 先核准急單', D.CUES[run.tl.index].id === 'rush', D.CUES[run.tl.index].id)

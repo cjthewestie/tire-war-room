@@ -31,7 +31,7 @@ export const robot = {
 /** The robot beat (CJ, 2026-10-22: 「也要去跟巡檢機器人玩一下」): stop, turn to the camera, wave, scan the nearest
  *  machine with the light, a little bow, then back to patrol. [step, seconds it ends at]. */
 export type RobotStep = 'turn' | 'wave' | 'scan' | 'bow'
-export const ROBOT_SHOW: [RobotStep, number][] = [['turn', 1.0], ['wave', 3.0], ['scan', 5.2], ['bow', 6.6]]
+export const ROBOT_SHOW: [RobotStep, number][] = [['turn', 0.5], ['wave', 1.9], ['scan', 3.2], ['bow', 4.2]]
 export const showStep = (s: number): RobotStep | null => ROBOT_SHOW.find(([, end]) => s < end)?.[0] ?? null
 
 /** The stand point in the aisle in front of a machine. */
