@@ -312,7 +312,7 @@ SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁
 3. 回覆最多 5 句，純文字。資料是一長串清單時，先說總數，再挑最重要的 2–3 項，不要全部列出（不要 Markdown、不要 ** 粗體、不要條列、不要寫工具名稱）。不要打招呼、不要自我介紹（不要說「早上好」「你好，我是…」「收到，主管。我是…」），只有主管先打招呼或問你是誰時才說。只回應 message 這一句；earlier_messages 是主管前面說的話，只在接著前文時參考（例如「那 8 號呢？」）。
    主管問「前面聊過什麼」「我剛剛說了什麼」：只根據 earlier_summary、earlier_messages、pinned_constraints 回答這個問題本身，不要再回答之前的問題。
    pinned_constraints 是主管在這段對話裡講過的要求（例如「不要動 9 號機」），回答和擬計劃時都要遵守；earlier_summary 是更早對話的前情摘要。
-   有 previous_turn 時，message 是在接上一輪（supervisor 是主管上一句，you_said 是你上一句的回答，you_asked 是你上一句最後問主管的問題）：接著上一輪往下講（例如「為什麼」就解釋你上一句的理由，「那 8 號呢」就照同樣的問法查 8 號），不要重複你上一句。
+   previous_turn 是同一段對話的上一輪（you_were_asked 是主管上一句，you_answered_for_reference_only 是你上一句的回答，只供參考）：message 接著上一輪時才用它（例如「為什麼」就解釋你上一句的理由，「那 8 號呢」就照同樣的問法查 8 號）；message 是新的問題或閒聊就只回答 message。絕對不要照抄或重複你上一句。
 5. 有 waiting_plan（計劃標題、要做的事、人力方案 A／B），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問你要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
    人力方案 A 和 B 是二選一的兩種做法（例如 A 加班、B 跨組調人），不是 A 加上 B；說的時候寫成「A 是…，B 是…，選一個」。
    {PROCESS_RULE}，也不可以說你會改溫度。
@@ -1276,7 +1276,9 @@ class MainAgent:
         if follow and notes["summary"]:
             ctx["earlier_summary"] = notes["summary"]           # 前情摘要 of the turns before the last 20
         if follow and prev is not None:
-            ctx["previous_turn"] = {"you_were_asked": prev[0], "you_answered": prev[1][:300]}
+            # its own answer rides along clipped and marked as reference (whole, the model copied it back, real runs
+            # 10-21); 「為什麼」 needs it
+            ctx["previous_turn"] = {"you_were_asked": prev[0], "you_answered_for_reference_only": prev[1][:160]}
         msgs.append({"role": "user", "content": json.dumps(ctx, ensure_ascii=False, default=str)})
         from warroom.agent.commander import thinking_off
         extra = thinking_off(self.server_kind)
@@ -1434,7 +1436,10 @@ class MainAgent:
             if out.get("control_reply"):            # the confirmation question (or 「找不到」) is code's, word for word
                 out["reply"] = out.pop("control_reply")
                 return
-            code = self._code_reply(out, reply, text, source, waiting_plan, editing, general=casual and not out["steps"])
+            # general knowledge is told by the reply itself (the prompt makes it say 「一般知識」), not by keywords in the
+            # message (issue #195); its numbers are not plant numbers
+            code = self._code_reply(out, reply, text, source, waiting_plan, editing,
+                                    general=not out["steps"] and "一般知識" in reply)
             if code in (NOT_DONE, NOT_CHANGED) and _APPROVE_RX.search(t):
                 code = APPROVE_REPLY                    # 「幫我核准…」 claimed a plan: the honest answer is the button
             if code is None and prev is not None and tidy(reply, True) == prev[1] and not last:
@@ -1529,7 +1534,7 @@ class MainAgent:
                 return fixed
             # nothing read and not a plan change: the words stay, as before (「現在狀況怎樣？」 → 「7 號機 122.3°C…」 from
             # the context: 「7」 is CURE-07, 「1 台」 a count; 「這個我沒有查到資料」 there was not true, review 10-21)
-        if waiting_plan and about_edit and _UNSAFE_RX.search(words):
+        if waiting_plan and _UNSAFE_RX.search(words):     # any reply beside a waiting plan (issue #195: no keyword gate)
             out["error"] = "advice outside what the plan can change"
             return PLAN_EDIT_Q
         t = text.strip()
