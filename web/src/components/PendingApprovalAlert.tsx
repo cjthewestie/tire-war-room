@@ -27,7 +27,7 @@ export function PendingApprovalAlert({ variant = 'bar', onGo, newTab = false, st
   const m = alertModel(state.pending, ms(state.clock?.factory_time ?? state.snapshot?.header.factory_time), state.clock?.speed ?? 1)
   if (!m) return null
   const left = m.leftS != null ? `${fmtClock(m.leftS)} 後逾時` : null
-  const cls = `paa paa-${variant} ${m.red ? 'red' : 'amber'} ${m.pulse ? 'pulse' : ''}`
+  const cls = `paa paa-${variant} ${m.red ? 'red' : 'amber'} ${m.pulse ? 'paa-pulse' : ''}`
   const label = `待核准 ${m.n} 件，最久一件「${m.title}」${fmtWaited(m.waitedS)}${left ? `，${left}` : ''}。去核准`
   const body = (
     <>
@@ -39,7 +39,7 @@ export function PendingApprovalAlert({ variant = 'bar', onGo, newTab = false, st
     </>
   )
   return (
-    <div className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top: `calc(${top}px + var(--demo-bar-h, 0px))` } : undefined} data-testid="pending-alert"
+    <div className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top } : undefined} data-testid="pending-alert"
       data-event={m.oldest.event_id} data-level={m.red ? 'red' : 'amber'}>
       {onGo
         ? <button type="button" className={cls} aria-label={label} onClick={() => onGo(m.oldest.event_id)}>{body}</button>
