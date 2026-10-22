@@ -11,7 +11,7 @@ import { player } from './pose'
 export interface Stand { x: number; z: number; yaw: number; pitch: number }
 type P = [number, number]
 
-const WALK = 3.2, RUN = 5.0   // brisk: no walk between beats takes much over 2.5 s
+const WALK = 4.2, RUN = 6.5   // brisk: no walk between beats takes much over 2 s
 const wrap = (a: number) => Math.atan2(Math.sin(a), Math.cos(a))
 /** yaw that faces from (x, z) toward (tx, tz) (forward = (−sin yaw, −cos yaw)) */
 export const yawToward = (x: number, z: number, tx: number, tz: number) => Math.atan2(-(tx - x), -(tz - z))
