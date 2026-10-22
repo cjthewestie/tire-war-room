@@ -40,6 +40,52 @@ e7679c2cdd17620372e3787944771c24ff2794a24e032f738a238f79a9985830  synthetic_fact
 08b89b72b4dd5b1633ecfa5291f38bcf749b37a674d310a8f08a2988202b7477  實心胎_合成資料_V2_1.xlsx
 ```
 
+The hashes above are those of the files as the teammate delivered them. Two committed files were edited afterwards (see the next section), so their current hashes differ.
+
+## Edit record: customer names (2026-10-22, issue text by CJ)
+
+The placeholder customer names 客戶A–G (this dataset) were replaced with invented Taiwanese-style company names for the demo. The 客戶甲～癸 of the simulator (`warroom/sim/`) were replaced in the same pass with a second, separate set; the two sets are different customers and were not merged. **All names are made up for the demo (Demo／Synthetic Data) and do not refer to real companies.** Nothing else in the data changed: order ids, sizes, quantities, due dates, priorities and every other cell are as delivered.
+
+| Was | Now | | Was | Now |
+|---|---|---|---|---|
+| 客戶A | 福氣輪業股份有限公司 | | 客戶甲 | 順風順水工業有限公司 |
+| 客戶B | 金旺來工業社 | | 客戶乙 | 日日興物流股份有限公司 |
+| 客戶C | 大力出奇蹟實業有限公司 | | 客戶丙 | 五路財神企業社 |
+| 客戶D | 永固機械股份有限公司 | | 客戶丁 | 台灣勇腳機械有限公司 |
+| 客戶E | 黑狗兄輪業商社 | | 客戶戊 | 金好運運輸商社 |
+| 客戶F | 好運輪輪來企業社 | | 客戶己 | 萬年富工業股份有限公司 |
+| 客戶G | 鐵牛運搬股份有限公司 | | 客戶庚 | 尚勇輪業有限公司 |
+| | | | 客戶辛 | 一路發搬運企業社 |
+| | | | 客戶壬 | 穩穩發物流有限公司 |
+| | | | 客戶癸 | 台灣鐵漢實業股份有限公司 |
+
+Files edited: `orders.csv` (customer column), `team_dataset.xlsx` (sheet `5_訂單`, including its 「範例列」 row, which had used 客戶甲, and sheet `D1_訂單結果`; the replaced cells keep their original font), plus `data/orders_seed.xlsx` and `data/orders_synthetic.xlsx` (sheet 訂單). In `orders_seed.xlsx` the rush tyre #A-311 had its own older customer name (台塑工業車輛, a name that resembled a real company); it is now 永固機械股份有限公司, the same customer as in `orders_synthetic.xlsx` and in the dataset (#A-311 is split off SO-004, see `warroom/data/team_plan.py`). Every other cell, formula and workbook part is unchanged (checked cell by cell against the committed versions).
+
+sha256 after the edit:
+
+```
+77ef5fe96b56b4753990c4b3abda0634d5ba6aac079132036fdd5ca226b7eba0  orders.csv   (before: fa6c3508f5d71e75ea9cee4e74aa5b3917b6933b85c02fd571a1e8d1fe04e1d4)
+41a60441c450054b6e0b9e3576071892854c95e6a2ce25e30e23048b1ecb102f  team_dataset.xlsx
+d8fd4158eca460a646363aa632edc26301465b2909914ffff2547ee1abe77ede  ../orders_seed.xlsx
+26469f052fb2f0878bd703a27919a6292d1e9e53b79d4f5f52f32cc9278f52fe  ../orders_synthetic.xlsx
+```
+
+A third, independent set lives in the built-in seed of `warroom/kb/orders_db.py` (used only when no workbook is imported and there is no sim) and in `data/make_orders_seed.py`. Its 9 older names, which resembled real companies, were replaced too (#A-311 uses 永固機械股份有限公司, the same customer as in the dataset). `make_orders_seed.py` is out of date and was edited but **not run**; no dataset was regenerated.
+
+| Was | Now |
+|---|---|
+| 南亞堆高機 (#S-101) | 興旺堆高機股份有限公司 |
+| 台灣搬運車 (#S-102) | 阿財搬運車行 |
+| 中部物流設備 (#S-103) | 順手物流設備有限公司 |
+| 台塑工業車輛 (#A-311) | 永固機械股份有限公司 |
+| 高雄港機具 (#A-309) | 港都機具工業有限公司 |
+| 東元物流 (#A-315) | 元氣滿滿物流股份有限公司 |
+| 長榮貨櫃場 (#A-318) | 海派貨櫃場有限公司 |
+| 台中港務 (#B-207) | 青海碼頭作業有限公司 |
+| 中鋼運輸 (#B-212) | 鋼鐵人運輸股份有限公司 |
+
+Not changed, so they may still hold the old names: the uncommitted `synthetic_factory_1.db` (its orders table), `data/runtime/` (history.sqlite, audit.jsonl and the memory files derived from it), and the historical logs in `bench/results/`.
+
 ## How the war room uses it
 
 - **Machine ids**: `warroom/data/team_ids.py` maps the dataset codes onto our 28 machines: A01..A07 → A-MIX, A-OPEN, A-BIGOPEN, A-SMALLOPEN, A-CAL, A-COOL, A-WIND; B01..B04 → B-MIX, B-OPEN, B-FORM, B-ASSY; C01..C04 → C-PAYOFF, C-EXTR, C-WIND, C-WRAP; D01 → D-CUT; L01 → BOND-01; V01..V11 → CURE-01..11.

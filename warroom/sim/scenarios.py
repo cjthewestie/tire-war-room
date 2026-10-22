@@ -60,7 +60,7 @@ OVERLAY_SCENARIOS = frozenset({ScenarioName.CONCURRENT_3, ScenarioName.OPEN_MILL
 SHIFT_START_OFFSET_S = 600.0         # 08:00 早班開工
 STAFFING_OFFSET_S = 600.0            # 07:30 the call comes in, 30 min into the curing 早班 (06:00–15:00)
 RUSH_OFFSET_S = 600.0                # 10:00 the rush order arrives
-# The rush order follows the team dataset's one tight-due order (orders.csv SO-009: 客戶G 中胎, 「唯一需週六加班
+# The rush order follows the team dataset's one tight-due order (orders.csv SO-009: 鐵牛運搬股份有限公司 中胎, 「唯一需週六加班
 # 的訂單（交期緊）」), moved onto the sim clock: 2 tyres due 2 days after it arrives (assumed first lot).
 RUSH_ORDER_ID = "#R-009"
 RUSH_QTY = 2
@@ -71,7 +71,7 @@ SICK_STAFF_ID = "S13"
 
 def _rush_order(start: datetime) -> Order:
     due: date = start.date() + timedelta(days=RUSH_DUE_DAYS)
-    return Order(id=RUSH_ORDER_ID, size=TireSize.M, qty=RUSH_QTY, done=0, due=due, customer="客戶G",
+    return Order(id=RUSH_ORDER_ID, size=TireSize.M, qty=RUSH_QTY, done=0, due=due, customer="鐵牛運搬股份有限公司",
                  mold_id="MD-R009", priority=3)
 
 
@@ -95,7 +95,7 @@ P2_FLOW_DROP_OFFSET_S = 135.0
 # (Runtime._hold_for_compute): the rush plan, the pre-plan and each p.11 plan add their model time (~12–19 s each on
 # the Mac) on top. Offsets are from 06:59.
 # The order flood: (offset s, id, customer, size, qty, due in days, priority, rush). Ids continue the team dataset's
-# orders.csv (SO-001..SO-009, customers 客戶A–G). A re-solve keeps the active plan's tyres and adds only orders of
+# orders.csv (SO-001..SO-009, the seven customers of that file). A re-solve keeps the active plan's tyres and adds only orders of
 # priority >= 2 it does not carry (solver._prepare), so the normal orders wait for the next full plan and SO-012,
 # flagged 優先 (priority 2, no card of its own), goes in with the rush order's re-solve. SO-012 is the at-risk one:
 # 8 小胎 due tomorrow (10/24 23:59). 小胎 cures 24 h on the 7 small presses (01–07) and its compound is fed 100 min
@@ -104,14 +104,14 @@ P2_FLOW_DROP_OFFSET_S = 135.0
 # de-mold after the due date) and #101's pre-plan drafts its plan. The rush order comes last, so its re-solve sees
 # the whole flood.
 MR_ORDERS: tuple[tuple[float, str, str, TireSize, int, int, int, bool], ...] = (
-    (60.0, "SO-010", "客戶A", TireSize.S, 20, 17, 0, False),
-    (120.0, "SO-011", "客戶B", TireSize.M, 12, 28, 0, False),
-    (180.0, "SO-012", "客戶F", TireSize.S, 8, 1, 2, False),
-    (240.0, "SO-013", "客戶C", TireSize.S, 16, 21, 0, False),
-    (300.0, "SO-014", "客戶D", TireSize.L, 6, 35, 0, False),
-    (360.0, "SO-015", "客戶E", TireSize.S, 24, 24, 0, False),
-    (420.0, "SO-016", "客戶B", TireSize.M, 10, 30, 0, False),
-    (480.0, "SO-017", "客戶G", TireSize.M, 2, 3, 3, True),    # 07:07 急單: SO-009's customer again, 2 中胎 by Monday
+    (60.0, "SO-010", "福氣輪業股份有限公司", TireSize.S, 20, 17, 0, False),
+    (120.0, "SO-011", "金旺來工業社", TireSize.M, 12, 28, 0, False),
+    (180.0, "SO-012", "好運輪輪來企業社", TireSize.S, 8, 1, 2, False),
+    (240.0, "SO-013", "大力出奇蹟實業有限公司", TireSize.S, 16, 21, 0, False),
+    (300.0, "SO-014", "永固機械股份有限公司", TireSize.L, 6, 35, 0, False),
+    (360.0, "SO-015", "黑狗兄輪業商社", TireSize.S, 24, 24, 0, False),
+    (420.0, "SO-016", "金旺來工業社", TireSize.M, 10, 30, 0, False),
+    (480.0, "SO-017", "鐵牛運搬股份有限公司", TireSize.M, 2, 3, 3, True),    # 07:07 急單: SO-009's customer again, 2 中胎 by Monday
 )
 MR_AT_RISK_ORDER = "SO-012"
 MR_RUSH_ORDER = "SO-017"

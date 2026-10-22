@@ -237,19 +237,19 @@ class Factory:
         l_done, _, _ = DEMO_ORDER_PROGRESS[TireSize.L]
         # S/M/L 100 each (page 2), done 38/12/8. #A-311 is the next mold on press 7, due in 3 days (p.11).
         orders = [
-            Order(id="#S-101", size=TireSize.S, qty=60, done=s_done, due=d0 + timedelta(days=5), customer="客戶甲",
+            Order(id="#S-101", size=TireSize.S, qty=60, done=s_done, due=d0 + timedelta(days=5), customer="順風順水工業有限公司",
                   mold_id="MD-S101"),
-            Order(id="#S-102", size=TireSize.S, qty=39, done=0, due=d0 + timedelta(days=12), customer="客戶乙",
+            Order(id="#S-102", size=TireSize.S, qty=39, done=0, due=d0 + timedelta(days=12), customer="日日興物流股份有限公司",
                   mold_id="MD-S102"),
-            Order(id="#M-201", size=TireSize.M, qty=50, done=m_done, due=d0 + timedelta(days=21), customer="客戶丙",
+            Order(id="#M-201", size=TireSize.M, qty=50, done=m_done, due=d0 + timedelta(days=21), customer="五路財神企業社",
                   mold_id="MD-M201"),
-            Order(id="#M-202", size=TireSize.M, qty=50, done=0, due=d0 + timedelta(days=45), customer="客戶丁",
+            Order(id="#M-202", size=TireSize.M, qty=50, done=0, due=d0 + timedelta(days=45), customer="台灣勇腳機械有限公司",
                   mold_id="MD-M202"),
-            Order(id="#L-301", size=TireSize.L, qty=59, done=l_done, due=d0 + timedelta(days=30), customer="客戶戊",
+            Order(id="#L-301", size=TireSize.L, qty=59, done=l_done, due=d0 + timedelta(days=30), customer="金好運運輸商社",
                   mold_id="MD-L301"),
-            Order(id="#A-311", size=TireSize.S, qty=1, done=0, due=d0 + timedelta(days=3), customer="客戶己",
+            Order(id="#A-311", size=TireSize.S, qty=1, done=0, due=d0 + timedelta(days=3), customer="萬年富工業股份有限公司",
                   mold_id="#A-311", priority=2),
-            Order(id="#L-302", size=TireSize.L, qty=41, done=0, due=d0 + timedelta(days=60), customer="客戶庚",
+            Order(id="#L-302", size=TireSize.L, qty=41, done=0, due=d0 + timedelta(days=60), customer="尚勇輪業有限公司",
                   mold_id="MD-L302"),
         ]
         self._orders: dict[str, Order] = {o.id: o for o in orders}
