@@ -13,6 +13,8 @@ import { EAST_X, LOOP, PLACED_IDS, STOPS, WEST_X, robot, route, showStep, standP
 
 const SPEED = 0.62
 const INSPECT_S = 3.4
+/** The demo's robot show plays this much faster than its 4.2 s script (patrol.ts ROBOT_SHOW): about 3.1 s. */
+const SHOW_RATE = 1.35
 
 function build() {
   const root = new THREE.Group()
@@ -117,7 +119,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
   const s = useRef({
     path: [] as [number, number][], loopI: 1, stopDone: new Set<number>(), inspect: -1, inspectFor: '' as string,
     arm: [...FOLD] as [number, number], yaw: Math.PI / 2, light: 0, target: null as string | null,
-    show: -1, showFor: '' as string, bow: 0, visiting: false, returnAfterShow: false,
+    show: -1, showFor: '' as string, bow: 0, visiting: false, returnAfterShow: false, waitShow: false,
   })
   const target = incident && PLACED_BY_ID[incident] ? incident : null
 
@@ -158,8 +160,10 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
       st.visiting = true
       robot.mode = 'divert'
     }
-    if (st.visiting && !st.path.length) { st.visiting = false; robot.playReq = true; st.returnAfterShow = true }
-    if (robot.playReq) {
+    // arrived next to the lead: wait there (facing the lead) for the robot beat's show, then back to the loop
+    if (st.visiting && !st.path.length) { st.visiting = false; st.waitShow = true; st.returnAfterShow = true; robot.mode = 'parked' }
+    if (robot.playReq && !st.visiting) {
+      st.waitShow = false
       robot.playReq = false
       st.show = 0
       st.inspect = -1
@@ -168,7 +172,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     }
     let showing: ReturnType<typeof showStep> = null
     if (st.show >= 0) {
-      st.show += dt
+      st.show += dt * SHOW_RATE
       showing = showStep(st.show)
       if (showing && robot.played[robot.played.length - 1] !== showing) robot.played.push(showing)
       robot.playing = showing
@@ -185,7 +189,9 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
       }
     }
     // 1. where to drive: an explicit path (divert / return) first, else the loop
-    if (showing) {
+    if (st.waitShow) {
+      faceYaw = Math.atan2(camera.position.x - robot.x, camera.position.z - robot.z)
+    } else if (showing) {
       faceYaw = showing === 'scan' ? yawTo(st.showFor) : Math.atan2(camera.position.x - robot.x, camera.position.z - robot.z)
     } else if (st.inspect >= 0) {
       st.inspect += dt / INSPECT_S
@@ -217,7 +223,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
       const off = Math.abs(wrapA(want - st.yaw))
       st.yaw += wrapA(want - st.yaw) * Math.min(1, d * 6)
       if (off > 0.5) return true
-      const step = Math.min(len, SPEED * (st.target ? 1.6 : 1) * d)
+      const step = Math.min(len, SPEED * (st.visiting ? 4 : st.target ? 1.6 : 1) * d)
       robot.x += (dx / len) * step; robot.z += (dz / len) * step
       return true
     }
@@ -232,6 +238,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     else if (showing === 'bow') goalArm = BOW
     else if (showing === 'turn') goalArm = RAISE
     else if (st.inspect >= 0) { const p = inspectPose(st.inspect); goalArm = p.a; light = p.light }
+    else if (st.waitShow) goalArm = RAISE
     else if (robot.mode === 'parked') { goalArm = POINT; light = 1 }
     const k = st.inspect >= 0 && !showing ? 1 : Math.min(1, dt * (showing ? 7 : 3))
     st.arm[0] += (goalArm[0] - st.arm[0]) * k

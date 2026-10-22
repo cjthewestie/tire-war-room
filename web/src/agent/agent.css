@@ -4,7 +4,7 @@
 /* layout */
 .agent { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 560px); gap: var(--gap); align-items: start; }
 /* both columns fit the first screen under the header (~174px) so the decision bar is never below the fold */
-.agent-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; position: sticky; top: 72px; max-height: max(480px, calc(100vh - 240px)); overflow-y: auto; scrollbar-width: thin; }
+.agent-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: max(480px, calc(100vh - 240px)); overflow-y: auto; scrollbar-width: thin; }
 .agent-empty { padding: 22px; }
 
 /* console */
@@ -346,12 +346,12 @@
 .home-status-row .agent-strip { margin: 0; flex: 1; min-width: 0; }
 .as-item b { color: var(--ink); font-weight: 700; }
 .home { --home-h: max(560px, calc(100vh - 236px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
-.home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
+.home > .home-list { grid-area: list; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: var(--home-h); }
 .home > .plan-area { grid-area: plan; height: var(--home-h); }
 /* 今日工廠概況 grows with its content (no clipped last section at 1440); the side columns stay sticky */
 .home > .home-ov { height: auto; min-height: var(--home-h); overflow: visible; }
 .home > .home-ov .po-body { overflow: visible; }
-.home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
+.home > .console { grid-area: chat; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); height: var(--home-h); }
 .con-view button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-ev { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
 .feed-ev-h { align-self: flex-start; margin: 10px 0 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-size: 12.5px; color: var(--ink-dim); }
@@ -524,7 +524,7 @@ a.ov-row:hover { background: var(--panel-2); }
 .con-steps a { color: var(--accent); margin-left: 4px; }
 
 .trace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.trace-side { position: sticky; top: 72px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.trace-side { position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: calc(100vh - var(--topbar-h, 60px) - var(--paa-h, 0px) - 50px); display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
 .trace-side .panel-h { margin-bottom: 0; }
 .trace-pick { display: none; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px; font: inherit; font-size: 14px; }
 .trace-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 4px; }
@@ -860,7 +860,7 @@ a.ov-row:hover { background: var(--panel-2); }
 .sp-talk { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-3); padding-top: 8px; margin-top: 4px; }
 
 /* 處理報告 at the end of the 處理歷程 (ReportBlock, fast repair) */
-.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: 80px; }
+.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 20px); }
 .r-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .r-report header .ticon { color: var(--accent); }
 .r-report header b { font-size: 15px; }
@@ -915,3 +915,40 @@ a.ov-row:hover { background: var(--panel-2); }
 .ts-prev { margin-top: 8px; border-top: 1px solid var(--border); padding-top: 6px; }
 .ts-prev summary { cursor: pointer; color: var(--ink-dim); font-size: 13px; }
 .ts-prev[open] summary { margin-bottom: 6px; }
+
+/* issue #189: one Agent Nemo session per task — the 主控台 session bar + switcher, and the searchable task list
+   (進行中 / 今日已結案 / 歷史任務 by day) shared with the Agent page */
+.con-session { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.con-session-name { flex: 1 1 150px; min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.con-session-name b { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; font-size: 14px; color: var(--ink); }
+.con-session-name small { flex: none; }
+.con-session .btn-ghost { flex: none; font-size: 13px; padding: 4px 10px; }
+.con-picker { flex-basis: 100%; max-height: min(60vh, 520px); overflow-y: auto; scrollbar-width: thin; border-top: 1px solid var(--border); padding-top: 10px; }
+.con-readonly { margin: 0; padding: 10px 16px; border-top: 1px solid var(--border); }
+.tss { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.tss .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.tss-search input { width: 100%; box-sizing: border-box; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 14px; }
+.tss-search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tss-groups { display: flex; flex-direction: column; gap: 10px; }
+.tss-g { display: flex; flex-direction: column; gap: 4px; }
+.tss-h { margin: 0; font-size: 12.5px; font-weight: 700; color: var(--ink-dim); display: flex; gap: 6px; align-items: baseline; }
+.tss-empty { margin: 0 0 0 2px; }
+.tss-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.tss-row { width: 100%; text-align: left; background: none; border: 1px solid transparent; border-radius: 8px; padding: 7px 10px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; color: var(--ink); font: inherit; cursor: pointer; min-height: 40px; }
+.tss-row:hover { background: var(--panel-2); }
+.tss-row.on { background: var(--panel-2); border-color: var(--accent); }
+.tss-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.tss-general { border-color: var(--panel-3); }
+.tss-t { font-size: 12px; color: var(--ink-faint); font-variant-numeric: tabular-nums; }
+.tss-title { flex: 1 1 140px; min-width: 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.tss-st { font-size: 11.5px; padding: 1px 8px; border-radius: 999px; background: var(--panel-3); color: var(--ink-dim); white-space: nowrap; }
+.tss-st.run { background: var(--accent-soft); color: var(--accent); }
+.tss-out { flex-basis: 100%; font-size: 12px; }
+.tss-row .tree-row { flex-basis: 100%; font-size: 12px; color: var(--ink-dim); }
+.tss-day { border-left: 2px solid var(--panel-3); padding-left: 8px; }
+.tss-day summary { cursor: pointer; font-size: 13px; color: var(--ink); padding: 4px 0; }
+.trace-tasks { min-height: 0; overflow-y: auto; scrollbar-width: thin; }
+@media (max-width: 1023px) {
+  .trace-tasks { max-height: 50vh; }
+}
+.con-session-id { flex-basis: 100%; font-size: 12px; color: var(--ink-dim); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }

@@ -873,6 +873,21 @@ export type ChatMode = "task" | "overview"
 /** A task named in an overview reply: opens its board (#console?event=<event_id>); `reason` only for questionable ones. */
 export interface TaskLink { event_id: string; label: string; state: string; reason: string | null }
 
+/** GET /api/tasks (warroom/api/task_sessions.py, issue #189): one row per task; its id is its Agent Nemo session. */
+export interface TaskRow {
+  id: string; title: string; what: string; kind: string; kind_label: string; machine_id: string | null; machine_label: string | null
+  orders: string[]; state: string | null; state_label: string; opened_at: ISODate | null; closed_at: ISODate | null; outcome: string | null
+  /** still in this scenario's events (its whole record and chat are on the page) */
+  live: boolean; running: boolean; qa_demo?: boolean; day?: string | null; loop?: number | null
+}
+/** 進行中, 今日已結案 (the current factory day) and 歷史任務 grouped by factory day, newest first; all filtered by `q`. */
+export interface TaskListing {
+  today: { date: string; label: string }; q: string; running: TaskRow[]; closed_today: TaskRow[]
+  history: { key: string; label: string; scenario: string | null; count: number; tasks: TaskRow[] }[]
+}
+/** GET /api/tasks/{id}/session: a task's turns from the chat log on disk (read-only). */
+export interface TaskSessionTurn { id: number; ts: ISODate; role: 'user' | 'assistant'; text: string; event_id: string | null; turn_id: string | null }
+
 /** Agent Nemo 異常報告 (Kyle 10-21, option A; warroom/agent/reporter.py): drafted by the local model during the repair
  *  (by "model"; mock mode or a model failure: the code-written draft, "rules"), the result line appended by code at close. */
 export interface EventAiReport {

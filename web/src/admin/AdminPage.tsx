@@ -56,7 +56,7 @@ export function AdminPage() {
         <nav className="seg" aria-label="後台頁面">
           {PAGES.map((p) => <button key={p.id} className={page === p.id ? 'on' : ''} aria-pressed={page === p.id} onClick={() => go(p.id)} data-testid={`admin-${p.id}`}>{p.label}</button>)}
         </nav>
-        <span className="muted small">只限廠內網路・需主管 PIN（現場螢幕免輸入）・每次寫入都記稽核</span>
+        <span className="muted small">只限廠內網路・每次寫入都記稽核</span>
       </header>
       {page === 'status' ? <HealthPage /> : page === 'audit' ? <AuditPage /> : page === 'params' ? <ParamsPage /> : page === 'rag' ? <RagPage /> : page === 'plant' ? <PlantPage /> : page === 'memory' ? <MemoryPage /> : <RunsPage />}
     </div>

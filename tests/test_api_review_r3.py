@@ -158,11 +158,11 @@ def test_excel_orders_and_shifts_reach_sim_tools_panel_and_schedule(tmp_path):
     assert "orders_xlsx" not in rt.degraded
     by_id = {o.id: o for o in rt.sim.orders()}
     # the workbook names the plant's own orders (data/make_orders_seed.py) with its own customers
-    assert {"SO-002", "SO-003", "#A-311"} <= set(by_id) and by_id["SO-002"].customer == "客戶B"
+    assert {"SO-002", "SO-003", "#A-311"} <= set(by_id) and by_id["SO-002"].customer == "金旺來工業社"
     assert by_id["#A-311"].size.value == "S" and by_id["#A-311"].qty == 1
     assert any(s.id == "1003-body-夜班" for s in rt.sim.shifts())
     res = rt.c.tools.call(ToolCall(id="t1", tool=ToolName.QUERY_ORDERS_SHIFTS, args={}))
-    assert res.ok and "客戶B" in [o["customer"] for o in res.data["orders"]], res
+    assert res.ok and "金旺來工業社" in [o["customer"] for o in res.data["orders"]], res
     assert "10/03 夜班缺 1 人" in res.data["gaps"]
     panel = {o.label: (o.done, o.total) for o in rt.snapshot().orders}
     assert panel == {"小胎": (21, 100), "中胎": (9, 100), "大胎": (7, 100)}      # dataset tyres de-molded by 02:12

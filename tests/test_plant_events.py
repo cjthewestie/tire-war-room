@@ -149,7 +149,7 @@ def test_solver_inserts_a_rush_order_the_plan_does_not_carry():
     from warroom.schedule.demo import demo_inputs
     now = datetime(2026, 10, 7, 10, 0, tzinfo=TZ)
     orders, shifts, seed = demo_inputs(now)
-    rush = Order(id="#R-T1", size=TireSize.M, qty=1, due=now.date() + timedelta(days=3), customer="客戶G", priority=3)
+    rush = Order(id="#R-T1", size=TireSize.M, qty=1, due=now.date() + timedelta(days=3), customer="鐵牛運搬股份有限公司", priority=3)
     res = FallbackScheduler().solve(SolveRequest(now=now, orders=[*orders, rush], shifts=shifts, previous=seed,
                                                  time_limit_s=10))
     assert res.feasible and res.schedule is not None

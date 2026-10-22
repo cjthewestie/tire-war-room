@@ -119,7 +119,7 @@ function Dashboard() {
       )}
       <main>{tab === 'monitor' ? <><EarlyWarnings onMachine={setMachine} /><MonitorTab onMachine={setMachine} onAgent={openAgent} onOrders={() => go('orders')} /></>
         : tab === 'schedule' ? <ScheduleTab /> : tab === 'orders' ? <OrdersTab />
-        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} /></Suspense>
+        : tab === 'console' ? <Suspense fallback={<div className="loading">載入 Agent…</div>}><AgentConsolePage asks={asks} setAsks={setAsks} initial={consoleEvent} onSession={(id) => openAgent(id)} /></Suspense>
         : tab === 'sm' ? <Suspense fallback={<div className="loading">載入狀態機…</div>}><StateMachinePage /></Suspense>
         : tab === 'admin' ? <Suspense fallback={<div className="loading">載入後台…</div>}><AdminPage /></Suspense>
         : tab === 'qa' ? <Suspense fallback={<div className="loading">載入 QA 模式…</div>}><QaPage /></Suspense>
@@ -161,7 +161,7 @@ function Dashboard() {
             </button>
             <button role="menuitem" className={tab === 'admin' ? 'on' : ''} onClick={() => { setMoreOpen(false); go('admin') }}>
               <svg viewBox="0 0 24 24" aria-hidden><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2" /></svg>
-              <span><b>後台</b><small>RAG 知識庫、工廠指示、記憶、狀態（主管 PIN）</small></span>
+              <span><b>後台</b><small>RAG 知識庫、工廠指示、記憶、狀態</small></span>
             </button>
             {!EMBEDDED && (
               <a role="menuitem" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" onClick={() => setMoreOpen(false)} data-testid="factory-link-more">

@@ -73,7 +73,7 @@ SCHED_DELAY_H = (2.0, 6.0)           # 待排程 → 生產中 for a normal worl
 RUSH_SCHED_DELAY_H = (0.5, 1.0)
 WORLD_PRESS_EQ = 1.0                 # a world-only order advances like one press curing it (no real press used)
 PACK_H = 1.0                         # 完成 → 待出貨: final inspection + packing
-CUSTOMERS = ("客戶甲", "客戶乙", "客戶丙", "客戶丁", "客戶戊", "客戶己", "客戶庚", "客戶辛", "客戶壬", "客戶癸")
+CUSTOMERS = ("順風順水工業有限公司", "日日興物流股份有限公司", "五路財神企業社", "台灣勇腳機械有限公司", "金好運運輸商社", "萬年富工業股份有限公司", "尚勇輪業有限公司", "一路發搬運企業社", "穩穩發物流有限公司", "台灣鐵漢實業股份有限公司")
 
 # Shipping (outbound trucks): a truck comes 45 min before each dispatch time when something waits to ship
 DISPATCH_TIMES = (time(10, 0), time(16, 0))
@@ -645,11 +645,11 @@ class World:
         d0 = t0.date()
         self._orders: dict[str, _WOrder] = {}
         hist = [  # world-only history so every pipeline stage has something at the start
-            ("#W-0391", TireSize.S, 20, -1, "客戶壬", "已出貨"),
-            ("#W-0392", TireSize.M, 6, -2, "客戶癸", "已出貨"),
-            ("#W-0395", TireSize.S, 12, 4, "客戶甲", "待出貨"),
-            ("#W-0397", TireSize.L, 4, 9, "客戶乙", "生產中"),
-            ("#W-0398", TireSize.M, 8, 14, "客戶丙", "待排程"),
+            ("#W-0391", TireSize.S, 20, -1, "穩穩發物流有限公司", "已出貨"),
+            ("#W-0392", TireSize.M, 6, -2, "台灣鐵漢實業股份有限公司", "已出貨"),
+            ("#W-0395", TireSize.S, 12, 4, "順風順水工業有限公司", "待出貨"),
+            ("#W-0397", TireSize.L, 4, 9, "日日興物流股份有限公司", "生產中"),
+            ("#W-0398", TireSize.M, 8, 14, "五路財神企業社", "待排程"),
         ]
         for oid, size, qty, due_d, cust, status in hist:
             o = _WOrder(id=oid, size=size, qty=qty, due=d0 + timedelta(days=due_d), customer=cust,
@@ -681,12 +681,12 @@ class World:
             o.status, o.done, o.start_at = "生產中", o.qty - 1, t0 - timedelta(hours=30)
             o.progress = max(0.0, 1.0 - left_h * WORLD_PRESS_EQ / CURE_HOURS[o.size])
         near_done(self._orders["#W-0397"], t0 + timedelta(hours=6, minutes=30))
-        o = _WOrder(id="#W-0396", size=TireSize.S, qty=10, due=d0 + timedelta(days=2), customer="客戶丁",
+        o = _WOrder(id="#W-0396", size=TireSize.S, qty=10, due=d0 + timedelta(days=2), customer="台灣勇腳機械有限公司",
                     created_at=t0 - timedelta(days=4))
         near_done(o, t0 + timedelta(hours=13, minutes=30))
         self._orders[o.id] = o
-        self._scripted = [(t0 + timedelta(hours=9, minutes=10), TireSize.M, 8, False, "客戶戊"),
-                          (t0 + timedelta(hours=10, minutes=40), TireSize.S, 4, True, "客戶己")]
+        self._scripted = [(t0 + timedelta(hours=9, minutes=10), TireSize.M, 8, False, "金好運運輸商社"),
+                          (t0 + timedelta(hours=10, minutes=40), TireSize.S, 4, True, "萬年富工業股份有限公司")]
 
     def _update_orders(self, t: datetime, dt: float) -> None:
         rng = self.rng

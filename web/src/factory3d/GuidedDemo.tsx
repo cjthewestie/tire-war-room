@@ -11,8 +11,6 @@ const LINK: Record<CueLink, { label: string; win: string }> = {
   console: { label: '主控台', win: 'tw-console' }, phone: { label: '手機頁', win: 'tw-phone' }, agent: { label: 'Agent 頁面', win: 'tw-agent' },
 }
 const CIRCLED = '①②③④⑤⑥⑦⑧⑨⑩'
-/** Beats seen from the war-room doorway with 7 號機 glowing mid-frame: the card sits low and compact, off the press. */
-const LOW_CARD = new Set(['event', 'h1', 'verify', 'h2'])
 
 /** Where a cue's 「開啟」 button goes. */
 function href(link: CueLink, eventId: string | null) {
@@ -46,31 +44,27 @@ export function DemoOverlay({ demo, deck, onPhone, pad }: {
   return (
     <>
       <div className="f3-demo-badge" data-testid="demo-badge">🎬 Demo 模式・視角鎖定{demo.checkpoint >= 0 && <b>{CIRCLED[demo.checkpoint]} / {demo.checkpoints}</b>}</div>
-      {big ? (
-        <div className={`f3-cue-big ${cue.id}`} role="status" data-testid="demo-cue-big"><div><b>{cue.title}</b><span>{cue.body}</span></div></div>
-      ) : (
-        <div className={`f3-cue ${pitch ? 'pitch' : ''} ${pitch && left <= 60 ? 'warn' : ''} ${LOW_CARD.has(cue.id) ? 'low' : ''}`} role="status" data-testid="demo-cue" key={cue.id}>
-          <i>{mss(t)}{demo.checkpoint >= 0 && ` ・ ${CIRCLED[demo.checkpoint]}`}</i>
-          <b>{cue.title}</b>
-          <span>{cue.body}</span>
-          {(links.length > 0 || cue.id === 'h1' || cue.id === 'h2') && (
-            <div className="f3-cue-links">
-              {(cue.id === 'h1' || cue.id === 'h2') && <button onClick={onPhone} data-testid="demo-raise-phone">拿起手機（P{pad ? '／X' : ''}）</button>}
-              {links.map((l) => (
-                <button key={l} data-testid={`demo-open-${l}`} onClick={() => window.open(href(l, demo.incidentEventId), LINK[l].win)}>開啟・{LINK[l].label}</button>
-              ))}
-            </div>
-          )}
-          {pitch && deck.slides.length > 0 && (
-            <em>投影片 {demo.slide + 1} / {deck.slides.length}{deck.titles[demo.slide] ? `・${deck.titles[demo.slide]}` : ''}{secs ? `・約 ${secs} 秒` : ''}・{pad ? 'LB／RB' : '←／→'} 換頁</em>
-          )}
-          {waiting === 'continue' && demo.ready && (
-            <div className="f3-cue-go" data-testid="demo-continue-prompt"><kbd>{contKey}</kbd> 按 {contKey} 繼續{!pad && <small>（或 N）</small>}{!pitch && <small>・工廠時間暫停中</small>}</div>
-          )}
-          {waiting === 'approval' && <div className="f3-cue-wait" data-testid="demo-approval-wait">⏳ 等主管核准…核准後自動往下</div>}
-          {waiting === 'event' && next?.enter?.on && <div className="f3-cue-wait" data-testid="demo-event-wait">⏳ 等工廠下一件事：{next.title}</div>}
-        </div>
-      )}
+      {/* CJ, 2026-10-22: 「上面大大提示框太顯眼改下」: a subtitle strip in the lower third, one line (the cue's title),
+          a short status, tiny buttons; the full description lives in the title attribute (hover) only */}
+      <div className={`f3-cue strip ${big ? 'big' : ''} ${pitch && left <= 60 ? 'warn' : ''}`} role="status" data-testid={big ? 'demo-cue-big' : 'demo-cue'} key={cue.id} title={cue.body}>
+        <b>{cue.title}</b>
+        {pitch && deck.slides.length > 0 && !big && (
+          <em>{demo.slide + 1}/{deck.slides.length}{deck.titles[demo.slide] ? `・${deck.titles[demo.slide]}` : ''}{secs ? `・約 ${secs} 秒` : ''}</em>
+        )}
+        {!big && waiting === 'continue' && demo.ready && (
+          <span className="f3-cue-go" data-testid="demo-continue-prompt"><kbd>{contKey}</kbd> 繼續</span>
+        )}
+        {!big && waiting === 'approval' && <span className="f3-cue-wait" data-testid="demo-approval-wait">⏳ 等核准</span>}
+        {!big && waiting === 'event' && next?.enter?.on && <span className="f3-cue-wait" data-testid="demo-event-wait">⏳ 進行中</span>}
+        {!big && (links.length > 0 || cue.id === 'h1' || cue.id === 'h2') && (
+          <span className="f3-cue-links">
+            {(cue.id === 'h1' || cue.id === 'h2') && <button onClick={onPhone} data-testid="demo-raise-phone" title={`拿起手機（P${pad ? '／X' : ''}）`}>📱</button>}
+            {links.map((l) => (
+              <button key={l} data-testid={`demo-open-${l}`} title={`開啟${LINK[l].label}`} onClick={() => window.open(href(l, demo.incidentEventId), LINK[l].win)}>↗ {LINK[l].label}</button>
+            ))}
+          </span>
+        )}
+      </div>
       {demo.overTarget && !pitch && (
         <div className="f3-pitch-nudge" data-testid="demo-pitch-nudge">🎤 該換 Pitch 了・{demo.cue.id === 'robot' ? (demo.autoPitchIn > 0 ? `${Math.ceil(demo.autoPitchIn)} 秒後自動換` : '換了') : '講快一點，機器人之後就換'}</div>
       )}

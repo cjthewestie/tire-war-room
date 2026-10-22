@@ -28,7 +28,7 @@ export function frameFor(shot: Shot, machine: string | null, s: number, reduced 
   const drift = (amp: number, w: number) => amp * k * Math.sin(s * w)
   if (shot.kind === 'establish') {
     // a wide shot of the whole building, then a slow push along the rows (east → west) as the orders come in
-    const u = ease(Math.min(1, s / 14))
+    const u = ease(Math.min(1, s / 4))
     return { x: lerp(1.8, -1.4, u), y: 0.5, z: lerp(0.8, 1.2, u), yaw: lerp(0.62, 0.22, u) + drift(0.03, 0.2), pitch: lerp(0.9, 0.62, u), dist: lerp(32, 16, u) }
   }
   if (shot.kind === 'incident') {
@@ -82,8 +82,8 @@ export function routeBetween(from: THREE.Vector3, to: THREE.Vector3): THREE.Catm
   return new THREE.CatmullRomCurve3(pts, false, 'centripetal')
 }
 
-/** Flight duration: 1.5 s for a short move, up to 2.5 s across the building. */
-export const flightTime = (d: number) => Math.min(2.5, Math.max(1.5, 1.4 + d / 18))
+/** Flight duration: 1.0 s for a short move, up to 1.8 s across the building (was 1.5–2.5 s: the demo runs faster now). */
+export const flightTime = (d: number) => Math.min(1.8, Math.max(1.0, 1.0 + d / 25))
 
 interface Flight { curve: THREE.CatmullRomCurve3; fromLook: THREE.Vector3; t0: number; dur: number }
 

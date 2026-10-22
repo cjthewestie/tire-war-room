@@ -28,7 +28,7 @@ export function Header({ tab, onTab }: { tab: Tab; onTab: (t: Tab) => void }) {
         <button role="tab" aria-selected={tab === 'orders'} className={tab === 'orders' ? 'on' : ''} onClick={() => onTab('orders')} data-testid="tab-orders">訂單</button>
         <button role="tab" aria-selected={tab === 'console'} className={tab === 'console' ? 'on' : ''} onClick={() => onTab('console')} data-testid="tab-console" title="Agent 完整過程：狀態、計畫、工具、資料、把關、核准">Agent</button>
         <button role="tab" aria-selected={tab === 'sm'} className={tab === 'sm' ? 'on' : ''} onClick={() => onTab('sm')} data-testid="tab-sm" title="狀態機：事件偵測、各狀態的即時看板、每日事件紀錄">狀態機</button>
-        <button role="tab" aria-selected={tab === 'admin'} className={tab === 'admin' ? 'on' : ''} onClick={() => onTab('admin')} data-testid="tab-admin" title="後台：RAG 知識庫、記憶、狀態、執行紀錄（主管 PIN・限廠內網路）">後台</button>
+        <button role="tab" aria-selected={tab === 'admin'} className={tab === 'admin' ? 'on' : ''} onClick={() => onTab('admin')} data-testid="tab-admin" title="後台：RAG 知識庫、記憶、狀態、執行紀錄（限廠內網路）">後台</button>
       </nav>
       <div className="top-right">
         {net !== 'online' && <span className={`chip net ${net}`} title="離線分層（p.9）">{NET_LABEL[net]}</span>}

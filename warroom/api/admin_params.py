@@ -233,6 +233,8 @@ def params(r: Any, app_state: Any = None) -> dict[str, Any]:
              _line("warroom/api/admin.py", r"後台只限廠內網路")),
         _row("主管 PIN 已設定", bool(getattr(access, "supervisor_pin", None)) if access is not None else MISSING,
              "遠端核准與後台要輸入主管 PIN；現場螢幕免輸入（PIN 本身不顯示）", "env WARROOM_SUPERVISOR_PIN"),
+        _row("免主管 PIN（展示）", bool(getattr(access, "no_pin", False)) if access is not None else MISSING,
+             "開著時所有裝置都當現場主管、不問 PIN（決賽展示用）", "env WARROOM_NO_PIN"),
         _row("PIN 錯誤上限（每台）", getattr(guard, "per_host_max", MISSING), "同一台裝置錯幾次就鎖，鎖的時間逐次加倍",
              _line("warroom/api/app.py", r"per_host_max: int =")),
         _row("PIN 鎖定起始秒數", getattr(guard, "base_lock_s", MISSING), "第一次鎖多久",

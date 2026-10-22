@@ -194,13 +194,15 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       const isAuto = r instanceof DemoRun && r.auto
       if (out === 'cue') {
         console.info(`[demo] ${r.t.toFixed(1)} ${c.id} (${r.tl.fired[r.tl.fired.length - 1].reason})`)
-        if (c.big) { chime(true); setBigUntil(now + 4000) } else chime()
+        if (c.big) { chime(true); setBigUntil(now + 2500) } else chime()
         if (c.id === 'pitch') setSlide(0)
         w.enteredAt = now
         w.station = stationFor(c.id, c.shot)
         if (isAuto) w.station = c.id === 'agent' ? null : c.id === 'event' ? 'doorway' : w.station
         // the robot comes over to the lead at 7 號機, then plays its show facing the camera
-        if (c.id === 'robot') robot.visitReq = ROBOT_MEET
+        // the robot heads over while the crew repairs 7 號機, so at its beat it is already there for the show
+        if (c.id === 'worker') robot.visitReq = ROBOT_MEET
+        if (c.id === 'robot') { if (robot.playing == null) robot.playReq = true }
       }
       // camera: the opening overview (orbit), a hand-over onto the lead, then the first-person walk between stations
       if (isAuto && r.t >= AUTO.openS && (c.id === 'start' || c.id === 'event') && director.mode === 'orbit') {
@@ -212,7 +214,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
         if (c.shot.kind === 'establish') demoCam.setShot(c.shot, null)
         else {
           demoCam.setShot({ kind: 'lead' } as unknown as Shot, null)
-          if (!demoCam.flying && now - w.enteredAt > 600) { director.mode = 'walk'; onWalk() }
+          if (!demoCam.flying && now - w.enteredAt > 300) { director.mode = 'walk'; onWalk() }
         }
       }
       if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
@@ -225,8 +227,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       if (c.id === 'pitch' && r.tl.released && !slideOpened.current) { slideOpened.current = true; setSlideView(true) }
       if (c.id !== 'pitch' && c.id !== 'warn' && c.id !== 'end') slideOpened.current = false
       // a checkpoint is ready only once the walk (and the monitor, the robot's show) has arrived
-      const robotDone = c.id !== 'robot' || robot.played.includes('bow') || now - w.enteredAt > 30000
-      const monitorDone = isAuto || !want || (!!show && now - w.monitorAt > 1500)
+      const robotDone = c.id !== 'robot' || (robot.played.includes('bow') && robot.playing == null) || now - w.enteredAt > 12000
+      const monitorDone = isAuto || !want || (!!show && now - w.monitorAt > 300)
       if (isAuto) r.arrived = true
       else r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
       // the doorway view of 7 號機: nobody walks through the foreground between the camera and the press
@@ -243,7 +245,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       const d = stateRef.current.demo
       if (d?.running && d.paused !== paused) setPaused(d.paused)
       setSnap(snapOf(r))
-    }, 250)
+    }, 150)
     return () => clearInterval(id)
   }, [running, stop, paused, onWalk])
   useEffect(() => () => { director.on = false }, [])

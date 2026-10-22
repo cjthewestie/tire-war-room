@@ -424,7 +424,7 @@ WALKS: tuple[WalkKind, ...] = (
     WalkKind("open_mill", "開煉機過熱", "A 線大開煉機冷卻水量 40 → 18 L/min，溫度上升（提案 p.2）",
              "偵測 → 計劃 → 核准 → 執行 → 驗證；溫度到 120°C 前沒處理好，安全核心直接停機（未經 AI），由人解除", "overlay",
              ScenarioName.OPEN_MILL_OVERHEAT.value),
-    WalkKind("rush_order", "急單插單", "客戶 G 急單 2 條、交期兩天後", "急單 → 重新排程（求解器）→ R2 核准 → 新版排程生效",
+    WalkKind("rush_order", "急單插單", "鐵牛運搬股份有限公司 急單 2 條、交期兩天後", "急單 → 重新排程（求解器）→ R2 核准 → 新版排程生效",
              "overlay", ScenarioName.RUSH_ORDER.value),
     WalkKind("staffing", "夜班缺工", "加硫組一人來電請病假", "缺工 → 人力方案 A／B → 主管選一個核准", "overlay",
              ScenarioName.STAFFING.value),

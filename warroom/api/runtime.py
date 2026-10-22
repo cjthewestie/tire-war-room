@@ -853,9 +853,15 @@ class Runtime:
         Extension point for the agent: World.add_listener (warroom/sim/world.py) sees every world event;
         nothing here wakes the state machine yet."""
         w = getattr(self.sim, "world", None)
-        if w is None or (w is self._world_obj and w.rev == self._world_rev):
+        if w is None:
             return
-        if callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open():
+        # a fast repair runs on the wall clock, also while the factory clock is held (no world step, no new rev): its
+        # crew and ring are sent anyway, or the 3D showed the crew 4–5 s late and the machine fixed before anyone came
+        # (呱呱 10-22). Only the sections that changed go out.
+        fast = callable(getattr(getattr(w, "tasks", None), "fast_open", None)) and w.tasks.fast_open()
+        if w is self._world_obj and w.rev == self._world_rev and not fast:
+            return
+        if fast:
             self._fast_world_until = now + 1.0   # a fast repair's ring fills smoothly, up to its 完成
         if not force and now - self._last_world_pub < (0.25 if now < self._fast_world_until else 1.0):
             return
@@ -1209,9 +1215,11 @@ class Runtime:
                 continue                         # 主管核准 first: the approved round's tasks run, then the fix lands
             del self._repaired[mid]
             takeout = getattr(self.sim, "needs_takeout", None)
-            if callable(takeout) and takeout(mid) and not any(x.kind == "停用檢修" for x in same):
-                # page 11: H1's 檢修 (check the steam supply) finds the press still leaking; only H2's 停用檢修 fixes
-                # it, so VERIFY still sees 119.5 °C and the next hypothesis follows (fast repair or not)
+            if self.scenario is ScenarioName.MORNING_RUSH and callable(takeout) and takeout(mid) \
+                    and not any(x.kind == "停用檢修" for x in same):
+                # 一早訂單湧入 (the guided demo): H1's 檢修 (check the steam supply) finds the press still leaking; only H2's
+                # 停用檢修 fixes it, so VERIFY still sees 119.5 °C and the next hypothesis follows. Not on 7 號硫化機溫降
+                # (key 1, DEMO-SCRIPT A): there the approved repair fixes it in round 1 (issue #190)
                 self.audit.append(AuditKind.SYSTEM, "world", {"msg": "檢修完成，洩壓仍在：需停用檢修", "machine_id": mid}, eid)
                 continue
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):

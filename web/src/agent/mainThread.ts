@@ -51,9 +51,16 @@ function shortText(t: string): string {
   return first.length > 90 ? `${first.slice(0, 88)}…` : `${first}。`
 }
 
-/** `scope`: 'overview' = the Agent page's 總覽 conversation; 'task' = the 主控台 chat. `about`: only the turns sent with
- *  that task selected (the Agent page's task board). */
-export function useMainThread(asks: LocalItem[], scope: ChatMode = 'task', about?: string): Bubble[] {
+/** Is this 主 agent row part of session `about` (issue #189: one session per task)? A turn sent with the task selected,
+ *  the turn that started it (dispatched), and its reports; null = the 「新對話」 session (turns with no task). */
+function inSession(p: D, eid: string | null | undefined, about: string | null): boolean {
+  if (about === null) return p.orch === 'chat' && !p.selected
+  return p.selected === about || p.dispatched === about || (p.orch !== 'chat' && eid === about)
+}
+
+/** `scope`: 'overview' = the Agent page's 總覽 conversation; 'task' = the 主控台 chat. `about`: one session only — a
+ *  task's event id, or null for the 「新對話」 session; undefined = every turn. */
+export function useMainThread(asks: LocalItem[], scope: ChatMode = 'task', about?: string | null): Bubble[] {
   const { state, transport, connected } = useWarRoom()
   const [backfill, setBackfill] = useState<AuditEntry[]>([])
   useEffect(() => {
@@ -78,12 +85,12 @@ export function useMainThread(asks: LocalItem[], scope: ChatMode = 'task', about
     const all = [...bySeq.values()].sort((a, b) => a.seq - b.seq)
     // every turn the server has, so a message sent before the switch does not come back as a local bubble
     const turns = new Set(all.map((e) => String((e.payload as D)?.turn ?? '')).filter(Boolean))
-    const out: Bubble[] = all.filter((e) => e.seq > loaded && (about === undefined || (e.payload as D)?.selected === about))
+    const out: Bubble[] = all.filter((e) => e.seq > loaded && (about === undefined || inSession((e.payload ?? {}) as D, e.event_id, about)))
       .flatMap((e) => fromAudit(e, scope))
     // what is being sent now (and answers whose audit row has not arrived yet)
     for (const it of asks) {
       if (it.k !== 'chat' || (it.turn && turns.has(it.turn)) || (it.mode === 'overview') !== (scope === 'overview')) continue
-      if (about !== undefined && it.selected !== about) continue
+      if (about !== undefined && (it.selected ?? null) !== about) continue
       out.push({ key: it.key, ts: it.ts, who: it.role === 'me' ? 'me' : 'agent', text: it.text, pending: it.pending, steps: it.steps,
         fellBack: it.fellBack, error: it.error, about: it.about ?? null, links: it.links })
     }
