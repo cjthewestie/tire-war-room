@@ -62,11 +62,14 @@ while (Date.now() - t0 < 8 * 60_000) {
     const x = await d3(), v = await wr.evaluate(() => window.__demoWarroom?.() ?? null)
     const hash = await wr.evaluate(() => location.hash)
     const name = await shoot(s.cue_id)
+    // CJ, 2026-10-22: the war room looks like everyday use in the demo (no dimming, spotlight or caption card)
+    const extra = await wr.evaluate(() => document.querySelectorAll('.dm-dim, .dm-spot, .dm-cap, .dm-pitch, .dm-bar').length)
+    check(`${s.cue_id}: no demo overlay on the war room`, extra === 0, String(extra))
     const row = { sec: Math.round((Date.now() - t0) / 1000), server: s.cue_id, d3: x?.cue ?? null, wait: s.waiting_for, warroom: { hash, caption: v?.caption, hit: v?.hit }, shot: name }
     rows.push(row)
     console.log(`[${row.sec}s] server=${row.server} 3d=${row.d3} wait=${row.wait} warroom ${hash || '#主控台'} hit=${v?.hit} caption=${v?.caption}`)
     if (s.cue_id === 'pitch') {
-      check('pitch: war room shows the calm card', await wr.locator('[data-testid="demo-pitch"]').isVisible())
+      check('pitch: the war room stays a normal page (no card over it)', !(await wr.locator('[data-testid="demo-pitch"]').count()))
       await wr.keyboard.press('Escape')
       let ended = false
       for (let i = 0; i < 20 && !ended; i++) { await wr.waitForTimeout(300); ended = !(await api('/api/demo/state')).running }

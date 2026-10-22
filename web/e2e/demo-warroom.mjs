@@ -73,7 +73,7 @@ while (Date.now() - t0 < 9 * 60_000) {
       if (d3) check(`3D shows the same cue (${s.cue_id})`, d3.cue === s.cue_id, `3D=${d3.cue}`)
     }
     if (s.cue_id === 'pitch') {
-      check('pitch: calm card on the war room', await wr.locator('[data-testid="demo-pitch"]').isVisible())
+      check('pitch: the war room stays a normal page (no card over it)', !(await wr.locator('[data-testid="demo-pitch"]').count()))
       await wr.keyboard.press('n'); await wr.waitForTimeout(2500)
       n++; last = 'warn'; await shoot('warn')
       const until = async (f, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { if (await f()) return true; await wr.waitForTimeout(250) } return false }

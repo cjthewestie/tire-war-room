@@ -1,7 +1,6 @@
-// The war room in demo mode: the 「🎬 Demo 模式」 bar with the cue's caption and the presenter controls, the spotlight
-// on the beat's element (everything else dimmed, a soft glow, the short caption beside it) and, during the pitch, a calm
-// full-screen card so the audience looks at the 3D whiteboard. Clicks pass through the dimmed area (CJ still presses
-// 核准 here); the page itself is switched by App at each beat change.
+// The war room in demo mode looks like everyday use (CJ, 2026-10-22): the shared cue switches the page (App), selects
+// the beat's item and scrolls it into view here; the only visible demo element is a small control pill at the bottom
+// (繼續 / 暫停 / ✕, the demo clock). No dimming, spotlight or caption card. Clicks work as usual (CJ presses 核准 here).
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { mss } from './cues'
 import type { UseDemo } from './useDemo'
@@ -9,8 +8,8 @@ import './demo.css'
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-/** The demo bar's height (one row on a big screen, two on a phone). */
-const barH = () => (document.querySelector<HTMLElement>('.dm-bar')?.offsetHeight ?? 56) + 8
+/** Space kept above a framed item when it is scrolled into view (the demo has no top bar). */
+const barH = () => 8
 
 /** The first anchor on screen: one selector, or `a & b` (every part must be on screen, each gets a hole). */
 function findAnchor(sel: string[]): HTMLElement[] {
@@ -30,8 +29,6 @@ function clip(el: HTMLElement, pad = 8): Rect | null {
   const left = Math.max(r.left - pad, 6), right = Math.min(r.right + pad, window.innerWidth - 6)
   return bottom - top < 24 || right - left < 24 ? null : { x: left, y: top, w: right - left, h: bottom - top }
 }
-
-const WAIT_TEXT = { approval: '等主管核准（手機或核准卡）', event: '等工廠事件發生…', continue: '按 Space／N（或手把 A）繼續' } as const
 
 export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: string[]; caption: string }) {
   const { demo, cue, beat } = d
@@ -70,6 +67,7 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
         scrolled = el; settleAt = performance.now() + 900
         const tall = el.getBoundingClientRect().height > avail - 40
         if (fits) window.scrollBy({ top: top - barH() - (avail - (bottom - top)) / 2, behavior: 'smooth' })
+        else if (els.length > 1) window.scrollBy({ top: el.getBoundingClientRect().top - 96, behavior: 'smooth' })   // the first part near the top
         else if (tall) window.scrollBy({ top: el.getBoundingClientRect().top - barH() - 12, behavior: 'smooth' })
         else el.scrollIntoView({ block: 'center', behavior: 'smooth' })
       } else if (fits && performance.now() > settleAt && (top < barH() || bottom > window.innerHeight)) {
@@ -94,60 +92,19 @@ export function DemoOverlay({ d, anchors, caption }: { d: UseDemo; anchors: stri
   }, [demo?.cue_id, demo?.paused, demo?.waiting_for, caption, anchors, hit, rects, beat?.pitch])
 
   if (!demo?.running) return null
-  // the caption sits by the whole lit area (below it, else above it), never over one of its parts
-  const r = rects.length ? rects.reduce((u, h) => {
-    const x = Math.min(u.x, h.x), y = Math.min(u.y, h.y)
-    return { x, y, w: Math.max(u.x + u.w, h.x + h.w) - x, h: Math.max(u.y + u.h, h.y + h.h) - y }
-  }) : null
-  const below = r ? r.y + r.h + 64 < window.innerHeight || r.y - 52 < barH() : true
-  const wait = demo.waiting_for ? WAIT_TEXT[demo.waiting_for] : null
+  // CJ, 2026-10-22: 「demo進戰情室看板的時候不需要那麼顯眼的提示跟一般一樣就好了讓評審看到使用的樣子」: the page looks like
+  // everyday use (no dimming, no spotlight, no caption card); the cue still picks the page, selects the item and scrolls
+  // to it. All that shows of the demo is this small control pill at the bottom.
+  const hint = demo.waiting_for === 'approval' ? '等核准' : demo.paused ? '已暫停' : null
   return (
-    <>
-      <div className="dm-bar" role="region" aria-label="Demo 模式" data-testid="demo-bar">
-        <span className="dm-badge">🎬 Demo 模式</span>
-        <span className="dm-time" title="Demo 時間">{mss(t)}</span>
-        <div className="dm-cue">
-          <b data-testid="demo-cue-title">{cue?.title ?? demo.cue_id}</b>
-          {cue?.body && <span className="dm-body">{cue.body}</span>}
-        </div>
-        {wait && <span className={`dm-wait w-${demo.waiting_for}`} data-testid="demo-wait">{wait}</span>}
-        {demo.paused && <span className="dm-wait w-paused">已暫停</span>}
-        {d.err && <span className="dm-err" role="alert" data-testid="demo-err">{d.err}</span>}
-        <div className="dm-ctl">
-          <button onClick={() => void d.cont()} disabled={demo.waiting_for === 'approval' || demo.waiting_for === 'event'} title="Space／N" data-testid="demo-continue">繼續 ▶</button>
-          <button onClick={() => void d.togglePause()} title="P" data-testid="demo-pause">{demo.paused ? '▶ 恢復' : '❚❚ 暫停'}</button>
-          <button onClick={() => void d.exit()} title="Esc" className="dm-exit" data-testid="demo-exit">✕ 結束</button>
-        </div>
-      </div>
-      {beat?.pitch ? (
-        <div className="dm-pitch" data-testid="demo-pitch">
-          <div className="dm-pitch-in">
-            <span className="dm-pitch-k">{caption}</span>
-            <b>實心胎智慧製造戰情室</b>
-            <span className="dm-pitch-s">請看 3D 工廠的白板</span>
-          </div>
-        </div>
-      ) : r ? (
-        <>
-          {/* the dim layer with a hole per anchor (an SVG mask, so two holes do not dim each other), then the glow */}
-          <svg className="dm-dim" aria-hidden width="100%" height="100%">
-            <defs>
-              <mask id="dm-holes">
-                <rect width="100%" height="100%" fill="white" />
-                {rects.map((h, i) => <rect key={i} x={h.x} y={h.y} width={h.w} height={h.h} rx="14" fill="black" />)}
-              </mask>
-            </defs>
-            <rect width="100%" height="100%" mask="url(#dm-holes)" />
-          </svg>
-          {rects.map((h, i) => <div key={i} className="dm-spot" style={{ left: h.x, top: h.y, width: h.w, height: h.h }} data-testid="demo-spot" aria-hidden />)}
-          {caption && (
-            <div className={`dm-cap ${below ? 'below' : 'above'}`} data-testid="demo-caption"
-              style={{ left: Math.max(12, Math.min(r.x, window.innerWidth - 420)), top: below ? Math.min(r.y + r.h + 12, window.innerHeight - 64) : r.y - 12 }}>{caption}</div>
-          )}
-        </>
-      ) : caption ? (
-        <div className="dm-cap only" data-testid="demo-caption">{caption}</div>
-      ) : null}
-    </>
+    <div className="dm-mini" role="region" aria-label="Demo 控制" data-testid="demo-bar" title={cue?.title ?? demo.cue_id ?? ''}>
+      <span className="dm-mini-dot" aria-hidden>🎬</span>
+      <span className="dm-time" title="Demo 時間">{mss(t)}</span>
+      {hint && <span className="dm-mini-hint" data-testid="demo-wait">{hint}</span>}
+      {d.err && <span className="dm-err" role="alert" data-testid="demo-err" title={d.err}>{d.err}</span>}
+      <button onClick={() => void d.cont()} disabled={demo.waiting_for === 'approval' || demo.waiting_for === 'event'} title="繼續（Space／N）" aria-label="繼續" data-testid="demo-continue">繼續 ▶</button>
+      <button onClick={() => void d.togglePause()} title="暫停／恢復（P）" aria-label={demo.paused ? '恢復' : '暫停'} data-testid="demo-pause">{demo.paused ? '▶' : '❚❚'}</button>
+      <button onClick={() => void d.exit()} title="結束（Esc）" aria-label="結束 Demo" data-testid="demo-exit">✕</button>
+    </div>
   )
 }
