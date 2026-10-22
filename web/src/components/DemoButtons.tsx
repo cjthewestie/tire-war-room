@@ -50,8 +50,8 @@ export function DemoButtons({ where = 'warroom' }: { where?: 'warroom' | 'factor
   const go = (a: Act) => {
     say(a.done)
     if (a.newTab) { window.open(a.href, '_blank', 'noopener'); return }
-    if (where === 'warroom' && a.href!.startsWith('/#')) { location.hash = a.href!.slice(1); return }
-    location.href = a.href!
+    if (where === 'warroom' && a.href!.startsWith('/#')) { window.location.hash = a.href!.slice(1); return }
+    window.location.href = a.href!
   }
   return (
     <div className={`dbtn dbtn-${where} ${open ? 'open' : ''}`} data-testid="demo-buttons">
