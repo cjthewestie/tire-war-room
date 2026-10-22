@@ -1572,9 +1572,10 @@ class MainAgent:
                 return fixed
             # nothing read and not a plan change: the words stay, as before (「現在狀況怎樣？」 → 「7 號機 122.3°C…」 from
             # the context: 「7」 is CURE-07, 「1 台」 a count; 「這個我沒有查到資料」 there was not true, review 10-21)
-        if waiting_plan and not steps and words.rstrip().endswith(("？", "?")) and re.search(r"改|調整|換", words):
+        if waiting_plan and not steps and re.search(r"[？?]", words) and re.search(r"改|調整|換", words):
             # beside a waiting plan the model asked what to change in its own words (「是想調整排程、變更派工對象…？」,
             # live run 10-22: options the card does not have): the card's real list is the question
+            # (or re-told the whole card first and then asked, also live 10-22)
             out["error"] = "asked what to change with options of its own"
             return edit_q(waiting_plan)
         if waiting_plan and _UNSAFE_RX.search(words):     # any reply beside a waiting plan (issue #195: no keyword gate)
