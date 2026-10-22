@@ -20,6 +20,7 @@ import { embedSearch } from './transport'
 import { DemoOverlay } from './demo/DemoOverlay'
 import { anchorsFor, focusEvent } from './demo/beats'
 import { DemoCtx, useDemo } from './demo/useDemo'
+import { DemoButtons } from './components/DemoButtons'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
@@ -120,6 +121,8 @@ function Dashboard() {
         : tab === 'qa' ? <Suspense fallback={<div className="loading">載入 QA 模式…</div>}><QaPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
+      {/* CJ, 2026-10-22: 「把我這些想要 demo 的東西都做成小按鈕，因為可能會被斷網」: a tiny collapsed ⚙ in the corner, local /api only */}
+      {!EMBEDDED && <DemoButtons />}
       {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}
       <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測
         {!EMBEDDED && <a className="foot-link" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" data-testid="factory-link">3D 工廠 ↗</a>}</footer>
