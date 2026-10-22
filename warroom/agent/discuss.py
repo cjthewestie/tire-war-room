@@ -46,7 +46,7 @@ change 時把條件轉成 constraints，只能用這四種：
 - no_transfer：不要跨組調人。
 - prefer_option：選某個方案，option = A|B|overtime|transfer。
 不能轉成這四種的改動，不要編造，constraints 留空陣列。只輸出一個 JSON 物件。
-例：「9 號機今晚要保養」→ change，machine_unavailable CURE-09 tonight；「不要跨組調人」→ change，no_transfer；「為什麼用 9 號機？」→ question；「哈摟」「謝謝」→ chitchat；「asdf」→ other。"""
+例：「9 號機今晚要保養」→ change，machine_unavailable CURE-09 tonight；「不要跨組調人」→ change，no_transfer；「為什麼用 9 號機？」→ question；「哈摟」「謝謝」→ chitchat；「怎改」「改一下」（沒說改什麼）→ other；「asdf」→ other。"""
 
 
 def classify_schema() -> dict[str, Any]:

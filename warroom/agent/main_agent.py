@@ -244,6 +244,8 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 # 「（discuss_waiting_plan 回覆：…）」: a tool name in the reply
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
+# the supervisor in the third person: the model's reading of the message written as the reply (issue #195)
+_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|(?:問|跟|向)主管")
 MAX_TOKENS = 350           # a reply is cut at MAX_CHARS anyway; 500 let it write 400-token lists (6–8 s, real run 10-22)
 MAX_CHARS = 260            # a chat bubble, not a report; the full data stays in the reply's tool line
 MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
@@ -316,7 +318,7 @@ SYSTEM = f"""你是實心胎工廠戰情室的 AI agent「Agent Nemo」，用繁
 5. 有 waiting_plan（計劃標題、要做的事、人力方案 A／B），而 message 只是「計劃改」「怎改」「改一下」這類話：直接問你要改哪一項，只能列這份計劃真的能改的：{PLAN_CHANGES}；也可以直接核准或駁回。不要再介紹一次計劃。
    人力方案 A 和 B 是二選一的兩種做法（例如 A 加班、B 跨組調人），不是 A 加上 B；說的時候寫成「A 是…，B 是…，選一個」。
    {PROCESS_RULE}，也不可以說你會改溫度。
-6. 有 waiting_plan，主管給了具體改法（例如「9 號機今晚要保養」「不要加班」「改選 A」）：呼叫 discuss_waiting_plan，text 寫成完整的一句。改法不在第 5 條裡（例如改溫度）也交給它，它會照實說能不能做；計劃有沒有改，以它的結果為準。
+6. 有 waiting_plan，主管給了具體改法（例如「9 號機今晚要保養」「不要加班」「改選 A」）：呼叫 discuss_waiting_plan，text 照抄主管這句話。改法不在第 5 條裡（例如改溫度）也交給它，它會照實說能不能做；計劃有沒有改，以它的結果為準。
 7. 主管要做的是一件新的事（例如「#A-311 可能晚交，請重排保交期」，對象不在 waiting_plan 裡）：呼叫 propose_plan，不要當成在改這份計劃。
 4. 主管的話很短或看不懂（例如「?」）：依 context 猜他可能想知道什麼，簡短回應並問一句確認，不要只說看不懂。
 系統事實：安全核心（Safety Core）是確定性的程式（紅色路徑），讀值超過硬上限時在毫秒內直接停機或降載，不經過模型、也不經過你。你不能覆蓋它。恢復要主管確認：按鈕或在對話裡回「好」，而且現場檢查和讀值都要先過（release_safety_stop 會先檢查，沒過就照實說還差什麼）。
@@ -409,7 +411,8 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
             "description": "要完成的事，一句話，含對象"}}, ["task"]),
     ]
     if with_discuss:
-        specs.append(_fn(DISCUSS, "主管在談目前選的待核准計劃：加條件或問為什麼", {"text": {"type": "string"}}, ["text"]))
+        specs.append(_fn(DISCUSS, "主管給了目前選的待核准計劃的具體改法（加條件、選方案）或問計劃為什麼；「怎改」「改一下」這種沒說改什麼的話不要呼叫，直接問他要改哪一項",
+                         {"text": {"type": "string", "description": "主管這句話的原話"}}, ["text"]))
     return specs
 
 
@@ -995,8 +998,12 @@ class MainAgent:
                 steps.append({"tool": name, "args": args, "ok": False, "summary": "主管這句看不懂，沒有拿來改計劃",
                               "label": "沒有改計劃"})
                 return "主管這句看不懂，不能拿來改計劃。請問主管要改哪一項。"
-            r = await discuss(str((args or {}).get("text") or text))
+            # the supervisor's own words, never the model's reading of them (issue #195: 「主管是想調整 7 號機…」 went in
+            # as the text and came back as the reply, real run 10-22)
+            r = await discuss(text)
             reply = str(r.get("reply") or "")
+            if r.get("intent") in ("unclear", "chitchat") and not r.get("replanned"):
+                reply = PLAN_EDIT_Q                    # 「怎改」: what this plan can change, the A／B options as a choice
             approval = r.get("approval") or {}
             steps.append({"tool": name, "args": args, "ok": True, "summary": reply[:200], "label": "討論計劃",
                           "reply": reply, "replanned": bool(r.get("replanned")),
@@ -1516,6 +1523,15 @@ class MainAgent:
             out["error"] = "all read tools failed"
             return nothing
         words = tidy(reply, True)
+        if _THIRD_RX.search(words):
+            # the model's reading of the message (「主管是想調整 7 號機…可以問主管要改哪一項」, issue #195) is no reply: the
+            # supervisor is 你. Those sentences go; nothing left beside a waiting plan → what the plan can change
+            kept = "".join(x for x in _SENTENCE_RX.findall(words) if not _THIRD_RX.search(x)).strip()
+            out["error"] = "reply spoke of the supervisor in the third person"
+            if not kept:
+                return PLAN_EDIT_Q if waiting_plan else words.replace("主管", "你")
+            # the rest still meets every check below; with none to make, the kept words are the reply
+            return self._code_reply(out, kept, text, source, waiting_plan, about_edit, general) or kept
         # a general answer with no plant read (「硫化是什麼」 → 「通常在 140–160°C」) is general knowledge, not a plant number
         bad = [] if general else ungrounded(words, source) + miscounted(words, source)
         if bad:                                       # a number the tools did not give: the results speak instead
