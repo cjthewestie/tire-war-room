@@ -156,8 +156,10 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
     const tasks = world.tasks?.items ?? []
     const active = new Set<string>()
     world.people.workers.forEach((w, k) => {
+      // the task's status leads: a worker's own state moves only when the factory clock steps, and the clock is held
+      // while the model computes, so a fast repair's crew showed up 8 s late (呱呱 10-22)
       const t = tasks.find((x) => x.worker_id === w.id && ON_TASK.has(x.status))
-      if (!t || !ON_TASK.has(w.state)) return
+      if (!t) return
       active.add(w.id)
       const s = spot(w, k)
       let wk = walkers.current.get(w.id)
@@ -184,9 +186,9 @@ export function WorldPeople({ world }: { world: WorldSnapshot }) {
         wk.taskId = t.id
       }
       wk.yaw = s.yaw
-      wk.key = `${w.state}|${t.id}`
+      wk.key = `${t.status}|${t.id}`
       wk.rush = REPAIR_KINDS.has(t.kind)
-      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(w.state === '執行中' ? '#76b900' : '#f5b83d')
+      ;(wk.task as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>).material.color.set(t.status === '執行中' ? '#76b900' : '#f5b83d')
       if (Math.abs(wk.progress - t.progress) > 0.01) {
         wk.progress = t.progress
         wk.ring.geometry.dispose()

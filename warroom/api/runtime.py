@@ -1215,9 +1215,11 @@ class Runtime:
                 continue                         # 主管核准 first: the approved round's tasks run, then the fix lands
             del self._repaired[mid]
             takeout = getattr(self.sim, "needs_takeout", None)
-            if callable(takeout) and takeout(mid) and not any(x.kind == "停用檢修" for x in same):
-                # page 11: H1's 檢修 (check the steam supply) finds the press still leaking; only H2's 停用檢修 fixes
-                # it, so VERIFY still sees 119.5 °C and the next hypothesis follows (fast repair or not)
+            if self.scenario is ScenarioName.MORNING_RUSH and callable(takeout) and takeout(mid) \
+                    and not any(x.kind == "停用檢修" for x in same):
+                # 一早訂單湧入 (the guided demo): H1's 檢修 (check the steam supply) finds the press still leaking; only H2's
+                # 停用檢修 fixes it, so VERIFY still sees 119.5 °C and the next hypothesis follows. Not on 7 號硫化機溫降
+                # (key 1, DEMO-SCRIPT A): there the approved repair fixes it in round 1 (issue #190)
                 self.audit.append(AuditKind.SYSTEM, "world", {"msg": "檢修完成，洩壓仍在：需停用檢修", "machine_id": mid}, eid)
                 continue
             if all(f.machine_id != mid for f in self.sim.faults(active_only=False)):
