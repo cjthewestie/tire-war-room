@@ -4,7 +4,7 @@
 /* layout */
 .agent { display: grid; grid-template-columns: minmax(0, 1fr) minmax(420px, 560px); gap: var(--gap); align-items: start; }
 /* both columns fit the first screen under the header (~174px) so the decision bar is never below the fold */
-.agent-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; position: sticky; top: 72px; max-height: max(480px, calc(100vh - 240px)); overflow-y: auto; scrollbar-width: thin; }
+.agent-side { display: flex; flex-direction: column; gap: var(--gap); min-width: 0; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: max(480px, calc(100vh - 240px)); overflow-y: auto; scrollbar-width: thin; }
 .agent-empty { padding: 22px; }
 
 /* console */
@@ -346,12 +346,12 @@
 .home-status-row .agent-strip { margin: 0; flex: 1; min-width: 0; }
 .as-item b { color: var(--ink); font-weight: 700; }
 .home { --home-h: max(560px, calc(100vh - 236px)); display: grid; grid-template-columns: 260px minmax(0, 1fr) 360px; grid-template-areas: "list plan chat"; gap: 12px; align-items: start; }
-.home > .home-list { grid-area: list; position: sticky; top: 72px; max-height: var(--home-h); }
+.home > .home-list { grid-area: list; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: var(--home-h); }
 .home > .plan-area { grid-area: plan; height: var(--home-h); }
 /* 今日工廠概況 grows with its content (no clipped last section at 1440); the side columns stay sticky */
 .home > .home-ov { height: auto; min-height: var(--home-h); overflow: visible; }
 .home > .home-ov .po-body { overflow: visible; }
-.home > .console { grid-area: chat; position: sticky; top: 72px; height: var(--home-h); }
+.home > .console { grid-area: chat; position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); height: var(--home-h); }
 .con-view button { max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .feed-ev { display: flex; flex-direction: column; gap: 6px; padding-bottom: 8px; }
 .feed-ev-h { align-self: flex-start; margin: 10px 0 2px; background: var(--panel-2); border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-size: 12.5px; color: var(--ink-dim); }
@@ -524,7 +524,7 @@ a.ov-row:hover { background: var(--panel-2); }
 .con-steps a { color: var(--accent); margin-left: 4px; }
 
 .trace { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: var(--gap); align-items: start; }
-.trace-side { position: sticky; top: 72px; max-height: calc(100vh - 110px); display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+.trace-side { position: sticky; top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 12px); max-height: calc(100vh - var(--topbar-h, 60px) - var(--paa-h, 0px) - 50px); display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
 .trace-side .panel-h { margin-bottom: 0; }
 .trace-pick { display: none; background: var(--panel-2); color: var(--ink); border: 1px solid var(--panel-3); border-radius: 8px; padding: 8px; font: inherit; font-size: 14px; }
 .trace-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; scrollbar-width: thin; display: flex; flex-direction: column; gap: 4px; }
@@ -860,7 +860,7 @@ a.ov-row:hover { background: var(--panel-2); }
 .sp-talk { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--panel-3); padding-top: 8px; margin-top: 4px; }
 
 /* 處理報告 at the end of the 處理歷程 (ReportBlock, fast repair) */
-.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: 80px; }
+.r-report { border: 1px solid rgb(var(--accent-rgb, 118 185 0) / .45); background: var(--panel-2); border-radius: 12px; padding: 12px 14px; margin: 10px 0 4px; font-size: 13.5px; scroll-margin-top: calc(var(--topbar-h, 60px) + var(--paa-h, 0px) + 20px); }
 .r-report header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .r-report header .ticon { color: var(--accent); }
 .r-report header b { font-size: 15px; }

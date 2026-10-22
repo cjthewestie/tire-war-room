@@ -8,8 +8,13 @@ import './demo.css'
 
 interface Rect { x: number; y: number; w: number; h: number }
 
-/** Space kept above a framed item when it is scrolled into view (the demo has no top bar). */
-const barH = () => 8
+/** Space kept above a framed item when it is scrolled into view: the sticky header and 待核准 bar (heights published by
+ *  PendingApprovalAlert as --topbar-h / --paa-h) plus a small margin. The demo itself has no top bar. */
+const barH = () => {
+  const cs = getComputedStyle(document.documentElement)
+  const px = (v: string) => parseFloat(cs.getPropertyValue(v)) || 0
+  return 8 + px('--topbar-h') + px('--paa-h')
+}
 
 /** The first anchor on screen: one selector, or `a & b` (every part must be on screen, each gets a hole). */
 function findAnchor(sel: string[]): HTMLElement[] {
