@@ -29,11 +29,18 @@ import { RepairNotice } from './RepairNotice'
 import { CUES } from '../demo/cues'
 import { isMachine } from '../demo/signals'
 import { APPROVAL_CUES } from '../demo/beats'
+import { autoActive } from '../demo/auto'
+import { AutoCard } from './AutoCard'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
 
 export function Phone() {
+  const { transport } = useWarRoom()
+  return autoActive(transport?.mode) ? <AutoCard /> : <PhoneFull />
+}
+
+function PhoneFull() {
   const { state, transport, connected } = useWarRoom()
   // the most urgent card first: R3 before R2, then the newest
   const pending = [...state.pending].sort((a, b) => (a.risk === b.risk ? (a.created_at < b.created_at ? 1 : -1) : a.risk > b.risk ? -1 : 1))

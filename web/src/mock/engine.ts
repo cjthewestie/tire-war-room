@@ -14,6 +14,7 @@ import { HOUR, MIN, baseJobs, makeSchedule, pressSize, shiftInstances, version }
 import {
   type Ctx, type OverlayFault, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, overlayFaultScript, press7Script, r1,
 } from './scripts'
+import { autoRequested } from '../demo/auto'
 
 /** Tyres already de-molded at the page-11 start (dataset 10/28 02:12 shifted to 10/03): S 21, M 9, L 7 of 100. */
 const MOCK_ORDER_DONE: Record<'S' | 'M' | 'L', number> = { S: 21, M: 9, L: 7 }
@@ -70,7 +71,12 @@ function buildScenario(name: ScenarioName): LoadedScenario {
   const T = (iso: string) => Date.parse(iso)
   switch (name) {
     case 'open_mill_overheat': return { name, scripts: [openMillScript(T('2026-10-22T14:13:00+08:00'))] }
-    case 'press7_temp_drop': { const p = press7Script(T('2026-10-03T02:14:00+08:00')); return { name, scripts: [p], press7: p } }
+    case 'press7_temp_drop': {
+      // ?mock=1&demo=cure07 (自動播放 Demo): 單一事件、單輪核准，事件在情境開始後 60 工廠秒（情境速度 10× → Demo 第 6 秒）出現
+      const single = autoRequested()
+      const p = press7Script(T(single ? '2026-10-03T02:13:00+08:00' : '2026-10-03T02:14:00+08:00'), single)
+      return { name, scripts: [p], press7: p }
+    }
     case 'concurrent_3': {
       const p = press7Script(T('2026-10-03T02:14:00+08:00'))
       return { name, scripts: [p, openMillScript(T('2026-10-03T02:14:30+08:00')), bmixScript(T('2026-10-03T02:15:00+08:00'))], press7: p }

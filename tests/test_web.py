@@ -67,7 +67,9 @@ def test_mock_page11_numbers():
     for t in ("2026-10-03T02:14:00+08:00",):
         assert t in ENGINE_TS
     # timeline offsets: 02:14:01, :03, :09, :11, :25, 02:16:40, 02:31:00, :04, :30
-    for off in ("at(1)", "at(3)", "at(9)", "at(11)", "at(25)", "at(160)", "at(1020)", "at(1024)", "at(1050)"):
+    # :03 / :09 / :11 / :25 / :26 live in the normal-run K table (#194 adds a compressed single-event table beside it)
+    assert "{ hyp: 3, plan: 9, sim: 11, gate: 25, card: 26 }" in SCRIPTS_TS
+    for off in ("at(1)", "at(160)", "at(1020)", "at(1024)", "at(1050)"):
         assert off in SCRIPTS_TS, off
 
 

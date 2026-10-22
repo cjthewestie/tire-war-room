@@ -90,10 +90,12 @@ function noise(id: string, t: number, amp = 0.15): number {
 // =====================================================================================
 // Page 11 — 硫化機 7 號 128 → 122 °C: extend cure, verify fails, swap hypothesis
 // =====================================================================================
-export function press7Script(A: number): Script & { versions(now: number, ctx: Ctx): ScheduleVersion[] } {
+export function press7Script(A: number, single = false): Script & { versions(now: number, ctx: Ctx): ScheduleVersion[] } {
   const EV = `EV-${isoTaipei(A).slice(0, 10).replace(/-/g, '')}-${isoTaipei(A).slice(11, 19).replace(/:/g, '')}-CURE-07`
   const at = (s: number) => A + s * SEC
-  const R1_CREATED = at(26), R1_DEADLINE = at(160)          // 02:16:40
+  // single = 自動播放 Demo（CURE-07 單一事件、單輪核准、128 → 122.3°C）：時間表壓縮，且不走 H1 → H2 第二輪
+  const K = single ? { hyp: 2, plan: 5, sim: 8, gate: 13, card: 15 } : { hyp: 3, plan: 9, sim: 11, gate: 25, card: 26 }
+  const R1_CREATED = at(K.card), R1_DEADLINE = single ? null : at(160)          // 02:16:40
   const VERIFY = at(1020), H2_T = at(1024), SAFETY_T = at(877) // 02:31:00, 02:31:04, 02:28:37
   const R2_CREATED = at(1032), R2_DEADLINE = at(1050)       // 02:31:30
   const moldIn07 = A - 14.4 * HOUR                           // 14.4 h into a 24 h small cure (dataset EV-2, S-027)
@@ -102,7 +104,8 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
   const temp07 = (t: number) => {
     const rel = (t - A) / SEC
     let v: number
-    if (rel < -240) v = 128
+    if (single) v = rel < -240 ? 128 : rel < 0 ? lerp(128, 122.3, (rel + 240) / 240) : lerp(122.3, 122, rel / 1800)
+    else if (rel < -240) v = 128
     else if (rel < 0) v = lerp(128, 122, (rel + 240) / 240)
     else if (rel < 360) v = lerp(122, 121.8, rel / 360)
     else if (rel < 1020) v = lerp(121.8, 119.5, (rel - 360) / 660)
@@ -132,7 +135,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     const out: ScheduleVersion[] = []
     const v1 = makeSchedule('SCH-v1', A - 2 * 24 * HOUR, base)
     out.push(version(1, null, 'active', A - 2 * 24 * HOUR, '週排程（硫化機為中心，出模排進有人時段）', null, v1))
-    if (now < at(25)) return out
+    if (now < at(K.gate)) return out
     // v2: CURE-07 cure extended to 28.5 h (small tire, dataset EV-2); #A-311 (small) still fits on press 7;
     //     night shift takes 1 from line 2
     let j2 = base.map((j) => ({ ...j }))
@@ -142,12 +145,12 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     j2[i07].frozen = true
     j2 = reflow(j2, 'CURE-07', Date.parse(j2[i07].demold) + 30 * MIN)
     const transfer = { kind: 'transfer' as const, shift_date: isoTaipei(A).slice(0, 10), shift_name: '夜班', to_team: 'body' as const, from_team: 'side' as const, from_label: '2 線', people: 1, label: `${NIGHT} 夜班從 2 線調 1 人` }
-    const v2s = makeSchedule('SCH-v2', at(25), j2, [transfer], ['7 號硫化時間延長至 28.5 h（+4.5 h）'])
+    const v2s = makeSchedule('SCH-v2', at(K.gate), j2, [transfer], ['7 號硫化時間延長至 28.5 h（+4.5 h）'])
     const res1 = r1Res(now, ctx)
     const v2active = !!res1 && res1.d.decision !== 'reject'
     out[0].status = v2active ? 'superseded' : 'active'
-    out.push(version(2, 1, v2active ? 'active' : res1 ? 'superseded' : 'proposed', at(25), 'S3 求解：#A-311 維持 7 號機、夜班從 2 線調 1 人', EV, v2s))
-    if (now < at(1031)) return out
+    out.push(version(2, 1, v2active ? 'active' : res1 ? 'superseded' : 'proposed', at(K.gate), 'S3 求解：#A-311 維持 7 號機、夜班從 2 線調 1 人', EV, v2s))
+    if (single || now < at(1031)) return out
     // v3: CURE-07 out of service; overtime (A) or transfer (B)
     const res2 = r2Res(now, ctx)
     const optB = res2?.d.option_id === 'B'
@@ -176,33 +179,39 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     const res2 = r2Res(now, ctx)
     const d1 = res1?.at ?? Infinity
     const d2 = res2?.at ?? Infinity
-    const marks: [number, EventState][] = [
-      [A, 'detected'], [at(1), 'classify'], [at(9), 'plan'], [at(11), 'simulate'], [at(25), 'gate'], [R1_CREATED, 'await_approval'],
+    const marksFull: [number, EventState][] = [
+      [A, 'detected'], [at(1), 'classify'], [at(K.plan), 'plan'], [at(K.sim), 'simulate'], [at(K.gate), 'gate'], [R1_CREATED, 'await_approval'],
       [d1, 'execute'], [d1 + 2 * SEC, 'verify'], [VERIFY, 'replan'], [at(1030), 'simulate'], [at(1031), 'gate'], [R2_CREATED, 'await_approval'],
       [d2, 'execute'], [d2 + 3 * SEC, 'verify'], [d2 + 10 * SEC, 'closed'],
     ]
+    const closeT = single ? d1 + 70 * SEC : d2 + 10 * SEC
+    const marks: [number, EventState][] = single
+      ? [[A, 'detected'], [at(1), 'classify'], [at(K.plan), 'plan'], [at(K.sim), 'simulate'], [at(K.gate), 'gate'], [R1_CREATED, 'await_approval'],
+         [d1, 'execute'], [d1 + 30 * SEC, 'verify'], [closeT, 'closed']]
+      : marksFull
     const state = stateAt(now, marks)
-    const round2 = now >= VERIFY
+    const round2 = !single && now >= VERIFY
 
     // ---- timeline (page 11 table) ----
     const T: TimelineItem[] = []
     const push = (t: number, a: TimelineItem['actor'], text: string, tag: TimelineItem['tag']) => { if (now >= t) T.push(tl(t, a, text, tag)) }
-    push(A, '事件偵測', '[工具] 7 號 128 → 122°C，預測穩定在 122±1°C → 喚醒指揮官', 'tool')
+    push(A, '事件偵測', single ? '[工具] 7 號 128 → 122.3°C，預測穩定在 122±1°C → 喚醒 AI' : '[工具] 7 號 128 → 122°C，預測穩定在 122±1°C → 喚醒指揮官', 'tool')
     push(at(1), '安全核心', '仍在 120–130°C，不停機（低於 120°C 直接處置，不等 AI）', 'safety')
-    push(at(3), '指揮官', '[工具] 讀 30 分鐘溫度、[工具] 查 SOP → 假設 H1：蒸汽壓不足，溫度會穩定', 'decision')
-    push(at(9), '指揮官', '拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知；預期：30 分內 ≥ 121°C', 'info')
-    push(at(11), '工具', `[工具] S1：122°C 總需 28.5 h（+4.5 h）　[工具] S2：下一模 #A-311 交期 3 天後，夜班缺 1 人`, 'tool')
-    push(at(25), '求解器', '[工具] S3：#A-311 仍排 7 號機、夜班從 2 線調 1 人，交期全部滿足', 'tool')
+    push(at(K.hyp), '指揮官', single ? '[工具] 讀 30 分鐘溫度、[工具] 查 SOP → 判斷原因：蒸汽壓不足，溫度會穩定' : '[工具] 讀 30 分鐘溫度、[工具] 查 SOP → 假設 H1：蒸汽壓不足，溫度會穩定', 'decision')
+    push(at(K.plan), '指揮官', '拆步驟：S1 硫化公式、S2 訂單班表 → S3 排程（依賴 S1、S2）→ S4 確認（需核准）→ S5 通知；預期：30 分內 ≥ 121°C', 'info')
+    push(at(K.sim), '工具', `[工具] S1：122°C 總需 28.5 h（+4.5 h）　[工具] S2：下一模 #A-311 交期 3 天後，夜班缺 1 人`, 'tool')
+    push(at(K.gate), '求解器', '[工具] S3：#A-311 仍排 7 號機、夜班從 2 線調 1 人，交期全部滿足', 'tool')
     if (res1) {
       const txt = res1.d.decision === 'reject'
         ? `[人工] 主管駁回新排程${res1.d.reason ? `（${res1.d.reason}）` : ''}；維持 v1，寫入稽核日誌`
         : `動作把關確認可行 → [人工] 主管核准${res1.auto ? '（示範腳本）' : ''}；寫入稽核日誌`
       push(res1.at, '主管', txt, 'human')
     }
-    push(SAFETY_T, '安全核心', '7 號降至 120°C 以下 → 依規則保溫保壓（cure hold），不等 AI', 'safety')
-    push(VERIFY, '驗證（程式）', '比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置', 'dynamic')
-    push(H2_T, '指揮官', '推翻 H1 → H2：持續洩壓或感測器漂移；[工具] 對照 6、8 號同管線 → [工具] SOP「硫化中斷處置」→ 7 號停用重排', 'decision')
-    if (res2) {
+    if (single && res1 && res1.d.decision !== 'reject') push(closeT, '系統', 'S5 已通知硫化機組、胎體／胎面膠夜班；事件結案', 'info')
+    if (!single) push(SAFETY_T, '安全核心', '7 號降至 120°C 以下 → 依規則保溫保壓（cure hold），不等 AI', 'safety')
+    if (!single) push(VERIFY, '驗證（程式）', '比對預期：溫度降到 119.5°C → H1 不成立；安全核心已依規則處置', 'dynamic')
+    if (!single) push(H2_T, '指揮官', '推翻 H1 → H2：持續洩壓或感測器漂移；[工具] 對照 6、8 號同管線 → [工具] SOP「硫化中斷處置」→ 7 號停用重排', 'decision')
+    if (res2 && !single) {
       const opt = res2.d.option_id === 'B' ? 'B' : 'A'
       const txt = res2.d.decision === 'reject'
         ? `[人工] 主管兩案皆駁回${res2.d.reason ? `（${res2.d.reason}）` : ''}；7 號停用、維持現行排程`
@@ -223,15 +232,15 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     let plan: Event['plan']
     if (!round2) {
       steps = [
-        run(s1, st(at(11), 'ok', now >= at(9) ? 'running' : 'pending'), now >= at(11) ? result('cure_formula', { rate_ratio: 0.679, remaining_ref_h: 9.6, remaining_actual_h: 14.1, total_cure_h: 28.5, extra_h: 4.5, formula: 'Arrhenius Ea=85 kJ/mol' }, 3) : null),
-        run(s2, st(at(11), 'ok', now >= at(9) ? 'running' : 'pending'), now >= at(11) ? result('query_orders_shifts', { next_order: '#A-311', due_in_days: 3, gaps: [`${NIGHT} 夜班缺 1 人`] }, 18) : null),
-        run(s3, st(at(25), 'ok', now >= at(11) ? 'running' : 'pending'), now >= at(25) ? result('solve_schedule', { feasible: true, solver: 'cp-sat', moves: [], staffing: ['夜班從 2 線調 1 人'], all_due_met: true, proposed_version: 2 }, 1840) : null),
-        run(s4, res1 ? (res1.d.decision === 'reject' ? 'rejected' : 'ok') : st(R1_CREATED, 'awaiting_approval'), res1 && res1.d.decision !== 'reject' ? result('confirm_schedule', { active_version: 2 }, 12) : null, now >= at(25) ? gate('S4', 'confirm_schedule', 'R3') : null),
-        run(s5, res1 && now >= d1 + SEC ? (res1.d.decision === 'reject' ? 'skipped' : 'ok') : 'pending', res1 && res1.d.decision !== 'reject' && now >= d1 + SEC ? result('notify_teams', { sent: 2 }, 6) : null, now >= at(25) ? gate('S5', 'notify_teams', 'R1', 'allow') : null),
+        run(s1, st(at(K.sim), 'ok', now >= at(K.plan) ? 'running' : 'pending'), now >= at(K.sim) ? result('cure_formula', { rate_ratio: 0.679, remaining_ref_h: 9.6, remaining_actual_h: 14.1, total_cure_h: 28.5, extra_h: 4.5, formula: 'Arrhenius Ea=85 kJ/mol' }, 3) : null),
+        run(s2, st(at(K.sim), 'ok', now >= at(K.plan) ? 'running' : 'pending'), now >= at(K.sim) ? result('query_orders_shifts', { next_order: '#A-311', due_in_days: 3, gaps: [`${NIGHT} 夜班缺 1 人`] }, 18) : null),
+        run(s3, st(at(K.gate), 'ok', now >= at(K.sim) ? 'running' : 'pending'), now >= at(K.gate) ? result('solve_schedule', { feasible: true, solver: 'cp-sat', moves: [], staffing: ['夜班從 2 線調 1 人'], all_due_met: true, proposed_version: 2 }, 1840) : null),
+        run(s4, res1 ? (res1.d.decision === 'reject' ? 'rejected' : 'ok') : st(R1_CREATED, 'awaiting_approval'), res1 && res1.d.decision !== 'reject' ? result('confirm_schedule', { active_version: 2 }, 12) : null, now >= at(K.gate) ? gate('S4', 'confirm_schedule', 'R3') : null),
+        run(s5, res1 && now >= d1 + SEC ? (res1.d.decision === 'reject' ? 'skipped' : 'ok') : 'pending', res1 && res1.d.decision !== 'reject' && now >= d1 + SEC ? result('notify_teams', { sent: 2 }, 6) : null, now >= at(K.gate) ? gate('S5', 'notify_teams', 'R1', 'allow') : null),
       ]
-      plan = now >= at(9) ? {
+      plan = now >= at(K.plan) ? {
         goal: '7 號機溫降，大胎與後續訂單不得延誤', hypothesis: H1, rejected_hypothesis_ids: [], steps: [s1, s2, s3, s4, s5],
-        alert_card: { title: '7 號機溫降 128→122°C', summary: '假設 H1 蒸汽壓不足；延長硫化 4.5 h，#A-311 維持 7 號機' }, safe_stop: false,
+        alert_card: single ? { title: 'CURE-07 溫度異常 128→122.3°C', summary: '蒸汽壓不足；延長硫化 4.5 h，後續訂單維持排程' } : { title: '7 號機溫降 128→122°C', summary: '假設 H1 蒸汽壓不足；延長硫化 4.5 h，#A-311 維持 7 號機' }, safe_stop: false,
         rationale: '溫度仍在 120–130°C，先延長硫化保品質，再以求解器重排避免交期延誤',
       } : null
     } else {
@@ -253,18 +262,18 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
         rationale: '預期 ≥121°C 未達成；同管線 6、8 號正常，排除總管蒸汽不足',
       } : null
     }
-    const hyps: Hypothesis[] = round2 ? [{ ...H1, status: 'rejected' }, ...(now >= H2_T ? [{ ...H2, status: (state === 'closed' ? 'confirmed' : 'active') as Hypothesis['status'] }] : [])] : now >= at(3) ? [H1] : []
+    const hyps: Hypothesis[] = round2 ? [{ ...H1, status: 'rejected' }, ...(now >= H2_T ? [{ ...H2, status: (state === 'closed' ? 'confirmed' : 'active') as Hypothesis['status'] }] : [])] : now >= at(K.hyp) ? [{ ...H1, status: (single && state === 'closed' ? 'confirmed' : 'active') as Hypothesis['status'] }] : []
 
     // ---- approvals ----
     const approvals: ApprovalRequest[] = []
     if (now >= R1_CREATED) approvals.push(approval({
       id: 'APR-P7-1', event: EV, step: 'S4', round: 1, created: R1_CREATED, risk: 'R3',
-      title: '7 號延長硫化 4.5 h，夜班從 2 線調 1 人', reason: '7 號 128 → 122°C；S1 硫化公式：總需 28.5 h（+4.5 h）',
+      title: '7 號延長硫化 4.5 h，夜班從 2 線調 1 人', reason: single ? '7 號 128 → 122.3°C；硫化公式：總需 28.5 h（+4.5 h）' : '7 號 128 → 122°C；S1 硫化公式：總需 28.5 h（+4.5 h）',
       done: ['安全核心監看中（仍在 120–130°C）', '已讀 30 分鐘溫度與 SOP'], gaps: [`${NIGHT} 夜班缺 1 名操作員`], impact: '交期全部滿足',
       options: [{ id: 'A', label: '核准新排程（夜班從 2 線調 1 人）', tool: 'confirm_schedule', args: { schedule_version: 2 }, recommended: true }],
       res: res1,
     }))
-    if (now >= R2_CREATED) approvals.push(approval({
+    if (!single && now >= R2_CREATED) approvals.push(approval({
       id: 'APR-P7-2', event: EV, step: 'S4', round: 2, created: R2_CREATED, risk: 'R3',
       title: '7 號機停用，重排中', reason: 'H1 不成立：溫度續降至 119.5°C',
       done: ['安全核心已處置', '#A-311 維持 7 號'], gaps: [`${NIGHT} 夜班缺 1 名操作員`], impact: '不受影響',
@@ -276,27 +285,27 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     }))
 
     // ---- safety ----
-    const safety: SafetyAction[] = now >= SAFETY_T ? [{
+    const safety: SafetyAction[] = !single && now >= SAFETY_T ? [{
       id: 'SA-CURE-07-1', ts: isoTaipei(SAFETY_T), machine_id: 'CURE-07', rule_id: 'CURE_LOW_HOLD', action: 'cure_hold',
       value: 119.9, threshold: 120, message: '7 號模溫 < 120°C：保溫保壓（cure hold），不等 AI', latency_ms: 3,
     }] : []
 
     // ---- focus (③) ----
     const tNow = r1(temp07(now))
-    const outOfService = now >= H2_T
+    const outOfService = !single && now >= H2_T
     const elapsedH = r1(14.4 + (now - A) / HOUR)
     const auto: string[] = ['安全核心監看中：120–130°C 內不停機']
-    if (now >= at(11)) auto.push('S1 硫化公式：122°C 總需 28.5 h（+4.5 h）')
-    if (now >= at(25)) auto.push('S3 求解：#A-311 仍排 7 號機，交期全部滿足')
+    if (now >= at(K.sim)) auto.push('S1 硫化公式：122°C 總需 28.5 h（+4.5 h）')
+    if (now >= at(K.gate)) auto.push('S3 求解：#A-311 仍排 7 號機，交期全部滿足')
     if (res1 && res1.d.decision !== 'reject') auto.push('新排程 v2 已生效')
-    if (now >= SAFETY_T) auto.push('安全核心已保溫保壓（< 120°C）')
+    if (!single && now >= SAFETY_T) auto.push('安全核心已保溫保壓（< 120°C）')
     if (outOfService) auto.push('7 號機停用（SOP 硫化中斷處置）')
     const pend = approvals.filter((a) => a.status === 'pending')
     const focus: FocusPanel = {
       event_id: EV, machine_id: 'CURE-07',
-      title: outOfService ? '異常：7 號硫化機　停用重排' : '異常：7 號硫化機　溫度下降',
+      title: outOfService ? '異常：7 號硫化機　停用重排' : single ? '異常：7 號硫化機（CURE-07）　溫度異常' : '異常：7 號硫化機　溫度下降',
       detail: `模溫 ${tNow}°C（硫化範圍 120–130°C；低於 120°C 安全核心直接保溫保壓）；` +
-        (round2 ? 'H1 不成立 → H2：持續洩壓或感測器漂移' : '假設 H1：蒸汽壓不足，溫度會穩定'),
+        (round2 ? 'H1 不成立 → H2：持續洩壓或感測器漂移' : single ? '原因：蒸汽壓偏低，溫度預測穩定在 122°C 附近' : '假設 H1：蒸汽壓不足，溫度會穩定'),
       tiles: [
         { label: '溫度', value: `${tNow}°C`, status: 'alarm' },
         { label: '壓力', value: '正常', status: 'normal' },
@@ -305,28 +314,28 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
       ],
       auto_done: auto,
       pending: pend.flatMap((a) => a.options.map((o) => ({ approval_id: a.id, option_id: o.id, label: `${o.id} ${o.label}` }))),
-      schedule_impact: round2 ? '7 號停用；#A-311 已改 4 號機，交期不受影響' : now >= at(25) ? '#A-311 維持 7 號機；交期全部滿足' : '計算中…',
+      schedule_impact: round2 ? '7 號停用；#A-311 已改 4 號機，交期不受影響' : now >= at(K.gate) ? '#A-311 維持 7 號機；交期全部滿足' : '計算中…',
       state, timeline: T,
     }
 
     const event: Event = {
       id: EV, opened_at: isoTaipei(A), machine_id: 'CURE-07',
       anomaly: {
-        id: `AN-${EV.slice(3)}`, ts: isoTaipei(A), machine_id: 'CURE-07', kind: 'temp_drop', channel: 'temp_c', value: 122, baseline: 128,
+        id: `AN-${EV.slice(3)}`, ts: isoTaipei(A), machine_id: 'CURE-07', kind: 'temp_drop', channel: 'temp_c', value: single ? 122.3 : 122, baseline: 128,
         prediction: { machine_id: 'CURE-07', channel: 'temp_c', now_value: 122, predicted_value: 122, band_lo: 121, band_hi: 123, horizon_s: 1800, trend_per_min: -0.1, model: 'int8-ts' },
-        severity: 'critical', message: '7 號 128 → 122°C，預測穩定在 122±1°C', related_machines: ['CURE-06', 'CURE-08'], detection_latency_s: 38,
+        severity: 'critical', message: single ? '7 號 128 → 122.3°C，預測穩定在 122±1°C' : '7 號 128 → 122°C，預測穩定在 122±1°C', related_machines: ['CURE-06', 'CURE-08'], detection_latency_s: 38,
       },
-      state, goal: now >= at(9) ? '7 號機溫降，大胎與後續訂單不得延誤' : null, hypotheses: hyps, plan, steps: plan ? steps : [],
+      state, goal: now >= at(K.plan) ? '7 號機溫降，大胎與後續訂單不得延誤' : null, hypotheses: hyps, plan, steps: plan ? steps : [],
       approvals: approvals.map((a) => a.id), safety_actions: safety, timeline: T, alert_card: plan?.alert_card ?? null,
-      consecutive_failures: 0, replans: round2 ? 1 : 0, closed_at: state === 'closed' ? isoTaipei(d2 + 10 * SEC) : null,
-      outcome: state === 'closed' ? (res2?.d.decision === 'reject' ? '7 號停用；維持現行排程' : res2?.d.option_id === 'B' ? '7 號停用；從 2 線調 1 人' : '7 號停用；夜班加班') : null,
+      consecutive_failures: 0, replans: round2 ? 1 : 0, closed_at: state === 'closed' ? isoTaipei(closeT) : null,
+      outcome: state === 'closed' && single ? '7 號延長硫化至 28.5 h；排程已更新' : state === 'closed' ? (res2?.d.decision === 'reject' ? '7 號停用；維持現行排程' : res2?.d.option_id === 'B' ? '7 號停用；從 2 線調 1 人' : '7 號停用；夜班加班') : null,
     }
     return {
       event, approvals, safety, focus: state === 'closed' ? { ...focus, pending: [] } : focus,
       machine: {
         'CURE-07': {
-          status: outOfService ? 'out_of_service' : 'alarm', active_event_id: state === 'closed' ? null : EV,
-          note: outOfService ? '停用：持續洩壓或感測器漂移（待維修確認）' : now >= SAFETY_T ? '保溫保壓中' : '溫度下降',
+          status: outOfService ? 'out_of_service' : single && state === 'closed' ? 'running' : 'alarm', active_event_id: state === 'closed' ? null : EV,
+          note: outOfService ? '停用：持續洩壓或感測器漂移（待維修確認）' : single && state === 'closed' ? '延長硫化中（排程已更新）' : !single && now >= SAFETY_T ? '保溫保壓中' : '溫度下降',
         },
       },
     }
@@ -337,7 +346,7 @@ export function press7Script(A: number): Script & { versions(now: number, ctx: C
     signal(id, t) {
       if (id === 'CURE-07') {
         const rel = (t - A) / SEC
-        const steam = rel < -240 ? 6.5 : rel < 1020 ? lerp(6.5, 5.2, (rel + 240) / 240) : 4.8
+        const steam = rel < -240 ? 6.5 : rel < (single ? 1e9 : 1020) ? lerp(6.5, 5.2, (rel + 240) / 240) : 4.8
         return { temp_c: temp07(t), steam_kgf_cm2: steam + noise('s7', t, 0.03) }
       }
       return null

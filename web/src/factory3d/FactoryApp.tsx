@@ -40,6 +40,8 @@ import { alarms, arrowEls } from './alarm'
 import { BTN, approach, usePad, type Btn, type PadFrame } from './gamepad'
 import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
+import { AutoOverlay } from './AutoOverlay'
+import { autoActive } from '../demo/auto'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
@@ -207,15 +209,19 @@ export function FactoryApp() {
   const onDemoEnd = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
   const onDemoWalk = useCallback(() => setMode('first'), [])
   const nSlides = deck.slides.length
-  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, nSlides })
+  const raisePhoneRef = useRef<(up: boolean) => void>(() => {})
+  const onDemoPhone = useCallback((up: boolean) => raisePhoneRef.current(up), [])
+  const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, onPhone: onDemoPhone, nSlides })
+  const autoOn = demo.running && demo.auto
+  const autoMode = autoActive(transport?.mode)
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
-    else if (act === 'continue') void demo.cont()
+    else if (act === 'continue') { if (!demo.auto) void demo.cont() }
     else if (act === 'pause') demo.togglePause()
-    else if (act === 'exit-ask') demo.setConfirmExit(true)
+    else if (act === 'exit-ask') { if (demo.auto) void demo.exit(); else demo.setConfirmExit(true) }
     else if (act === 'exit-yes') void demo.exit()
     else if (act === 'exit-no') demo.setConfirmExit(false)
     else if (act === 'slide+') changeSlide(1)
@@ -255,6 +261,8 @@ export function FactoryApp() {
     setPhoneUp(up)
     if (up) { setPanel(null); releaseLook() } else { window.focus(); canvasRef.current?.focus() }
   }, [])
+
+  useEffect(() => { raisePhoneRef.current = raisePhone }, [raisePhone])
 
   const closePanel = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
 
@@ -459,7 +467,7 @@ export function FactoryApp() {
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
-        <div className="f3-hud-top">
+        <div className="f3-hud-top" style={autoOn ? { display: 'none' } : undefined}>
           <b>戰情室負責人</b>
           <span className="f3-where" data-testid="f3-where">📍 {SCENE_LABEL[scene]}</span>
           <span className="muted">{ft ? `${fmtMD(ft)} ${fmtHM(ft)}` : '—'}</span>
@@ -490,7 +498,7 @@ export function FactoryApp() {
         <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>}
-      <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />
+      {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
         <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
           ref={(el) => { if (el) arrowEls.set(id, el); else arrowEls.delete(id) }}
@@ -513,7 +521,7 @@ export function FactoryApp() {
       )}
       <div className={`f3-fade ${fading ? 'on' : ''}`} aria-hidden data-testid="f3-fade" />
 
-      {!started && (
+      {!started && !autoMode && (
         <div className="f3-start" onClick={start} data-testid="f3-start">
           <div>
             <h1>迷你工廠・戰情室</h1>
