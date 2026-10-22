@@ -260,3 +260,19 @@ html, body, #root { height: 100%; overflow: hidden; }
 .f3-cue.low b { font-size: 22px; } .f3-cue.low span { font-size: 14px; }
 .f3-cue.low .f3-cue-links button { font-size: 14px; padding: 6px 14px; }
 @media (max-width: 640px) { .f3-cue.low { bottom: 120px; } }
+
+/* the cue as a subtitle strip (CJ: 「上面大大提示框太顯眼改下」): lower third, one line, small, see-through; it never
+   covers the middle of the scene. The big variant (the pitch switch, the end) is the same strip, a size up. */
+.f3-cue.strip { top: auto; bottom: 66px; left: 50%; translate: -50% 0; width: auto; max-width: min(860px, calc(100vw - 32px)); display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; padding: 6px 14px; border: 0; border-radius: 12px; background: rgba(30, 26, 22, .58); color: #fff6e4; box-shadow: none; backdrop-filter: blur(3px); animation: f3-fade-in .3s ease-out; white-space: nowrap; }
+.f3-cue.strip b { font-size: 16px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.f3-cue.strip em { font-style: normal; font-size: 12.5px; color: #e9dcc6; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.f3-cue.strip .f3-cue-go { display: inline-flex; align-items: center; gap: 4px; margin: 0; padding: 1px 8px; font-size: 12.5px; font-weight: 700; color: #1f3a0e; background: #b7e39a; border-radius: 999px; animation: none; }
+.f3-cue.strip .f3-cue-go kbd { font-size: 11px; padding: 0 4px; min-width: 0; }
+.f3-cue.strip .f3-cue-wait { margin: 0; padding: 1px 8px; font-size: 12.5px; font-weight: 700; color: #4a3200; background: #ffe29a; border-radius: 999px; }
+.f3-cue.strip .f3-cue-links { display: inline-flex; gap: 4px; margin: 0; }
+.f3-cue.strip .f3-cue-links button { font: inherit; font-size: 12px; font-weight: 700; padding: 1px 8px; border: 0; border-radius: 999px; background: rgba(255, 246, 228, .2); color: #fff6e4; box-shadow: none; cursor: pointer; }
+.f3-cue.strip.big { bottom: 66px; padding: 8px 18px; background: rgba(30, 26, 22, .66); }
+.f3-cue.strip.big b { font-size: 22px; }
+.f3-cue.strip.warn { background: rgba(160, 50, 40, .7); }
+@keyframes f3-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@media (max-width: 640px) { .f3-cue.strip { bottom: 112px; } .f3-cue.strip b { font-size: 14px; } }
