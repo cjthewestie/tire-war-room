@@ -879,10 +879,14 @@ export interface TaskRow {
   orders: string[]; state: string | null; state_label: string; opened_at: ISODate | null; closed_at: ISODate | null; outcome: string | null
   /** still in this scenario's events (its whole record and chat are on the page) */
   live: boolean; running: boolean; qa_demo?: boolean; day?: string | null; loop?: number | null
+  /** session number (CJ 10-22): 「Nemo-1022-#01」 full, 「Nemo#01 · 10/22」 compact; creation order per factory date */
+  session?: string | null; session_short?: string | null
 }
 /** 進行中, 今日已結案 (the current factory day) and 歷史任務 grouped by factory day, newest first; all filtered by `q`. */
 export interface TaskListing {
   today: { date: string; label: string }; q: string; running: TaskRow[]; closed_today: TaskRow[]
+  /** the 新對話 / 總覽 session of the day: 「Nemo-1022-#00」 */
+  general_session?: { session: string | null; session_short: string | null }
   history: { key: string; label: string; scenario: string | null; count: number; tasks: TaskRow[] }[]
 }
 /** GET /api/tasks/{id}/session: a task's turns from the chat log on disk (read-only). */

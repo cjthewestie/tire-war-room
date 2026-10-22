@@ -29,14 +29,27 @@ function rowOf(e: Event): TaskRow {
 /** Search: every word must appear in the title, id, machine, orders, type, state or outcome (case, '#', spaces ignored). */
 export function matches(r: TaskRow, q: string): boolean {
   const norm = (s: string) => s.replace(/[\s#]/g, '').toUpperCase()
-  const hay = norm([r.id, r.title, r.what, r.machine_id, r.machine_label, r.orders.join(' '), r.kind_label, r.state_label, r.outcome].filter(Boolean).join(' '))
+  const hay = norm([r.id, r.session, r.session_short, r.title, r.what, r.machine_id, r.machine_label, r.orders.join(' '), r.kind_label, r.state_label, r.outcome].filter(Boolean).join(' '))
   return q.split(/\s+/).filter(Boolean).every((w) => hay.includes(norm(w)))
 }
 
 /** The mock (no backend): this scenario's events only; nothing is kept across a reload, so there is no history. */
 export function localListing(events: Event[], q: string, today: string): TaskListing {
-  const rows = [...events].sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).map(rowOf).filter((r) => matches(r, q))
-  return { today: { date: today, label: today.slice(5).replace('-', '/') }, q, running: rows.filter((r) => r.running), closed_today: rows.filter((r) => !r.running), history: [] }
+  const perDay: Record<string, number> = {}
+  const numbered = [...events].sort((a, b) => (a.opened_at < b.opened_at ? -1 : 1)).map((e) => {
+    const day = (e.opened_at ?? today).slice(0, 10)
+    perDay[day] = (perDay[day] ?? 0) + 1
+    return { ...rowOf(e), ...sessionLabel(day, perDay[day]) }
+  })
+  const rows = numbered.reverse().filter((r) => matches(r, q))
+  return { today: { date: today, label: today.slice(5).replace('-', '/') }, q, running: rows.filter((r) => r.running), closed_today: rows.filter((r) => !r.running), history: [], general_session: sessionLabel(today, 0) }
+}
+
+/** 「Nemo-1022-#01」 / 「Nemo#01 · 10/22」 (as warroom/api/task_sessions.py session_label) */
+export function sessionLabel(day: string, no: number): { session: string | null; session_short: string | null } {
+  if (!/^\d{4}-\d{2}-\d{2}/.test(day)) return { session: null, session_short: null }
+  const mm = day.slice(5, 7), dd = day.slice(8, 10), n = String(no).padStart(2, '0')
+  return { session: `Nemo-${mm}${dd}-#${n}`, session_short: `Nemo#${n} · ${mm}/${dd}` }
 }
 
 /** The task list for the switcher / the Agent page, refreshed every 6 s and on a new search (debounced). */

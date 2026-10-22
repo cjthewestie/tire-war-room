@@ -5,6 +5,8 @@ import { RANK_LABEL, type HomeItem, type Rank } from './homeItems'
 import { REPLAN_HINT, useReplans, type Replan } from './replanStore'
 import { useWarRoom } from '../useWarRoom'
 import { SUB_STATUS } from './subagents'
+import { allRows, useTaskListing } from './sessionStore'
+import type { TaskRow } from '../contracts'
 
 export function ApprovalList({ items, selected, onPick }: {
   items: HomeItem[]; selected: string | null; onPick: (key: string) => void
@@ -14,6 +16,8 @@ export function ApprovalList({ items, selected, onPick }: {
   const ranks = ([1, 2, 3, 4] as Rank[]).filter((r) => open.some((i) => i.rank === r))
   const decide = open.filter((i) => i.req).length
   const replans = useReplans()
+  // session numbers (CJ 10-22: 「任務框跟對話框要有 session 編號」): one listing for every card
+  const nos = new Map(allRows(useTaskListing('')).map((r) => [r.id, r]))
   return (
     <section className="panel home-list" aria-label="待核准事件" data-testid="approval-list">
       <header className="hl-h"><h2>待核准事件</h2><span className={`hl-n ${decide ? 'has' : ''}`} title="待核准件數">{decide}</span></header>
@@ -26,13 +30,13 @@ export function ApprovalList({ items, selected, onPick }: {
         {ranks.map((r) => (
           <div key={r} className="hl-sec">
             <h3 className="hl-k">{RANK_LABEL[r]}</h3>
-            {open.filter((i) => i.rank === r).map((i) => <Row key={i.key} i={i} on={i.key === selected} onPick={onPick} rp={i.orderId ? replans[i.orderId] ?? null : undefined} />)}
+            {open.filter((i) => i.rank === r).map((i) => <Row key={i.key} i={i} on={i.key === selected} onPick={onPick} rp={i.orderId ? replans[i.orderId] ?? null : undefined} no={i.eventId ? nos.get(i.eventId) : undefined} />)}
           </div>
         ))}
         {fyi.length > 0 && (
           <details className="hl-fyi">
             <summary>{RANK_LABEL[5]}（{fyi.length}）</summary>
-            {fyi.slice(0, 12).map((i) => <Row key={i.key} i={i} on={i.key === selected} onPick={onPick} />)}
+            {fyi.slice(0, 12).map((i) => <Row key={i.key} i={i} on={i.key === selected} onPick={onPick} no={i.eventId ? nos.get(i.eventId) : undefined} />)}
           </details>
         )}
       </div>
@@ -41,11 +45,12 @@ export function ApprovalList({ items, selected, onPick }: {
 }
 
 /** `rp`: a ② item's replan (null = not asked yet → the hint line; undefined = not an order item). */
-function Row({ i, on, onPick, rp }: { i: HomeItem; on: boolean; onPick: (key: string) => void; rp?: Replan | null }) {
+function Row({ i, on, onPick, rp, no }: { i: HomeItem; on: boolean; onPick: (key: string) => void; rp?: Replan | null; no?: TaskRow }) {
   const sub = useWarRoom().state.subagents?.items.find((s) => s.id === i.eventId)
   const planning = rp?.state === 'sending' || rp?.state === 'planning'
   return (
-    <button type="button" className={`hl-item tone-${i.tone} ${i.req ? `has-req r-${i.req.risk}` : ''} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`}>
+    <button type="button" className={`hl-item tone-${i.tone} ${i.req ? `has-req r-${i.req.risk}` : ''} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`} title={no?.session ? `${no.session}・${i.eventId}` : undefined}>
+      {no?.session_short && <span className="tss-no hl-no" data-testid="item-session-no">{no.session_short}</span>}
       {i.req ? (
         <>
           <span className="hl-top">

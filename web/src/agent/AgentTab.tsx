@@ -169,8 +169,9 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
           <a className="con-full" href={`#console${sessionId ? `?event=${encodeURIComponent(sessionId)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
         </div>
         <div className="con-session" data-testid="con-session" data-session={sessionId ?? 'general'}>
-          <span className="con-session-name" title={sessionId ?? '不綁任務的對話'}>
+          <span className="con-session-name" title={sessionId ? [row?.session, sessionId].filter(Boolean).join('・') : (listing?.general_session?.session ?? '不綁任務的對話')}>
             <small className="muted">{sessionId ? '任務對話' : '對話'}</small>
+            {(sessionId ? row?.session_short : listing?.general_session?.session_short) && <span className="tss-no" data-testid="con-session-no">{sessionId ? row?.session_short : listing?.general_session?.session_short}</span>}
             <b>{sessionId ? plain(row?.title ?? (sessionEv ? sessionTitle(sessionEv) : sessionId === cardSession && card ? card.title : sessionId)) : '新對話'}</b>
             {row && <span className={`tss-st ${row.running ? 'run' : ''}`}>{row.state_label}</span>}
           </span>

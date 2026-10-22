@@ -52,6 +52,15 @@ def _orders(text: str | None) -> list[str]:
     return orders_in(text or "")
 
 
+def session_label(day: str | None, no: int | None) -> dict[str, str | None]:
+    """「Nemo-1022-#01」 (full: Agent page, tooltip, search) and 「Nemo#01 · 10/22」 (task card, chat header). #00 is the
+    新對話 / 總覽 session of that day."""
+    if not day or no is None:
+        return {"session": None, "session_short": None}
+    d = datetime.fromisoformat(day)
+    return {"session": f"Nemo-{d:%m%d}-#{no:02d}", "session_short": f"Nemo#{no:02d} · {d:%m/%d}"}
+
+
 def live_row(r: Any, e: Any, subs: dict[str, Any]) -> dict[str, Any]:
     from warroom.api import overview
     st = e.state.value
@@ -63,7 +72,16 @@ def live_row(r: Any, e: Any, subs: dict[str, Any]) -> dict[str, Any]:
             "orders": _orders(f"{what} {e.goal or ''}"), "state": st,
             "state_label": "已結案，等現場完成" if working else STATE.get(st, st),
             "opened_at": _iso(e.opened_at), "closed_at": _iso(e.closed_at), "outcome": (e.outcome or "")[:160] or None,
-            "live": True, "running": st not in ("closed", "safe_stop") or working}
+            "live": True, "running": st not in ("closed", "safe_stop") or working,
+            **session_label(*(_no(r, e.id) or (None, None)))}
+
+
+def _no(r: Any, event_id: str) -> tuple[str, int] | None:
+    tl = getattr(r, "tasklog", None)
+    try:
+        return tl.session_no(event_id) if tl is not None else None
+    except Exception:  # noqa: BLE001 - a number is a label; the list never fails for it
+        return None
 
 
 def _log_row(x: dict[str, Any], live_ids: set[str]) -> dict[str, Any]:
@@ -83,14 +101,14 @@ def _log_row(x: dict[str, Any], live_ids: set[str]) -> dict[str, Any]:
             "opened_at": x.get("opened_at"), "closed_at": x.get("closed_at"), "outcome": x.get("outcome"),
             "live": x["id"] in live_ids, "running": False, "qa_demo": bool(x.get("qa_demo")),
             "day": day, "loop": x.get("closed_loop"), "epoch": x.get("closed_epoch"),
-            "scenario": x.get("scenario"), "seq": x.get("last_seq", 0)}
+            "scenario": x.get("scenario"), "seq": x.get("last_seq", 0), **session_label(x.get("date"), x.get("no"))}
 
 
 def matches(row: dict[str, Any], q: str | None) -> bool:
     """Search: title, event id, machine (code or 7 號機), order id, type, state, outcome — case and spaces ignored."""
     if not q or not q.strip():
         return True
-    hay = " ".join(str(v) for v in (row.get("id"), row.get("title"), row.get("what"), row.get("machine_id"),
+    hay = " ".join(str(v) for v in (row.get("id"), row.get("session"), row.get("session_short"), row.get("title"), row.get("what"), row.get("machine_id"),
                                      row.get("machine_label"), " ".join(row.get("orders") or []), row.get("kind_label"),
                                      row.get("state_label"), row.get("outcome")) if v)
     norm = lambda s: s.replace(" ", "").replace("#", "").upper()        # noqa: E731
@@ -151,6 +169,7 @@ def listing(r: Any, q: str | None = None) -> dict[str, Any]:
                              "tasks": tasks})
     return {"today": {"date": today, "label": day_label(today, (r.day_loop_info() or {}).get("loop")
                                                         if hasattr(r, "day_loop_info") else None)},
+            "general_session": session_label(today, 0),
             "q": q or "", "running": [x for x in running if matches(x, q)],
             "closed_today": [x for x in closed_today if matches(x, q)][:MAX_ROWS], "history": out_hist}
 

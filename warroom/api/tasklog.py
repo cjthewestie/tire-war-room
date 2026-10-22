@@ -159,11 +159,25 @@ class TaskLog:
         self.refresh()
         with self._lock:
             out = []
+            per_day: dict[str, int] = {}
             for k in self._order:
                 r = dict(self._runs[k])
                 r["date"] = _ts(r["opened_at"]).astimezone(F.TZ).date().isoformat()
+                # the session number (CJ 10-22: 「session 編號…Nemo#1 之類的搭配日期」): creation order within the factory
+                # date, from the audit file's own order, so a reload or a restart gives every task the same number
+                r["no"] = per_day[r["date"]] = per_day.get(r["date"], 0) + 1
                 out.append(r)
             return out
+
+    def session_no(self, event_id: str) -> tuple[str, int] | None:
+        """(factory date, number) of the latest run of this event id, or None before its first audit row."""
+        rows = self.rows()
+        with self._lock:
+            key = self._latest.get(event_id)
+        if key is None:
+            return None
+        i = self._order.index(key)
+        return rows[i]["date"], rows[i]["no"]
 
     def days(self) -> list[dict[str, Any]]:
         """Newest date first; inside a date, groups by (loop, scenario) in the order they happened."""
