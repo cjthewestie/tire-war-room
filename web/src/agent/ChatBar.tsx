@@ -16,9 +16,11 @@ export type BarMode = 'discuss' | 'command' | 'ask'
 let askSeq = 0
 const nowIso = () => new Date().toISOString()
 
-export function ChatBar({ ev, waiting, setAsks, focus, onSent, mode = 'task' }: {
+export function ChatBar({ ev, waiting, setAsks, focus, onSent, onReply, mode = 'task' }: {
   ev: Event | null; waiting: boolean; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>
   focus: BarFocus | null; onSent?: (about: string | null) => void
+  /** the reply arrived (a 下新任務 reply carries the new task's event id: the 主控台 opens its session) */
+  onReply?: (r: MainReply) => void
   /** 'overview': the Agent page's 總覽 conversation (no task selected, its own memory) */
   mode?: ChatMode
 }) {
@@ -67,6 +69,7 @@ export function ChatBar({ ev, waiting, setAsks, focus, onSent, mode = 'task' }: 
       // the reply (with its tool line) stays here until the server's audit row of this turn replaces it
       setAsks((xs) => xs.map((x) => (x.key === keys[0] && x.k === 'chat' ? { ...x, pending: false, turn: r.id }
         : x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: r.reply, turn: r.id, steps: r.steps, fellBack: r.fell_back, error: r.error, links: r.links } : x)))
+      onReply?.(r)
     } catch (e) {
       setAsks((xs) => xs.map((x) => (x.key === keys[1] && x.k === 'chat' ? { ...x, pending: false, text: `送出失敗：${String(e)}` } : x)))
     } finally { setBusy(false) }

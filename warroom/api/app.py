@@ -1058,11 +1058,35 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         """Both sides of the turn into the chat log on disk (CJ 2026-10-22: 「這些對話紀錄跟訂單紀錄都要記錄下來」)."""
         scope = "overview" if body.mode == "overview" else "task"
         try:
-            r.history_log.add_chat(r.clock.now(), f"{scope}|{session.actor}|{body.conversation_id or ''}", scope,
+            r.history_log.add_chat(r.clock.now(), session_key(body, session.actor), scope,
                                    session.actor, text, res.get("reply") or "", turn_id=res.get("id"),
                                    event_id=res.get("event_id") or body.event_id, by=res.get("by"))
         except Exception:  # noqa: BLE001 - a log write never fails the reply
             log.exception("chat log write failed")
+
+    def session_key(body: MainMessage, actor: str) -> str:
+        """Which Agent Nemo session a message belongs to (issue #189, CJ: 「一個任務一個 agent context，不要共用」): a task
+        selected → that task's own session, whatever page sent it (主控台 and the Agent page share it); none → the
+        page's 「新對話」 session; the 總覽 its own. History never crosses sessions."""
+        if body.mode == "overview":
+            return f"overview|{actor}|{body.conversation_id or ''}"
+        if body.event_id:
+            return f"task:{body.event_id}|{actor}"
+        return f"task|{actor}|{body.conversation_id or ''}"
+
+    @app.get("/api/tasks")
+    async def tasks_list(q: str | None = Query(default=None, max_length=80)) -> dict[str, Any]:
+        """The task list (issue #189): 進行中, 今日已結案 and 歷史任務 by factory day, filtered by `q` (title, event id,
+        machine, order, type). Read-only."""
+        from warroom.api import task_sessions
+        r = rt()
+        return task_sessions.listing(r, q)          # on the loop: it walks live runtime state
+
+    @app.get("/api/tasks/{event_id}/session")
+    async def task_session(event_id: str) -> dict[str, Any]:
+        """One task's Agent Nemo session from the chat log on disk (a task of an earlier day, or after a restart)."""
+        from warroom.api import task_sessions
+        return task_sessions.session(rt(), event_id)
 
     @app.get("/api/history/chat")
     async def history_chat(day: str | None = None, session_id: str | None = None, scope: str | None = None,
@@ -1370,7 +1394,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             from warroom.api import overview
             context["overview"] = {**_safe(lambda: overview.snapshot(r), {}),
                                    "note": ("總覽模式：主管在看全部任務，不是某一件。用 overview.tasks 回答任務狀況；問哪些有問題時只列 "
-                                            "overview.questionable 的任務，每件一句原因，沒有就說沒有，不要加工廠概況；過去的資料用 query_plant（handled_today、orders_history、"
+                                            "overview.questionable 的任務，每件一句原因，沒有就說沒有，不要加工廠概況；過去的資料用 query_plant（task_search 找任務（進行中、今日已結案、歷史任務）、handled_today、orders_history、"
                                             "order_lookup）。提到任務時說機台或訂單，不要寫事件編號，也不要說 topic 或欄位名稱；連結由系統附上。")}
         if body.event_id:
             # the task picked on the Agent page (or the 主控台): the chat talks about it (CJ 2026-10-22: 「A」)
@@ -1420,7 +1444,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             memory = ChatMemory()
         res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
                                         propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant, conversation=f"{'overview|' if overview_mode else ''}{session.actor}|{body.conversation_id or ''}",
+                                        read_plant=read_plant, conversation=session_key(body, session.actor),
                                         control=Control(), mode=body.mode, memory=memory)
         if overview_mode:
             from warroom.api import overview

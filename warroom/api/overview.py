@@ -186,6 +186,10 @@ def links(r: Any, text: str, reply: str, reads: list[tuple[str, Any]], acted: li
     returned are linked when the reply names them (id, order or press), or all of them when it names none. `acted`:
     the events a control step of this turn ran on (「好」 → 中斷 it)."""
     events = {e.id: e for e in r.events()}
+    # issue #189: a task of an earlier day (task_search) is linked too; it opens read-only on the 主控台
+    past = {t["id"]: t for _t, d in reads if _t == "task_search" and isinstance(d, dict)
+            for t in [*d.get("closed_today", []), *(x for g in d.get("history", []) for x in g.get("tasks", []))]
+            if t.get("id") not in events}
     asked = bool(QUESTIONABLE_RX.search(text)) or any(t == "questionable" for t, _d in reads)
     q = {x["id"]: "；".join(x["reasons"]) for x in questionable(r)} if asked else {}
     order: list[str] = [*q, *acted]
@@ -193,11 +197,19 @@ def links(r: Any, text: str, reply: str, reads: list[tuple[str, Any]], acted: li
     read = [i for _t, d in reads for i in _ids_in(d) if i in events]
     named = [i for i in read if _mentioned(events[i], reply)]
     order += named or read
+    order += [i for i in past if i in reply] or list(past)[:3]
     out, seen = [], set()
     for i in order:
-        if i in seen or i not in events:
+        if i in seen or (i not in events and i not in past):
             continue
         seen.add(i)
+        if i not in events:
+            t = past[i]
+            out.append({"event_id": i, "label": str(t.get("what") or i)[:24], "state": t.get("state") or "已結案",
+                        "reason": None})
+            if len(out) >= MAX_LINKS:
+                break
+            continue
         e = events[i]
         out.append({"event_id": i, "label": label(e), "state": _state_word(r, e), "reason": q.get(i)})
         if len(out) >= MAX_LINKS:

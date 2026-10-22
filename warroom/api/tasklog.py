@@ -39,6 +39,9 @@ class TaskLog:
     def _reset(self) -> None:
         self._offset = 0
         self._gen = 0                     # +1 per scenario load: the same event id again is a new task
+        # +1 per scenario load and per runtime start (issue #189): the factory clock starts over, so a closed task of an
+        # earlier epoch is never 「今日已結案」 even when its date and cycle number repeat
+        self._epoch = 0
         self._scenario: str | None = None
         self._loop: int | None = None
         self._runs: dict[str, dict[str, Any]] = {}
@@ -84,7 +87,13 @@ class TaskLog:
         self._seq = int(e.get("seq") or 0)
         if kind == "system" and p.get("msg") == "scenario loaded":
             self._gen += 1
+            self._epoch += 1
             self._scenario, self._loop = p.get("scenario"), None
+            return
+        if kind == "system" and p.get("msg") == "runtime start":
+            self._epoch += 1
+            self._scenario = p.get("scenario") or self._scenario
+            self._loop = None
             return
         if kind == "system" and actor == "day_loop" and "loop" in p:
             self._loop = int(p["loop"])
@@ -106,7 +115,8 @@ class TaskLog:
             r = self._runs[key] = {"id": eid, "opened_at": e["ts"], "closed_at": None, "machine_id": None, "order_id": None,
                                    "title": None, "final": "處理中", "state": "detected", "approvals": [], "outcome": None,
                                    "scenario": self._scenario, "loop": self._loop, "rounds": 1, "source": "event",
-                                   "report": f"/report?event={eid}", "last_seq": self._seq}
+                                   "report": f"/report?event={eid}", "last_seq": self._seq,
+                                   "epoch": self._epoch, "closed_loop": None, "closed_epoch": None}
             self._order.append(key)
         if kind == "system" and p.get("tag") == "QA 展示":       # opened by a QA 模式 walkthrough / proof (warroom/api/qa_demo.py)
             r["qa_demo"] = True
@@ -124,6 +134,7 @@ class TaskLog:
                 r["rounds"] += 1
             if p["to"] in TERMINAL:
                 r["closed_at"] = e["ts"]
+                r["closed_loop"], r["closed_epoch"] = self._loop, self._epoch
                 r["final"] = FINAL[p["to"]] if r["final"] not in ("主管中斷", "人工處理") else r["final"]
         elif kind == "approval_request":
             r["title"] = r["title"] or p.get("title")
@@ -172,6 +183,12 @@ class TaskLog:
                 g["rows"].append(r)
             out.append({"date": date, "count": len(by_date[date]), "groups": groups})
         return out
+
+    def period(self) -> dict[str, Any]:
+        """Where the log is now: the epoch (runtime start / scenario load) and day-loop cycle the next row belongs to."""
+        self.refresh()
+        with self._lock:
+            return {"epoch": self._epoch, "loop": self._loop, "scenario": self._scenario}
 
     def today(self) -> dict[str, Any]:
         days = self.days()
