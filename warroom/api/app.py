@@ -1134,7 +1134,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 opts = "；".join(f"方案 {o.id}：{o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
                 # issue #195: 「A 夜班加班加上 B 線調 1 人」 (real run 10-22) — the options are alternatives, say so
                 waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(card.actions) or '無'}"
-                           + (f"。人力方案（{len(card.options)} 選 1，不是加在一起）：{opts}" if opts else ""))
+                           + (f"。人力方案（{len(card.options)} 選 1，不是加在一起）：{opts}" if len(card.options) > 1
+                              else f"。方案：{opts}（只有這一個）" if opts else ""))
         from warroom.agent.ask import AskAgent
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult

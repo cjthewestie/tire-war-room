@@ -159,7 +159,15 @@ NOTHING_READ = "我剛剛去查，但沒有讀到資料（{err}），所以不�
 PLAN_CHANGES = "某台硫化機某時段不排（例如「9 號機今晚要保養」）、不要加班、不要跨組調人、改選 A 或 B 方案"
 PLAN_EDIT_Q = f"這份計劃能改的是：{PLAN_CHANGES}；也可以直接核准或駁回。你要改哪一項？"
 NOT_CHANGED = "計劃沒有改。" + PLAN_EDIT_Q
-NOT_DONE = "我還沒有改任何東西，也沒有擬計劃。要安排的話，直接說要做什麼和對象，例如「請安排 9 號機明天保養」。"
+
+
+def edit_q(waiting_plan: str | None) -> str:
+    """PLAN_EDIT_Q for this card: a card with one staffing option has no 「改選 A 或 B」 (issue #195)."""
+    if waiting_plan and "方案 B" not in waiting_plan:
+        return PLAN_EDIT_Q.replace("、改選 A 或 B 方案", "")
+    return PLAN_EDIT_Q
+NOT_DONE = ("我沒有能直接動機台的工具（停機、開關、調設定都不行），所以還沒有改任何東西，也沒有擬計劃。"
+            "要安排的話，跟我說要做什麼和對象，我擬計劃送你核准、由現場人員執行，例如「請安排 9 號機明天保養」。")
 NO_FACTS = "這個我沒有查到資料，不能給你數字。要我查哪台機台或哪張訂單？例如：「#A-311 會不會晚交？」"
 NO_SUCH_ORDER = "沒有這張訂單：{what}，所以查不到交期。你要查的是哪一張？例如：「#A-311 會不會晚交？」"
 NUMBERS_OFF = "我查了資料，但整理出來的數字跟資料對不上，先不回答，免得說錯。要我直接列出查到的項目嗎？"
@@ -245,7 +253,7 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
 # the supervisor in the third person: the model's reading of the message written as the reply (issue #195)
-_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|(?:問|跟|向)主管")
+_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|(?:問|跟|向)主管|(?:你|您)說的「[^」]*」(?:是|應該|可能)")
 MAX_TOKENS = 350           # a reply is cut at MAX_CHARS anyway; 500 let it write 400-token lists (6–8 s, real run 10-22)
 MAX_CHARS = 260            # a chat bubble, not a report; the full data stays in the reply's tool line
 MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
@@ -719,6 +727,7 @@ class MainAgent:
         self._read_plant: Callable[[str, str], Awaitable[dict[str, Any]]] | None = None
         self.mode = "task"
         self._memory: Any = None
+        self._waiting: str | None = None
 
     # ---------------------------------------------------------------- one turn
     async def turn(self, text: str, *, context: dict[str, Any], waiting_plan: str | None,
@@ -1003,7 +1012,7 @@ class MainAgent:
             r = await discuss(text)
             reply = str(r.get("reply") or "")
             if r.get("intent") in ("unclear", "chitchat") and not r.get("replanned"):
-                reply = PLAN_EDIT_Q                    # 「怎改」: what this plan can change, the A／B options as a choice
+                reply = edit_q(self._waiting)          # 「怎改」: what this plan can change, the A／B options as a choice
             approval = r.get("approval") or {}
             steps.append({"tool": name, "args": args, "ok": True, "summary": reply[:200], "label": "討論計劃",
                           "reply": reply, "replanned": bool(r.get("replanned")),
@@ -1305,6 +1314,7 @@ class MainAgent:
         reopened = False                                # a remark that opened like the last one is asked once more
         worded = False                                  # asked once for words after the tools
         regenerated = False                             # one retry after a degenerate repetition
+        self._waiting = waiting_plan
         editing = discuss is not None and plan_edit(t)  # only for the reply check: a plan change is said by discuss
         sop_asked = False
         for i in range(MAX_STEPS + 1):
@@ -1537,7 +1547,7 @@ class MainAgent:
             kept = "".join(x for x in _SENTENCE_RX.findall(words) if not _THIRD_RX.search(x)).strip()
             out["error"] = "reply spoke of the supervisor in the third person"
             if not kept:
-                return PLAN_EDIT_Q if waiting_plan else words.replace("主管", "你")
+                return edit_q(waiting_plan) if waiting_plan else words.replace("主管", "你")
             # the rest still meets every check below; with none to make, the kept words are the reply
             return self._code_reply(out, kept, text, source, waiting_plan, about_edit, general) or kept
         # a general answer with no plant read (「硫化是什麼」 → 「通常在 140–160°C」) is general knowledge, not a plant number
@@ -1553,14 +1563,19 @@ class MainAgent:
             if steps and all(s["tool"] == QUERY for s in steps if s["ok"]) and not (waiting_plan and about_edit):
                 # query_plant data is JSON: pasted back it read as noise (「查到：工廠資料（之前的訂單）：completed_or_shipped: id:…」)
                 return self._raw_list(out) or NUMBERS_OFF
-            fixed = self._results_reply(steps) or (PLAN_EDIT_Q if waiting_plan and about_edit else "")
+            fixed = self._results_reply(steps) or (edit_q(waiting_plan) if waiting_plan and about_edit else "")
             if fixed:
                 return fixed
             # nothing read and not a plan change: the words stay, as before (「現在狀況怎樣？」 → 「7 號機 122.3°C…」 from
             # the context: 「7」 is CURE-07, 「1 台」 a count; 「這個我沒有查到資料」 there was not true, review 10-21)
+        if waiting_plan and not steps and words.rstrip().endswith(("？", "?")) and re.search(r"改|調整|換", words):
+            # beside a waiting plan the model asked what to change in its own words (「是想調整排程、變更派工對象…？」,
+            # live run 10-22: options the card does not have): the card's real list is the question
+            out["error"] = "asked what to change with options of its own"
+            return edit_q(waiting_plan)
         if waiting_plan and _UNSAFE_RX.search(words):     # any reply beside a waiting plan (issue #195: no keyword gate)
             out["error"] = "advice outside what the plan can change"
-            return PLAN_EDIT_Q
+            return edit_q(waiting_plan)
         t = text.strip()
         asks_only = bool(_QUESTION_RX.search(t)) and not _CHANGE_WORD_RX.search(t) and not is_gibberish(t)
         if _CLAIM_RX.search(words) and not asks_only:  # 「已改／已更新／已擬計劃／已送」 with nothing proposed or replanned
