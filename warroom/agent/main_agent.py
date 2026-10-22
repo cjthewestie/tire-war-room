@@ -1315,6 +1315,7 @@ class MainAgent:
         reopened = False                                # a remark that opened like the last one is asked once more
         worded = False                                  # asked once for words after the tools
         regenerated = False                             # one retry after a degenerate repetition
+        retold = False                                  # one retry after a reply that copied the waiting card
         self._waiting = waiting_plan
         editing = discuss is not None and plan_edit(t)  # only for the reply check: a plan change is said by discuss
         sop_asked = False
@@ -1437,6 +1438,14 @@ class MainAgent:
                 regrounded = True
                 msgs += [{"role": "assistant", "content": reply},
                          {"role": "user", "content": f"回覆裡的 {'、'.join(bad[:5])} 不在查到的資料裡。只用上面工具結果的數字重寫回覆，不要自己算或猜。"}]
+                continue
+            if (waiting_plan and not retold and not last and not out["steps"]
+                    and any(waiting_plan[k:k + 24] in reply for k in range(0, max(len(waiting_plan) - 24, 1), 8))):
+                # the card copied back (「這份待核准的計劃（v1）是：…要做的事：…」 for 「怎改」, live run 10-22): the supervisor
+                # sees it on screen; once more, answering only what was said
+                retold = True
+                msgs += [{"role": "assistant", "content": reply},
+                         {"role": "user", "content": f"不要再介紹一次計劃，主管看得到。只回應他這一句「{t}」，最多 2 句，稱他「你」。"}]
                 continue
             if bad and not regrounded and not last and not out["steps"] and "一般知識" not in reply:
                 # issue #195: no keyword asks for a read before the model, so the check is on its reply: a plant number
