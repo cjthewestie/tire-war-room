@@ -492,13 +492,26 @@ def orders_arrived(r: Any, day: str | None = None) -> dict[str, Any]:
             **({} if rows else {"note": "這一天沒有訂單紀錄"})}
 
 
+def task_search(r: Any, q: str | None = None) -> dict[str, Any]:
+    """The task list the 主控台 searches (warroom/api/task_sessions.py), compact: 進行中, 今日已結案, 歷史任務 by day."""
+    from warroom.api import task_sessions
+    d = task_sessions.listing(r, q)
+    row = lambda t: {"id": t["id"], "what": t["title"], "state": t["state_label"], "opened": _hm(t["opened_at"]),  # noqa: E731
+                     "closed": _hm(t["closed_at"]), "outcome": (t.get("outcome") or "")[:60] or None}
+    return {"q": q or "", "running": [row(t) for t in d["running"]][:12],
+            "closed_today": [row(t) for t in d["closed_today"]][:12],
+            "history": [{"day": g["label"], "tasks": [row(t) for t in g["tasks"]][:8]} for g in d["history"][:6]],
+            **({} if d["running"] or d["closed_today"] or d["history"] else {"note": "沒有符合的任務"})}
+
+
 TOPICS = {"overview": overview, "shipments": shipments, "schedule": schedule, "materials": materials,
           "open_events": open_events, "handled_today": handled_today, "audit_recent": audit_recent,
           "staffing": staffing, "orders": orders, "machines": machines, "quality": quality,
           "maintenance": maintenance, "energy": energy, "orders_history": orders_history, "order_lookup": order_lookup, "tasks": tasks,
           "safety_stops": safety_stops, "questionable": questionable,
           "machine_history": machine_history, "memory_notes": memory_notes, "daily_summary": daily_summary,
-          "memory_search": memory_search, "chat_history": chat_history, "orders_arrived": orders_arrived}
+          "memory_search": memory_search, "chat_history": chat_history, "orders_arrived": orders_arrived,
+          "task_search": task_search}
 
 
 def _shrink(d: Any, n: int) -> Any:
@@ -518,7 +531,7 @@ def query(r: Any, topic: str, order_id: str | None = None, machine_id: str | Non
         data = TOPICS[topic](r, machine_id)
     elif topic in ("daily_summary", "chat_history", "orders_arrived"):
         data = TOPICS[topic](r, date)
-    elif topic == "memory_search":
+    elif topic in ("memory_search", "task_search"):
         data = TOPICS[topic](r, q)
     else:
         data = TOPICS[topic](r)

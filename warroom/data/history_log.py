@@ -37,6 +37,7 @@ class HistoryLog:
                        "event_id TEXT, by TEXT)")
             db.execute("CREATE INDEX IF NOT EXISTS chat_day ON chat_log(day, id)")
             db.execute("CREATE INDEX IF NOT EXISTS chat_session ON chat_log(session_id, id)")
+            db.execute("CREATE INDEX IF NOT EXISTS chat_event ON chat_log(event_id, id)")
             db.execute("CREATE TABLE IF NOT EXISTS order_log (id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, day TEXT, "
                        "logged_at TEXT, kind TEXT, order_id TEXT, customer TEXT, spec TEXT, qty INTEGER, due TEXT, "
                        "priority INTEGER, on_time INTEGER, text TEXT)")
@@ -76,10 +77,10 @@ class HistoryLog:
 
     # ---------------------------------------------------------------- reads
     def chats(self, day: str | None = None, session: str | None = None, scope: str | None = None,
-              limit: int = 200) -> list[dict[str, Any]]:
-        """Chat rows, oldest first (the last `limit` that match)."""
+              limit: int = 200, event_id: str | None = None) -> list[dict[str, Any]]:
+        """Chat rows, oldest first (the last `limit` that match). `event_id`: one task's session (issue #189)."""
         where, args = [], []
-        for col, v in (("day", day), ("session_id", session), ("scope", scope)):
+        for col, v in (("day", day), ("session_id", session), ("scope", scope), ("event_id", event_id)):
             if v:
                 where.append(f"{col}=?")
                 args.append(v)

@@ -106,6 +106,8 @@ PLANT_TOPICS: dict[str, str] = {
     # CJ 2026-10-22: 「從現在開始這些對話紀錄跟訂單紀錄都要記錄下來」
     "chat_history": "之前的對話紀錄：某一天（date，不給就是今天）跟 Agent Nemo 聊過什麼，每段對話的時間和內容",
     "orders_arrived": "訂單紀錄：某一天（date，不給就是今天）進了哪些新訂單、急單（客戶、規格、數量、交期），完成、遲交、出貨的",
+    # issue #189: 「總攬區的對話要可以存取這些事件」
+    "task_search": "搜尋任務：進行中、今日已結案、歷史任務（依日），每件的狀態與結果；可給 q（例如 7 號機、#A-311、急單），不給就是全部",
 }
 # task control from chat (CJ 2026-10-22: 「A」): existing supervisor actions only, each confirmed in chat first.
 # Approving a card and releasing a Safety Core stop are never chat actions (buttons only).
@@ -264,6 +266,8 @@ _TOPIC_RX: list[tuple[str, re.Pattern[str]]] = [
     ("materials", re.compile(r"原料|庫存|缺料|補料|進貨|採購|橡膠|碳黑|鋼絲|尼龍|硫化劑")),
     ("safety_stops", re.compile(r"安全核心.{0,6}(?:停|狀況|怎樣|如何|放行)|安全停機|停機.{0,4}(?:放行|解除|恢復)|放行")),
     ("questionable", re.compile(r"有問題|有疑問|怪怪|不對勁|卡住|要注意|該注意|哪些.{0,4}(?:不正常|出錯|有狀況)")),
+    # issue #189: a task of an earlier day, or a search over the task list
+    ("task_search", re.compile(r"歷史任務|(?:之前|以前|過去|昨天|前天|上一?輪|前幾天).{0,6}(?:任務|事件)|(?:找|搜尋|查).{0,4}任務")),
     ("tasks", re.compile(r"(?:所有|全部|每個|每件)?任務.{0,4}(?:狀況|狀態|進度|怎樣|如何)|任務(?:狀況|進度)|卡在哪")),
     ("open_events", re.compile(r"事件|還沒結|未結|待核准|等核准|警報")),
     ("handled_today", re.compile(r"處理過|做了什麼|做過|今天.{0,4}(?:處理|完成)|結案")),
@@ -391,7 +395,7 @@ def tool_specs(with_discuss: bool) -> list[dict[str, Any]]:
              "order_id": {"type": "string", "description": "order_lookup 用：訂單編號，例如 #A-311、SO-004"},
              "machine_id": {"type": "string", "description": "machine_history 用：機台編號，例如 CURE-07"},
              "date": {"type": "string", "description": "daily_summary、chat_history、orders_arrived 用：日期 YYYY-MM-DD（可不給）"},
-             "q": {"type": "string", "description": "memory_search 用：要找的事，例如 7 號機 疏水閥"}}, ["topic"]),
+             "q": {"type": "string", "description": "memory_search、task_search 用：要找的事，例如 7 號機 疏水閥、#A-311"}}, ["topic"]),
         _fn(PROPOSE, "主管要做一件會動到現場的事：擬計劃送主管核准（核准前不執行）", {"task": {"type": "string",
             "description": "要完成的事，一句話，含對象"}}, ["task"]),
     ]
@@ -1162,7 +1166,7 @@ class MainAgent:
         oid = oid if topic == "order_lookup" else None
         mid = mid if topic == "machine_history" else None
         day = str((args or {}).get("date") or "").strip()[:20] if topic in ("daily_summary", "chat_history", "orders_arrived") else ""
-        q = str((args or {}).get("q") or "").strip()[:80] if topic == "memory_search" else ""
+        q = str((args or {}).get("q") or "").strip()[:80] if topic in ("memory_search", "task_search") else ""
         if topic == "memory_search" and not q:
             steps.append({"tool": QUERY, "args": {"topic": topic}, "ok": False, "summary": "失敗：沒有要找什麼",
                           "label": "查了工廠資料（搜尋記憶）"})
