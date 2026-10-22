@@ -230,6 +230,7 @@ NO_DATA_REPLIES = ("我這邊沒有天氣、新聞這類外部資料，這題沒
                    "外面的資料我沒有接進來，這題答不了。")
 SMALLTALK_LINES = ("辛苦了，先喝口水喘口氣！", "撐著點，今天也快過一半了！", "累了就先放鬆一下肩膀！", "好好吃頓飯，下午才有力氣！")
 _PLANT_WORD_RX = re.compile(r"機|爐|溫度|訂單|排程|出貨|產線|硫化|天氣|\d")
+_GREET_REPLY_RX = re.compile(r"\s*(?:你好|您好|哈囉|嗨|早安|午安|晚安|不客氣)")
 _PLANT_STAT_RX = re.compile(r"在班|上班人員|運轉|待機|出貨|機台|號機|工單|訂單|事件")
 _JOKE_TAIL_RX = re.compile(r"工廠|排程|出貨|輪胎|訂單|機台|在班")
 DATA_OPEN, DATA_CLOSE = "<<<DATA", "DATA>>>"
@@ -253,7 +254,7 @@ _UNSAFE_RX = re.compile(r"調低|降低.{0,6}溫|降溫|加快.{0,4}降|縮短.{
 _TOOL_PAREN_RX = re.compile(r"\s*[（(][^（）()]*[A-Za-z]+_[A-Za-z_]+[^（）()]*[）)]")
 _SENTENCE_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
 # the supervisor in the third person: the model's reading of the message written as the reply (issue #195)
-_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|(?:問|跟|向)主管|(?:你|您)說的「[^」]*」(?:是|應該|可能)")
+_THIRD_RX = re.compile(r"主管(?:是想|想要|想|似乎|應該是|的意思|在問|是在)|主管(?:要|說|希望|打算)|(?:問|跟|向)主管|(?:你|您)說的「[^」]*」(?:是|應該|可能)")
 MAX_TOKENS = 350           # a reply is cut at MAX_CHARS anyway; 500 let it write 400-token lists (6–8 s, real run 10-22)
 MAX_CHARS = 260            # a chat bubble, not a report; the full data stays in the reply's tool line
 MAX_SENTENCES = 5          # CJ approved a looser chat (2026-10-21, option A: 「好改」); 3 cut general answers mid-thought
@@ -1486,16 +1487,19 @@ class MainAgent:
                 out["reply"] = self._with_fact(line, context)
                 return
             words = tidy(reply, keep_intro=bool(_IDENTITY_RX.search(t) or _HELLO_RX.match(t)))
+            words = words.replace("您", "你")          # the supervisor is 你 (issue #195)
             if remark and code is None:
                 words = _ECHO_RX.sub("", _DUMP_TAIL_RX.sub("", tidy(reply, keep_intro=False, limit=3))).strip() or words
                 words = re.sub(r"^好[，,]\s*(?=聽起來)", "", words)
                 if words and words[-1] not in "。！？!?～~":
                     words += "？" if re.search(r"哪|嗎|要不要|還是|是不是", words.split("。")[-1]) else "。"
                 notes["last_opener"] = opener(words)
-            elif code is None and casual and not out["steps"]:
+            elif code is None and not out["steps"] and (casual or _GREET_REPLY_RX.match(words)):
                 # a general answer does not end on a plant status dump from the context (「硫化是什麼」 → 「今天上班人員
                 # 27 人…明天第一班次出貨時間是 10/21」, preview run 10-21)
                 words = "".join(x for x in _SENTENCE_RX.findall(words) if not (_PLANT_STAT_RX.search(x) and re.search(r"\d", x))) or words
+                if _GREET_REPLY_RX.match(words):       # a greeting is no status report (issue #195, live run 10-22)
+                    words = "".join(x for x in _SENTENCE_RX.findall(words) if not re.search(r"\d", x)) or words
             if (code is None and not out["steps"] and not out["event_id"] and self._pin_of(t)
                     and not wants_task(t) and not _QUESTION_RX.search(t)):
                 # the supervisor only set a constraint (「#A-311 優先，不要動 9 號機」): code confirms it is pinned (the
@@ -1544,7 +1548,7 @@ class MainAgent:
         if _THIRD_RX.search(words):
             # the model's reading of the message (「主管是想調整 7 號機…可以問主管要改哪一項」, issue #195) is no reply: the
             # supervisor is 你. Those sentences go; nothing left beside a waiting plan → what the plan can change
-            kept = "".join(x for x in _SENTENCE_RX.findall(words) if not _THIRD_RX.search(x)).strip()
+            kept = "".join(x for x in _SENTENCE_RX.findall(words) if not _THIRD_RX.search(x)).strip().replace("您", "你")
             out["error"] = "reply spoke of the supervisor in the third person"
             if not kept:
                 return edit_q(waiting_plan) if waiting_plan else words.replace("主管", "你")
