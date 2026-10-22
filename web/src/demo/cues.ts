@@ -89,7 +89,9 @@ export interface Cue {
 
 export const CUES: Cue[] = [
   { id: 'start', at: 0, title: '一天開始：訂單湧進來', body: '07:00 早班開工，今天的訂單一張張進來：有一般單、有交期很趕的單，還有急單。',
-    hold: { wait: 'continue', min: 6 }, shot: { kind: 'establish' } },
+    // ① is ready once the 急單's card is up (the orders flood in meanwhile, the sim runs fast): the plan for it is made
+    // during the establishing shot instead of as dead air after it
+    hold: { wait: 'continue', min: 6, until: 'rushCard', untilTimeout: 30 }, shot: { kind: 'establish' } },
   { id: 'rush', at: 20, title: '📋 急單進來：先核准', body: '急單 SO-017 到了，AI 已經重排好。去主控台看計劃、按核准。', links: ['console'],
     hold: { wait: 'approval', approval: 'rushApproved', card: 'rushCard' }, shot: { kind: 'overview' } },
   { id: 'console', at: 40, title: '👉 主控台：計劃已先擬好，只等核准或討論', body: '急單排進去後，SO-012 交期有風險：Agent 先擬好保交期的方案，等主管決定。', links: ['console'],

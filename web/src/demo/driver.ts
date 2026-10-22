@@ -165,12 +165,15 @@ export class DemoRun {
       void this.io.control({ action: 'speed', speed }).catch(() => {})
     }
     const w = waiting(r.tl, t, sig)
-    const key = `${r.tl.index}|${w}`
+    // done with a beat and waiting for the next one's live event: the shared pointer already shows that next beat
+    // (waiting for its event), so after a continue no screen flashes back to the beat that just ended
+    const postIndex = r.tl.released && CUES[r.tl.index + 1]?.enter?.on ? r.tl.index + 1 : r.tl.index
+    const key = `${postIndex}|${w}`
     if (key !== this.posted) {
       this.posted = key
-      this.ack = r.tl.index
+      this.ack = postIndex
       this.inflight++
-      void this.send({ action: 'cue', cue_id: CUES[r.tl.index].id, cue_index: r.tl.index, waiting_for: w })
+      void this.send({ action: 'cue', cue_id: CUES[postIndex].id, cue_index: postIndex, waiting_for: w })
         .then((out) => { if (out) this.myRev = Math.max(this.myRev, out.rev) })
         .finally(() => { this.inflight-- })
     }

@@ -41,26 +41,7 @@ await room.waitForSelector('[data-testid="demo-mode-button"]', { timeout: 30000 
 await sleep(2000)
 const t0 = Date.now()
 await room.locator('[data-testid="demo-mode-button"]').click()
-const joined = await (async () => { for (let i = 0; i < 40; i++) { // pacing: per beat, how long the walk / flight took, how long until it was ready (or the card showed), and any idle
-// stretch (the plant or the 3D, not CJ, is what the demo waits for) longer than 3 s
-const beats = []
-for (const smp of samples) {
-  let b = beats[beats.length - 1]
-  if (!b || b.cue !== smp.cue) { b = { cue: smp.cue, in: smp.t, walk: null, ready: null, out: null, idle: [] }; beats.push(b); if (beats.length > 1) beats[beats.length - 2].out = smp.t }
-  if (b.walk == null && smp.walkDone && smp.t > b.in) b.walk = smp.t
-  if (b.ready == null && (smp.waiting === 'continue' || (smp.waiting === 'approval' && cardUp.has(Math.round(smp.t))))) b.ready = smp.t
-}
-for (const b of beats) {
-  const walk = b.walk == null ? 0 : b.walk - b.in
-  const ready = b.ready == null ? null : b.ready - b.in
-  const idle = ready == null ? 0 : Math.max(0, ready - Math.max(walk, 0))
-  b.row = { cue: b.cue, walk_s: +walk.toFixed(1), ready_s: ready == null ? '—' : +ready.toFixed(1), idle_s: +idle.toFixed(1), in_s: +b.in.toFixed(1) }
-}
-console.table(beats.map((b) => b.row))
-const pitch = beats.find((b) => b.cue === 'pitch')
-console.log(`      time to pitch: ${pitch ? pitch.in.toFixed(1) : '—'} s`)
-writeFileSync(resolve(OUT, 'pacing.json'), JSON.stringify({ beats: beats.map((b) => b.row), samples }, null, 2))
-const d = await f3.evaluate(() => window.__demo3d?.()); if (d?.running) return d; await sleep(500) } return null })()
+const joined = await (async () => { for (let i = 0; i < 40; i++) { const d = await f3.evaluate(() => window.__demo3d?.()); if (d?.running) return d; await sleep(500) } return null })()
 check('the 3D joins a demo started on the war room', !!joined, JSON.stringify(joined?.cue))
 const seenAt = new Map(), approved = new Set()
 const samples = []
@@ -95,6 +76,25 @@ while (Date.now() - t0 < 8 * 60 * 1000) {
   }
   await sleep(300)
 }
+// pacing: per beat, how long the walk / flight took, how long until it was ready (or the card showed), and any idle
+// stretch (the plant or the 3D, not CJ, is what the demo waits for) longer than 3 s
+const beats = []
+for (const smp of samples) {
+  let b = beats[beats.length - 1]
+  if (!b || b.cue !== smp.cue) { b = { cue: smp.cue, in: smp.t, walk: null, ready: null, out: null, idle: [] }; beats.push(b); if (beats.length > 1) beats[beats.length - 2].out = smp.t }
+  if (b.walk == null && smp.walkDone && smp.t > b.in) b.walk = smp.t
+  if (b.ready == null && (smp.waiting === 'continue' || (smp.waiting === 'approval' && cardUp.has(Math.round(smp.t))))) b.ready = smp.t
+}
+for (const b of beats) {
+  const walk = b.walk == null ? 0 : b.walk - b.in
+  const ready = b.ready == null ? null : b.ready - b.in
+  const idle = ready == null ? 0 : Math.max(0, ready - Math.max(walk, 0))
+  b.row = { cue: b.cue, walk_s: +walk.toFixed(1), ready_s: ready == null ? '—' : +ready.toFixed(1), idle_s: +idle.toFixed(1), in_s: +b.in.toFixed(1) }
+}
+console.table(beats.map((b) => b.row))
+const pitch = beats.find((b) => b.cue === 'pitch')
+console.log(`      time to pitch: ${pitch ? pitch.in.toFixed(1) : '—'} s`)
+writeFileSync(resolve(OUT, 'pacing.json'), JSON.stringify({ beats: beats.map((b) => b.row), samples }, null, 2))
 const d = await f3.evaluate(() => window.__demo3d?.())
 const rows = (d?.log ?? []).map((r) => ({ cue: r.id, planned: r.planned, followed: r.t }))
 console.table(rows)

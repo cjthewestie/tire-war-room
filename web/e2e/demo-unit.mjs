@@ -47,7 +47,8 @@ function drive(script, until, dt = 0.25) {
   const r = drive({}, 60)
   check('① blocks: no continue → still on start at 60 s', r.tl.index === 0 && !r.tl.released)
   check('① camera / orders first (6 s): sim runs until then', r.at(5.75).paused === false && r.at(5.75).waiting === null)
-  check('① then waits for continue with the sim paused', r.at(6).paused === true && r.at(6).waiting === 'continue')
+  check('① waits for the 急單 card first (sim running, fast): not ready at 6 s without it', r.at(6).waiting === null && r.at(6).paused === false)
+  check('① then (card, or its 30 s fallback) waits for continue with the sim paused', r.at(30).paused === true && r.at(30).waiting === 'continue')
   const c = drive({ 20: { cont: true } }, 22)
   check('continue releases ① and the next cue enters', c.at(20).released && c.at(20.25).cue === 'rush', JSON.stringify(c.at(20.25)))
   check('sim resumed after continue', c.at(20).paused === false && c.at(20.25).paused === false)
@@ -57,7 +58,7 @@ function drive(script, until, dt = 0.25) {
 {
   const tl = D.startTimeline()
   check('walking: not ready while arrived is false', !D.ready(tl, 20, { arrived: false }) && !D.simPaused(tl, 20, { arrived: false }))
-  check('arrived (or no gate, the war room): ready', D.ready(tl, 20, { arrived: true }) && D.ready(tl, 20, {}))
+  check('arrived (or no gate, the war room): ready', D.ready(tl, 20, { arrived: true, rushCard: true }) && D.ready(tl, 20, { rushCard: true }))
   const r = D.advance(tl, 20, { arrived: false }, true)
   check('walking: continue waits for the arrival', r.refused && !r.tl.released)
 }
@@ -179,7 +180,7 @@ function story(times) {
   let resolved = []
   const state = () => ({ demo: { ...srv }, snapshot: { events: [], machines: [] }, pending: [], resolved, world: null })
   const tickN = async (n, dt = 250) => { for (let i = 0; i < n; i++) { now += dt; run.tick(now, state()); await new Promise((r) => setTimeout(r, 0)) } }
-  await tickN(60)   // ① ready after 12 s
+  await tickN(130)   // ① ready (no 急單 card in this fake: its 30 s fallback)
   check('driver: ① waits for continue', D.CUES[run.tl.index].id === 'start' && D.waiting(run.tl, run.t, run.latched) === 'continue')
   await run.continue(); await tickN(4)
   check('driver: one continue (server) → 先核准急單', D.CUES[run.tl.index].id === 'rush', D.CUES[run.tl.index].id)
