@@ -20,6 +20,7 @@ Behind Docker NAT every client arrives with the gateway's address, so an address
 the on-site seat. In a container loopback is not the seat by default; the touch screen pairs once
 with WARROOM_KIOSK_TOKEN via GET /kiosk?token=... (HttpOnly cookie). With neither a PIN nor a kiosk
 token configured in a container, a kiosk token is generated and its pairing URL logged.
+WARROOM_NO_PIN=1 (決賽展示) turns all of this off: every client is the supervisor seat and no PIN is asked.
 The PIN travels only in the header (never in a URL); set WARROOM_SSL_CERTFILE/KEYFILE to serve TLS. Page 9 tiers: weak (弱網)
 leaves the agent untouched and only delays/batches WebSocket pushes to the phone and other remote
 clients (WARROOM_WEAK_PUSH_DELAY_S, default 5 s); wan_down keeps the phone on the factory LAN;
@@ -148,6 +149,7 @@ class AccessConfig:
     local_hosts: frozenset[str] = LOCAL_HOSTS
     kiosk_token: str | None = None
     container: bool = False
+    no_pin: bool = False    # WARROOM_NO_PIN=1 (決賽展示): every client is the supervisor seat, no PIN asked
 
     @classmethod
     def from_env(cls, supervisor_pin: str | None = None, demo_controls: bool | None = None,
@@ -172,14 +174,17 @@ class AccessConfig:
             log.warning("WARROOM_LOCAL_HOSTS=%s inside a container: behind Docker NAT a LAN client can arrive "
                         "with the gateway's address and would become the PIN-free seat. Prefer "
                         "WARROOM_KIOSK_TOKEN (GET /kiosk?token=...) or network_mode: host.", ",".join(sorted(extra)))
-        if container and not pin and not kiosk:
+        no_pin = os.environ.get("WARROOM_NO_PIN", "").strip().lower() in _TRUE
+        if no_pin:
+            log.warning("WARROOM_NO_PIN=1: every client on the network is the supervisor seat (no PIN). Demo only.")
+        if container and not pin and not kiosk and not no_pin:
             import secrets
             kiosk = secrets.token_urlsafe(18)
             log.warning("no WARROOM_SUPERVISOR_PIN and no WARROOM_KIOSK_TOKEN in a container: nobody could "
                         "approve. Generated a kiosk token for this run; pair the on-site screen once by "
                         "opening  /kiosk?token=%s", kiosk)
         return cls(supervisor_pin=pin, demo_controls=demo, local_hosts=base | extra, kiosk_token=kiosk,
-                   container=container)
+                   container=container, no_pin=no_pin)
 
 
 class PinGuard:
@@ -415,7 +420,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         """The on-site seat (loopback outside a container, or a paired kiosk), same rule as writes."""
         host = _norm_host(conn.client.host if conn.client else "")
         fwd = [_norm_host(h) for h in conn.headers.get("x-forwarded-for", "").split(",") if h.strip()]
-        return (host in access.local_hosts and all(h in access.local_hosts for h in fwd)) or kiosk_ok(conn)
+        return access.no_pin or (host in access.local_hosts and all(h in access.local_hosts for h in fwd)) \
+            or kiosk_ok(conn)
 
     def supervisor(request: Request, response: Response) -> Session:
         """Who may write. The on-site seat = loopback (outside a container) or a paired kiosk;
@@ -423,7 +429,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         host = _norm_host(request.client.host if request.client else "")
         fwd = [_norm_host(h) for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
         local = host in access.local_hosts and all(h in access.local_hosts for h in fwd)
-        if local or kiosk_ok(request):
+        if access.no_pin or local or kiosk_ok(request):
             return Session(actor="supervisor", local=True, host=host)
         if not access.supervisor_pin:
             hint = " or pair the on-site screen via /kiosk?token=..." if access.kiosk_token else ""
