@@ -30,6 +30,7 @@ import { isMachine } from '../demo/signals'
 import { APPROVAL_CUES } from '../demo/beats'
 import { autoApproves } from '../demo/auto'
 import { AutoCard } from './AutoCard'
+import { useSessionNo } from '../agent/sessionStore'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
@@ -171,6 +172,8 @@ const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '�
 function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: boolean; onSent: (text: string) => void }) {
   const { transport, state } = useWarRoom()
   const ev = state.snapshot?.events.find((e) => e.id === a.event_id) ?? null
+  // the task's session number, exactly as on the 主控台 task card
+  const no = useSessionNo(a.event_id)
   const [opt, setOpt] = useState<string | null>(null)
   const [talk, setTalk] = useState(false)
   const [text, setText] = useState('')
@@ -208,6 +211,7 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
     <div className="ph-card ph-approval">
       <div className="ph-col-a">
       <p className="ph-meta" data-testid="phone-meta">
+        {no?.session_short && <span className="ph-no" title={no.session ?? a.event_id} data-testid="phone-session-no">{no.session_short}</span>}
         <span className="ph-risk" title={a.risk}>{RISK_PLAIN[a.risk]}</span>・{ROUND[a.round] ?? `第${a.round}輪`}核准
         {(a.version ?? 1) > 1 && <b data-testid="phone-version">・v{a.version}（最新）</b>}
       </p>

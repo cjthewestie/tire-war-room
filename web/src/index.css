@@ -1006,6 +1006,9 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 .ph-meta { margin: 0 0 10px; font-size: 13px; color: var(--ink-dim); }
 .ph-meta .ph-risk { background: none; padding: 0; color: inherit; font-weight: 400; }
 .ph-meta b { font-weight: 600; }
+/* the task's session number (「Nemo#03 · 10/21」), the same as on the 主控台 task card (agent.css .tss-no) */
+.ph-no { display: inline-block; margin-right: 8px; padding: 1px 7px; border-radius: 6px; font-size: 12.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .ph-bar { position: sticky; bottom: 0; z-index: 2; margin: 14px -16px 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); background: var(--panel); border-top: 1px solid var(--border); }
 .ph-bar .ph-scope { margin: 0 0 8px; }
 .ph-bar .ph-acts { position: static; margin: 0; padding: 0; background: none; border: 0; }

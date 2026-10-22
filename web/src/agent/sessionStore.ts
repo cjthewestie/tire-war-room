@@ -71,6 +71,34 @@ export function useTaskListing(q: string): TaskListing | null {
   return data
 }
 
+/** One task's session number (「Nemo#03 · 10/21」, as on the 主控台 task card), looked up by its event id: the phone's
+ *  approval card shows the same number (CJ 10-22: 「手機的卡號跟任務卡號要對齊」). Live: GET /api/tasks, retried every
+ *  2 s while a brand-new task is not listed yet (up to ~30 s); the mock: numbered from the snapshot like the task list. */
+export function useSessionNo(eventId: string | null | undefined): TaskRow | null {
+  const { state, transport, connected } = useWarRoom()
+  const live = transport?.mode === 'live'
+  const [hit, setHit] = useState<{ id: string; row: TaskRow } | null>(null)
+  useEffect(() => {
+    if (!live || !connected || !eventId) return
+    let off = false, tries = 0
+    let t: ReturnType<typeof setTimeout> | undefined
+    const pull = () => apiGet<TaskListing>('/api/tasks').then((d) => {
+      if (off) return
+      const row = allRows(d).find((r) => r.id === eventId)
+      if (row?.session_short) setHit({ id: eventId, row })
+      else if (++tries < 15) t = setTimeout(pull, 2000)
+    }).catch(() => { if (!off && ++tries < 15) t = setTimeout(pull, 2000) })
+    void pull()
+    return () => { off = true; if (t) clearTimeout(t) }
+  }, [live, connected, eventId])
+  if (!eventId) return null
+  if (!live) {
+    const today = (state.clock?.factory_time ?? state.snapshot?.header.factory_time ?? '').slice(0, 10)
+    return allRows(localListing(state.snapshot?.events ?? [], '', today)).find((r) => r.id === eventId) ?? null
+  }
+  return hit?.id === eventId ? hit.row : null
+}
+
 /** Every row of a listing, for a lookup by id. */
 export const allRows = (l: TaskListing | null): TaskRow[] => (l ? [...l.running, ...l.closed_today, ...l.history.flatMap((g) => g.tasks)] : [])
 
