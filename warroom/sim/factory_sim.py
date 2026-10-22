@@ -870,6 +870,30 @@ class Factory:
         m.status, m.note = MachineStatus.IDLE, f"QC 報廢 {job.order_id}，換模入模中"
         return job.job_id
 
+    PASS_HELD_NOTE = "QC 放行，機台待維修／讀值未回到安全範圍"
+
+    def pass_held_job(self, press_id: str) -> str | None:
+        """QC 合格放行 of the tyre a CURE_HOLD kept in the mold while the press is still out of range (supervisor
+        decision, warroom/api/resolve.py): the tyre is accepted as made and de-molded like a normal cure completion
+        (the order counts it; the world sees the job leave and books final inspection and goods as for any de-mold),
+        and the press goes OUT_OF_SERVICE, waiting for repair: no new mold-in, and with no cure job left the Safety
+        Core's CURE_HOLD rule no longer applies. Back in service only via Runtime.return_to_service after 檢修完成.
+        Returns the passed job id (None: no job in the press)."""
+        ps = self._press.get(press_id)
+        if ps is None or ps.job is None:
+            return None
+        job = ps.job
+        o = self._orders.get(job.order_id)
+        if o is not None:
+            self._orders[o.id] = o.model_copy(update={"done": min(o.qty, o.done + 1)})
+        if job.order_id in self._in_press:
+            self._in_press[job.order_id] = max(0, self._in_press[job.order_id] - 1)
+        ps.job = None
+        ps.idle_until = None
+        m = self._m[press_id]
+        m.status, m.note = MachineStatus.OUT_OF_SERVICE, self.PASS_HELD_NOTE
+        return job.job_id
+
     def set_active_event(self, machine_id: str, event_id: str | None) -> None:
         self._m[machine_id].active_event_id = event_id
 

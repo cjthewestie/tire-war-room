@@ -1365,8 +1365,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             try:
                 if c is not None:
                     d = "scrap" if ("報廢" in words and "scrap" in c.decisions) else c.decisions[0]
-                    r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"), self.actor)
+                    done = r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"),
+                                            self.actor)
                     result = (f"已報廢{machine_label(mid)}這一模，換模後再入模。" if d == "scrap"
+                              else f"QC 合格放行：{machine_label(mid)}這一模出模計入訂單；讀值還沒回到安全範圍，機台停用待維修。"
+                              if d == "qc_pass" and not done.reading_ok
                               else f"已恢復{machine_label(mid)}運轉（{'QC 合格放行' if d == 'qc_pass' else '確認恢復運轉'}）。")
                 else:
                     r.return_to_service(mid, self.actor)

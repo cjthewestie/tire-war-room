@@ -6,9 +6,12 @@
                   core needs to re-arm (RuleSafetyCore.rearm_samples). It only READS the readings and the core's rule
                   list; the core is never called, reset or changed here.
   ③ 確認恢復運轉  the supervisor's release: allowed only when ② passed AND ① is done (or 「已現場確認」 with a reason).
-                  SR-CURE-LOW-120 releases by QC decision instead: 「QC 合格，放行」 or 「報廢」 (scrap needs no ②: the
-                  tyre leaves the press). Lifts STOPPED / ALARM back to RUNNING (never OUT_OF_SERVICE), audited
-                  (AuditKind.SAFETY_RELEASE, actor = the supervisor session).
+                  SR-CURE-LOW-120 releases by QC decision instead: 「QC 合格，放行」 or 「報廢」. Both judge the tyre, so
+                  they need ① only, not ② (CJ 10-22, option B). 報廢: the tyre leaves the press. QC 合格 with ② passed:
+                  as 確認恢復運轉. QC 合格 with the press still out of range: the tyre is de-molded as made (counts for
+                  its order) and the press goes OUT_OF_SERVICE 「QC 放行，機台待維修」 (no cure job left, so the hold
+                  does not fire again; back via 恢復運轉 after 檢修完成). Otherwise lifts STOPPED / ALARM back to
+                  RUNNING, audited (AuditKind.SAFETY_RELEASE, actor = the supervisor session, with the branch taken).
 
 (B) SAFE_STOP → follow-up: replan (a new event, warroom/agent/state_machine.py open_replan), hand to the floor (worker
     tasks, 「人工處理中」) and close (「確認結案」). Driven by Runtime; the fixed SOP tasks for B are here too.
@@ -209,7 +212,8 @@ class SafetyCases:
         reason = body.reason.strip()
         if body.field_confirmed and not reason:
             raise ValueError("勾選「已現場確認」時請寫理由")
-        if body.decision != "scrap" and not c.reading_ok:
+        # CJ 10-22 (option B): 「QC 合格放行」 judges the tyre, not the press: field check only. 確認恢復運轉 still needs ②.
+        if body.decision == "resume" and not c.reading_ok:
             raise ValueError(f"讀值還沒回到安全範圍（連續 {c.safe_samples}/{c.safe_needed} 筆）")
         self._refresh(c, board)
         done = c.tasks_done
@@ -224,15 +228,27 @@ class SafetyCases:
         self.check_release(c, body, board)
         st = sim.machine(c.machine_id)
         before = st.status
-        scrapped = None
+        scrapped = passed = None
         if body.decision == "scrap":
+            branch = "scrap"
             fn = getattr(sim, "scrap_held_job", None)
             scrapped = fn(c.machine_id) if callable(fn) else None
             if scrapped is None and before is MachineStatus.STOPPED:
                 sim.set_machine_status(c.machine_id, MachineStatus.IDLE, "QC 報廢，換模入模中")
+        elif body.decision == "qc_pass" and not c.reading_ok:
+            # the tyre is accepted as made; the press is still out of range, so it must NOT go back to RUNNING:
+            # de-mold as a completed tyre and take the press out of service until it is repaired
+            branch = "qc_pass_press_out_of_service"
+            fn = getattr(sim, "pass_held_job", None)
+            passed = fn(c.machine_id) if callable(fn) else None
+            if passed is None:
+                sim.set_machine_status(c.machine_id, MachineStatus.OUT_OF_SERVICE, "QC 放行，機台待維修／讀值未回到安全範圍")
         elif before in (MachineStatus.STOPPED, MachineStatus.ALARM):
+            branch = f"{body.decision}_running"
             # STOPPED / ALARM only: an OUT_OF_SERVICE decision is not the core's and stays
             sim.set_machine_status(c.machine_id, MachineStatus.RUNNING, "主管確認恢復運轉")
+        else:
+            branch = f"{body.decision}_status_kept"
         after = sim.machine(c.machine_id).status
         c.status, c.resolved_at, c.resolved_by = "resolved", now, actor
         c.resolution, c.reason, c.field_confirmed = body.decision, body.reason.strip() or None, body.field_confirmed
@@ -241,6 +257,7 @@ class SafetyCases:
                            "reason": c.reason, "field_confirmed": body.field_confirmed, "reading": c.reading,
                            "safe_samples": c.safe_samples, "safe_needed": c.safe_needed, "task_ids": c.task_ids,
                            "tasks_done": c.tasks_done, "status_before": before.value, "status_after": after.value,
-                           "scrapped_job": scrapped, "safety_action_ids": c.actions},
+                           "scrapped_job": scrapped, "passed_job": passed, "branch": branch,
+                           "safety_action_ids": c.actions},
                           c.event_id or c.id)
         return c
