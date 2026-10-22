@@ -469,8 +469,8 @@ export function FactoryApp() {
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
       <PendingApprovalAlert variant="corner" newTab />
-      {/* 斷網備援的 Demo 小按鈕 (CJ 2026-10-22): bottom-right, collapsed; hidden while a demo runs */}
-      {!demoOn && <DemoButtons where="factory" />}
+      {/* 斷網備援的 Demo 小按鈕 (CJ 2026-10-22): bottom-right, collapsed; hidden while the auto-play demo runs */}
+      {!autoOn && <DemoButtons where="factory" />}
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
