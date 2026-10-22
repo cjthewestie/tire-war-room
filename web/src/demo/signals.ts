@@ -64,5 +64,7 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     // 停用檢修, so 「all done」 alone would fire early). Never on status running: 7 號機 stays 停用 until 恢復運轉.
     workerDone: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))),
     closed,
+    // the walk to 7 號機 starts as soon as the last repair is approved (the crew works while the lead runs there)
+    fixing: (rejected && mine.length >= 2) || (approved && (!!tile?.repaired || closed)),
   }
 }

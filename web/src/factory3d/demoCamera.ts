@@ -28,7 +28,7 @@ export function frameFor(shot: Shot, machine: string | null, s: number, reduced 
   const drift = (amp: number, w: number) => amp * k * Math.sin(s * w)
   if (shot.kind === 'establish') {
     // a wide shot of the whole building, then a slow push along the rows (east → west) as the orders come in
-    const u = ease(Math.min(1, s / 14))
+    const u = ease(Math.min(1, s / 6))
     return { x: lerp(1.8, -1.4, u), y: 0.5, z: lerp(0.8, 1.2, u), yaw: lerp(0.62, 0.22, u) + drift(0.03, 0.2), pitch: lerp(0.9, 0.62, u), dist: lerp(32, 16, u) }
   }
   if (shot.kind === 'incident') {
