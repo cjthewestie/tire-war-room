@@ -164,7 +164,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       const w = walk.current
       if (out === 'cue') {
         console.info(`[demo] ${r.t.toFixed(1)} ${c.id} (${r.tl.fired[r.tl.fired.length - 1].reason})`)
-        if (c.big) { chime(true); setBigUntil(now + 4000) } else chime()
+        if (c.big) { chime(true); setBigUntil(now + 2500) } else chime()
         if (c.id === 'pitch') setSlide(0)
         w.enteredAt = now
         w.station = stationFor(c.id, c.shot)
@@ -178,7 +178,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
         if (c.shot.kind === 'establish') demoCam.setShot(c.shot, null)
         else {
           demoCam.setShot({ kind: 'lead' } as unknown as Shot, null)
-          if (!demoCam.flying && now - w.enteredAt > 600) { director.mode = 'walk'; onWalk() }
+          if (!demoCam.flying && now - w.enteredAt > 300) { director.mode = 'walk'; onWalk() }
         }
       }
       if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
@@ -192,7 +192,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       if (c.id !== 'pitch' && c.id !== 'warn' && c.id !== 'end') slideOpened.current = false
       // a checkpoint is ready only once the walk (and the monitor, the robot's show) has arrived
       const robotDone = c.id !== 'robot' || (robot.played.includes('bow') && robot.playing == null) || now - w.enteredAt > 12000
-      const monitorDone = !want || (!!show && now - w.monitorAt > 600)
+      const monitorDone = !want || (!!show && now - w.monitorAt > 300)
       r.arrived = director.mode === 'walk' ? walker.done && robotDone && monitorDone : c.shot.kind === 'establish' ? undefined : false
       // the doorway view of 7 號機: nobody walks through the foreground between the camera and the press
       director.clearRadius = director.mode === 'walk' && walker.at === 'doorway' && walker.done ? 3.2 : 0
@@ -204,7 +204,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, nSlide
       const d = stateRef.current.demo
       if (d?.running && d.paused !== paused) setPaused(d.paused)
       setSnap(snapOf(r))
-    }, 250)
+    }, 150)
     return () => clearInterval(id)
   }, [running, stop, paused, onWalk])
   useEffect(() => () => { director.on = false }, [])

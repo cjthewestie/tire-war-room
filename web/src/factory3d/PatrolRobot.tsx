@@ -13,6 +13,8 @@ import { EAST_X, LOOP, PLACED_IDS, STOPS, WEST_X, robot, route, showStep, standP
 
 const SPEED = 0.62
 const INSPECT_S = 3.4
+/** The demo's robot show plays this much faster than its 4.2 s script (patrol.ts ROBOT_SHOW): about 3.1 s. */
+const SHOW_RATE = 1.35
 
 function build() {
   const root = new THREE.Group()
@@ -170,7 +172,7 @@ export function PatrolRobot({ incident }: { incident: string | null }) {
     }
     let showing: ReturnType<typeof showStep> = null
     if (st.show >= 0) {
-      st.show += dt
+      st.show += dt * SHOW_RATE
       showing = showStep(st.show)
       if (showing && robot.played[robot.played.length - 1] !== showing) robot.played.push(showing)
       robot.playing = showing

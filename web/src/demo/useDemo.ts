@@ -59,7 +59,7 @@ export function useDemo() {
       const r = run.current
       if (!r) return
       if (r.tick(performance.now(), stateRef.current) === 'stopped') run.current = null
-    }, 250)
+    }, 150)
     return () => clearInterval(id)
   }, [driving])
 
