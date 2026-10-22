@@ -309,7 +309,7 @@ export function Player({ enabled, started, onNear, onDoor, prompt, pending, buzz
     // blend between the two (a teleport snaps it)
     const want = started && first ? 1 : 0
     if (cam.snap) { blend.current = want; cam.snap = false }
-    else blend.current += Math.sign(want - blend.current) * Math.min(Math.abs(want - blend.current), Math.min(dtRaw, 0.25) / 1.1)   // real time, even at a low frame rate
+    else blend.current += Math.sign(want - blend.current) * Math.min(Math.abs(want - blend.current), Math.min(dtRaw, 0.25) / (director.on ? 0.7 : 1.1))   // real time, even at a low frame rate; the guided demo blends faster
     const b = ease(blend.current)
     camera.position.lerpVectors(tmp.op, tmp.ep, b)
     camera.quaternion.slerpQuaternions(tmp.oq, tmp.eq, b)
