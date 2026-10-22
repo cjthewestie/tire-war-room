@@ -1,8 +1,10 @@
 // 提詞機台詞：一個 beat 一句。CJ 改講稿只要改這裡的文字（beat id 不要動，是 Demo 流程的固定介面）。
-export type DemoBeat = 'overview' | 'walk' | 'orders' | 'anomaly' | 'approve' | 'repair' | 'robot' | 'warroom'
+// beat 的型別與順序只定義一次，在 ./beat.ts（auto 流程的固定介面）；這裡轉出去給提詞機用。
+import { DEMO_BEATS, type DemoBeat } from './beat'
+export type { DemoBeat }
 
-/** Demo 的順序（進度條 = 第幾段 / BEATS.length）。 */
-export const BEATS: readonly DemoBeat[] = ['overview', 'walk', 'orders', 'anomaly', 'approve', 'repair', 'robot', 'warroom']
+/** Demo 的順序（進度條 = 第幾段 / BEATS.length）＝ beat.ts 的 DEMO_BEATS。 */
+export const BEATS: readonly DemoBeat[] = DEMO_BEATS
 
 export const SCRIPT: Record<DemoBeat, string> = {
   overview: '大家好，我們是新創團隊 Team Westie。我們要讓中小企業工廠真的用得上邊緣 AI：一台 DGX Spark，資料不出廠。這是一條實心胎，光是硫化就要 24 到 34 個小時，工廠的人每天忙得焦頭爛額。',
