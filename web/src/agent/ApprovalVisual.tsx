@@ -32,7 +32,7 @@ export function PendingApproval({ req, onAgent }: { req: ApprovalRequest; onAgen
  *  does what after approval, the option picker when there is a choice, and only two actions — 核准 and 討論
  *  (CJ: 「agent 計劃就只有核准跟討論」; changing or rejecting a plan happens by talking to the agent).
  *  `wide` = 產線監控: the same decision plus the evidence (plan diagram, schedule before/after, tools). */
-export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'wide', showBoard = false }: {
+export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide', showBoard = false }: {
   req: ApprovalRequest; ev: Event | null; items: Item[]; onAgent?: () => void; onDiscuss?: () => void; layout?: 'wide' | 'plan'
   /** the S1–S5 計劃板 inside the plan layout: off on the 主控台 (CJ, 2026-10-22), the code and data stay */
   showBoard?: boolean
