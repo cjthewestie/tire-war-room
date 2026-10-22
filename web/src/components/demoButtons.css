@@ -12,8 +12,8 @@
 .dbtn-toast.bad { background: rgb(var(--alarm-rgb, 195 48 42) / .18); border-color: rgb(var(--alarm-rgb, 195 48 42)); }
 /* the guided demo bar sits in the same corner: step above it */
 .demo-on .dbtn-warroom { bottom: calc(var(--nav-h, 0px) + 58px + env(safe-area-inset-bottom)); }
-/* /factory：右下角（左上是 HUD、左下是按鍵提示；手機畫面升起時蓋在它上面） */
-.dbtn-factory { left: auto; right: 12px; bottom: 12px; flex-direction: row-reverse; z-index: 12; }
+/* /factory：右下角、Demo 播放列上方（左上是 HUD、左下是按鍵提示；手機畫面升起時蓋在它上面） */
+.dbtn-factory { left: auto; right: 12px; bottom: 64px; flex-direction: row-reverse; z-index: 12; }
 .dbtn-factory .dbtn-pill { order: 1; background: var(--c-paper-solid, #fff); color: var(--c-ink, #333); border-color: transparent; }
 .dbtn-factory .dbtn-row { background: var(--c-paper-solid, #fff); border-color: transparent; }
 .dbtn-factory .dbtn-row button { background: var(--c-paper, #f5f0e8); color: var(--c-ink, #333); border-color: transparent; }
