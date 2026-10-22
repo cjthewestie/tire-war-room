@@ -4,8 +4,9 @@
 // 真實後端「不會」自動核准：核准一定是人在手機（或戰情室核准卡）上按，走原本的 Action Gate 與主管身分；Demo 只把手機
 // 舉起來、等那一下。備援：/factory?mock=1&scenario=press7_temp_drop&demo=cure07 —— 瀏覽器內建 Mock 引擎，核准只存在
 // 本機記憶體（Demo 自動核准，不碰 Action Gate、不送主管身分、不寫後端稽核）。
-// 九段流程（beat.ts）：俯瞰 → 走向電腦 → 訂單任務進來並解決 → 離開電腦走向工廠 → 走路途中 7 號機異常 → 手機才響、核准 →
-// 看員工修好 → 巡檢機器人 → 走回戰情室電腦（結束）。
+// 八段流程（beat.ts）：俯瞰 → 走向電腦 → 日常訂單在電腦上排好 → 離開電腦往工廠看 → 手機響（7 號機異常）、核准 →
+// 看員工做完任務 → 巡檢機器人 → 走回戰情室電腦（結束）。CJ 10-22：「我 3d demo 只需要 7 號溫度這個核准異常」：
+// 真實後端載 7 號機溫降情境（沒有急單卡），隨機事件關掉；整段只有 7 號機的核准、手機只響這一次。
 import type { DemoBeat } from './beat'
 import type { Signal } from './cues'
 import { SCRIPT } from './script'
@@ -20,8 +21,11 @@ export const autoRequested = (): boolean => q()?.get(AUTO_Q) === AUTO_VAL
 export const autoMockRequested = (): boolean => { const p = q(); return !!p && p.has('mock') && p.get(AUTO_Q) === AUTO_VAL }
 /** 可以自動播放：網址要求，且有 transport（真實後端或 Mock）。 */
 export const autoActive = (mode: string | undefined): boolean => autoRequested() && (mode === 'mock' || mode === 'live')
-/** 自動核准只在 Mock 引擎（本機記憶體）；真實後端永遠是人按。 */
+/** 按鈕全藏的 Mock 自動卡（phone/AutoCard）只在 Mock 引擎。真實後端的自動播放也會自動核准（CJ 10-22：「3d 工廠 demo 核准要
+ *  自動核准」），但只核准 Demo 自己的 7 號機卡、走主管手機同一支核准 API（Action Gate、稽核照舊），手機上看得到完整的卡。 */
 export const autoApproves = (mode: string | undefined): boolean => autoRequested() && mode === 'mock'
+/** 真實後端的自動播放：Demo 替主管在手機上按 7 號機的核准（driver.ts autoStep）。 */
+export const autoApprovesLive = (mode: string | undefined): boolean => autoRequested() && mode === 'live'
 
 // html[data-demo-auto]：自動播放的畫面精簡（auto.css）。"mock" 才藏核准按鈕（Demo 自動核准）；真實後端要留著給人按。
 if (autoRequested() && typeof document !== 'undefined') document.documentElement.dataset.demoAuto = autoMockRequested() ? 'mock' : 'live'
@@ -38,6 +42,8 @@ export const AUTO = {
   phoneAfterS: 1.5,
   /** 急單的計劃卡在螢幕上給觀眾看多久，才自動核准（Mock） */
   ordersApproveS: 4,
+  /** 真實後端：7 號機的卡在手機上給觀眾看幾秒，Demo 才替主管按核准（同一支核准 API，過 Action Gate、留稽核） */
+  liveApproveS: 3,
   /** 訂單段至少停多久（走到電腦後） */
   ordersMinS: 3,
   /** 訂單解決後，離開電腦往 7 號機走至少多久，異常這段才開始（異常早就發生也一樣：先走出去） */
@@ -71,12 +77,12 @@ export interface AutoStep {
   hold: { min: number; needArrive?: boolean; until?: Signal; untilDwell?: number; card?: Signal; cardTimeout?: number; timeout?: number }
 }
 export const AUTO_STEPS: Record<string, AutoStep> = {
-  // 俯瞰：開場那句唸完
+  // 俯瞰：開場那句唸完（真實後端：沒有急單卡，訂單段只看日常訂單；Mock 的急單卡照舊自動核准）
   start: { hold: { min: Math.max(AUTO.openS, beatMinS('overview')) } },
   // 走向電腦（walk）→ 電腦上急單進來、計劃、核准、完成（orders）；結案後畫面再留 RESULT_S.orders 秒
-  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushDone', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 60, timeout: 240 } },
-  // 訂單結束 → 離開電腦往工廠走（leave，至少 leaveS 秒）→ 走路途中 7 號機異常（anomaly）：走到門口、看著 7 號機
-  event: { enter: { on: 'event', timeout: 90, min: Math.max(AUTO.leaveS, beatMinS('leave')) }, hold: { min: Math.max(AUTO.anomalyS, beatMinS('anomaly')), needArrive: true, timeout: 40 } },
+  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushDone', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 0, timeout: 240 } },
+  // 訂單結束 → 離開電腦、走到門口往工廠看（leave）→ 7 號機警示燈亮（事件進來，還是 leave）→ 看一下，手機才響
+  event: { enter: { on: 'event', timeout: 90, min: AUTO.leaveS }, hold: { min: AUTO.anomalyS, needArrive: true, timeout: 30 } },
   // 手機這時才響（震動＋鈴聲＋舉起來）→ 核准：Mock 由 Demo 自動按；真實後端等人按
   // 核准後手機留著「已核准」RESULT_S.phone 秒才放下
   h1: { enter: { on: 'approval', timeout: 60 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: RESULT_S.phone, card: 'approval', cardTimeout: 30, timeout: 600 } },
@@ -91,9 +97,10 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
 
 /** Mock 備援情境（單一事件版：急單 + 7 號機一輪核准）。 */
 export const AUTO_SCENARIO = 'press7_temp_drop'
-/** 真實後端情境：訂單湧入、急單、7 號機溫降（PR #107）。伺服器沒有這個情境時改用 press7_temp_drop。 */
-export const AUTO_LIVE_SCENARIO = 'morning_rush'
-export const AUTO_LIVE_SPEED = 40
+/** 真實後端情境：只有 7 號機溫降（CJ：「只需要 7 號溫度這個核准異常」）。 */
+export const AUTO_LIVE_SCENARIO = 'press7_temp_drop'
+/** 7 號機的溫降在情境 14 分鐘處：16× 約 52 秒，剛好在訂單段之後 */
+export const AUTO_LIVE_SPEED = 16
 export const CURE07_FROM = 128
 
 /** 自動播放上方的一行字幕（每段一句；AutoOverlay 依 useDemoBeat() 顯示）。 */
@@ -101,9 +108,8 @@ export const AUTO_TEXT: Record<DemoBeat, string> = {
   overview: '工廠運轉中',
   walk: '走向戰情室電腦',
   orders: '📋 訂單任務進來：Agent 規劃 → 核准 → 完成',
-  leave: '🚶 訂單處理好了：離開電腦，走向工廠',
-  anomaly: '⚠ 7 號硫化機溫度異常（CURE-07）',
-  phone: '📱 手機響了：主管核准',
+  leave: '🚶 訂單處理好了：離開電腦，往工廠看',
+  phone: '📱 手機響了：7 號硫化機溫度異常，主管核准',
   repair: '👷 員工前往 7 號機維修',
   robot: '🤖 巡檢機器人',
   back: '回到戰情室：剛剛的任務都在這裡',

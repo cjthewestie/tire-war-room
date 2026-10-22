@@ -195,6 +195,7 @@ export function autoHoldDone(tl: Timeline, t: number, sig: Signals): boolean {
   if (h.needArrive && sig.arrived === false) return false
   if (h.until && sig[h.until] && h.untilDwell) return t - (tl.untilAt ?? t) >= h.untilDwell
   if (!h.until || sig[h.until]) return true
+  // the card never showed (cardTimeout s; 0 = the scenario has none: do not wait for it)
   return !!h.card && !sig[h.card] && e >= (h.cardTimeout ?? Infinity)
 }
 

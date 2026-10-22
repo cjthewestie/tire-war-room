@@ -12,12 +12,12 @@ const vite = await createServer({ root: resolve(here, '..'), configFile: false, 
 const S = await vite.ssrLoadModule('/src/demo/script.ts')
 await vite.close()
 
-const IDS = ['overview', 'walk', 'orders', 'leave', 'anomaly', 'phone', 'repair', 'robot', 'back']
+const IDS = ['overview', 'walk', 'orders', 'leave', 'phone', 'repair', 'robot', 'back']
 check('beat order is the fixed contract', S.BEATS.join() === IDS.join(), S.BEATS.join())
 check('every beat has a non-empty line', IDS.every((b) => typeof S.SCRIPT[b] === 'string' && S.SCRIPT[b].trim().length > 0))
 check('no extra lines', Object.keys(S.SCRIPT).length === IDS.length)
-check('wording: overview / anomaly / back', S.SCRIPT.overview.startsWith('大家好，我們是新創團隊 Team Westie') &&
-  S.SCRIPT.anomaly.includes('7 號硫化機溫度往下掉') && S.SCRIPT.back === '回到戰情室，接下來我直接操作給大家看。')
+check('wording: overview / phone / back', S.SCRIPT.overview.startsWith('大家好，我們是新創團隊 Team Westie') &&
+  S.SCRIPT.phone.includes('7 號硫化機溫度往下掉') && S.SCRIPT.back === '回到戰情室，接下來我直接操作給大家看。')
 check('null beat → null', S.lineFor(null) === null && S.lineFor(undefined) === null)
 check('unknown beat → null', S.lineFor('nope') === null)
 IDS.forEach((b, i) => {

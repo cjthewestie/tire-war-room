@@ -1,5 +1,5 @@
-// Unit checks (no server, no browser) for the auto-play demo (/factory?demo=cure07; ?mock=1 fallback): CJ's nine beats
-// in order (demo/beat.ts: overview → walk → orders → leave → anomaly → phone → repair → robot → back), each driven by its
+// Unit checks (no server, no browser) for the auto-play demo (/factory?demo=cure07; ?mock=1 fallback): CJ's eight beats
+// in order (demo/beat.ts: overview → walk → orders → leave → phone → repair → robot → back), each driven by its
 // cue in the auto timeline (demo/cues.ts advance(…, auto) with demo/auto.ts AUTO_STEPS), the run ending at the war
 // room (no pitch), the auto-approve only in the mock (never on the real backend), and a whole run of the mock engine
 // (急單 → 7 號機) through the real driver (demo/driver.ts DemoRun) with the 3D's walk faked by a clock.
@@ -27,7 +27,7 @@ const ST = await vite.ssrLoadModule('/src/store.ts')
 await vite.close()
 
 // ---- the contract ----
-check('beat ids (fixed contract)', BT.DEMO_BEATS.join(',') === 'overview,walk,orders,leave,anomaly,phone,repair,robot,back', BT.DEMO_BEATS.join(','))
+check('beat ids (fixed contract)', BT.DEMO_BEATS.join(',') === 'overview,walk,orders,leave,phone,repair,robot,back', BT.DEMO_BEATS.join(','))
 check('auto cues', AU.AUTO_CUES.join(',') === 'start,rush,event,h1,worker,robot,agent', AU.AUTO_CUES.join(','))
 check('every auto cue is a real cue, in CUES order', AU.AUTO_CUES.every((id, i, a) => C.CUES.findIndex((c) => c.id === id) >= 0
   && (i === 0 || C.CUES.findIndex((c) => c.id === id) > C.CUES.findIndex((c) => c.id === a[i - 1]))))
@@ -85,7 +85,7 @@ const plant = (o) => (t) => ({
 const P = { rushCard: 11, rushOk: 15, rushDone: 18, event: 21, card: 22.5, ok: 41, fixed: 48 }
 const { tl, beats } = play(plant(P))
 const seq = beats.map((b) => b.beat).join(',')
-check('nine beats in CJ order', seq === BT.DEMO_BEATS.join(','), seq)
+check('eight beats in CJ order', seq === BT.DEMO_BEATS.join(','), seq)
 const tOf = (b) => beats.find((x) => x.beat === b)?.t
 check('overview from 0', tOf('overview') === 0)
 const H = (id) => AU.AUTO_STEPS[id].hold
@@ -95,8 +95,8 @@ for (const b of BT.DEMO_BEATS) check(`beat ${b} min ≥ 7 s`, AU.beatMinS(b) >= 
 check('walk after the opening line', near(tOf('walk'), H('start').min), tOf('walk'))
 check('orders once at the desk', near(tOf('orders'), tOf('walk') + 2.5), tOf('orders'))
 check('leave once the order is done and has been seen', near(tOf('leave'), Math.max(tOf('walk') + H('rush').min, P.rushDone + AU.RESULT_S.orders)), tOf('leave'))
-check('anomaly after the walk out', near(tOf('anomaly'), Math.max(P.event, tOf('leave') + AU.AUTO_STEPS.event.enter.min)), tOf('anomaly'))
-check('phone on the 7 號機 card, after the anomaly look', near(tOf('phone'), Math.max(P.card, tOf('anomaly') + H('event').min)), String(tOf('phone')))
+{ const ev = Math.max(P.event, tOf('leave') + AU.AUTO_STEPS.event.enter.min)
+  check('phone on the 7 號機 card, after the look at the factory', near(tOf('phone'), Math.max(P.card, ev + H('event').min)), String(tOf('phone'))) }
 check('repair after the approval has been seen on the phone', near(tOf('repair'), Math.max(P.ok + AU.RESULT_S.phone, tOf('phone') + H('h1').min)), tOf('repair'))
 check('robot after the press is green and held', near(tOf('robot'), Math.max(P.fixed + AU.RESULT_S.repair, tOf('repair') + H('worker').min)), tOf('robot'))
 check('back after the robot show', near(tOf('back'), tOf('robot') + H('robot').min), `${tOf('back')}`)
@@ -106,7 +106,7 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
 // the anomaly that comes early (while the order is still being resolved) waits for the orders beat to finish
 {
   const r = play(plant({ ...P, event: 12, card: 13.5 }))
-  const a = r.beats.find((x) => x.beat === 'anomaly')?.t
+  const a = r.beats.find((x) => x.beat === 'phone')?.t
   check('early anomaly: orders still finish first', a >= P.rushDone && r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(','), `${a}`)
 }
 // the real backend: nobody has tapped yet → the approve beat waits (never skipped while the card is up)
@@ -118,8 +118,8 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
 // a scenario without a rush card (the live fallback press7_temp_drop): orders moves on after 40 s, the rest plays
 {
   const r = play(plant({ ...P, rushCard: 1e9, rushOk: 1e9, rushDone: 1e9, event: 60, card: 61.5, ok: 80, fixed: 87 }))
-  const o = r.beats.find((x) => x.beat === 'anomaly')?.t
-  check('no rush card: on to the anomaly once it comes', r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(',') && o >= 60, `${o}`)
+  const o = r.beats.find((x) => x.beat === 'phone')?.t
+  check('no rush card (live 7 號機 only): straight on, phone once the card comes', r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(',') && o >= 61.5, `${o}`)
 }
 // the robot beat waits for the walk / show (arrived) but never longer than its timeout
 {
@@ -163,7 +163,7 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
   }
   const seq2 = beats.map((b) => b.beat).join(',')
   console.log('      mock run:', beats.map((b) => `${b.beat}@${b.t}`).join('  '))
-  check('mock run: nine beats in order', seq2 === BT.DEMO_BEATS.join(','), seq2)
+  check('mock run: eight beats in order', seq2 === BT.DEMO_BEATS.join(','), seq2)
   check('mock run: rush card comes (~11 s)', firstRushCard != null && firstRushCard > 7 && firstRushCard < 14, `${firstRushCard}`)
   check('mock run: 7 號機 comes (~21 s)', firstEvent != null && firstEvent > 18 && firstEvent < 25, `${firstEvent}`)
   check('mock run: two auto approvals (rush in orders, 7 號機 in phone)', decided.length === 2
