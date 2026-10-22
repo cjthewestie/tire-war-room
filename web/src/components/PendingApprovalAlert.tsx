@@ -2,7 +2,7 @@
 // a sticky slim bar under the header (war-room tabs), compact on 主控台 and during the Demo spotlight, inline in the
 // sticky header of /report and /handover, a corner overlay on /factory. Not on /phone (its own approval UI and title)
 // nor /worker (workers do not approve). The whole bar is one click target: the oldest card on 主控台.
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { alertModel, approveHref, fmtClock, fmtWaited, titleWithPending } from '../approvalAlert'
 import { ms } from '../format'
 import { embedSearch } from '../transport'
@@ -22,6 +22,8 @@ export function PendingApprovalAlert({ variant = 'bar', onGo, newTab = false, st
   const n = state.pending.length
   usePendingTitle(n)
   const top = useStickyTop(stickyBelow, n > 0)
+  const wrap = useRef<HTMLDivElement>(null)
+  usePublishChrome(stickyBelow, wrap, variant, n > 0)
 
   // the server sends the clock every 0.5 s (runtime.py), so the countdown ticks with it; paused = it stops
   const m = alertModel(state.pending, ms(state.clock?.factory_time ?? state.snapshot?.header.factory_time), state.clock?.speed ?? 1)
@@ -39,7 +41,7 @@ export function PendingApprovalAlert({ variant = 'bar', onGo, newTab = false, st
     </>
   )
   return (
-    <div className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top: `calc(${top}px + var(--demo-bar-h, 0px))` } : undefined} data-testid="pending-alert"
+    <div ref={wrap} className={`paa-wrap paa-wrap-${variant} no-print`} style={top != null ? { top: `calc(${top}px + var(--demo-bar-h, 0px))` } : undefined} data-testid="pending-alert"
       data-event={m.oldest.event_id} data-level={m.red ? 'red' : 'amber'}>
       {onGo
         ? <button type="button" className={cls} aria-label={label} onClick={() => onGo(m.oldest.event_id)}>{body}</button>
@@ -74,4 +76,29 @@ function useStickyTop(selector: string | undefined, on: boolean): number | null 
     return () => { ro.disconnect(); window.removeEventListener('resize', f) }
   }, [selector, on])
   return top
+}
+
+/** Publishes the sticky chrome heights as CSS variables so sticky columns and the Demo's scrolling stop below them:
+ *  --topbar-h = the header (0 while it is static), --paa-h = this bar while it is sticky in the page (0 otherwise).
+ *  Layout measurement only. */
+function usePublishChrome(selector: string | undefined, wrap: RefObject<HTMLDivElement | null>, variant: AlertVariant, on: boolean) {
+  useLayoutEffect(() => {
+    if (!selector) return
+    const root = document.documentElement
+    const hdr = document.querySelector<HTMLElement>(selector)
+    const bar = on && variant !== 'inline' && variant !== 'corner' ? wrap.current : null
+    const f = () => {
+      root.style.setProperty('--topbar-h', `${hdr && getComputedStyle(hdr).position === 'sticky' ? hdr.offsetHeight : 0}px`)
+      root.style.setProperty('--paa-h', `${bar && getComputedStyle(bar).position === 'sticky' ? bar.offsetHeight : 0}px`)
+    }
+    f()
+    const ro = new ResizeObserver(f)
+    if (hdr) ro.observe(hdr)
+    if (bar) ro.observe(bar)
+    window.addEventListener('resize', f)
+    return () => {
+      ro.disconnect(); window.removeEventListener('resize', f)
+      root.style.removeProperty('--topbar-h'); root.style.removeProperty('--paa-h')
+    }
+  }, [selector, wrap, variant, on])
 }
