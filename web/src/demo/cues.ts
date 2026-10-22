@@ -15,6 +15,8 @@
 // beat (the Agent page, after the robot), or by itself there from 3:30.
 // Nothing here touches React or three.js, so e2e/demo-unit.mjs drives it with fake clocks and fake signals.
 
+import { AUTO, AUTO_CUES, AUTO_FINAL } from './auto'
+
 /** The scenario the demo plays: 「一早訂單湧入」 (PR #107). One constant, so retiming is one edit. */
 export const DEMO_SCENARIO = 'morning_rush'
 /** Until morning_rush lands on the server: the plant runs normally, then the 7 號機溫降 scenario loads. */
@@ -171,7 +173,35 @@ export function canContinue(tl: Timeline, t: number, sig: Signals): boolean {
 export interface Step { tl: Timeline; refused?: boolean }
 
 /** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on). */
-export function advance(tl: Timeline, t: number, sig: Signals, cont = false): Step {
+/** 自動播放（?mock=1&demo=cure07）用的 cue 文字：一個事件、不提 H1/H2、不提稽核。 */
+export const AUTO_TEXT: Record<string, { title: string; body: string }> = {
+  start: { title: '工廠運轉中', body: '' },
+  event: { title: '⚠ 7 號硫化機溫度異常（CURE-07）128°C → 122.3°C', body: '偵測器發現溫度往下掉，通知 Agent 規劃。' },
+  agent: { title: 'Agent 分析與建議', body: '' },
+}
+const nextAuto = (i: number) => { let k = i + 1; while (CUES[k] && !AUTO_CUES.includes(CUES[k].id)) k++; return k }
+
+/** 自動播放的時間軸：不等任何人按鍵；只走 AUTO_CUES，最後一步（AUTO_FINAL）停住顯示最終結果。 */
+function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
+  const cur = CUES[tl.index]
+  if (!tl.released) {
+    if (cur.id === AUTO_FINAL) return { tl }
+    const dwell = cur.id === 'start' ? AUTO.openS : AUTO.phoneAfterS + 0.5
+    return t - tl.enteredAt >= dwell ? { tl: release(tl, t, 'auto') } : { tl }
+  }
+  const i = nextAuto(tl.index)
+  const next = CUES[i]
+  if (!next) return { tl }
+  const en = next.enter, since = t - tl.releasedAt
+  if (en?.on) {
+    if (sig[en.on]) return { tl: enter(tl, i, t, 'event') }
+    return since >= Math.min(en.timeout ?? 15, 15) ? { tl: enter(tl, i, t, 'time') } : { tl }
+  }
+  return { tl: enter(tl, i, t, 'auto') }
+}
+
+export function advance(tl: Timeline, t: number, sig: Signals, cont = false, auto = false): Step {
+  if (auto) return advanceAuto(tl, t, sig)
   // the soft target: from 3:30 the last story beat (the Agent page) hands over to the pitch by itself; earlier beats only get the nudge
   // (CJ paces the story; a beat is never cut short)
   if (tl.index === LAST_STORY_INDEX && t >= AUTO_PITCH) return { tl: enter(tl, PITCH_INDEX, t, 'time') }

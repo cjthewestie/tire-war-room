@@ -3,12 +3,13 @@
 // /api/demo/state. Each tick it reads the live signals, follows the server's pointer (a continue pressed on another
 // screen moves cue_index ahead), pauses the sim while a checkpoint waits for CJ (and plays it again on continue), and
 // posts the cue and what it waits for whenever either changes. No React here: the hooks own one DemoRun each.
-import type { ScenarioName, SimControl } from '../contracts'
+import type { ApprovalDecision, ApprovalRequest, ScenarioName, SimControl } from '../contracts'
 import type { WarRoomState } from '../store'
 import {
   CUES, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
+import { AUTO, AUTO_SCENARIO } from './auto'
 import { freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
@@ -16,6 +17,8 @@ export interface DemoIO {
   mode: string
   control(c: SimControl): Promise<void>
   demo?(c: DemoCommand): Promise<DemoState>
+  /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到。 */
+  decide?(d: ApprovalDecision): Promise<ApprovalRequest | null>
 }
 
 export interface LogRow { id: string; title: string; planned: number; t: number; reason: string; out?: number; outBy?: string; wall: string }
@@ -47,9 +50,41 @@ export class DemoRun {
   private inflight = 0
   private serverRunning = false
 
+  /** 自動播放（?mock=1&demo=cure07）：只在 Mock 引擎自動核准；Live 一律不自動核准 */
+  auto: boolean
+  /** 給畫面的一行狀態：監看中 / 事件偵測 / Agent 分析中 / Demo 自動核准 / 執行中 / 處理完成 */
+  autoStatus = ''
+  private approveAt = new Map<string, number>()
+  private decided = new Set<string>()
+
   private io: DemoIO
   private driver: string
-  constructor(io: DemoIO, driver: string) { this.io = io; this.driver = driver }
+  constructor(io: DemoIO, driver: string, auto = false) { this.io = io; this.driver = driver; this.auto = auto && io.mode === 'mock' }
+
+  /** 自動核准的狀態推進：事件的核准卡出現後讓觀眾看 AUTO.analysisS 秒，再用 Mock 引擎核准一次。 */
+  private autoStep(now: number, state: WarRoomState) {
+    if (!this.auto || this.io.mode !== 'mock') return   // 絕不對真實後端（Action Gate）自動核准
+    const id = this.seen.id
+    if (!id) { this.autoStatus = '監看中'; return }
+    const f = state.snapshot?.events.find((e) => e.id === id)
+    const mine = state.pending.filter((p) => p.event_id === id)
+    if (f?.state === 'closed') this.autoStatus = '處理完成'
+    else if (this.decided.size && (f?.state === 'execute' || f?.state === 'verify')) this.autoStatus = '執行中'
+    else if (this.decided.size) this.autoStatus = 'Demo 自動核准'
+    else if (mine.length) this.autoStatus = 'Agent 分析中'
+    else this.autoStatus = '事件偵測'
+    for (const p of mine) {
+      const first = this.approveAt.get(p.id)
+      if (first == null) { this.approveAt.set(p.id, now); continue }
+      if (now - first < AUTO.analysisS * 1000 || this.decided.has(p.id) || p.status !== 'pending' || !this.io.decide) continue
+      this.decided.add(p.id)
+      const opt = p.options.find((o) => o.recommended) ?? p.options[0]
+      void this.io.decide({
+        request_id: p.id, decision: 'approve', option_id: opt?.id ?? null, reason: 'Demo 自動核准（Mock 模式，未經 Action Gate）',
+        modified_args: null, decided_by: 'Demo 自動核准（Mock）', via: 'auto',
+      }).catch((e) => console.warn('[demo] auto approve', e))
+    }
+  }
 
   private send(c: DemoCommand) { return this.io.demo?.(c).catch((e) => { console.warn('[demo]', e); return null }) ?? Promise.resolve(null) }
 
@@ -68,11 +103,19 @@ export class DemoRun {
     this.firstSeen = {}; this.log = [{ id: CUES[0].id, title: CUES[0].title, planned: 0, t: 0, reason: 'time', wall: new Date().toISOString() }]
     this.loaded = new Set([0]); this.ack = 0; this.posted = ''; this.simHeld = false; this.serverRunning = false; this.myRev = -1; this.inflight = 0
     let known = this.io.mode !== 'live'
-    if (this.io.mode === 'live') {
-      try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { known = true }
-    } else known = false
-    this.loads = known ? MAIN_LOADS : FALLBACK_LOADS
-    this.fallback = !known
+    if (this.auto) {
+      // 自動播放：只載入 CURE-07 單一事件情境（不載 morning_rush：沒有 SO-017／SO-012）
+      known = true
+      this.loads = [{ at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
+      this.fallback = false
+      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'
+    } else {
+      if (this.io.mode === 'live') {
+        try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { known = true }
+      } else known = false
+      this.loads = known ? MAIN_LOADS : FALLBACK_LOADS
+      this.fallback = !known
+    }
     const st = await this.send({ action: 'start', cues: CUES.map((c) => c.id), cue_id: CUES[0].id, cue_index: 0, driver: this.driver, story_target_s: PITCH_AT })
     if (st) this.myRev = st.rev
     try { await this.load(this.loads[0]) } catch (e) { console.warn('[demo] load', e); return '情境載入沒有成功' }
@@ -127,12 +170,13 @@ export class DemoRun {
     this.latched = latch(this.latched, live)
     const sig = this.arrived === undefined ? this.latched : { ...this.latched, arrived: this.arrived }
     const before = this.tl
-    let r = advance(before, t, sig, this.contReq)
+    this.autoStep(now, state)
+    let r = advance(before, t, sig, this.contReq && !this.auto, this.auto)
     this.contReq = false
     // a continue that ends a hold whose next beat starts right away: take that step in the same tick, so the server
     // never sees the old beat again in between (every screen would flash back to it)
     if (r.tl.released && !before.released && r.tl.index === before.index) {
-      const r2 = advance(r.tl, t, sig, false)
+      const r2 = advance(r.tl, t, sig, false, this.auto)
       if (r2.tl.index !== r.tl.index) r = r2
     }
     // refused (an approval, or a live event still to come): post the cue again, so a server that moved ahead comes back
@@ -150,7 +194,7 @@ export class DemoRun {
       if (row && f.out != null) { row.out = Math.round(f.out * 10) / 10; row.outBy = f.outBy }
     }
     // a checkpoint waiting for CJ holds the plant still (never at the approval: it needs the plant running)
-    const hold = simPaused(r.tl, t, sig) && this.clock.since != null
+    const hold = !this.auto && simPaused(r.tl, t, sig) && this.clock.since != null
     if (hold !== this.simHeld) {
       this.simHeld = hold
       void this.io.control({ action: hold ? 'pause' : 'play' }).catch(() => {})

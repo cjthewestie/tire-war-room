@@ -1,3 +1,4 @@
+@import './demo/auto.css';
 /* Noto Sans TC bundled (SIL OFL 1.1): the DGX Spark is offline Linux and has no PingFang, so the UI font ships with the app. */
 @import '@fontsource-variable/noto-sans-tc';
 :root {
