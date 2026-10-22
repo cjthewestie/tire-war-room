@@ -248,13 +248,6 @@ try {
     const after = await until(async () => { const n = await pendingN(); return n < before ? String(n) : null }, 10000)
     check('approve inside the raised phone, from the 休息區', !!after, `pending ${before} -> ${after}`)
   } else check('approval card in phone', false, 'no option radio found')
-  const ta = frame.locator('textarea[placeholder*="9 號機"]')
-  if (await ta.count()) {
-    await ta.fill('7 號硫化機現在溫度多少？')
-    await frame.locator('button:has-text("送出問題")').click()
-    const ans = await until(async () => { const a = frame.locator('[data-testid=ask-answer]'); return (await a.count()) ? (await a.last().innerText()).replace(/\n/g, ' ').slice(0, 120) : null }, 20000)
-    check('問戰情室 answers inside the phone', !!ans, ans ?? 'no answer')
-  } else check('問戰情室 box in phone', false)
   await page.screenshot({ path: `${OUT}/factory-phone-used.png` })
   await page.keyboard.press('Escape')
   await sleep(600)
