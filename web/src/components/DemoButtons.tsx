@@ -7,6 +7,12 @@ import { useWarRoom } from '../useWarRoom'
 import { AUTO_FAULT, AUTO_VAL } from '../demo/auto'
 import './demoButtons.css'
 
+/** Same page (war room) + a #hash: only the hash changes, so the tabs follow it without a reload. */
+function navigate(href: string, samePage: boolean) {
+  if (samePage && href.startsWith('/#')) window.location.hash = href.slice(1)
+  else window.location.assign(href)
+}
+
 type Act = { id: string; label: string; title: string; done: string; run?: () => Promise<unknown>; href?: string; newTab?: boolean }
 
 export function DemoButtons({ where = 'warroom' }: { where?: 'warroom' | 'factory' }) {
@@ -50,8 +56,7 @@ export function DemoButtons({ where = 'warroom' }: { where?: 'warroom' | 'factor
   const go = (a: Act) => {
     say(a.done)
     if (a.newTab) { window.open(a.href, '_blank', 'noopener'); return }
-    if (where === 'warroom' && a.href!.startsWith('/#')) { window.location.hash = a.href!.slice(1); return }
-    window.location.href = a.href!
+    navigate(a.href!, where === 'warroom')
   }
   return (
     <div className={`dbtn dbtn-${where} ${open ? 'open' : ''}`} data-testid="demo-buttons">
