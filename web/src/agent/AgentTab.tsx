@@ -9,6 +9,7 @@ import { ApprovalList } from './ApprovalList'
 import { HomeOverview } from './HomeOverview'
 import { HomeStatus } from './HomeStatus'
 import { useHomeSelection } from './homeSelection'
+import type { HomeItem } from './homeItems'
 import { PlanArea } from './PlanArea'
 import { isDialogue, type Item, type LocalItem } from './transcript'
 import { PendingNotice } from './PendingNotice'
@@ -63,8 +64,8 @@ export function AgentTab({ asks, setAsks, picked, setPicked, onMonitor, onFull, 
       {!sel && <HomeOverview onMonitor={onMonitor} onFull={onFull} />}{/* nothing to decide: 今日工廠概況 in the plan column (grid-area) */}
       <ApprovalList items={list} selected={sel?.key ?? null} onPick={setPicked} />
       <PlanArea sel={sel} ev={ev} items={items} opened={!!sel && picked === sel.key} onDiscuss={() => chat('discuss')} onAsk={() => chat('ask')} onCommand={(t) => chat('command', t)} />
-      <Console planEv={ev} items={items} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)}
-        requested={picked} events={events} onSession={(id) => { if (id) setPicked(id) }} />
+      <Console items={items} asks={asks} setAsks={setAsks} focus={focus} onFull={onFull} onGuide={(t) => chat('ask', t, true)}
+        requested={picked} events={events} card={sel} onSession={(id) => { if (id) setPicked(id) }} />
     </div>
     </>
   )
@@ -87,25 +88,28 @@ const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風�
  *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed; issue #100: the 此事項／全部 switcher is gone too). The plan on
  *  screen sits in the thread as a short 待核准 notice (or the briefing of its state), placed by its own time. Each
  *  subagent's progress is on the Agent page, via 看完整過程. */
-function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide, requested, events, onSession }: {
-  planEv: Event | null; items: Item[]
+function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, events, card, onSession }: {
+  items: Item[]
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
   onGuide: (text: string) => void
   /** the 主控台 pick (a home item key or an event id: an overview link asks for that task's session) */
   requested: string | null; events: Event[]; onSession: (eventId: string | null) => void
+  /** the card selected in the left list: its session is the chat's (CJ 10-22: 「左邊換任務卡右邊對話框就會自動替換」) */
+  card: HomeItem | null
 }) {
   const { state, transport, connected } = useWarRoom()
-  // issue #189: one Agent Nemo session per task. The session follows the plan on screen until the supervisor picks
-  // another one in the switcher (or 新對話); an event id asked for from outside (an overview link) opens its session
-  const [chosen, setChosen] = useState<{ id: string | null } | null>(() => (requested?.startsWith('EV-') && requested !== planEv?.id ? { id: requested } : null))
-  const [planSeen, setPlanSeen] = useState<string | null>(planEv?.id ?? null)
+  // issue #189: one Agent Nemo session per task. A card picked in the left list switches the chat to that card's own
+  // session at once (its event id; a card with no event, e.g. 交期風險 order:<id>, has one under its key). The 切換 list
+  // and 新對話 pick another; an event id asked for from outside (an overview link) opens its session.
+  const onCard = (id: string | null) => !!id && !!card && (card.key === id || card.eventId === id)
+  const [chosen, setChosen] = useState<{ id: string | null } | null>(() => (requested?.startsWith('EV-') && !onCard(requested) ? { id: requested } : null))
   const [reqSeen, setReqSeen] = useState<string | null>(requested)
-  if ((planEv?.id ?? null) !== planSeen) { setPlanSeen(planEv?.id ?? null); if (!(chosen?.id && chosen.id === requested)) setChosen(null) }
-  if (requested !== reqSeen) { setReqSeen(requested); if (requested?.startsWith('EV-') && requested !== planEv?.id) setChosen({ id: requested }) }
+  if (requested !== reqSeen) { setReqSeen(requested); setChosen(requested?.startsWith('EV-') && !onCard(requested) ? { id: requested } : null) }
   const [picking, setPicking] = useState(false)
-  const sessionId = chosen ? chosen.id : planEv?.id ?? null
-  const sessionEv = chosen ? (chosen.id ? events.find((e) => e.id === chosen.id) ?? null : null) : planEv
-  const past = !!sessionId && !sessionEv                  // a task of an earlier day / load: read-only, from the chat log
+  const cardSession = card ? card.eventId ?? card.key : null
+  const sessionId = chosen ? chosen.id : cardSession
+  const sessionEv = sessionId?.startsWith('EV-') ? events.find((e) => e.id === sessionId) ?? null : null
+  const past = !!sessionId?.startsWith('EV-') && !sessionEv   // a task of an earlier day / load: read-only, from the chat log
   const listing = useTaskListing('')
   const row = allRows(listing).find((r) => r.id === sessionId)
   const live = useMainThread(asks, 'task', sessionId)
@@ -167,9 +171,10 @@ function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide, request
         <div className="con-session" data-testid="con-session" data-session={sessionId ?? 'general'}>
           <span className="con-session-name" title={sessionId ?? '不綁任務的對話'}>
             <small className="muted">{sessionId ? '任務對話' : '對話'}</small>
-            <b>{sessionId ? plain(row?.title ?? (sessionEv ? sessionTitle(sessionEv) : sessionId)) : '新對話'}</b>
+            <b>{sessionId ? plain(row?.title ?? (sessionEv ? sessionTitle(sessionEv) : sessionId === cardSession && card ? card.title : sessionId)) : '新對話'}</b>
             {row && <span className={`tss-st ${row.running ? 'run' : ''}`}>{row.state_label}</span>}
           </span>
+          {sessionId && <code className="con-session-id" data-testid="session-id" title="任務編號（這個對話的 session）">{sessionId.replace(/^order:/, '訂單 ').replace(/^fyi:/, '通知 ').replace(/^safety:/, '安全核心 ')}</code>}
           <button type="button" className="btn-ghost con-switch" aria-expanded={picking} onClick={() => setPicking((p) => !p)} data-testid="session-switch">{picking ? '收起' : '切換 ▾'}</button>
           {sessionId && <button type="button" className="btn-ghost" onClick={() => open(null)} data-testid="session-new">新對話</button>}
         </div>
@@ -179,7 +184,7 @@ function Console({ planEv, items, asks, setAsks, focus, onFull, onGuide, request
         extra={past ? null : extra} guide={past ? null : guide} follow />
       {past
         ? <p className="con-readonly muted small" data-testid="session-readonly">這是{row?.day ? `${row.day.slice(5).replace('-', '/')} ` : '之前'}結案的任務，對話只能查看。</p>
-        : <ChatBar ev={talkEv} waiting={waiting} setAsks={setAsks} focus={focus} onReply={onReply} />}
+        : <ChatBar ev={talkEv} session={sessionEv ? null : sessionId} waiting={waiting} setAsks={setAsks} focus={focus} onReply={onReply} />}
     </section>
   )
 }
