@@ -1,13 +1,12 @@
 // Supervisor phone (UX brief §6, CJ 2026-10-20): notification → ONE decision card → 核准, or 討論 to change it by
-// talking (「agent 計劃就只有核准跟討論」) → done. Plus 問一句. Nothing else.
+// talking (「agent 計劃就只有核准跟討論」) → done. Nothing else (問一句 removed, CJ 2026-10-22).
 // #73: the card (and, once approved, the idle card) shows 修復預估: how long, how, and by when (RepairEta).
 // Fast repair (Kyle 10-21 flow): after 核准 the AI line says 專人維修中（n/m）; at Event.repaired_at a 「維修完成：…，溫度回升中」
 // notice, at close 「已恢復正常・異常報告已產生」 with 看報告 / 知道了 (RepairNotice), one per event (3 件同時異常: one after
 // another), each ringing once; nothing waits for them. 「主管已讀」 joins the history.
 import { useMemo, useRef, useState } from 'react'
 import { TodayOrders } from '../components/TodayOrders'
-import { newConversationId } from '../components/ordersToday'
-import type { ApprovalRequest, AskAnswer, Event } from '../contracts'
+import type { ApprovalRequest, Event } from '../contracts'
 import { STATE_LABEL } from '../components/common'
 import { TemperatureTrend } from '../components/Trend'
 import { RISK_PLAIN, plain } from '../plain'
@@ -162,62 +161,10 @@ function PhoneFull() {
           {noticeCards}
         </>}
         <TodayOrders compact />
-        {transport?.ask && <AskBox disabled={lanDown} />}
       </div>
     </div>
   )
 }
-const ASK_EXAMPLES = ['今天有哪些訂單？', '哪些訂單有遲交風險？', '7 號機現在怎樣？']
-const TOOL_ZH: Record<string, string> = {
-  read_sensors: '讀感測器', predict_anomaly: '異常預測', cure_formula: '硫化公式',
-  query_orders_shifts: '訂單／班表', sop_search: 'SOP',
-}
-
-// 問戰情室: read-only. The answer comes only from the read tools; anything that would change the
-// plant is refused by the server and shown here as 已攔下.
-function AskBox({ disabled }: { disabled: boolean }) {
-  const { transport } = useWarRoom()
-  const [q, setQ] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-  const [answers, setAnswers] = useState<AskAnswer[]>([])
-  const convId = useRef(newConversationId())
-  const send = async (question: string) => {
-    if (!transport?.ask || !question.trim()) return
-    setBusy(true); setErr(null)
-    try {
-      const a = await transport.ask(question.trim(), convId.current)
-      setAnswers((xs) => [a, ...xs].slice(0, 3)); setQ('')
-    } catch (e) { setErr(String(e)) } finally { setBusy(false) }
-  }
-  return (
-    <div className="ph-card ph-ask" data-testid="ask-box">
-      <h2 className="ph-title">問一句</h2>
-      <p className="muted small">只查不改：答案只來自感測器、訂單班表與 SOP，提問會寫入稽核日誌。</p>
-      <div className="ph-opts">
-        {ASK_EXAMPLES.map((x) => (
-          <button key={x} className="ph-opt" disabled={disabled || busy} onClick={() => void send(x)}>{x}</button>
-        ))}
-      </div>
-      <textarea className="ph-reason" rows={2} maxLength={300} placeholder="例如：9 號機下一模是哪張訂單？"
-        value={q} disabled={disabled || busy} onChange={(e) => setQ(e.target.value)} />
-      {err && <p className="err">{err}</p>}
-      <div className="ph-acts">
-        <button className="ph-approve" disabled={disabled || busy || !q.trim()} onClick={() => void send(q)}>{busy ? '查詢中…' : '送出問題'}</button>
-      </div>
-      {answers.map((a) => (
-        <div key={a.id} className="ph-answer" data-testid="ask-answer">
-          <p className="ph-hist"><b>問</b>　{a.question}</p>
-          <p><b>答</b>　{a.answer}</p>
-          {a.choices && a.choices.length > 0 && <div className="ph-opts">{a.choices.map((c) => <button key={c} className="ph-opt" disabled={disabled || busy} onClick={() => void send(`${c} 現在做到哪裡？`)}>{c}</button>)}</div>}
-          <p className="muted small">{a.id}・{a.steps.map((s) => `${TOOL_ZH[s.tool] ?? s.tool}${s.ok ? '' : '（失敗）'}`).join('、') || '未查詢'}
-            {a.intercepted.length ? `・已攔下 ${a.intercepted.length}` : ''}{a.fell_back_to_mock ? '・規則模式備援' : ''}</p>
-        </div>
-      ))}
-    </div>
-  )
-}
-
 const DEC_LABEL: Record<string, string> = { approved: '已核准', modified: '已修改', rejected: '已駁回', expired: '逾時', superseded: '已改版（討論後由新版取代）' }
 
 function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: boolean; onSent: (text: string) => void }) {
