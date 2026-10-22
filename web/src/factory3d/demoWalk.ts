@@ -23,6 +23,8 @@ export const ROBOT_MEET: [number, number] = [P7.x + 1.6, 3.2]
 export const STATIONS = {
   desk: { x: DESK.x - 0.63, z: DESK.z, yaw: -Math.PI / 2, pitch: -0.3 } as Stand,
   doorway: { x: 5.0, z: 0.15, yaw: yawToward(5.0, 0.15, P7.x, P7.z), pitch: -0.06 } as Stand,
+  // auto-play's leave (CJ 10-22: 「退出電腦往後看，第一人稱」): a step back from the desk, turned round to the factory
+  lookout: { x: 7.05, z: 0.1, yaw: yawToward(7.05, 0.1, P7.x, P7.z), pitch: -0.05 } as Stand,
   // a step back from the press, looking a little up: the press, its lamp and ring, and the worker in one view
   press7: { x: P7.x, z: 2.55, yaw: Math.PI, pitch: 0.16 } as Stand,
   // the same spot, turned to the robot that comes over along the aisle (it plays its show facing the lead)
@@ -35,6 +37,9 @@ export type StationId = keyof typeof STATIONS
  *  west doorway, down the east corridor at x 4.2, along the 硫化 aisle). */
 const VIA: Record<string, P[]> = {
   'desk>doorway': [[6.4, 0.1]],
+  'desk>lookout': [],
+  'lookout>press7': [[6.4, 0.1], [5.0, 0.15], [4.35, 0.5], [4.2, 2.6], [4.0, 2.7]],
+  'lookout>desk': [],
   'doorway>press7': [[4.35, 0.5], [4.2, 2.6], [4.0, 2.7]],
   'press7>desk': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.4, 0.1]],
   'robot>desk': [[4.0, 2.7], [4.2, 2.6], [4.35, 0.5], [5.0, 0.15], [6.4, 0.1]],

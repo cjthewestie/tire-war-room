@@ -826,6 +826,7 @@ export const API = {
   simEvents: "/api/sim/events", // GET SimEventsView; POST SimEventsBody (issue #36 模擬事件)
   simEventsFire: "/api/sim/events/fire", // POST {kind} -> {ok, fired}
   simClear: "/api/sim/clear", // POST {machine_id?}: remove injected faults (demo; #72 現場處置完成)
+  simFault: "/api/sim/fault", // POST {machine_id, kind, params}: inject one fault now (demo)
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)

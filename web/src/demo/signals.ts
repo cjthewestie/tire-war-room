@@ -69,6 +69,7 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     // auto-play's 維修 beat: the crew's repair done, or (the mock: no crew) the incident closed with the press running again
     repaired: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))
       || (closed && tile?.status === 'running')),
+    crewDone: approved && ((tasks.length > 0 && tasks.every((k) => k.status === '完成')) || !!tile?.repaired || closed),
     // the walk to 7 號機 starts as soon as the last repair is approved (the crew works while the lead runs there)
     fixing: (rejected && mine.length >= 2) || (approved && (!!tile?.repaired || closed)),
   }

@@ -9,7 +9,7 @@ import {
   BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
+import { AUTO, AUTO_END_SPEED, AUTO_FAULT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
 import { freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
@@ -18,6 +18,9 @@ export interface DemoIO {
   control(c: SimControl): Promise<void>
   /** 自動播放：關掉隨機模擬事件（整段只有 7 號機） */
   setSimEvents?(b: { enabled?: boolean }): Promise<unknown>
+  /** 自動播放（真實後端）：leave 時注入 7 號機的故障，結束時清掉 */
+  injectFault?(f: { machine_id: string; kind: string; params?: Record<string, number> }): Promise<void>
+  clearFault?(machineId: string): Promise<void>
   demo?(c: DemoCommand): Promise<DemoState>
   /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到（真實後端一律人按）。 */
   decide?(d: ApprovalDecision): Promise<ApprovalRequest | null>
@@ -61,6 +64,10 @@ export class DemoRun {
   /** 給畫面的一行狀態：監看中 / 訂單規劃中 / 事件偵測 / Agent 分析中 / 等主管在手機核准 / Demo 自動核准 / 執行中 / 處理完成 */
   autoStatus = ''
   private approveAt = new Map<string, number>()
+  /** 真實後端：7 號機的故障已經注入（leave 一次） */
+  private faultSent = false
+  /** 自動播放已經收尾（回到電腦：速度 1×、清故障；之後什麼都不做） */
+  finished = false
   private decided = new Set<string>()
 
   private io: DemoIO
@@ -75,8 +82,14 @@ export class DemoRun {
    *  「按手機核准」段看 AUTO.analysisS 秒，再用 Mock 引擎核准一次（本機記憶體，不碰 Action Gate）。真實後端只更新狀態行，
    *  等人在手機上按；回到戰情室之後什麼都不自動做。 */
   private autoStep(now: number, state: WarRoomState) {
-    if (!this.auto) return
+    if (!this.auto || this.finished) return
     const cue = CUES[this.tl.index]?.id
+    // 真實後端：訂單段結束（離開電腦往工廠看）才注入 7 號機的溫降，開場與訂單段全廠正常
+    if (this.io.mode === 'live' && !this.faultSent && cue === 'rush' && this.tl.released && this.io.injectFault) {
+      this.faultSent = true
+      console.info('[demo] inject', AUTO_FAULT.machine_id, AUTO_FAULT.kind)
+      void this.io.injectFault(AUTO_FAULT).catch((e) => { this.faultSent = false; console.warn('[demo] inject fault', e) })
+    }
     const pending = state.pending.filter((p) => p.status === 'pending')
     const id = this.seen.id
     const rushCards = pending.filter((p) => p.event_id.endsWith('-RUSH'))
@@ -152,7 +165,7 @@ export class DemoRun {
       }
       this.loads = [this.io.mode === 'live' ? { at: 0, scenario: live, speed: live === AUTO_LIVE_SCENARIO ? AUTO_LIVE_SPEED : AUTO.speed } : { at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
       this.fallback = false
-      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'
+      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.finished = false
       if (this.io.mode === 'live') await this.io.setSimEvents?.({ enabled: false }).catch((e) => console.warn('[demo] sim events off', e))
     } else {
       if (this.io.mode === 'live') {
@@ -185,6 +198,17 @@ export class DemoRun {
     if (this.io.demo) void this.send({ action: paused ? 'pause' : 'resume' })
     else void this.io.control({ action: paused ? 'pause' : 'play' }).catch(() => {})
     if (!paused) this.simHeld = false   // the server played the sim; the next tick re-holds it if a checkpoint still waits
+  }
+
+  /** 自動播放走回電腦：收尾一次（模擬速度回 1×、隨機事件關、清掉 7 號機的故障 → 全廠正常），之後不再自動做任何事。 */
+  async finish() {
+    if (this.finished) return
+    this.finished = true
+    this.autoStatus = '結束'
+    if (this.io.mode !== 'live') return
+    await this.io.control({ action: 'speed', speed: AUTO_END_SPEED }).catch(() => {})
+    await this.io.setSimEvents?.({ enabled: false }).catch(() => {})
+    await this.io.clearFault?.(AUTO_FAULT.machine_id).catch(() => {})
   }
 
   async exit() {

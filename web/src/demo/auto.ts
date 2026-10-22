@@ -59,7 +59,7 @@ export const SPEECH_CPS = 4
 export const BEAT_MIN_FLOOR = 7
 export const beatMinS = (b: DemoBeat): number => Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
 /** 動作完成之後，結果在畫面上至少再留幾秒（訂單結案、手機上的「已核准」、7 號機轉綠） */
-export const RESULT_S = { orders: 6, phone: 3, repair: 6 }
+export const RESULT_S = { orders: 6, phone: 3, repair: 4 }
 
 /** 自動播放走的故事步驟（cues.ts 的 id，依 CUES 順序）；console／verify／h2／Pitch 略過。 */
 export const AUTO_CUES = ['start', 'rush', 'event', 'h1', 'worker', 'robot', 'agent']
@@ -87,8 +87,8 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
   // 核准後手機留著「已核准」RESULT_S.phone 秒才放下
   h1: { enter: { on: 'approval', timeout: 60 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: RESULT_S.phone, card: 'approval', cardTimeout: 30, timeout: 600 } },
   // 員工跑去 7 號機：前往中 → 執行中 → 完成，機台轉綠
-  // 修好、轉綠之後再留 RESULT_S.repair 秒
-  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('repair')), needArrive: true, until: 'repaired', untilDwell: RESULT_S.repair, timeout: 100 } },
+  // 核准後員工馬上出發；任務完成（不等溫度完全回升，回升在背景繼續）就轉綠、再留 RESULT_S.repair 秒（CJ：「七號機維修等太久」）
+  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('repair')), needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 45 } },
   // 巡檢機器人：轉身、揮手、掃描、鞠躬（walk 的 arrived 含機器人表演完）
   // 巡檢機器人：整套表演做完（arrived）、那句唸完，才走回電腦
   robot: { hold: { min: beatMinS('robot'), needArrive: true, timeout: 30 } },
@@ -98,9 +98,14 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
 /** Mock 備援情境（單一事件版：急單 + 7 號機一輪核准）。 */
 export const AUTO_SCENARIO = 'press7_temp_drop'
 /** 真實後端情境：只有 7 號機溫降（CJ：「只需要 7 號溫度這個核准異常」）。 */
-export const AUTO_LIVE_SCENARIO = 'press7_temp_drop'
-/** 7 號機的溫降在情境 14 分鐘處：16× 約 52 秒，剛好在訂單段之後 */
-export const AUTO_LIVE_SPEED = 16
+/** CJ 10-22：「為什麼一開始硫化機就出問題」「一開始是正常的一天」：真實後端從正常運轉開始（沒有排好的故障、隨機事件關），
+ *  到了 leave（離開電腦往工廠看）才由 Demo 注入 7 號機蒸汽壓下降（POST /api/sim/fault，以前觸發異常的同一條路）。 */
+export const AUTO_LIVE_SCENARIO = 'normal'
+export const AUTO_LIVE_SPEED = 15
+/** Demo 在 leave 注入的故障：7 號機蒸汽壓不足，128 → 122°C（不洩壓：只有一張核准卡） */
+export const AUTO_FAULT = { machine_id: 'CURE-07', kind: 'steam_pressure_drop', params: { target_c: 122 } }
+/** 回到電腦、Demo 結束：模擬速度回 1×、清掉 7 號機的故障（全廠正常），留給 CJ 手動 Demo 各頁面 */
+export const AUTO_END_SPEED = 1
 export const CURE07_FROM = 128
 
 /** 自動播放上方的一行字幕（每段一句；AutoOverlay 依 useDemoBeat() 顯示）。 */

@@ -207,7 +207,11 @@ export function FactoryApp() {
   const onDemoBegin = useCallback(() => {
     setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); releaseLook()
   }, [])
-  const onDemoEnd = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
+  // the auto demo ended at the desk: the lead stays seated with the real war-room page (主控台) up; Esc / F stands up
+  const onDemoEnd = useCallback((atDesk?: boolean) => {
+    if (atDesk) { setMode('first'); setPanel({ kind: 'monitor', hash: '#agent' }); releaseLook(); return }
+    setPanel(null); window.focus(); canvasRef.current?.focus()
+  }, [])
   const onDemoWalk = useCallback(() => setMode('first'), [])
   const nSlides = deck.slides.length
   const raisePhoneRef = useRef<(up: boolean) => void>(() => {})

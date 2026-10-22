@@ -25,7 +25,7 @@ html[data-demo-auto] .f3-demo-badge { display: none !important; }
 
 /* 提詞機（demo/Prompter.tsx，只在自動播放 Demo 有 beat 時出現）在 3D 工廠裡的位置：左下、自動播放列（.f3-auto-bar，置中、bottom 14px）
    的上方，不碰上方字幕、左上 HUD（待核准）、右上待核准卡、右下手機。窄螢幕手機舉起來會蓋滿畫面，這時提詞機先讓開。 */
-.f3-tp .tp-box { left: 16px; bottom: 70px; top: auto; right: auto; width: min(400px, calc(100vw - 32px)); }
+.f3-tp .tp-box { left: 16px; bottom: 16px; top: auto; right: auto; width: min(400px, calc(100vw - 32px)); }
 @media (max-width: 960px) {
   .f3-tp .tp-box { width: auto; right: 16px; }
   .f3-tp[data-phone="up"] .tp-box { display: none; }

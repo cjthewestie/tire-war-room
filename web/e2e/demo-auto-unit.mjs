@@ -80,7 +80,7 @@ function play(plant, { until = 400, walkS = 2.5 } = {}) {
 const at = (from) => (t) => t >= from
 const plant = (o) => (t) => ({
   rushCard: at(o.rushCard)(t), rushApproved: at(o.rushOk)(t), rushDone: at(o.rushDone)(t),
-  event: at(o.event)(t), approval: at(o.card)(t) && t < o.ok, approved: at(o.ok)(t), repaired: at(o.fixed)(t),
+  event: at(o.event)(t), approval: at(o.card)(t) && t < o.ok, approved: at(o.ok)(t), repaired: at(o.fixed)(t), crewDone: at(o.fixed)(t),
 })
 const P = { rushCard: 11, rushOk: 15, rushDone: 18, event: 21, card: 22.5, ok: 41, fixed: 48 }
 const { tl, beats } = play(plant(P))

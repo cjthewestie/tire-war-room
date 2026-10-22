@@ -48,6 +48,9 @@ export type Signal =
   /** auto-play: the rush order's plan approved and its event closed (plan → approved → done); the incident's press
    *  repaired and back (the crew's task done, or the event closed with the press running again) */
   | 'rushDone' | 'repaired'
+  /** auto-play's 維修 beat: the crew's tasks for the incident all 完成 (or it is repaired / closed); the temperature
+   *  coming back is not waited for */
+  | 'crewDone'
   /** the last repair is under way (H2 approved) or done: the walk to 7 號機 starts, the repair is watched, not waited for */
   | 'fixing'
   /** the 3D's own: the walk / camera has arrived and framed the beat (false holds a checkpoint's 「按 A 繼續」) */
