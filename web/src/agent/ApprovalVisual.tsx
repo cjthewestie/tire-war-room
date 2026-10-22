@@ -266,10 +266,9 @@ export function ApprovalVisual({ req, ev, items, onAgent, onDiscuss, layout = 'w
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
               {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
-            {onDiscuss && <button className="btn-sec" disabled={busy} onClick={onDiscuss} data-testid="visual-discuss">討論</button>}
             {deadline && <span className="apv-deadline" data-testid="approve-deadline" title="期限依模擬工廠時間計算">{deadline}<small>模擬工廠時間</small></span>}
           </div>
-          {!planLayout && <p className="apv-hint">核准後 Agent Nemo 派人執行並回報；要改，按「討論」跟 Agent Nemo 說</p>}
+          {!planLayout && <p className="apv-hint">核准後 Agent Nemo 派人執行並回報；要改，直接在旁邊的對話框跟 Agent Nemo 說</p>}
         </>}
       </footer>
     </section>
