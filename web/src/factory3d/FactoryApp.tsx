@@ -40,6 +40,7 @@ import { BTN, approach, usePad, type Btn, type PadFrame } from './gamepad'
 import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
+import { DemoButtons } from '../components/DemoButtons'
 import { autoActive } from '../demo/auto'
 import { useDemoBeat } from '../demo/beat'
 import { Prompter } from '../demo/Prompter'
@@ -468,6 +469,8 @@ export function FactoryApp() {
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
       <PendingApprovalAlert variant="corner" newTab />
+      {/* 斷網備援的 Demo 小按鈕 (CJ 2026-10-22): bottom-right, collapsed; hidden while the auto-play demo runs */}
+      {!autoOn && <DemoButtons where="factory" />}
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
