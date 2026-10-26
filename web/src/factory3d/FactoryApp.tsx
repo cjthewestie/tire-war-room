@@ -531,7 +531,7 @@ export function FactoryApp() {
       </div>}
       {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
-      <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>
+      {!slideView && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
       {FPS_ON && <FpsMeter />}
       <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
         onNext={() => void demo.cont()} onPitch={openSlides} />
