@@ -9,7 +9,7 @@ import {
   BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_END_SPEED, AUTO_FAULT, AUTO_FAULT_BOOST, AUTO_ORDER_EVENT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
+import { AUTO, AUTO_BOOST, AUTO_END_SPEED, AUTO_FAULT, AUTO_ORDER_EVENT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
 import { isOrderTask, freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
@@ -70,8 +70,8 @@ export class DemoRun {
   private faultSent = false
   /** 真實後端：訂單任務已經送進來（rush 一次） */
   private orderSent = false
-  /** 真實後端：注入後加速中（偵測到就回 AUTO_LIVE_SPEED） */
-  private boosted: 'off' | 'on' | 'done' = 'off'
+  /** 真實後端：Demo 最後設的模擬速度 */
+  private liveSpeed = 0
   /** 自動播放已經收尾（回到電腦：速度 1×、清故障；之後什麼都不做） */
   finished = false
   private decided = new Set<string>()
@@ -102,10 +102,14 @@ export class DemoRun {
       console.info('[demo] inject', AUTO_FAULT.machine_id, AUTO_FAULT.kind)
       void this.io.injectFault(AUTO_FAULT).catch((e) => { this.faultSent = false; console.warn('[demo] inject fault', e) })
     }
-    if (this.io.mode === 'live' && this.faultSent && this.boosted !== 'done') {
-      const seen = !!this.latched.event
-      if (!seen && this.boosted === 'off') { this.boosted = 'on'; void this.io.control({ action: 'speed', speed: AUTO_FAULT_BOOST }).catch(() => {}) }
-      if (seen) { this.boosted = 'done'; void this.io.control({ action: 'speed', speed: AUTO_LIVE_SPEED }).catch(() => {}) }
+    // 真實後端：等工廠的時候跑快（訂單核准後到結案、注入後到偵測、7 號機核准後到員工做完），其他時候 AUTO_LIVE_SPEED
+    if (this.io.mode === 'live' && now >= this.armedAt) {
+      const sg = this.latched
+      const want = cue === 'rush' && sg.rushApproved && !sg.rushDone ? AUTO_BOOST.orderDone
+        : this.faultSent && !sg.event ? AUTO_BOOST.detect
+        : cue === 'worker' && sg.approved && !sg.crewDone ? AUTO_BOOST.repair
+        : AUTO_LIVE_SPEED
+      if (want !== this.liveSpeed) { this.liveSpeed = want; void this.io.control({ action: 'speed', speed: want }).catch(() => {}) }
     }
     const pending = state.pending.filter((p) => p.status === 'pending')
     const id = this.seen.id
@@ -198,7 +202,7 @@ export class DemoRun {
       }
       this.loads = [this.io.mode === 'live' ? { at: 0, scenario: live, speed: live === AUTO_LIVE_SCENARIO ? AUTO_LIVE_SPEED : AUTO.speed } : { at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
       this.fallback = false
-      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.orderSent = false; this.boosted = 'off'; this.finished = false
+      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.orderSent = false; this.liveSpeed = 0; this.finished = false
       if (this.io.mode === 'live') await this.io.setSimEvents?.({ enabled: false }).catch((e) => console.warn('[demo] sim events off', e))
     } else {
       if (this.io.mode === 'live') {

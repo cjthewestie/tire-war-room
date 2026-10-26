@@ -52,8 +52,8 @@ export const AUTO = {
   leaveS: 4,
   /** 走到 7 號機附近、看著異常至少多久，手機才響 */
   anomalyS: 4,
-  /** 員工修好後，在 7 號機前多看一下（綠燈） */
-  repairMinS: 3,
+  /** 維修段至少多久（CJ：「七號機維修等太久」：走幾秒、很快修好就往機器人走） */
+  repairMinS: 7,
 }
 
 /** 每段至少停多久（秒）：照提詞機那句的長度（約每秒 4 個字，CJ 唸得完），最少 7 秒。CJ 10-22：「每一個步驟不可以太趕，要順暢」。 */
@@ -61,7 +61,7 @@ export const SPEECH_CPS = 4
 export const BEAT_MIN_FLOOR = 7
 export const beatMinS = (b: DemoBeat): number => Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
 /** 動作完成之後，結果在畫面上至少再留幾秒（訂單結案、手機上的「已核准」、7 號機轉綠） */
-export const RESULT_S = { orders: 6, phone: 3, repair: 4 }
+export const RESULT_S = { orders: 5, phone: 3, repair: 3 }
 
 /** 自動播放走的故事步驟（cues.ts 的 id，依 CUES 順序）；console／verify／h2／Pitch 略過。 */
 export const AUTO_CUES = ['start', 'rush', 'event', 'h1', 'worker', 'robot', 'agent']
@@ -93,7 +93,7 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
   h1: { enter: { on: 'approval', timeout: 60 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: RESULT_S.phone, card: 'approval', cardTimeout: 30, timeout: 600 } },
   // 員工跑去 7 號機：前往中 → 執行中 → 完成，機台轉綠
   // 核准後員工馬上出發；任務完成（不等溫度完全回升，回升在背景繼續）就轉綠、再留 RESULT_S.repair 秒（CJ：「七號機維修等太久」）
-  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('repair')), needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 45 } },
+  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: AUTO.repairMinS, needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 25 } },
   // 巡檢機器人：轉身、揮手、掃描、鞠躬（walk 的 arrived 含機器人表演完）
   // 巡檢機器人：整套表演做完（arrived）、那句唸完，才走回電腦
   robot: { hold: { min: beatMinS('robot'), needArrive: true, timeout: 30 } },
@@ -115,8 +115,9 @@ export const AUTO_ORDER_EVENT = 'shift_start'
 export const AUTO_FAULT = { machine_id: 'CURE-07', kind: 'steam_pressure_drop', params: { target_c: 122 } }
 /** 回到電腦、Demo 結束：模擬速度回 1×、清掉 7 號機的故障（全廠正常），留給 CJ 手動 Demo 各頁面 */
 export const AUTO_END_SPEED = 1
-/** 注入之後到偵測器看到 7 號機溫降之前，模擬跑快一點（看著工廠的那幾秒不要空等），看到了就回 AUTO_LIVE_SPEED */
-export const AUTO_FAULT_BOOST = 60
+/** 模擬在 Demo 等工廠的時候跑快一點（不要空等），其他時候 AUTO_LIVE_SPEED：今日訂單排程核准後到結案（人員任務做完、
+ *  轉綠）、7 號機注入後到偵測、7 號機核准後到員工做完。 */
+export const AUTO_BOOST = { orderDone: 120, detect: 60, repair: 90 }
 export const CURE07_FROM = 128
 
 /** 自動播放上方的一行字幕（每段一句；AutoOverlay 依 useDemoBeat() 顯示）。 */

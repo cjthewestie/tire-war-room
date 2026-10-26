@@ -435,9 +435,9 @@ export function FactoryApp() {
       <Canvas
         className="f3-canvas"
         camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
-        dpr={[1, 1.5]}
-        shadows="percentage"
-        gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
+        dpr={[1, 1.25]}
+        shadows={false}
+        gl={{ antialias: false, powerPreference: 'high-performance', alpha: true }}
         onCreated={({ gl, camera }) => {
           canvasRef.current = gl.domElement
           cameraRef.current = camera
@@ -447,7 +447,6 @@ export function FactoryApp() {
         }}
       >
         <color attach="background" args={['#e9dfcf']} />
-        <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
         <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
           board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} alarms={alarmMap} arrows={!demoOn && scene === 'factory'} quiet={demo.quiet} />
@@ -507,6 +506,7 @@ export function FactoryApp() {
       {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
       <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>
+      {FPS_ON && <FpsMeter />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
         <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
@@ -562,6 +562,23 @@ export function FactoryApp() {
 }
 
 /** The teleprompter on the auto demo's beat; its own component so a beat change re-renders only this. */
+/** ?fps=1: a tiny frame-rate readout (rAF count, written to the DOM twice a second; no React state per frame). */
+const FPS_ON = (() => { try { return new URLSearchParams(location.search).get('fps') === '1' } catch { return false } })()
+function FpsMeter() {
+  const el = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    let n = 0, t0 = performance.now(), id = 0
+    const f = (t: number) => {
+      n++
+      if (t - t0 >= 500) { if (el.current) el.current.textContent = `${Math.round((n * 1000) / (t - t0))} fps`; n = 0; t0 = t }
+      id = requestAnimationFrame(f)
+    }
+    id = requestAnimationFrame(f)
+    return () => cancelAnimationFrame(id)
+  }, [])
+  return <div ref={el} data-testid="fps" style={{ position: 'fixed', right: 8, top: 8, zIndex: 60, padding: '2px 8px', borderRadius: 6, font: '600 12px/1.4 ui-monospace, monospace', background: 'rgba(0,0,0,.6)', color: '#7CFC9A', pointerEvents: 'none' }}>– fps</div>
+}
+
 function DemoPrompter() {
   return <Prompter beat={useDemoBeat()} />
 }
