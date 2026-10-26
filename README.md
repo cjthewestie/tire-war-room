@@ -4,7 +4,9 @@
 
 Tire War Room watches every machine in a solid-tire plant, notices problems before an operator would, plans a response with an LLM, and asks a supervisor to approve it from their phone. It runs on one edge box with no internet. A fixed set of rules decides what the AI may do, and the safety rules sit outside the AI's reach.
 
-![Tire War Room dashboard](docs/screenshots/final-dashboard.png)
+![Tire War Room console: press 7 temperature drop, waiting for supervisor approval](docs/screenshots/cover.png)
+
+*The live console in mock mode: press 7's temperature dropped, the agent drafted a fix with its impact on delivery dates, and it waits for a supervisor to approve.*
 
 [繁體中文說明 → README.zh-TW.md](README.zh-TW.md)
 
