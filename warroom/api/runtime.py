@@ -1275,7 +1275,15 @@ class Runtime:
     def safety_release(self, case_id: str, body: Any, actor: str) -> Any:
         """③ 確認恢復運轉 / QC 放行 / 報廢 (supervisor session only; never the agent). KeyError / ValueError as above."""
         c = self.cases.release(case_id, body, actor, self.sim, self._board(), self.clock.now())
-        if c.resolution != "scrap":
+        out = c.resolution == "qc_pass" and not c.reading_ok      # QC 放行, press still out of range: out of service
+        if out:
+            # already fixed (no fault left on it, e.g. ① 檢修 cleared it while it cooled): 恢復運轉 is open at once;
+            # otherwise the usual repair flow marks it 檢修完成 (_apply_repairs) before 恢復運轉
+            status_of = getattr(self.sim, "status_of", None)
+            faults = getattr(self.sim, "faults", None)
+            if callable(status_of) and status_of(c.machine_id) is MachineStatus.OUT_OF_SERVICE and callable(faults)                     and not any(f.machine_id == c.machine_id for f in faults()):
+                self._repaired_out[c.machine_id] = c.event_id or c.id
+        if c.resolution != "scrap" and not out:
             # the core re-arms by itself after the same count of clear samples (② required it); the detector goes back
             # to the machine's normal baseline (as after a repair), so the way back to normal is not a new 「溫度驟降」
             try:
@@ -1286,7 +1294,8 @@ class Runtime:
         label = {"resume": "確認恢復運轉", "qc_pass": "QC 合格，放行", "scrap": "QC 報廢"}[c.resolution]
         if c.event_id and callable(getattr(sm, "add_note", None)):
             sm.add_note(c.event_id, "主管", f"[人工] 安全核心解除：{label}（讀值 {c.reading}°C，連續 {c.safe_samples} 筆在安全範圍"
-                        + (f"；已現場確認：{c.reason}" if c.field_confirmed else "") + "）")
+                        + (f"；已現場確認：{c.reason}" if c.field_confirmed else "") + "）"
+                        + ("；讀值未回到安全範圍：本模出模計入訂單，機台停用待維修" if out else ""))
         self._after_resolution()
         return c
 

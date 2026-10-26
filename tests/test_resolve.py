@@ -1,7 +1,8 @@
 """Resolution paths (CJ, 2026-10-22: 「安全核心要設計可以被解決 安全停止也要有可以走向解決的按鈕」).
 
 (A) a Safety Core stop is released only by the supervisor, only after the reading is back in range for the core's own
-re-arm count and the field check is done; the agent has no way to it. (B) a SAFE_STOP gets 請 AI 重新規劃 / 交給現場處理 /
+re-arm count and the field check is done (a cure-low hold's 「QC 合格放行」 judges the tyre: field check only, and a
+press still cold goes out of service); the agent has no way to it. (B) a SAFE_STOP gets 請 AI 重新規劃 / 交給現場處理 /
 確認結案, each producing the right event, tasks and audit."""
 from __future__ import annotations
 
@@ -152,6 +153,68 @@ async def test_cure_low_hold_releases_by_qc_decision(tmp_path):
                              "supervisor")
     assert done.resolution == "scrap" and rt.sim.machine(press).cure_job is None
     assert rt.sim.machine(press).status is MachineStatus.IDLE
+
+
+async def _cold_press(rt: Runtime):
+    """A curing press with a cure job loses its steam: the real Safety Core holds it (SR-CURE-LOW-120, CURE_HOLD)."""
+    press = next(m.machine_id for m in rt.sim.machines() if m.machine_id.startswith("CURE-") and m.cure_job)
+    rt.inject_fault(FaultSpec(id="cold", machine_id=press, kind=FaultKind.TEMP_RAMP,
+                              params={"target": 105.0, "rate_c_per_min": 30.0}))
+    for _ in range(600):
+        await rt.tick(1.0, publish=False)
+        c = rt.cases.open_for(press)
+        if c is not None:
+            assert "SR-CURE-LOW-120" in c.rule_ids
+            return press, c
+    raise AssertionError("the Safety Core never held the cold press")
+
+
+async def test_qc_pass_needs_only_the_field_check_and_takes_a_cold_press_out_of_service(tmp_path):
+    """CJ 10-22 (option B): 「QC 合格放行」 judges the tyre. With the press still cold it is pressable once ① is done (or
+    confirmed with a reason); the tyre de-molds as made (counts for its order), the press goes out of service, not
+    RUNNING, and no new CURE_HOLD fires on it."""
+    rt = _rt(tmp_path)
+    press, c = await _cold_press(rt)
+    for _ in range(30):
+        await rt.tick(1.0, publish=False)
+    assert not c.reading_ok and c.reading is not None and c.reading < 120
+    job = rt.sim.machine(press).cure_job
+    done_before = rt.sim._orders[job.order_id].done
+    with pytest.raises(ValueError, match="請先派現場檢查"):           # ① still required
+        rt.safety_release(c.id, SafetyRelease(decision="qc_pass"), "supervisor")
+    with pytest.raises(ValueError, match="理由"):
+        rt.safety_release(c.id, SafetyRelease(decision="qc_pass", field_confirmed=True, reason=" "), "supervisor")
+    out = rt.safety_release(c.id, SafetyRelease(decision="qc_pass", field_confirmed=True, reason="QC 判定硫化度合格"),
+                            "supervisor")
+    assert out.resolution == "qc_pass" and out.status == "resolved"
+    st = rt.sim.machine(press)
+    assert st.status is MachineStatus.OUT_OF_SERVICE and st.cure_job is None and "待維修" in (st.note or "")
+    assert rt.sim._orders[job.order_id].done == min(rt.sim._orders[job.order_id].qty, done_before + 1)
+    p = [e for e in rt.audit.tail(0, 100_000) if e.kind == AuditKind.SAFETY_RELEASE][-1].payload
+    assert p["branch"] == "qc_pass_press_out_of_service" and p["passed_job"] == job.job_id
+    assert p["status_after"] == "out_of_service" and p["safe_samples"] < p["safe_needed"]
+    holds = lambda: [x for x in rt.c.safety.actions if x.machine_id == press and x.action.value == "cure_hold"]  # noqa: E731
+    n_holds = len(holds())
+    for _ in range(120):                                               # still cold: no new hold, no new mold-in
+        await rt.tick(1.0, publish=False)
+    assert rt.cases.open_for(press) is None
+    assert rt.sim.machine(press).status is MachineStatus.OUT_OF_SERVICE and rt.sim.machine(press).cure_job is None
+    assert len(holds()) == n_holds
+
+
+async def test_qc_pass_with_the_reading_back_resumes_as_before(tmp_path):
+    rt = _rt(tmp_path)
+    from warroom.contracts import SafetyAction, SafetyActionKind
+    press = next(m.machine_id for m in rt.sim.machines() if m.machine_id.startswith("CURE-") and m.cure_job)
+    a = SafetyAction(id="SA-test-CURE2", ts=rt.now(), machine_id=press, rule_id="SR-CURE-LOW-120",
+                     action=SafetyActionKind.CURE_HOLD, value=119.0, threshold=120.0, message="test", latency_ms=0.1)
+    rt.sim.apply_safety_action(a)
+    c = rt.cases.on_action(a, None)
+    await _until_reading_ok(rt, c)
+    rt.safety_release(c.id, SafetyRelease(decision="qc_pass", field_confirmed=True, reason="QC 合格"), "supervisor")
+    assert rt.sim.machine(press).status is MachineStatus.RUNNING and rt.sim.machine(press).cure_job is not None
+    p = [e for e in rt.audit.tail(0, 100_000) if e.kind == AuditKind.SAFETY_RELEASE][-1].payload
+    assert p["branch"] == "qc_pass_running" and p["passed_job"] is None
 
 
 def test_release_is_not_reachable_from_the_agent():
