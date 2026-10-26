@@ -82,13 +82,12 @@ function latestReq(pending: ApprovalRequest[], evId: string | undefined): Approv
   return [...pending].filter((p) => p.event_id === evId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null
 }
 
-const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
 
 /** The 主控台 conversation panel: the one NemoClaw (主 agent) thread (CJ, 2026-10-21: 「我不要長這樣」 about the
  *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed; issue #100: the 此事項／全部 switcher is gone too). The plan on
  *  screen sits in the thread as a short 待核准 notice (or the briefing of its state), placed by its own time. Each
  *  subagent's progress is on the Agent page, via 看完整過程. */
-function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, events, card, onSession }: {
+function Console({ items, asks, setAsks, focus, onFull, requested, events, card, onSession }: {
   items: Item[]
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
   onGuide: (text: string) => void
@@ -155,8 +154,6 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
       <h3>我是 Agent Nemo</h3>
       <p className="muted small">戰情室的主 agent。我可以幫你：</p>
       <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
-      <p className="muted small">試試這些問題：</p>
-      {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
       {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent Nemo 問答</p>}
     </div>
   )
