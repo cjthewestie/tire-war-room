@@ -1,0 +1,14 @@
+# systemd --user unit used on the demo Spark (recovered 10-27 from the session transcripts).
+# Install: cp deploy/spark-demo/warroom.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#          systemctl --user enable --now warroom.service ; loginctl enable-linger $USER
+[Unit]
+Description=Tire war room (port 8090, model = westie-llm on :8000)
+After=network-online.target
+
+[Service]
+ExecStart=/home/nvidia/tire-war-room/deploy/spark-demo/run_warroom_spark.sh
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
