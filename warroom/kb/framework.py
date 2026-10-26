@@ -39,7 +39,7 @@ log = logging.getLogger(__name__)
 
 COLLECTION = "framework"
 QA_FILE = "docs/qa/framework-qa.md"
-DOC_FILES = ("README.md", "CONTRIBUTING.md", "CLAUDE.md", "PRODUCT.md", "config/plant/PLANT.md")
+DOC_FILES = ("README.md", "README.zh-TW.md", "CLAUDE.md", "PRODUCT.md", "config/plant/PLANT.md")
 DOC_GLOBS = ("docs/**/*.md",)
 DOCSTRING_FILES = ("warroom/agent/state_machine.py", "warroom/agent/commander.py", "warroom/agent/main_agent.py",
                    "warroom/agent/gate.py", "warroom/safety/core.py", "warroom/natkit/register.py",

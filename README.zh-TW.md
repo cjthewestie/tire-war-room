@@ -8,7 +8,7 @@
 
 ## 中文（團隊用）
 
-**新加入？先看 [`CONTRIBUTING.md`](CONTRIBUTING.md)（下載、執行、開 issue、分支、PR、規範）和 3 分鐘影片 [`docs/onboarding/team-onboarding.mp4`](docs/onboarding/team-onboarding.mp4)。**
+**新加入？先看 3 分鐘影片 [`docs/onboarding/team-onboarding.mp4`](docs/onboarding/team-onboarding.mp4)。**
 
 ### 這是什麼
 

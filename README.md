@@ -151,7 +151,7 @@ cd web && pnpm build && pnpm lint
 
 ## Contributing
 
-Issues and pull requests are welcome. The team workflow (issues, branches, PR checks) is in [`CONTRIBUTING.md`](CONTRIBUTING.md), currently in Traditional Chinese. Two rules matter most:
+Issues and pull requests are welcome. Open an issue first, work on a branch, and run the tests above before opening a PR. Two rules matter most:
 
 1. No tool or code path may move a machine. All writes go through the Action Gate.
 2. `warroom/safety/` must never import the agent, tools, API or an LLM client.
