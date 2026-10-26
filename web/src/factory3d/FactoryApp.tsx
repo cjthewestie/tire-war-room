@@ -242,6 +242,10 @@ export function FactoryApp() {
       if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable) || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.code === 'KeyM') { toggleMusic(); return }
       if (e.code === 'KeyP' && e.shiftKey) { e.stopImmediatePropagation(); openSlides(); return }
+      // F / Esc always stand up from the desk computer (when the page itself has the keys, DeskMonitor does it)
+      if (!demoOn && !slideView && panel?.kind === 'monitor' && (e.code === 'KeyF' || e.code === 'Escape')) {
+        e.stopImmediatePropagation(); setPanel(null); window.focus(); canvasRef.current?.focus(); return
+      }
       // the slides outside the demo (the demo's own keys handle them while it runs)
       if (slideView && !demoOn) {
         if (e.code === 'ArrowRight' || e.code === 'PageDown' || e.code === 'Space') { e.preventDefault(); changeSlide(1) }
@@ -251,7 +255,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k, true)
     return () => window.removeEventListener('keydown', k, true)
-  }, [openSlides, slideView, demoOn, changeSlide, setSlideView])
+  }, [openSlides, slideView, demoOn, changeSlide, setSlideView, panel])
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
