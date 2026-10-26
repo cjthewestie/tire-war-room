@@ -80,7 +80,7 @@ class Walker {
   /** One frame; returns whether the lead is walking (for the head-bob and the walk cycle). */
   update(dt: number): boolean {
     if (!this.goal) return false
-    const top = this.calm ? (this.run ? RUN * 0.7 : WALK * 0.72) : this.run ? RUN : WALK
+    const top = this.calm ? 1.4 : this.run ? RUN : WALK   // auto-play: a calm walking pace (CJ: 「不要急」)
     if (this.path.length) {
       const [gx, gz] = this.path[0]
       const dx = gx - player.x, dz = gz - player.z, len = Math.hypot(dx, dz)

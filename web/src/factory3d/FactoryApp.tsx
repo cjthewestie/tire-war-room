@@ -18,7 +18,7 @@
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
@@ -42,7 +42,8 @@ import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
 import { DemoButtons } from '../components/DemoButtons'
 import { autoActive } from '../demo/auto'
-import { useDemoBeat } from '../demo/beat'
+import { stageOf, useDemoBeat } from '../demo/beat'
+import { musicMuted, startMusic, stopMusic, subscribeMusic, toggleMusic } from '../demo/music'
 import { Prompter } from '../demo/Prompter'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
@@ -230,6 +231,27 @@ export function FactoryApp() {
   const autoMode = autoActive(transport?.mode)
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
+  // 簡報 from anywhere (CJ: 「白板我點不進去怎麼demo」): stand up from the desk first, then the full-screen slides
+  const openSlides = useCallback(() => { setPanel(null); releaseLook(); setSlideView(true) }, [setSlideView])
+  // background music: during the 3D demo only, faded out for the pitch
+  useEffect(() => { if (demoOn && !slideView && !pitchView) startMusic(); else stopMusic() }, [demoOn, slideView, pitchView])
+  useEffect(() => () => stopMusic(0.3), [])
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable) || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.code === 'KeyM') { toggleMusic(); return }
+      if (e.code === 'KeyP' && e.shiftKey) { e.stopImmediatePropagation(); openSlides(); return }
+      // the slides outside the demo (the demo's own keys handle them while it runs)
+      if (slideView && !demoOn) {
+        if (e.code === 'ArrowRight' || e.code === 'PageDown' || e.code === 'Space') { e.preventDefault(); changeSlide(1) }
+        else if (e.code === 'ArrowLeft' || e.code === 'PageUp') { e.preventDefault(); changeSlide(-1) }
+        else if (e.code === 'Escape') { e.stopImmediatePropagation(); setSlideView(false) }
+      }
+    }
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
+  }, [openSlides, slideView, demoOn, changeSlide, setSlideView])
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
@@ -507,6 +529,8 @@ export function FactoryApp() {
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
       <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>
       {FPS_ON && <FpsMeter />}
+      <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
+        onNext={() => void demo.cont()} onPitch={openSlides} />
       {(slideView || pitchView) && <PitchPrompter says={deck.says} index={Math.min(demo.slide, nSlides - 1)} />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
@@ -578,6 +602,25 @@ function FpsMeter() {
     return () => cancelAnimationFrame(id)
   }, [])
   return <div ref={el} data-testid="fps" style={{ position: 'fixed', right: 8, top: 8, zIndex: 60, padding: '2px 8px', borderRadius: 6, font: '600 12px/1.4 ui-monospace, monospace', background: 'rgba(0,0,0,.6)', color: '#7CFC9A', pointerEvents: 'none' }}>– fps</div>
+}
+
+/** Bottom-right: the stage 「n/7」 and 「下一階段 ▶」 in the auto demo (at 回到電腦 / after it: 「Pitch ▶」),
+ *  「▶ Demo 開始」 when no demo runs, 「簡報 ▶」 (Shift+P) and the music 🔊/🔇 (M) always. */
+function DemoDock({ running, auto, slides, onStart, onNext, onPitch }: { running: boolean; auto: boolean; slides: boolean; onStart: () => void; onNext: () => void; onPitch: () => void }) {
+  const beat = useDemoBeat()
+  const muted = useSyncExternalStore(subscribeMusic, musicMuted, () => false)
+  const stage = slides ? stageOf(null, true) : auto || beat === 'back' ? stageOf(beat) : null
+  const atEnd = beat === 'back' || (!running && !!stage)
+  return (
+    <div className="f3-dock" data-testid="demo-dock">
+      {stage && <span className="f3-dock-stage" data-testid="auto-stage">{stage.n}/{stage.total} {stage.label}</span>}
+      {auto && !atEnd && <button type="button" className="f3-dock-next" data-testid="auto-next" onClick={onNext} title="跳到下一階段（N / →）">下一階段 ▶</button>}
+      {atEnd && !slides && <button type="button" className="f3-dock-next" data-testid="auto-pitch" onClick={onPitch} title="下一階段：Pitch（Shift+P）">Pitch ▶</button>}
+      {!running && <button type="button" data-testid="demo-start-btn" onClick={onStart} title="從第 1 階段重新開始自動 Demo（G）">▶ Demo 開始</button>}
+      {!atEnd && !slides && <button type="button" data-testid="slides-open" onClick={onPitch} title="打開簡報（Shift+P）">簡報 ▶</button>}
+      <button type="button" className="f3-dock-mute" data-testid="music-toggle" onClick={toggleMusic} aria-pressed={!muted} title={muted ? '開啟背景音樂（M）' : '關閉背景音樂（M）'}>{muted ? '🔇' : '🔊'}</button>
+    </div>
+  )
 }
 
 /** The pitch's prompter: the current slide's line (slides.json `say`) and the next one, following ← / →. */

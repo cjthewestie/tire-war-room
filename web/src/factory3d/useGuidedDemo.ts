@@ -230,7 +230,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       // auto-play: the order is done (the 急單 hold is over) → the lead leaves the computer and walks out to 7 號機; the
       // anomaly comes in on the way (CJ 10-22: 「訂單結束之後我要離開電腦然後走向工廠，然後手機才響」)
       if (isAuto && c.id === 'rush' && r.tl.released && w.station === 'desk') w.station = 'lookout'
-      if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
+      if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' && !isAuto })
       // the war-room computer: open at the desk once the lead has arrived (主控台 for the orders, Agent page later)
       // the order task the demo started (the newest 今日訂單排程 / order event): selected on the 主控台
       const orderId = isAuto ? [...(stateRef.current.snapshot?.events ?? [])].filter((e) => isOrderTask(e.id))
@@ -261,7 +261,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       // the beat the prompter reads (demo/beat.ts): walk until the lead stands at the war-room computer, then orders,
       // then leave once the order's hold is over
       const beat = isAuto ? beatOf(c.id, director.mode === 'walk' && walker.at === 'desk' && walker.done, r.tl.released,
-        { elapsed: (now - w.enteredAt) / 1000, overviewS: beatMinS('overview'), approved: !!r.latched.approved }) : null
+        { elapsed: (now - w.enteredAt) / 1000, overviewS: beatMinS('overview'), approved: !!r.latched.approved, approveS: beatMinS('approve') }) : null
       setDemoBeat(beat)
       if (!isAuto && r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt

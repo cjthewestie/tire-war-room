@@ -72,7 +72,7 @@ function play(plant, { until = 400, walkS = 2.5 } = {}) {
     tl = r.tl
     const cc = C.CUES[tl.index]
     const atDesk = cc.id === 'rush' && t - tl.enteredAt >= walkS
-    const b = BT.beatOf(cc.id, atDesk, tl.released, { elapsed: t - tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!sig.approved })
+    const b = BT.beatOf(cc.id, atDesk, tl.released, { elapsed: t - tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!sig.approved, approveS: AU.beatMinS('approve') })
     if (beats[beats.length - 1]?.beat !== b) beats.push({ beat: b, t })
   }
   return { tl, beats }
@@ -96,7 +96,7 @@ for (const b of BT.DEMO_BEATS) check(`beat ${b} min ≥ 7 s`, AU.beatMinS(b) >= 
 {
   const dur = (b) => { const i = beats.findIndex((x) => x.beat === b); return i < 0 ? 0 : (beats[i + 1]?.t ?? Infinity) - beats[i].t }
   for (const b of BT.DEMO_BEATS.filter((x) => x !== 'back')) {
-    const need = b === 'walk' ? AU.beatMinS('walk') - AU.WALK_S : b === 'leave' ? 3 : b === 'orders' ? AU.beatMinS('orders') : Math.min(AU.beatMinS(b), 7)
+    const need = b === 'walk' ? AU.beatMinS('walk') - AU.WALK_S : b === 'leave' ? 3 : b === 'phone' ? 7 : b === 'approve' ? 7 : b === 'orders' ? AU.beatMinS('orders') : Math.min(AU.beatMinS(b), 7)
     check(`paced: ${b} lasts ≥ ${need.toFixed(0)} s`, dur(b) >= need - 0.2, `${dur(b).toFixed(1)}`)
   }
 }
@@ -156,7 +156,7 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
     run.tick(now, state)
     if (run.tl.index !== before) run._entered = now
     const cc = C.CUES[run.tl.index]
-    const b = BT.beatOf(cc.id, cc.id === 'rush' && now - (run._entered ?? 0) >= 2500, run.tl.released, { elapsed: run.t - run.tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!run.latched.approved })
+    const b = BT.beatOf(cc.id, cc.id === 'rush' && now - (run._entered ?? 0) >= 2500, run.tl.released, { elapsed: run.t - run.tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!run.latched.approved, approveS: AU.beatMinS('approve') })
     if (beats[beats.length - 1]?.beat !== b) beats.push({ beat: b, t: Math.round(run.t * 10) / 10 })
     if (firstRushCard == null && state.pending.some((p) => p.event_id.endsWith('-RUSH'))) firstRushCard = run.t
     if (firstEvent == null && (state.snapshot?.events ?? []).some((e) => e.machine_id === 'CURE-07')) firstEvent = run.t

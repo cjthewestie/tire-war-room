@@ -23,7 +23,7 @@ export const BEAT_CUE: Record<DemoBeat, string> = {
 /** The beat for an auto cue; `atDesk` = the lead has walked to the war-room computer (splits walk / orders);
  *  `released` = the cue's hold is over (the 急單 cue: the order is done, the lead leaves the desk). */
 export function beatOf(cueId: string | null | undefined, atDesk = true, released = false,
-  x: { elapsed?: number; overviewS?: number; approved?: boolean } = {}): DemoBeat | null {
+  x: { elapsed?: number; overviewS?: number; approved?: boolean; approveS?: number } = {}): DemoBeat | null {
   switch (cueId) {
     // the opening shot carries two lines (CJ's 逐字稿): 開場, then 鏡頭飛過產線 (from overviewS s in)
     case 'start': return x.overviewS != null && (x.elapsed ?? 0) >= x.overviewS ? 'walk' : 'overview'
@@ -31,7 +31,7 @@ export function beatOf(cueId: string | null | undefined, atDesk = true, released
     case 'event': return 'leave'
     // the phone rings (the 7 號機 line), then, once its card is approved, 一鍵核准
     case 'h1': return x.approved ? 'approve' : 'phone'
-    case 'worker': return 'repair'
+    case 'worker': return x.approveS != null && (x.elapsed ?? 0) < x.approveS ? 'approve' : 'repair'
     case 'robot': return 'robot'
     case 'agent': return 'back'
     default: return null
@@ -39,8 +39,9 @@ export function beatOf(cueId: string | null | undefined, atDesk = true, released
 }
 
 /** The six stages CJ names (「訂單 / 離開電腦 / 7號機手機 / 維修 / 機器人 / 回到電腦」): the indicator 「2/6 離開電腦」. */
-export const STAGES = ['訂單', '離開電腦', '7號機手機', '維修', '機器人', '回到電腦'] as const
-export function stageOf(b: DemoBeat | null): { n: number; total: number; label: string } | null {
+export const STAGES = ['訂單', '離開電腦', '7號機手機', '維修', '機器人', '回到電腦', 'Pitch'] as const
+export function stageOf(b: DemoBeat | null, pitch = false): { n: number; total: number; label: string } | null {
+  if (pitch) return { n: STAGES.length, total: STAGES.length, label: 'Pitch' }
   if (!b) return null
   const i = b === 'overview' || b === 'walk' || b === 'orders' ? 0 : b === 'leave' ? 1 : b === 'phone' || b === 'approve' ? 2
     : b === 'repair' ? 3 : b === 'robot' ? 4 : 5

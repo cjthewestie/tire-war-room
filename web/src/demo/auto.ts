@@ -61,7 +61,7 @@ export const SPEECH_CPS = 4
 export const BEAT_MIN_FLOOR = 7
 export const beatMinS = (b: DemoBeat): number => Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
 /** 動作完成之後，結果在畫面上至少再留幾秒（訂單結案、手機上的「已核准」、7 號機轉綠） */
-export const RESULT_S = { orders: 5, phone: 3, repair: 3 }
+export const RESULT_S = { orders: 5, phone: 1, repair: 3 }
 /** 第一人稱走到電腦大約幾秒 */
 export const WALK_S = 3
 /** 真實後端：7 號機的卡在手機上多久才按核准＝「手機響」那句的長度（最少 3 秒） */
@@ -100,10 +100,11 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
   // 手機這時才響（震動＋鈴聲＋舉起來）→ 核准：Mock 由 Demo 自動按；真實後端等人按
   // 核准後手機留著「已核准」RESULT_S.phone 秒才放下
   // 手機響（7 號機那句唸完）才核准（driver：卡出現 phoneApproveS 秒後），核准後「一鍵核准」那句唸完才放下手機
-  h1: { enter: { on: 'event', timeout: 5 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: Math.max(RESULT_S.phone, beatMinS('approve')), card: 'approval', cardTimeout: 30, timeout: 600 } },
+  // （核准後只等 ~1 秒就放下手機往 7 號機走；「一鍵核准」那句在走路時繼續唸，見 beat.ts worker）
+  h1: { enter: { on: 'event', timeout: 5 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: RESULT_S.phone, card: 'approval', cardTimeout: 30, timeout: 600 } },
   // 員工跑去 7 號機：前往中 → 執行中 → 完成，機台轉綠
   // 核准後員工馬上出發；任務完成（不等溫度完全回升，回升在背景繼續）就轉綠、再留 RESULT_S.repair 秒（CJ：「七號機維修等太久」）
-  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('repair')), needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 30 } },
+  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('approve') + beatMinS('repair')), needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: beatMinS('approve') + beatMinS('repair') + 20 } },
   // 巡檢機器人：轉身、揮手、掃描、鞠躬（walk 的 arrived 含機器人表演完）
   // 巡檢機器人：整套表演做完（arrived）、那句唸完，才走回電腦
   robot: { hold: { min: beatMinS('robot'), needArrive: true, timeout: 30 } },
