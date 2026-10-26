@@ -44,7 +44,7 @@ import { DemoButtons } from '../components/DemoButtons'
 import { autoActive } from '../demo/auto'
 import { stageOf, useDemoBeat } from '../demo/beat'
 import { musicMuted, startMusic, stopMusic, subscribeMusic, toggleMusic } from '../demo/music'
-import { Prompter } from '../demo/Prompter'
+import { Prompter, pagesOf } from '../demo/Prompter'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
@@ -627,17 +627,25 @@ function DemoDock({ running, auto, slides, onStart, onNext, onPitch }: { running
   )
 }
 
-/** The pitch's prompter: the current slide's line (slides.json `say`) and the next one, following ← / →. */
+/** The pitch's prompter (CJ 10-22 「pitch框框要再小一點」): a compact box in the bottom-left strip under the slide
+ *  (the slide view keeps that strip free, so the slide is never covered), the current slide's line only, ~15px, paged
+ *  by sentence when it is long (the pages turn by themselves at about reading speed), following ← / →. */
 function PitchPrompter({ says, index }: { says?: (string | null)[]; index: number }) {
-  const cur = says?.[index]
+  const cur = says?.[index] ?? null
+  const pages = cur ? pagesOf(cur) : []
+  const [pg, setPg] = useState({ index: -1, i: 0 })
+  const i = pg.index === index ? Math.min(pg.i, pages.length - 1) : 0
+  const n = pages.length, len = pages[i]?.length ?? 0
+  useEffect(() => {
+    if (i >= n - 1) return
+    const id = setTimeout(() => setPg({ index, i: i + 1 }), Math.max(3500, len * 230))
+    return () => clearTimeout(id)
+  }, [index, i, n, len])
   if (!cur) return null
-  const next = says?.[index + 1] ?? null
   return (
-    <aside className="tp-box tp-bottom-left" style={{ zIndex: 90 }} aria-live="polite" aria-label="提詞機（Pitch）" data-testid="pitch-prompter">
-      <div className="tp-head"><div className="tp-bar"><i style={{ width: `${((index + 1) / (says?.length ?? 1)) * 100}%` }} /></div>
-        <span className="tp-meta">Pitch {index + 1}/{says?.length}</span></div>
-      <p key={index} className="tp-cur tp-pitch">{cur}</p>
-      {next && <p className="tp-next"><span className="tp-lab">下一頁</span>{next}</p>}
+    <aside className="tp-box tp-pitch-box" aria-live="polite" aria-label="提詞機（Pitch）" data-testid="pitch-prompter">
+      <span className="tp-meta">Pitch {index + 1}/{says?.length}{n > 1 ? ` · ${i + 1}/${n}` : ''}</span>
+      <p key={`${index}-${i}`} className="tp-cur tp-pitch">{pages[i]}</p>
     </aside>
   )
 }

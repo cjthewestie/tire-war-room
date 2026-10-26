@@ -23,8 +23,11 @@
 .tp-meta { flex: none; font-size: 10.5px; color: var(--tp-faint); font-variant-numeric: tabular-nums; }
 .tp-cur { margin: 0; font-size: 17px; line-height: 1.4; font-weight: 600; animation: tp-in .3s ease;
   display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
-/* the pitch lines are long: the whole line, a little smaller, scrolling if it has to */
-.tp-cur.tp-pitch { font-size: 15px; -webkit-line-clamp: unset; line-clamp: unset; display: block; max-height: 40vh; overflow-y: auto; }
+/* the pitch prompter: ~1/3 of the screen in the bottom-left strip the slide view keeps free (factory3d.css) */
+.tp-box.tp-pitch-box { left: 10px; bottom: 8px; width: min(34vw, 520px); padding: 5px 10px 6px; z-index: 90;
+  background: color-mix(in srgb, var(--tp-bg) 62%, transparent); }
+.tp-pitch-box .tp-meta { display: block; margin-bottom: 2px; }
+.tp-cur.tp-pitch { font-size: 15px; line-height: 1.38; font-weight: 600; -webkit-line-clamp: 3; line-clamp: 3; }
 .tp-next { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: var(--tp-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tp-lab { font-size: 11px; margin-right: 5px; padding: 0 5px; border-radius: 5px; background: var(--tp-chip); color: var(--tp-dim); }
