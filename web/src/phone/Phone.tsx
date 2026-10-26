@@ -26,9 +26,9 @@ import { AiStatusLine } from '../AiStatusLine'
 import { OptionGuideNote } from '../OptionGuideNote'
 import { RepairNotice } from './RepairNotice'
 import { CUES } from '../demo/cues'
-import { isMachine } from '../demo/signals'
+import { isMachine, isOrderTask } from '../demo/signals'
 import { APPROVAL_CUES } from '../demo/beats'
-import { autoApproves, autoApprovesLive } from '../demo/auto'
+import { autoApproves, autoApprovesLive, autoRequested } from '../demo/auto'
 import { AutoCard } from './AutoCard'
 import { useSessionNo } from '../agent/sessionStore'
 
@@ -92,7 +92,8 @@ function PhoneFull() {
     .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1)).slice(0, 3)
   const noticeCards = notices.map((e) => <RepairNotice key={rkey(e)} ev={e} disabled={lanDown || !transport}
     onRead={(x) => setRead((r) => ({ ...r, [rkey(e)]: x.review?.status === 'done' ? x : { ...e, review: { ...e.review!, status: 'done', done_at: ft ?? null, by: '主管' } } }))} />)
-  const alerts = useApprovalAlerts([...pending, ...repairNotices(notices, state.snapshot?.machines), ...resolveAlerts(cases, events)], connected && !lanDown)
+  // the 3D auto demo: the phone rings only for the 7 號機 card (the order plan is approved at the desk)
+  const alerts = useApprovalAlerts([...(autoRequested() ? pending.filter((p) => !isOrderTask(p.event_id)) : pending), ...repairNotices(notices, state.snapshot?.machines), ...resolveAlerts(cases, events)], connected && !lanDown)
   const bctx = useBriefCtx()
   const demo = state.demo
   const idle = pending.length === 0

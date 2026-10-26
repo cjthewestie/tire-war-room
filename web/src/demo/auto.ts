@@ -42,6 +42,8 @@ export const AUTO = {
   phoneAfterS: 1.5,
   /** 急單的計劃卡在螢幕上給觀眾看多久，才自動核准（Mock） */
   ordersApproveS: 4,
+  /** 真實後端：訂單任務的核准卡在主控台上給觀眾看幾秒，Demo 才在主控台替主管按核准（via dashboard） */
+  consoleApproveS: 3,
   /** 真實後端：7 號機的卡在手機上給觀眾看幾秒，Demo 才替主管按核准（同一支核准 API，過 Action Gate、留稽核） */
   liveApproveS: 3,
   /** 訂單段至少停多久（走到電腦後） */
@@ -80,7 +82,10 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
   // 俯瞰：開場那句唸完（真實後端：沒有急單卡，訂單段只看日常訂單；Mock 的急單卡照舊自動核准）
   start: { hold: { min: Math.max(AUTO.openS, beatMinS('overview')) } },
   // 走向電腦（walk）→ 電腦上急單進來、計劃、核准、完成（orders）；結案後畫面再留 RESULT_S.orders 秒
-  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushDone', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 0, timeout: 240 } },
+  // 真實後端（CJ 10-22：「是在主控台跑訂單任務跟核准」）：走向電腦時 Demo 開始今日訂單排程（早班開工計畫），主控台上
+  // Agent Nemo 規劃 → 核准卡 → Demo 在主控台替主管按核准 → 執行 → 結案；結案後再留 RESULT_S.orders 秒。到了電腦最多再等
+  // ORDERS_CAP_S 秒，模型慢也照樣往下（任務在背景跑完）。
+  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushDone', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 45, timeout: beatMinS('walk') + beatMinS('orders') + 35 } },
   // 訂單結束 → 離開電腦、走到門口往工廠看（leave）→ 7 號機警示燈亮（事件進來，還是 leave）→ 看一下，手機才響
   event: { enter: { on: 'event', timeout: 90, min: AUTO.leaveS }, hold: { min: AUTO.anomalyS, needArrive: true, timeout: 30 } },
   // 手機這時才響（震動＋鈴聲＋舉起來）→ 核准：Mock 由 Demo 自動按；真實後端等人按
@@ -102,6 +107,10 @@ export const AUTO_SCENARIO = 'press7_temp_drop'
  *  到了 leave（離開電腦往工廠看）才由 Demo 注入 7 號機蒸汽壓下降（POST /api/sim/fault，以前觸發異常的同一條路）。 */
 export const AUTO_LIVE_SCENARIO = 'normal'
 export const AUTO_LIVE_SPEED = 15
+/** 真實後端：走向電腦時開始的今日訂單排程（早班開工計畫，POST /api/sim/events/fire shift_start；CJ：「呈現一種日常訂單，
+ *  早上 agent 安排完」「急單不要了」） */
+export const AUTO_ORDER_EVENT = 'shift_start'
+
 /** Demo 在 leave 注入的故障：7 號機蒸汽壓不足，128 → 122°C（不洩壓：只有一張核准卡） */
 export const AUTO_FAULT = { machine_id: 'CURE-07', kind: 'steam_pressure_drop', params: { target_c: 122 } }
 /** 回到電腦、Demo 結束：模擬速度回 1×、清掉 7 號機的故障（全廠正常），留給 CJ 手動 Demo 各頁面 */
@@ -112,7 +121,7 @@ export const CURE07_FROM = 128
 export const AUTO_TEXT: Record<DemoBeat, string> = {
   overview: '工廠運轉中',
   walk: '走向戰情室電腦',
-  orders: '📋 訂單任務進來：Agent 規劃 → 核准 → 完成',
+  orders: '📋 今日訂單排程：Agent 規劃 → 主管核准 → 完成',
   leave: '🚶 訂單處理好了：離開電腦，往工廠看',
   phone: '📱 手機響了：7 號硫化機溫度異常，主管核准',
   repair: '👷 員工前往 7 號機維修',

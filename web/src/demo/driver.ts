@@ -9,8 +9,8 @@ import {
   BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_END_SPEED, AUTO_FAULT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
-import { freshSeen, signals, type Seen } from './signals'
+import { AUTO, AUTO_END_SPEED, AUTO_FAULT, AUTO_ORDER_EVENT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
+import { isOrderTask, freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
 export interface DemoIO {
@@ -21,6 +21,8 @@ export interface DemoIO {
   /** 自動播放（真實後端）：leave 時注入 7 號機的故障，結束時清掉 */
   injectFault?(f: { machine_id: string; kind: string; params?: Record<string, number> }): Promise<void>
   clearFault?(machineId: string): Promise<void>
+  /** 自動播放（真實後端）：走向電腦時開始今日訂單排程（POST /api/sim/events/fire） */
+  fireEvent?(kind: string): Promise<unknown>
   demo?(c: DemoCommand): Promise<DemoState>
   /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到（真實後端一律人按）。 */
   decide?(d: ApprovalDecision): Promise<ApprovalRequest | null>
@@ -66,6 +68,8 @@ export class DemoRun {
   private approveAt = new Map<string, number>()
   /** 真實後端：7 號機的故障已經注入（leave 一次） */
   private faultSent = false
+  /** 真實後端：訂單任務已經送進來（rush 一次） */
+  private orderSent = false
   /** 自動播放已經收尾（回到電腦：速度 1×、清故障；之後什麼都不做） */
   finished = false
   private decided = new Set<string>()
@@ -84,6 +88,12 @@ export class DemoRun {
   private autoStep(now: number, state: WarRoomState) {
     if (!this.auto || this.finished) return
     const cue = CUES[this.tl.index]?.id
+    // 真實後端：走向電腦時送進一張訂單（主控台上跑：規劃 → 核准卡 → 核准 → 執行 → 結案）
+    if (this.io.mode === 'live' && !this.orderSent && cue === 'rush' && this.io.fireEvent) {
+      this.orderSent = true
+      console.info('[demo] fire', AUTO_ORDER_EVENT)
+      void this.io.fireEvent(AUTO_ORDER_EVENT).catch((e) => { this.orderSent = false; console.warn('[demo] fire order', e) })
+    }
     // 真實後端：訂單段結束（離開電腦往工廠看）才注入 7 號機的溫降，開場與訂單段全廠正常
     if (this.io.mode === 'live' && !this.faultSent && cue === 'rush' && this.tl.released && this.io.injectFault) {
       this.faultSent = true
@@ -106,6 +116,22 @@ export class DemoRun {
     // 真實後端（CJ 10-22：「3d 工廠 demo 核准要自動核准」）：只核准 Demo 自己追的 7 號機事件的卡（event id 相符），在手機段
     // （h1）卡出現 AUTO.liveApproveS 秒後；同一件事後來的新版卡（AI 換假設 H2）在維修段也一樣。用主管手機同一支 API
     // （decided_by 主管、via phone），過 Action Gate、寫稽核。其他卡一律不碰；回到戰情室（AUTO_FINAL）後什麼都不做。
+    // 訂單段：這次的今日訂單排程（-PLAN；情境剛載入，沒有別的）的核准卡，在主控台上看 consoleApproveS 秒後核准（via dashboard）
+    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && cue === 'rush' && this.orderSent) {
+      for (const p of pending.filter((x) => isOrderTask(x.event_id))) {
+        const first = this.approveAt.get(p.id)
+        if (first == null) { this.approveAt.set(p.id, now); continue }
+        if (now - first < AUTO.consoleApproveS * 1000 || this.decided.has(p.id)) continue
+        this.decided.add(p.id)
+        const opt = p.options.find((o) => o.recommended) ?? p.options[0]
+        console.info(`[demo] auto approve (console) ${p.id} (${p.event_id})`)
+        void this.io.decide({
+          request_id: p.id, decision: 'approve', option_id: opt?.id ?? null, reason: 'Demo 自動核准',
+          modified_args: null, decided_by: '主管', via: 'dashboard',
+        }).catch((e) => { this.decided.delete(p.id); console.warn('[demo] auto approve', e) })
+      }
+      return
+    }
     if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && id && (cue === 'h1' || cue === 'worker')) {
       for (const p of pending.filter((x) => x.event_id === id)) {
         const first = this.approveAt.get(p.id)
@@ -165,7 +191,7 @@ export class DemoRun {
       }
       this.loads = [this.io.mode === 'live' ? { at: 0, scenario: live, speed: live === AUTO_LIVE_SCENARIO ? AUTO_LIVE_SPEED : AUTO.speed } : { at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
       this.fallback = false
-      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.finished = false
+      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.orderSent = false; this.finished = false
       if (this.io.mode === 'live') await this.io.setSimEvents?.({ enabled: false }).catch((e) => console.warn('[demo] sim events off', e))
     } else {
       if (this.io.mode === 'live') {

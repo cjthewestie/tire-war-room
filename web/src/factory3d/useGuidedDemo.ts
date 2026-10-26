@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DemoFollow, DemoRun, type LogRow } from '../demo/driver'
 import { AUTO_FINAL, autoActive } from '../demo/auto'
+import { isOrderTask } from '../demo/signals'
 import { beatOf, setDemoBeat, type DemoBeat } from '../demo/beat'
 import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
 import type { WarRoomState } from '../store'
@@ -39,9 +40,10 @@ function chime(loud = false) {
 }
 
 /** Which page the war-room computer shows at a beat (the lead has to be at the desk). */
-function monitorFor(cueId: string, eventId: string | null, auto = false): string | null {
-  // auto-play (CJ 10-22: 「進去電腦講訂單，但是畫面任務都不是訂單」): the 訂單 tab for the orders, the 主控台 at the end
-  if (auto) return cueId === 'rush' ? '#orders' : cueId === 'agent' ? '#agent' : null
+function monitorFor(cueId: string, eventId: string | null, auto = false, orderId: string | null = null): string | null {
+  // auto-play (CJ 10-22: 「是在主控台跑訂單任務跟核准」「絕對不要切到別的頁面」): always the 主控台, with the order task
+  // selected once it is in; the 主控台 again at the end
+  if (auto) return cueId === 'rush' ? (orderId ? `#approve?event=${encodeURIComponent(orderId)}` : '#agent') : cueId === 'agent' ? '#agent' : null
   if (cueId === 'rush' || cueId === 'console') return '#agent'
   if (cueId === 'agent') return eventId ? `#console?event=${encodeURIComponent(eventId)}` : '#console'
   return null
@@ -228,7 +230,10 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       if (isAuto && c.id === 'rush' && r.tl.released && w.station === 'desk') w.station = 'lookout'
       if (director.mode === 'walk' && w.station && walker.at !== w.station) walker.go(w.station, { run: c.id === 'worker' })
       // the war-room computer: open at the desk once the lead has arrived (主控台 for the orders, Agent page later)
-      const want = monitorFor(c.id, r.seen.id, isAuto)
+      // the order task the demo started (the newest 今日訂單排程 / order event): selected on the 主控台
+      const orderId = isAuto ? [...(stateRef.current.snapshot?.events ?? [])].filter((e) => isOrderTask(e.id))
+        .sort((a, b) => (a.opened_at < b.opened_at ? 1 : -1))[0]?.id ?? null : null
+      const want = monitorFor(c.id, r.seen.id, isAuto, orderId)
       const atDesk = director.mode === 'walk' && walker.at === 'desk' && walker.done
       const show = want && atDesk ? want : null
       if (show !== monitorRef.current) { monitorRef.current = show; setMonitor(show); w.monitorAt = now }

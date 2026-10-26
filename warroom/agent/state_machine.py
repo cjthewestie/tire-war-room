@@ -629,7 +629,7 @@ class StateMachine:
                           {"from": None, "to": EventState.DETECTED.value, "reason": "plant event"}, event_id=eid)
         self.audit.append(AuditKind.SYSTEM, "plant", {"plant_input": pin.model_dump(mode="json")}, event_id=eid)
         self._note(ev, "事件偵測", f"[工具] {pin.text} → 喚醒指揮官", "tool", ts=now)
-        title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
+        title = {"shift_start": "今日訂單排程", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
         self._set_alert(ev, AlertCard(title=title, summary=pin.text[:60]), source="detector")
         return ev
 

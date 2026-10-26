@@ -21,8 +21,10 @@ export const isMachine = (machine: string | null | undefined) => !!machine && ma
 
 const isGranted = (status: string) => status === 'approved' || status === 'modified'
 const keyOf = (r: { id?: string; event_id: string }) => r.id ?? r.event_id
-/** morning_rush's events: the rush order is EV-…-RUSH, a supervisor command (the SO-012 pre-plan) EV-…-CMD. */
-const isRush = (eventId: string | null | undefined) => !!eventId && eventId.endsWith('-RUSH')
+/** The orders beat's task: morning_rush's rush order EV-…-RUSH, or the auto demo's 今日訂單排程 (早班開工, EV-…-PLAN). */
+export const isOrderTask = (eventId: string | null | undefined) => !!eventId && /-(RUSH|PLAN)(-\d+)?$/.test(eventId)
+const isRush = isOrderTask
+/** a supervisor command (the SO-012 pre-plan) is EV-…-CMD */
 const isCmd = (eventId: string | null | undefined) => !!eventId && eventId.endsWith('-CMD')
 
 export function signals(state: WarRoomState, seen: Seen): Signals {
