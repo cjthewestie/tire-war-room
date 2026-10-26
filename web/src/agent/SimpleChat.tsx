@@ -5,7 +5,7 @@
 // MainThread: the 主 agent's whole thread across subagents — its turns (audit kind=system actor=main_agent orch=chat,
 // backfilled once from GET /api/audit and then live), its dispatches / reports / interrupts, and what is being sent now.
 // SubProgress: one subagent's progress in the same panel (state, tools with results, worker tasks, 中斷).
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Event } from '../contracts'
 import { fmtHM, ms } from '../format'
 import { plain } from '../plain'
