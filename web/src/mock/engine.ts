@@ -12,7 +12,7 @@ import { isoTaipei } from '../format'
 import { isAbnormal } from '../store'
 import { HOUR, MIN, baseJobs, makeSchedule, pressSize, shiftInstances, version } from './schedule'
 import {
-  type Ctx, type OverlayFault, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, overlayFaultScript, press7Script, r1,
+  type Ctx, type OverlayFault, type Script, type ScriptWorld, type Signal, SEC, bmixScript, openMillScript, overlayFaultScript, press7Script, r1, rushOrderScript,
 } from './scripts'
 import { autoRequested } from '../demo/auto'
 
@@ -72,10 +72,11 @@ function buildScenario(name: ScenarioName): LoadedScenario {
   switch (name) {
     case 'open_mill_overheat': return { name, scripts: [openMillScript(T('2026-10-22T14:13:00+08:00'))] }
     case 'press7_temp_drop': {
-      // ?mock=1&demo=cure07 (自動播放 Demo): 單一事件、單輪核准，事件在情境開始後 60 工廠秒（情境速度 10× → Demo 第 6 秒）出現
+      // ?mock=1&demo=cure07 (自動播放 Demo): 先一張急單（情境開始後 90 工廠秒，情境速度 10× → Demo 第 9 秒，走到電腦時），
+      // 再 7 號機單一事件、單輪核准（210 工廠秒 → Demo 第 21 秒，訂單段做完之後）
       const single = autoRequested()
-      const p = press7Script(T(single ? '2026-10-03T02:13:00+08:00' : '2026-10-03T02:14:00+08:00'), single)
-      return { name, scripts: [p], press7: p }
+      const p = press7Script(T(single ? '2026-10-03T02:15:30+08:00' : '2026-10-03T02:14:00+08:00'), single)
+      return { name, scripts: single ? [rushOrderScript(T('2026-10-03T02:13:30+08:00')), p] : [p], press7: p }
     }
     case 'concurrent_3': {
       const p = press7Script(T('2026-10-03T02:14:00+08:00'))

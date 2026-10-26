@@ -583,7 +583,10 @@ class StateMachine:
         ev = run.ev
         text = ev.command or ""
         self._to(ev, EventState.CLASSIFY, "supervisor command: read context")
-        refusal = physical_request(text)
+        # issue #195: with a model the commander reads the command itself (its plan has no actuator to call, and every
+        # action still meets the Action Gate and the supervisor's approval); the keyword refusal is the rule mode's
+        llm = str(getattr(getattr(self.commander, "mode", None), "value", getattr(self.commander, "mode", ""))) == "llm"
+        refusal = None if llm else physical_request(text)
         if refusal:
             # nothing on the allow-list can do it: say so, never invent an action (page 5: no actuator)
             self.audit.append(AuditKind.SYSTEM, "state_machine", {"command_refused": refusal, "command": text},

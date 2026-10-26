@@ -15,7 +15,7 @@
 // beat (the Agent page, after the robot), or by itself there from 3:30.
 // Nothing here touches React or three.js, so e2e/demo-unit.mjs drives it with fake clocks and fake signals.
 
-import { AUTO, AUTO_CUES, AUTO_FINAL } from './auto'
+import { AUTO_CUES, AUTO_FINAL, AUTO_STEPS } from './auto'
 
 /** The scenario the demo plays: 「一早訂單湧入」 (PR #107). One constant, so retiming is one edit. */
 export const DEMO_SCENARIO = 'morning_rush'
@@ -45,6 +45,12 @@ export interface DemoLoad { at: number; scenario: string; speed: number }
 export type Signal =
   | 'orders' | 'rushCard' | 'rushApproved' | 'preplan' | 'event' | 'approval' | 'approved' | 'rejected' | 'approval2' | 'approved2'
   | 'worker' | 'workerDone' | 'closed'
+  /** auto-play: the rush order's plan approved and its event closed (plan → approved → done); the incident's press
+   *  repaired and back (the crew's task done, or the event closed with the press running again) */
+  | 'rushDone' | 'repaired'
+  /** auto-play's 維修 beat: the crew's tasks for the incident all 完成 (or it is repaired / closed); the temperature
+   *  coming back is not waited for */
+  | 'crewDone'
   /** the last repair is under way (H2 approved) or done: the walk to 7 號機 starts, the repair is watched, not waited for */
   | 'fixing'
   /** the 3D's own: the walk / camera has arrived and framed the beat (false holds a checkpoint's 「按 A 繼續」) */
@@ -135,6 +141,8 @@ export interface Timeline {
   releasedAt: number
   /** demo second the deck started (the pitch checkpoint passed; null = not yet) */
   pitchAt: number | null
+  /** auto-play: when the current hold's `until` signal first came in (for its `untilDwell`) */
+  untilAt?: number | null
   fired: Fired[]
 }
 export const startTimeline = (): Timeline => ({ index: 0, enteredAt: 0, released: false, releasedAt: 0, pitchAt: null, fired: [{ id: CUES[0].id, t: 0, reason: 'time' }] })
@@ -148,7 +156,7 @@ export function latch(seen: Signals, now: Signals): Signals {
 
 function enter(tl: Timeline, i: number, t: number, reason: Reason): Timeline {
   return {
-    ...tl, index: i, enteredAt: t, released: false, releasedAt: t,
+    ...tl, index: i, enteredAt: t, released: false, releasedAt: t, untilAt: null,
     fired: [...tl.fired, { id: CUES[i].id, t, reason }],
   }
 }
@@ -176,34 +184,46 @@ export function canContinue(tl: Timeline, t: number, sig: Signals): boolean {
 
 export interface Step { tl: Timeline; refused?: boolean }
 
-/** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on). */
-/** 自動播放（?mock=1&demo=cure07）用的 cue 文字：一個事件、不提 H1/H2、不提稽核。 */
-export const AUTO_TEXT: Record<string, { title: string; body: string }> = {
-  start: { title: '工廠運轉中', body: '' },
-  event: { title: '⚠ 7 號硫化機溫度異常（CURE-07）128°C → 122.3°C', body: '偵測器發現溫度往下掉，通知 Agent 規劃。' },
-  agent: { title: 'Agent 分析與建議', body: '' },
-}
+/** 自動播放（?demo=cure07）的時間軸：不等任何人按鍵（核准除外：真實後端要人按，Mock 由 Demo 按）；只走 AUTO_CUES，
+ *  每一步怎麼進、怎麼停看 auto.ts AUTO_STEPS；最後一步（AUTO_FINAL，回到戰情室）停住，不往 Pitch 走。 */
 const nextAuto = (i: number) => { let k = i + 1; while (CUES[k] && !AUTO_CUES.includes(CUES[k].id)) k++; return k }
 
-/** 自動播放的時間軸：不等任何人按鍵；只走 AUTO_CUES，最後一步（AUTO_FINAL）停住顯示最終結果。 */
+/** Is the auto step's hold over? At least `min` s; then the walk has arrived and its `until` is in (or the card it waits
+ *  for never showed in `cardTimeout` s), or its `timeout` passed anyway. */
+export function autoHoldDone(tl: Timeline, t: number, sig: Signals): boolean {
+  const h = AUTO_STEPS[CUES[tl.index].id]?.hold ?? { min: ARRIVE }
+  const e = t - tl.enteredAt
+  if (e < h.min) return false
+  if (h.timeout != null && e >= h.timeout) return true
+  if (h.needArrive && sig.arrived === false) return false
+  if (h.until && sig[h.until] && h.untilDwell) return t - (tl.untilAt ?? t) >= h.untilDwell
+  if (!h.until || sig[h.until]) return true
+  // the card never showed (cardTimeout s; 0 = the scenario has none: do not wait for it)
+  return !!h.card && !sig[h.card] && e >= (h.cardTimeout ?? Infinity)
+}
+
 function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
   const cur = CUES[tl.index]
   if (!tl.released) {
     if (cur.id === AUTO_FINAL) return { tl }
-    const dwell = cur.id === 'start' ? AUTO.openS : AUTO.phoneAfterS + 0.5
-    return t - tl.enteredAt >= dwell ? { tl: release(tl, t, 'auto') } : { tl }
+    const u = AUTO_STEPS[cur.id]?.hold.until
+    if (u && sig[u] && tl.untilAt == null) tl = { ...tl, untilAt: t }
+    return autoHoldDone(tl, t, sig) ? { tl: release(tl, t, 'auto') } : { tl }
   }
   const i = nextAuto(tl.index)
   const next = CUES[i]
   if (!next) return { tl }
-  const en = next.enter, since = t - tl.releasedAt
-  if (en?.on) {
+  const en = AUTO_STEPS[next.id]?.enter, since = t - tl.releasedAt
+  if (en) {
+    if (en.min != null && since < en.min) return { tl }
     if (sig[en.on]) return { tl: enter(tl, i, t, 'event') }
-    return since >= Math.min(en.timeout ?? 15, 15) ? { tl: enter(tl, i, t, 'time') } : { tl }
+    return since >= en.timeout ? { tl: enter(tl, i, t, 'time') } : { tl }
   }
   return { tl: enter(tl, i, t, 'auto') }
 }
 
+/** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on); `auto` = the
+ *  auto-play timeline (advanceAuto). */
 export function advance(tl: Timeline, t: number, sig: Signals, cont = false, auto = false): Step {
   if (auto) return advanceAuto(tl, t, sig)
   // the soft target: from 3:30 the last story beat (the Agent page) hands over to the pitch by itself; earlier beats only get the nudge

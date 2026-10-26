@@ -1,0 +1,47 @@
+/* ---------- 後台 效能與追蹤 (issue #199) — admin.css tokens ---------- */
+.perf { gap: 18px; }
+.perf-part { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.perf-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.perf-h h3 { margin: 0; font-size: 16px; }
+.perf-sub { margin: 4px 0 6px; font-size: 14px; color: var(--ink-dim); }
+.perf-num, .perf-table td, .perf-q, .perf-load { font-variant-numeric: tabular-nums; }
+.perf-table td { white-space: nowrap; }
+.perf-table td:first-child { white-space: normal; }
+.perf-bench td.perf-metric { min-width: 190px; }
+.perf-bench td:nth-child(2) { white-space: normal; min-width: 120px; font-size: 13px; }
+.perf-cell { min-width: 220px; }
+.perf-cell > * { vertical-align: middle; }
+.perf-val { font-size: 15.5px; font-weight: 700; margin-right: 8px; }
+.perf-cell small { display: block; font-size: 12px; margin-top: 2px; white-space: normal; overflow-wrap: anywhere; }
+.perf-cell code { font-size: 11.5px; }
+.perf-note { color: var(--ink-faint); max-width: 300px; }
+.perf-v { display: inline-block; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; line-height: 19px; background: var(--panel-3); color: var(--ink-dim); }
+.perf-v.v-ok { background: var(--accent-soft); color: var(--accent); }
+.perf-v.v-bad { background: var(--alarm-soft); color: var(--alarm); }
+.perf-v.v-warn { background: var(--warn-soft); color: var(--warn); }
+.perf-v.v-info { color: var(--info); }
+.perf-v.v-none { color: var(--ink-faint); }
+.perf-load { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; background: var(--panel); border: 1px dashed var(--panel-3); border-radius: var(--radius); padding: 10px 14px; }
+.perf-load .admin-job { flex: 1 1 100%; overflow-wrap: anywhere; }
+.perf-models .admin-table-wrap { margin-top: 8px; }
+.perf-two { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); gap: 12px; align-items: start; }
+.perf-two > section { min-width: 0; }
+.perf-q { margin: 0 0 6px; font-size: 13.5px; }
+.perf-table td.warn { color: var(--warn); }
+.perf-last td:last-child { white-space: normal; max-width: 280px; }
+
+/* phones: each table row becomes a card, the column name before each value */
+@media (max-width: 640px) {
+  .perf-two { grid-template-columns: 1fr; }
+  .perf .admin-table-wrap { overflow-x: visible; }
+  .perf-table thead { display: none; }
+  .perf-table, .perf-table tbody, .perf-table tr, .perf-table td { display: block; width: 100%; }
+  .perf-table tr { padding: 8px 12px; border-bottom: 1px solid var(--border); }
+  .perf-table tr:last-child { border-bottom: 0; }
+  .perf .perf-table td { border: 0; padding: 2px 0; white-space: normal; min-width: 0 !important; max-width: none !important; }
+  .perf .perf-table:not(.perf-bench) td[data-label] { display: inline-block; width: auto; margin-right: 14px; }
+  .perf-table td[data-label]::before { content: attr(data-label) "　"; color: var(--ink-faint); font-size: 12px; }
+  .perf-cell { padding-top: 4px !important; }
+  .perf-cell small { display: inline; margin-left: 6px; }
+  .perf-cell .perf-note { display: block; margin-left: 0; }
+}

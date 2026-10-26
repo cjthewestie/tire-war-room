@@ -503,11 +503,10 @@ async def test_discuss_gibberish_is_unclear_in_both_modes():
     assert got["intent"] == "unclear" and got["fell_back"]
 
 
-async def test_model_misreading_an_explicit_change_is_overruled_by_code():
-    """Seen live with Nemotron: 「9 號機今晚要保養」 classified as chitchat. Code decides: the rules read an
-    explicit, enforceable change, so the change goes through (marked as a fallback)."""
-    for wrong in ("chitchat", "question", "other"):
-        got = await _llm_talk(json.dumps({"intent": wrong, "constraints": []})).classify("9 號機今晚要保養", None, NOW)
-        assert got["intent"] == "change" and got["fell_back"] and got["by"] == "rules", wrong
-        assert [c.machine_id for c in got["constraints"]] == ["CURE-09"]
-        assert wrong in got["error"]
+async def test_model_reading_stands_no_keyword_override():
+    """Issue #195 (CJ 10-22: 「取消對話前的程式檢查 完全讓 LLM 跟 system prompt 擋」): the model's intent stands; no keyword
+    reading turns it into a change. The rules read the words only when the model call fails (see the fallback tests)."""
+    for said, want in (("chitchat", "chitchat"), ("question", "question"), ("other", "unclear")):
+        got = await _llm_talk(json.dumps({"intent": said, "constraints": []})).classify("9 號機今晚要保養", None, NOW)
+        assert got["intent"] == want and got["by"] == "model" and not got["fell_back"], said
+        assert got["constraints"] == []

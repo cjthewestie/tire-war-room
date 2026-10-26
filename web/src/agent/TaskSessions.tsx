@@ -25,7 +25,7 @@ export function TaskSessions({ current, onPick, onGeneral, generalLabel = '新�
     <div className="tss" data-testid={testId}>
       {onGeneral && (
         <button type="button" className={`tss-row tss-general ${current === null ? 'on' : ''}`} aria-pressed={current === null} onClick={onGeneral} data-testid="session-general">
-          <b>{generalLabel}</b><span className="muted small">不綁任務的問題</span>
+          <b>{list?.general_session?.session_short && <span className="tss-no" title={list.general_session.session ?? ''} data-testid="session-no">{list.general_session.session_short}</span>}{generalLabel}</b><span className="muted small">不綁任務的問題</span>
         </button>
       )}
       <label className="tss-search">
@@ -78,7 +78,8 @@ function Rows({ rows, current, onPick, status }: { rows: TaskRow[]; current: str
       {rows.map((r) => (
         <li key={`${r.id}-${r.opened_at}`}>
           <button type="button" className={`tss-row ${r.id === current ? 'on' : ''}`} aria-current={r.id === current ? 'true' : undefined}
-            onClick={() => onPick(r)} data-testid="task-row" data-event={r.id} data-live={r.live ? '1' : '0'}>
+            onClick={() => onPick(r)} data-testid="task-row" data-event={r.id} data-live={r.live ? '1' : '0'} title={[r.session, r.id].filter(Boolean).join('・')}>
+            {r.session_short && <span className="tss-no" data-testid="session-no">{r.session_short}</span>}
             <span className="tss-t">{r.opened_at ? fmtHM(r.opened_at) : ''}{r.closed_at ? `–${fmtHM(r.closed_at)}` : ''}</span>
             <b className="tss-title">{plain(r.title)}</b>
             <span className={`tss-st ${r.running ? 'run' : ''}`}>{r.state_label}</span>

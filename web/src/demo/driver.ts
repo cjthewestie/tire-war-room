@@ -9,15 +9,20 @@ import {
   BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_SCENARIO } from './auto'
+import { AUTO, AUTO_END_SPEED, AUTO_FAULT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
 import { freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
 export interface DemoIO {
   mode: string
   control(c: SimControl): Promise<void>
+  /** 自動播放：關掉隨機模擬事件（整段只有 7 號機） */
+  setSimEvents?(b: { enabled?: boolean }): Promise<unknown>
+  /** 自動播放（真實後端）：leave 時注入 7 號機的故障，結束時清掉 */
+  injectFault?(f: { machine_id: string; kind: string; params?: Record<string, number> }): Promise<void>
+  clearFault?(machineId: string): Promise<void>
   demo?(c: DemoCommand): Promise<DemoState>
-  /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到。 */
+  /** 只有自動播放用：Mock 引擎的核准（本機記憶體，不碰 Action Gate）。Live 傳進來也不會被用到（真實後端一律人按）。 */
   decide?(d: ApprovalDecision): Promise<ApprovalRequest | null>
 }
 
@@ -52,33 +57,78 @@ export class DemoRun {
   private inflight = 0
   private serverRunning = false
 
-  /** 自動播放（?mock=1&demo=cure07）：只在 Mock 引擎自動核准；Live 一律不自動核准 */
+  /** 自動播放（?demo=cure07，真實後端或 ?mock=1）：照 auto.ts 的八段流程自己走 */
   auto: boolean
-  /** 給畫面的一行狀態：監看中 / 事件偵測 / Agent 分析中 / Demo 自動核准 / 執行中 / 處理完成 */
+  /** 自動核准：只在 Mock 引擎（本機記憶體）。真實後端永遠 false：核准一定是人在手機上按（Action Gate、主管身分、稽核照舊） */
+  readonly autoApprove: boolean
+  /** 給畫面的一行狀態：監看中 / 訂單規劃中 / 事件偵測 / Agent 分析中 / 等主管在手機核准 / Demo 自動核准 / 執行中 / 處理完成 */
   autoStatus = ''
   private approveAt = new Map<string, number>()
+  /** 真實後端：7 號機的故障已經注入（leave 一次） */
+  private faultSent = false
+  /** 自動播放已經收尾（回到電腦：速度 1×、清故障；之後什麼都不做） */
+  finished = false
   private decided = new Set<string>()
 
   private io: DemoIO
   private driver: string
-  constructor(io: DemoIO, driver: string, auto = false) { this.io = io; this.driver = driver; this.auto = auto && io.mode === 'mock' }
+  constructor(io: DemoIO, driver: string, auto = false) {
+    this.io = io; this.driver = driver
+    this.auto = auto && (io.mode === 'mock' || io.mode === 'live')
+    this.autoApprove = this.auto && io.mode === 'mock'
+  }
 
-  /** 自動核准的狀態推進：事件的核准卡出現後讓觀眾看 AUTO.analysisS 秒，再用 Mock 引擎核准一次。 */
+  /** 自動播放的狀態行，和（只在 Mock）自動核准：急單的計劃卡在「訂單」段給觀眾看 AUTO.ordersApproveS 秒、事件的核准卡在
+   *  「按手機核准」段看 AUTO.analysisS 秒，再用 Mock 引擎核准一次（本機記憶體，不碰 Action Gate）。真實後端只更新狀態行，
+   *  等人在手機上按；回到戰情室之後什麼都不自動做。 */
   private autoStep(now: number, state: WarRoomState) {
-    if (!this.auto || this.io.mode !== 'mock') return   // 絕不對真實後端（Action Gate）自動核准
+    if (!this.auto || this.finished) return
+    const cue = CUES[this.tl.index]?.id
+    // 真實後端：訂單段結束（離開電腦往工廠看）才注入 7 號機的溫降，開場與訂單段全廠正常
+    if (this.io.mode === 'live' && !this.faultSent && cue === 'rush' && this.tl.released && this.io.injectFault) {
+      this.faultSent = true
+      console.info('[demo] inject', AUTO_FAULT.machine_id, AUTO_FAULT.kind)
+      void this.io.injectFault(AUTO_FAULT).catch((e) => { this.faultSent = false; console.warn('[demo] inject fault', e) })
+    }
+    const pending = state.pending.filter((p) => p.status === 'pending')
     const id = this.seen.id
-    if (!id) { this.autoStatus = '監看中'; return }
-    const f = state.snapshot?.events.find((e) => e.id === id)
-    const mine = state.pending.filter((p) => p.event_id === id)
-    if (f?.state === 'closed') this.autoStatus = '處理完成'
-    else if (this.decided.size && (f?.state === 'execute' || f?.state === 'verify')) this.autoStatus = '執行中'
-    else if (this.decided.size) this.autoStatus = 'Demo 自動核准'
-    else if (mine.length) this.autoStatus = 'Agent 分析中'
-    else this.autoStatus = '事件偵測'
-    for (const p of mine) {
+    const rushCards = pending.filter((p) => p.event_id.endsWith('-RUSH'))
+    if (!id) {
+      this.autoStatus = rushCards.length ? (this.autoApprove ? 'Demo 自動核准（訂單）' : '等主管核准訂單計劃') : cue === 'rush' ? '訂單規劃中' : '監看中'
+    } else {
+      const f = state.snapshot?.events.find((e) => e.id === id)
+      const mine = pending.filter((p) => p.event_id === id)
+      if (f?.state === 'closed') this.autoStatus = '處理完成'
+      else if (f?.state === 'execute' || f?.state === 'verify') this.autoStatus = '執行中'
+      else if (mine.length) this.autoStatus = this.autoApprove ? (this.decided.size ? 'Demo 自動核准' : 'Agent 分析中') : 'Demo 替主管在手機核准'
+      else this.autoStatus = '事件偵測'
+    }
+    // 真實後端（CJ 10-22：「3d 工廠 demo 核准要自動核准」）：只核准 Demo 自己追的 7 號機事件的卡（event id 相符），在手機段
+    // （h1）卡出現 AUTO.liveApproveS 秒後；同一件事後來的新版卡（AI 換假設 H2）在維修段也一樣。用主管手機同一支 API
+    // （decided_by 主管、via phone），過 Action Gate、寫稽核。其他卡一律不碰；回到戰情室（AUTO_FINAL）後什麼都不做。
+    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && id && (cue === 'h1' || cue === 'worker')) {
+      for (const p of pending.filter((x) => x.event_id === id)) {
+        const first = this.approveAt.get(p.id)
+        if (first == null) { this.approveAt.set(p.id, now); continue }
+        if (now - first < AUTO.liveApproveS * 1000 || this.decided.has(p.id)) continue
+        this.decided.add(p.id)
+        const opt = p.options.find((o) => o.recommended) ?? p.options[0]
+        console.info(`[demo] auto approve ${p.id} (${p.event_id})`)
+        void this.io.decide({
+          request_id: p.id, decision: 'approve', option_id: opt?.id ?? null, reason: 'Demo 自動核准',
+          modified_args: null, decided_by: '主管', via: 'phone',
+        }).catch((e) => { this.decided.delete(p.id); console.warn('[demo] auto approve', e) })
+      }
+      return
+    }
+    // Mock：本機記憶體的自動核准（急單、7 號機）；回到戰情室（AUTO_FINAL）後也不再自動做任何事
+    if (!this.autoApprove || !this.io.decide || cue === AUTO_FINAL) return
+    const due = cue === 'rush' ? { cards: rushCards, wait: AUTO.ordersApproveS } : cue === 'h1' && id ? { cards: pending.filter((p) => p.event_id === id), wait: AUTO.analysisS } : null
+    if (!due) return
+    for (const p of due.cards) {
       const first = this.approveAt.get(p.id)
       if (first == null) { this.approveAt.set(p.id, now); continue }
-      if (now - first < AUTO.analysisS * 1000 || this.decided.has(p.id) || p.status !== 'pending' || !this.io.decide) continue
+      if (now - first < due.wait * 1000 || this.decided.has(p.id)) continue
       this.decided.add(p.id)
       const opt = p.options.find((o) => o.recommended) ?? p.options[0]
       void this.io.decide({
@@ -106,11 +156,17 @@ export class DemoRun {
     this.loaded = new Set([0]); this.ack = 0; this.posted = ''; this.simHeld = false; this.serverRunning = false; this.myRev = -1; this.inflight = 0
     let known = this.io.mode !== 'live'
     if (this.auto) {
-      // 自動播放：只載入 CURE-07 單一事件情境（不載 morning_rush：沒有 SO-017／SO-012）
+      // 自動播放。Mock：CURE-07 單一事件版（急單 + 7 號機一輪核准，mock/engine.ts）。真實後端：一早訂單湧入（急單 SO-017、
+      // 7 號機溫降），經 /api/sim/control 載入，事件、核准、任務、稽核都留在主機上；伺服器沒有這個情境就用 7 號機溫降。
       known = true
-      this.loads = [{ at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
+      let live = AUTO_LIVE_SCENARIO
+      if (this.io.mode === 'live') {
+        try { if (!(await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === live)) live = AUTO_SCENARIO } catch { /* keep */ }
+      }
+      this.loads = [this.io.mode === 'live' ? { at: 0, scenario: live, speed: live === AUTO_LIVE_SCENARIO ? AUTO_LIVE_SPEED : AUTO.speed } : { at: 0, scenario: AUTO_SCENARIO, speed: AUTO.speed }]
       this.fallback = false
-      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'
+      this.approveAt.clear(); this.decided.clear(); this.autoStatus = '監看中'; this.faultSent = false; this.finished = false
+      if (this.io.mode === 'live') await this.io.setSimEvents?.({ enabled: false }).catch((e) => console.warn('[demo] sim events off', e))
     } else {
       if (this.io.mode === 'live') {
         try { known = (await fetch('/api/sim/scenarios').then((r) => r.json()) as { name: string }[]).some((s) => s.name === MAIN_LOADS[0].scenario) } catch { known = true }
@@ -142,6 +198,17 @@ export class DemoRun {
     if (this.io.demo) void this.send({ action: paused ? 'pause' : 'resume' })
     else void this.io.control({ action: paused ? 'pause' : 'play' }).catch(() => {})
     if (!paused) this.simHeld = false   // the server played the sim; the next tick re-holds it if a checkpoint still waits
+  }
+
+  /** 自動播放走回電腦：收尾一次（模擬速度回 1×、隨機事件關、清掉 7 號機的故障 → 全廠正常），之後不再自動做任何事。 */
+  async finish() {
+    if (this.finished) return
+    this.finished = true
+    this.autoStatus = '結束'
+    if (this.io.mode !== 'live') return
+    await this.io.control({ action: 'speed', speed: AUTO_END_SPEED }).catch(() => {})
+    await this.io.setSimEvents?.({ enabled: false }).catch(() => {})
+    await this.io.clearFault?.(AUTO_FAULT.machine_id).catch(() => {})
   }
 
   async exit() {
@@ -203,7 +270,7 @@ export class DemoRun {
       void this.io.control({ action: hold ? 'pause' : 'play' }).catch(() => {})
     }
     // waiting on the plant (not on CJ): run the sim fast; back to the demo speed once the beat is there
-    const speed = hold || !this.io.demo ? null : plantWait(r.tl, sig) ? BOOST_SPEED : this.loads[0]?.speed ?? DEMO_SPEED
+    const speed = hold || !this.io.demo || this.auto ? null : plantWait(r.tl, sig) ? BOOST_SPEED : this.loads[0]?.speed ?? DEMO_SPEED
     if (speed != null && speed !== this.speed && this.clock.since != null && now >= this.armedAt) {
       this.speed = speed
       void this.io.control({ action: 'speed', speed }).catch(() => {})

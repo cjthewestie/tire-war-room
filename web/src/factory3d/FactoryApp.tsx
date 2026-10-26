@@ -5,8 +5,8 @@
 // F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 6 正常運轉 (the demo strip's
 // default three), 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo never has to leave the 3D view; ?demo=1 also
-// lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
-// click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
+// lists them in the key strip. (The ⚡ 觸發異常 menu / T and the 4 隨機事件 key are gone, CJ 10-22: 「觸發異常先幫我刪掉，
+// 我只需要 demo」; T is the teleprompter's toggle now.) 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
 // is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
 // ▶ Demo（6 分鐘） (G, or Menu on the pad): the guided run for the finals (useGuidedDemo.ts, demo/cues.ts): presenter
 // checkpoints (Space / N / A continue, the sim waits meanwhile), one continuous camera take (demoCamera.ts), the robot's
@@ -32,7 +32,6 @@ import { repairStage } from '../aiStatus'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
 import { DemoOverlay, PadHelp, SlideView } from './GuidedDemo'
@@ -42,6 +41,8 @@ import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
 import { autoActive } from '../demo/auto'
+import { useDemoBeat } from '../demo/beat'
+import { Prompter } from '../demo/Prompter'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
@@ -134,7 +135,6 @@ export function FactoryApp() {
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
-  const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
   const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -163,7 +163,8 @@ export function FactoryApp() {
   // New approval (or fast-repair notice) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
     const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
-    if (!out.fire.length) return
+    // the auto demo rings the phone itself, at its phone beat (onDemoPhone), not when a card shows up
+    if (!out.fire.length || document.documentElement.dataset.demoBeat) return
     const { title, body } = alertText(out.fire, out.flushed)
     setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
     setBuzzUntil(performance.now() + 2200)
@@ -204,13 +205,25 @@ export function FactoryApp() {
   // ▶ Demo（6 分鐘）: the camera is the director's while it runs, so the lead stands still and the overview is on
   const deck = useDeck()
   const onDemoBegin = useCallback(() => {
-    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
+    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); releaseLook()
   }, [])
-  const onDemoEnd = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
+  // the auto demo ended at the desk: the lead stays seated with the real war-room page (主控台) up; Esc / F stands up
+  const onDemoEnd = useCallback((atDesk?: boolean) => {
+    if (atDesk) { setMode('first'); setPanel({ kind: 'monitor', hash: '#agent' }); releaseLook(); return }
+    setPanel(null); window.focus(); canvasRef.current?.focus()
+  }, [])
   const onDemoWalk = useCallback(() => setMode('first'), [])
   const nSlides = deck.slides.length
   const raisePhoneRef = useRef<(up: boolean) => void>(() => {})
-  const onDemoPhone = useCallback((up: boolean) => raisePhoneRef.current(up), [])
+  // auto-play's phone beat: the phone rings (buzz + vibrate + ring), then comes up
+  const onDemoPhone = useCallback((up: boolean) => {
+    raisePhoneRef.current(up)
+    if (!up) return
+    setBuzzUntil(performance.now() + 2200)
+    setBuzz(true)
+    try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
+    ring()
+  }, [])
   const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, onPhone: onDemoPhone, nSlides })
   const autoOn = demo.running && demo.auto
   const autoMode = autoActive(transport?.mode)
@@ -306,17 +319,8 @@ export function FactoryApp() {
         sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
-      if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
-        if (!transport?.setSimEvents || e.repeat) return
-        const on = !state.clock?.random_events?.enabled
-        transport.setSimEvents({ enabled: on }).then(
-          (v) => setDemoNote({ text: v.enabled ? `隨機事件：開（每 ${v.every_min} 分）` : '隨機事件：關', at: Date.now() }),
-          (err) => { console.warn(err); setDemoNote({ text: '隨機事件：沒有成功', at: Date.now() }) })
-        return
-      }
-      if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
-      if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
+      if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
         if (panel) { closePanel(); return }
@@ -330,7 +334,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen, demoOn])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, demoOn])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -364,8 +368,8 @@ export function FactoryApp() {
   const padIdx = useRef(-1)
   const padLook = useRef({ x: 0, y: 0, fw: 0, st: 0 })
   const bHeldFired = useRef(false)
-  const live = useRef({ demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction })
-  useEffect(() => { live.current = { demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction } })
+  const live = useRef({ demo, demoOn, started, panel, phoneUp, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction })
+  useEffect(() => { live.current = { demo, demoOn, started, panel, phoneUp, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction } })
   useEffect(() => { phoneUpRef.current = phoneUp }, [phoneUp])
   useEffect(() => { if (!padFocus) return; const id = setTimeout(() => setPadFocus(null), 4000); return () => clearTimeout(id) }, [padFocus])
   const pad = usePad(useCallback((f: PadFrame, edges: Btn[], held: Record<number, number>, dt: number) => {
@@ -411,7 +415,7 @@ export function FactoryApp() {
         else if (nr) { releaseLook(); setPanel(nr.kind === 'desk' ? { kind: 'monitor' } : { kind: 'machine', id: nr.id }) }
         else if (padIdx.current >= 0) setPanel({ kind: 'machine', id: PLACED[padIdx.current].id })
       } else if (act === 'back') {
-        if (L.anomOpen) setAnomOpen(false); else if (L.phoneUp) raisePhone(false); else if (L.panel) closePanel()
+        if (L.phoneUp) raisePhone(false); else if (L.panel) closePanel()
       } else if (act === 'fly') {
         // an abnormal machine first (the off-screen arrows point at the same ones), else the whiteboard
         const hot = Object.entries(L.alarms).filter(([id]) => PLACED_BY_ID[id]).map(([id]) => id)
@@ -490,14 +494,16 @@ export function FactoryApp() {
         {!demoOn && (
           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
         )}
-        {started && !phoneUp && !demoOn && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>}
+      {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
+          Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
+      <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
         <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
@@ -550,4 +556,9 @@ export function FactoryApp() {
       <PhoneOverlay up={phoneUp} onLower={() => raisePhone(false)} buzzing={buzz} />
     </div>
   )
+}
+
+/** The teleprompter on the auto demo's beat; its own component so a beat change re-renders only this. */
+function DemoPrompter() {
+  return <Prompter beat={useDemoBeat()} />
 }

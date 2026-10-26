@@ -161,6 +161,15 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
     </div>
   )
 
+  // CJ 10-22: 「沒有任務的話是不要有對話框的」: no task picked → no chat box on the 主控台, only how to open one
+  if (!sessionId) {
+    return (
+      <section className="console panel con-none" aria-label="Agent Nemo 對話" data-testid="con-none">
+        <header className="con-h"><div className="con-title"><h2>Agent Nemo 對話</h2></div></header>
+        <p className="muted con-empty">選左邊一個任務，就會開它的 Agent Nemo 對話。</p>
+      </section>
+    )
+  }
   return (
     <section className="console panel" aria-label="Agent Nemo 對話">
       <header className="con-h">
@@ -169,16 +178,16 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
           <a className="con-full" href={`#console${sessionId ? `?event=${encodeURIComponent(sessionId)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
         </div>
         <div className="con-session" data-testid="con-session" data-session={sessionId ?? 'general'}>
-          <span className="con-session-name" title={sessionId ?? '不綁任務的對話'}>
+          <span className="con-session-name" title={sessionId ? [row?.session, sessionId].filter(Boolean).join('・') : (listing?.general_session?.session ?? '不綁任務的對話')}>
             <small className="muted">{sessionId ? '任務對話' : '對話'}</small>
+            {(sessionId ? row?.session_short : listing?.general_session?.session_short) && <span className="tss-no" data-testid="con-session-no">{sessionId ? row?.session_short : listing?.general_session?.session_short}</span>}
             <b>{sessionId ? plain(row?.title ?? (sessionEv ? sessionTitle(sessionEv) : sessionId === cardSession && card ? card.title : sessionId)) : '新對話'}</b>
             {row && <span className={`tss-st ${row.running ? 'run' : ''}`}>{row.state_label}</span>}
           </span>
           {sessionId && <code className="con-session-id" data-testid="session-id" title="任務編號（這個對話的 session）">{sessionId.replace(/^order:/, '訂單 ').replace(/^fyi:/, '通知 ').replace(/^safety:/, '安全核心 ')}</code>}
           <button type="button" className="btn-ghost con-switch" aria-expanded={picking} onClick={() => setPicking((p) => !p)} data-testid="session-switch">{picking ? '收起' : '切換 ▾'}</button>
-          {sessionId && <button type="button" className="btn-ghost" onClick={() => open(null)} data-testid="session-new">新對話</button>}
         </div>
-        {picking && <div className="con-picker" data-testid="session-picker"><TaskSessions current={sessionId} onPick={open} onGeneral={() => open(null)} /></div>}
+        {picking && <div className="con-picker" data-testid="session-picker"><TaskSessions current={sessionId} onPick={open} /></div>}
       </header>
       <Bubbles items={thread} empty={past ? (stored.loaded ? '這個任務的對話紀錄是空的。' : '讀取對話紀錄…') : '跟 Agent Nemo 說要做的事，或問工廠現在的狀況。'}
         extra={past ? null : extra} guide={past ? null : guide} follow />

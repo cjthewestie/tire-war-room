@@ -62,6 +62,7 @@ from warroom.contracts import (
     CommandReply,
     CommandRequest,
     DiscussReply,
+    LLMMode,
     DiscussRequest,
     ApprovalDecision,
     ApprovalRequest,
@@ -1020,7 +1021,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕下指令")
         _sm_ready(r)
         from warroom.agent.ask import smalltalk_reply
-        chat = smalltalk_reply(body.text)
+        # issue #195: the keyword greeting check is the rule mode's; with a model the commander reads the command
+        chat = smalltalk_reply(body.text) if r.llm_mode is not LLMMode.LLM else None
         if chat is not None:       # a greeting is not a task: no event, no tool; still audited
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
@@ -1029,7 +1031,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         # 「我只需要一個幫忙分類的，現在先不要派發」); the same path as Agent Nemo's propose_plan
         ev = r.start_command(body.text.strip(), session.actor)
         from warroom.agent.talk import physical_request
-        refusal = physical_request(body.text)
+        refusal = physical_request(body.text) if r.llm_mode is not LLMMode.LLM else None
         return CommandReply(event_id=ev.id, accepted=refusal is None,
                             reply=refusal or "已開新任務：計劃擬好會送到計劃區給你核准，核准後才執行。")
 
@@ -1129,9 +1131,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             if card is not None:
                 # the card as the supervisor sees it: title, what it does and the A／B staffing options (the title alone
                 # let the model invent changes: 「調低到 118°C、縮短硫化時間」, real run 2026-10-21)
-                opts = "；".join(f"{o.id} {o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
-                waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(card.actions) or '無'}"
-                           + (f"。人力方案：{opts}" if opts else ""))
+                opts = "；".join(f"方案 {o.id}：{o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
+                # issue #195: 「A 夜班加班加上 B 線調 1 人」 (real run 10-22) — the options are alternatives, say so
+                acts = [re.sub(r"^S\d+\s*", "", a) for a in card.actions]       # 「S3 排程 v2 生效」: no step ids
+                waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(acts) or '無'}"
+                           + (f"。人力方案（{len(card.options)} 選 1，不是加在一起）：{opts}" if len(card.options) > 1
+                              else f"。方案：{opts}（只有這一個）" if opts else ""))
         from warroom.agent.ask import AskAgent
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult
@@ -1179,6 +1184,17 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                            event_id=eid)
             reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
+
+        if body.event_id and not overview_mode:
+            from warroom.api.task_sessions import TASK_LIST_TOPICS
+            _read_all = read_plant
+
+            async def read_plant(topic: str, call_id: str, order_id: str | None = None,  # noqa: F811
+                                 machine_id: str | None = None, date: str | None = None, q: str | None = None) -> dict[str, Any]:
+                # a task's session never lists the other tasks (issue #195); the 總覽 / 新對話 does
+                if topic in TASK_LIST_TOPICS:
+                    return {"ok": False, "data": None, "error": "這是單一任務的對話，其他任務請到新對話或總覽問"}
+                return await _read_all(topic, call_id, order_id, machine_id, date, q)
 
         reads: list[tuple[str, Any]] = []
 
@@ -1399,6 +1415,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         from warroom.api import plant_query
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        if body.event_id and not overview_mode:
+            # a task's own session (issue #195, live run 10-22: another task's card in the reply): this task only; the
+            # plant overview stays out (it was read back as 「今天的工廠概況：…」) and is a query_plant read away
+            from warroom.api.task_sessions import scope_context
+            context = scope_context(context, body.event_id)
         if overview_mode:
             from warroom.api import overview
             context["overview"] = {**_safe(lambda: overview.snapshot(r), {}),
@@ -1410,6 +1431,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             ev_sel = _safe(lambda: sm.get(body.event_id), None)
             if ev_sel is not None:
                 context["selected_task"] = {"id": ev_sel.id, "state": ev_sel.state.value, "machine": ev_sel.machine_id,
+                                            "outcome": (ev_sel.outcome or "")[:160] or None,
                                             "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
                                                                         else ev_sel.anomaly.message))[:60]}
         memory = None

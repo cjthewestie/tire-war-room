@@ -11,6 +11,7 @@ import { ML_PRESSES, machineLabel } from '../factory'
 import { factoryMidnight, fmtHM, fmtHM12, fmtMD, ms } from '../format'
 import { RISK_PLAIN, plain } from '../plain'
 import { caseTitle } from '../resolveText'
+import { SHOW_SAFETY_CASES } from '../safetyFlag'
 
 export type Rank = 1 | 2 | 3 | 4 | 5
 export const RANK_LABEL: Record<Rank, string> = { 1: '① 安全／機台異常', 2: '② 交期風險', 3: '③ 插單／人力決定', 4: '④ 執行中，等確認完成', 5: '⑤ AI 已自行處理' }
@@ -107,7 +108,7 @@ export function homeItems(snap: DashboardSnapshot | null, pending: ApprovalReque
     }
   }
   // ① a Safety Core stop / hold still open: its checklist is the way back (components/Resolve.tsx)
-  for (const c of (snap?.safety_cases ?? []).filter((x) => x.status === 'open')) {
+  for (const c of (SHOW_SAFETY_CASES ? snap?.safety_cases ?? [] : []).filter((x) => x.status === 'open')) {
     const done = c.tasks_done
     out.push({ key: `safety:${c.id}`, rank: 1, tone: 'bad', pill: '安全核心', eventId: null, orderId: null, req: null, ts: ms(c.ts), caseId: c.id,
       title: caseTitle(c),

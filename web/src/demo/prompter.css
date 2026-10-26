@@ -1,0 +1,38 @@
+/* 提詞機（src/demo/Prompter.tsx）：小、深色半透明、圓角（CJ 10-22：「逐字稿對話框太大了」→ 約 400px 寬、最多 3 行）。
+   只用 index.css 的暗色 token；亮色主題下也固定用暗色那組值，提詞框永遠是深底淺字。 */
+.tp-box {
+  --tp-bg: var(--bg); --tp-ink: var(--ink); --tp-dim: var(--ink-dim); --tp-faint: var(--ink-faint);
+  --tp-track: var(--panel-3); --tp-chip: var(--panel-2); --tp-edge: var(--border);
+  position: fixed; z-index: 45; width: min(400px, calc(100vw - 32px)); padding: 7px 11px 8px;
+  border-radius: 10px; border: 1px solid var(--tp-edge);
+  background: color-mix(in srgb, var(--tp-bg) 80%, transparent); color: var(--tp-ink);
+  -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); pointer-events: none;
+}
+:root[data-theme="light"] .tp-box {
+  /* dark-token values from :root in index.css */
+  --tp-bg: #0b0d10; --tp-ink: #eceeea; --tp-dim: #adb3ab; --tp-faint: #868d85;
+  --tp-track: #272c34; --tp-chip: #1c2027; --tp-edge: #242930;
+}
+.tp-bottom-left { left: 16px; bottom: 16px; }
+.tp-bottom-right { right: 16px; bottom: 16px; }
+.tp-top-left { left: 16px; top: 16px; }
+.tp-top-right { right: 16px; top: 16px; }
+.tp-head { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.tp-bar { flex: 1; height: 2px; border-radius: 2px; background: var(--tp-track); overflow: hidden; }
+.tp-bar > i { display: block; height: 100%; background: var(--accent); transition: width .4s ease; }
+.tp-meta { flex: none; font-size: 10.5px; color: var(--tp-faint); font-variant-numeric: tabular-nums; }
+.tp-cur { margin: 0; font-size: 17px; line-height: 1.4; font-weight: 600; animation: tp-in .3s ease;
+  display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tp-next { margin: 4px 0 0; font-size: 13px; line-height: 1.4; color: var(--tp-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-lab { font-size: 11px; margin-right: 5px; padding: 0 5px; border-radius: 5px; background: var(--tp-chip); color: var(--tp-dim); }
+@keyframes tp-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+@media (max-width: 600px) {
+  .tp-box { padding: 6px 10px 7px; }
+  .tp-cur { font-size: 15px; }
+  .tp-next { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tp-cur { animation: none; }
+  .tp-bar > i { transition: none; }
+}
