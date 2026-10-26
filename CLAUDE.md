@@ -4,7 +4,7 @@ Teammates drive Claude with short Chinese requests. This file holds the team rul
 
 ## Always
 
-- Work on an issue: open one with `gh issue create` (template 前端體驗改進 for UX work) before changing code, unless the request names an existing issue. Docs-only changes (README and similar) need no issue (CJ, 2026-10-26, on the README rewrite: "dont need issue for this").
+- Open an issue only when it is needed: work someone else must pick up or track, a request for CJ outside `web/`, or a bug you can't fix now. Small or docs-only changes go straight to a branch and PR. CJ, 2026-10-26: "dont need issue for this" (on the README rewrite), "only write issue if needed". Use template 前端體驗改進 for UX issues.
 - Branch `座位/issue號-簡述` (teammates: `d/<n>-<slug>`); never commit or push to `main`.
 - Teammates change the front end only: `web/`. Anything in `warroom/`, `deploy/`, `bench/` or `warroom/contracts.py` → open an issue for CJ instead of editing. CJ, 2026-10-18: 「我希望他們改的是前端客戶體驗」.
 - Before a PR: `cd web && pnpm build && pnpm lint`, then `uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py`; all green. Attach before/after screenshots at 1440 and 390 width (headless browser).
