@@ -955,3 +955,6 @@ a.ov-row:hover { background: var(--panel-2); }
   .trace-tasks { max-height: 50vh; }
 }
 .con-session-id { flex-basis: 100%; font-size: 12px; color: var(--ink-dim); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; overflow-wrap: anywhere; }
+
+/* a Nemo reply is shown whole; its 「・」 list lines keep their breaks (CJ 2026-10-22: 「回覆的時候不要收合」) */
+.sc-text { white-space: pre-line; overflow-wrap: anywhere; }
