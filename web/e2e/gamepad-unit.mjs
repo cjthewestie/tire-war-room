@@ -76,7 +76,7 @@ check('keys: G starts (not in a demo)', I.demoKey('KeyG', ctx()) === 'start' && 
 check('keys: Space / N continue (= A)', I.demoKey('Space', ctx({ demoOn: true })) === 'continue' && I.demoKey('KeyN', ctx({ demoOn: true })) === 'continue')
 check('keys: B pause (= Menu)', I.demoKey('KeyB', ctx({ demoOn: true })) === 'pause')
 check('keys: Esc asks to exit (= hold B), Enter confirms', I.demoKey('Escape', ctx({ demoOn: true })) === 'exit-ask' && I.demoKey('Enter', ctx({ demoOn: true, confirmExit: true })) === 'exit-yes')
-check('keys: ← → slides at the board (= LB RB)', I.demoKey('ArrowRight', ctx({ demoOn: true, slides: true })) === 'slide+' && I.demoKey('ArrowRight', ctx({ demoOn: true })) === null)
+check('keys: ← → slides at the board (= LB RB); → elsewhere is continue (auto demo: 下一階段)', I.demoKey('ArrowRight', ctx({ demoOn: true, slides: true })) === 'slide+' && I.demoKey('ArrowRight', ctx({ demoOn: true })) === 'continue')
 check('keys: WASD do nothing in the demo', ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyV', 'KeyF', 'KeyT', 'Digit1'].every((k) => I.demoKey(k, ctx({ demoOn: true })) === null))
 
 console.log(failed ? `\n${failed} FAILED` : '\nall passed')

@@ -20,6 +20,11 @@ html[data-demo-auto] .f3-demo-badge { display: none !important; }
   padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,.92); box-shadow: 0 4px 18px rgba(0,0,0,.18); font-size: 14px; }
 .f3-auto-bar b { font-weight: 700; }
 .f3-auto-bar button { border: 0; border-radius: 999px; padding: 5px 12px; background: #f3b43f; font-weight: 700; cursor: pointer; }
+.f3-auto-stage { position: fixed; right: 16px; bottom: 16px; z-index: 41; display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 4px 12px; border-radius: 999px; background: rgba(30,30,30,.6); color: #fff; font-size: 13px; font-weight: 600; }
+.f3-auto-next { border: 0; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 700; color: #1b1b1b;
+  background: #f3b43f; cursor: pointer; opacity: .85; }
+.f3-auto-next:hover, .f3-auto-next:focus-visible { opacity: 1; background: rgba(30,30,30,.82); }
 .f3-auto-cap { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 40; padding: 10px 18px; border-radius: 14px;
   background: rgba(30,30,30,.82); color: #fff; font-size: 17px; font-weight: 700; max-width: 80vw; text-align: center; }
 

@@ -53,6 +53,8 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     rushCard: state.pending.some((p) => isRush(p.event_id)) || fresh.some((r) => isRush(r.event_id)),
     rushApproved: fresh.some((r) => isRush(r.event_id)),
     // auto-play's 訂單 beat: this run's rush plan approved and its event done (plan → approved → done)
+    rushRunning: fresh.some((r) => isRush(r.event_id) && events.some((e) => e.id === r.event_id
+      && (e.state === 'execute' || e.state === 'verify' || e.state === 'closed' || e.state === 'safe_stop'))),
     rushDone: fresh.some((r) => isRush(r.event_id) && events.some((e) => e.id === r.event_id && (e.state === 'closed' || e.state === 'safe_stop'))),
     // the SO-012 pre-plan (a supervisor command event): in and done
     preplan: cmd.length > 0 && cmd.every((e) => e.state === 'closed' || e.state === 'safe_stop'),

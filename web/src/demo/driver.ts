@@ -70,6 +70,11 @@ export class DemoRun {
   private faultSent = false
   /** 真實後端：訂單任務已經送進來（rush 一次） */
   private orderSent = false
+  /** 「下一階段 ▶」按了（下一個 tick 處理）；hurry：這個 tick 的核准不等 */
+  private skipReq = false
+  private hurry = false
+  /** 自動播放：馬上進下一段（Demo 自己的待核准卡先核准掉） */
+  skip() { if (this.auto && !this.finished) this.skipReq = true }
   /** 真實後端：Demo 最後設的模擬速度 */
   private liveSpeed = 0
   /** 自動播放已經收尾（回到電腦：速度 1×、清故障；之後什麼都不做） */
@@ -105,7 +110,7 @@ export class DemoRun {
     // 真實後端：等工廠的時候跑快（訂單核准後到結案、注入後到偵測、7 號機核准後到員工做完），其他時候 AUTO_LIVE_SPEED
     if (this.io.mode === 'live' && now >= this.armedAt) {
       const sg = this.latched
-      const want = cue === 'rush' && sg.rushApproved && !sg.rushDone ? AUTO_BOOST.orderDone
+      const want = sg.rushApproved && !sg.rushDone && (cue === 'rush' || cue === 'event') && !(this.faultSent && !sg.event) ? AUTO_BOOST.orderDone
         : this.faultSent && !sg.event ? AUTO_BOOST.detect
         : cue === 'worker' && sg.approved && !sg.crewDone ? AUTO_BOOST.repair
         : AUTO_LIVE_SPEED
@@ -128,11 +133,11 @@ export class DemoRun {
     // （h1）卡出現 AUTO.liveApproveS 秒後；同一件事後來的新版卡（AI 換假設 H2）在維修段也一樣。用主管手機同一支 API
     // （decided_by 主管、via phone），過 Action Gate、寫稽核。其他卡一律不碰；回到戰情室（AUTO_FINAL）後什麼都不做。
     // 訂單段：這次的今日訂單排程（-PLAN；情境剛載入，沒有別的）的核准卡，在主控台上看 consoleApproveS 秒後核准（via dashboard）
-    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && cue === 'rush' && this.orderSent) {
+    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && cue !== AUTO_FINAL && this.orderSent) {
       for (const p of pending.filter((x) => isOrderTask(x.event_id))) {
         const first = this.approveAt.get(p.id)
-        if (first == null) { this.approveAt.set(p.id, now); continue }
-        if (now - first < AUTO.consoleApproveS * 1000 || this.decided.has(p.id)) continue
+        if (first == null && !this.hurry) { this.approveAt.set(p.id, now); continue }
+        if ((!this.hurry && now - (first ?? now) < AUTO.consoleApproveS * 1000) || this.decided.has(p.id)) continue
         this.decided.add(p.id)
         const opt = p.options.find((o) => o.recommended) ?? p.options[0]
         console.info(`[demo] auto approve (console) ${p.id} (${p.event_id})`)
@@ -141,13 +146,12 @@ export class DemoRun {
           modified_args: null, decided_by: '主管', via: 'dashboard',
         }).catch((e) => { this.decided.delete(p.id); console.warn('[demo] auto approve', e) })
       }
-      return
     }
-    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && id && (cue === 'h1' || cue === 'worker')) {
+    if (!this.autoApprove && this.io.mode === 'live' && this.io.decide && id && (cue === 'h1' || cue === 'worker' || (this.hurry && cue === 'event'))) {
       for (const p of pending.filter((x) => x.event_id === id)) {
         const first = this.approveAt.get(p.id)
-        if (first == null) { this.approveAt.set(p.id, now); continue }
-        if (now - first < AUTO.liveApproveS * 1000 || this.decided.has(p.id)) continue
+        if (first == null && !this.hurry) { this.approveAt.set(p.id, now); continue }
+        if ((!this.hurry && now - (first ?? now) < AUTO.liveApproveS * 1000) || this.decided.has(p.id)) continue
         this.decided.add(p.id)
         const opt = p.options.find((o) => o.recommended) ?? p.options[0]
         console.info(`[demo] auto approve ${p.id} (${p.event_id})`)
@@ -164,8 +168,8 @@ export class DemoRun {
     if (!due) return
     for (const p of due.cards) {
       const first = this.approveAt.get(p.id)
-      if (first == null) { this.approveAt.set(p.id, now); continue }
-      if (now - first < due.wait * 1000 || this.decided.has(p.id)) continue
+      if (first == null && !this.hurry) { this.approveAt.set(p.id, now); continue }
+      if ((!this.hurry && now - (first ?? now) < due.wait * 1000) || this.decided.has(p.id)) continue
       this.decided.add(p.id)
       const opt = p.options.find((o) => o.recommended) ?? p.options[0]
       void this.io.decide({
@@ -277,8 +281,12 @@ export class DemoRun {
     this.latched = latch(this.latched, live)
     const sig = this.arrived === undefined ? this.latched : { ...this.latched, arrived: this.arrived }
     const before = this.tl
+    const skip = this.skipReq
+    this.skipReq = false
+    this.hurry = skip
     this.autoStep(now, state)
-    let r = advance(before, t, sig, this.contReq && !this.auto, this.auto)
+    this.hurry = false
+    let r = advance(before, t, sig, this.contReq && !this.auto, this.auto, skip)
     this.contReq = false
     // a continue that ends a hold whose next beat starts right away: take that step in the same tick, so the server
     // never sees the old beat again in between (every screen would flash back to it)

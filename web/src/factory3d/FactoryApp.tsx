@@ -233,7 +233,7 @@ export function FactoryApp() {
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
-    else if (act === 'continue') { if (!demo.auto) void demo.cont() }
+    else if (act === 'continue') void demo.cont()   // auto-play: 下一階段 (skip)
     else if (act === 'pause') demo.togglePause()
     else if (act === 'exit-ask') { if (demo.auto) void demo.exit(); else demo.setConfirmExit(true) }
     else if (act === 'exit-yes') void demo.exit()

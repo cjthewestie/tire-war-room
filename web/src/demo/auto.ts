@@ -85,7 +85,9 @@ export const AUTO_STEPS: Record<string, AutoStep> = {
   // 真實後端（CJ 10-22：「是在主控台跑訂單任務跟核准」）：走向電腦時 Demo 開始今日訂單排程（早班開工計畫），主控台上
   // Agent Nemo 規劃 → 核准卡 → Demo 在主控台替主管按核准 → 執行 → 結案；結案後再留 RESULT_S.orders 秒。到了電腦最多再等
   // ORDERS_CAP_S 秒，模型慢也照樣往下（任務在背景跑完）。
-  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushDone', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 45, timeout: beatMinS('walk') + beatMinS('orders') + 35 } },
+  // (until rushRunning, not rushDone: the day's plan stays 驗證中 while the crews work through their tasks — the beat
+  // used to wait for that until its 64 s cap, which looked stuck; the crews finish in the background, sim at 120×)
+  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushRunning', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 45, timeout: beatMinS('walk') + beatMinS('orders') + 25 } },
   // 訂單結束 → 離開電腦、走到門口往工廠看（leave）→ 7 號機警示燈亮（事件進來，還是 leave）→ 看一下，手機才響
   event: { enter: { on: 'event', timeout: 90, min: AUTO.leaveS }, hold: { min: AUTO.anomalyS, needArrive: true, timeout: 30 } },
   // 手機這時才響（震動＋鈴聲＋舉起來）→ 核准：Mock 由 Demo 自動按；真實後端等人按

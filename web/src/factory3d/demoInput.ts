@@ -27,6 +27,7 @@ export function demoKey(code: string, c: Ctx): Action | null {
   if (code === 'KeyB') return 'pause'
   if (code === 'KeyP') return 'phone'
   if (c.slides && (code === 'ArrowRight' || code === 'PageDown')) return 'slide+'
+  if (code === 'ArrowRight') return 'continue'   // auto-play's 下一階段 (outside the slides)
   if (c.slides && (code === 'ArrowLeft' || code === 'PageUp')) return 'slide-'
   if (code === 'Escape') return c.slideView ? 'slides-close' : c.phoneUp ? 'phone' : 'exit-ask'
   return null

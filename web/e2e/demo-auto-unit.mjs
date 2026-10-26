@@ -79,7 +79,7 @@ function play(plant, { until = 400, walkS = 2.5 } = {}) {
 // the plant: the rush card at 11 s, approved (by whoever) at 15, done at 18; 7 號機 at 21, its card at 22.5, approved 41, repaired 48
 const at = (from) => (t) => t >= from
 const plant = (o) => (t) => ({
-  rushCard: at(o.rushCard)(t), rushApproved: at(o.rushOk)(t), rushDone: at(o.rushDone)(t),
+  rushCard: at(o.rushCard)(t), rushApproved: at(o.rushOk)(t), rushDone: at(o.rushDone)(t), rushRunning: at(o.rushOk)(t),
   event: at(o.event)(t), approval: at(o.card)(t) && t < o.ok, approved: at(o.ok)(t), repaired: at(o.fixed)(t), crewDone: at(o.fixed)(t),
 })
 const P = { rushCard: 11, rushOk: 15, rushDone: 18, event: 21, card: 22.5, ok: 41, fixed: 48 }
@@ -94,7 +94,7 @@ const near = (x, want, slack = 0.3) => x != null && x >= want - 0.05 && x < want
 for (const b of BT.DEMO_BEATS) check(`beat ${b} min ≥ 7 s`, AU.beatMinS(b) >= 7, `${AU.beatMinS(b)}`)
 check('walk after the opening line', near(tOf('walk'), H('start').min), tOf('walk'))
 check('orders once at the desk', near(tOf('orders'), tOf('walk') + 2.5), tOf('orders'))
-check('leave once the order is done and has been seen', near(tOf('leave'), Math.max(tOf('walk') + H('rush').min, P.rushDone + AU.RESULT_S.orders)), tOf('leave'))
+check('leave once the order plan is approved and running, and has been seen', near(tOf('leave'), Math.max(tOf('walk') + H('rush').min, P.rushOk + AU.RESULT_S.orders)), tOf('leave'))
 { const ev = Math.max(P.event, tOf('leave') + AU.AUTO_STEPS.event.enter.min)
   check('phone on the 7 號機 card, after the look at the factory', near(tOf('phone'), Math.max(P.card, ev + H('event').min)), String(tOf('phone'))) }
 check('repair after the approval has been seen on the phone', near(tOf('repair'), Math.max(P.ok + AU.RESULT_S.phone, tOf('phone') + H('h1').min)), tOf('repair'))

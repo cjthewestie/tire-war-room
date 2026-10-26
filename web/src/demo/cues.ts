@@ -51,6 +51,8 @@ export type Signal =
   /** auto-play's 維修 beat: the crew's tasks for the incident all 完成 (or it is repaired / closed); the temperature
    *  coming back is not waited for */
   | 'crewDone'
+  /** auto-play's 訂單 beat: this run's order plan approved and executing (執行中 / 驗證中) or done */
+  | 'rushRunning'
   /** the last repair is under way (H2 approved) or done: the walk to 7 號機 starts, the repair is watched, not waited for */
   | 'fixing'
   /** the 3D's own: the walk / camera has arrived and framed the beat (false holds a checkpoint's 「按 A 繼續」) */
@@ -202,8 +204,14 @@ export function autoHoldDone(tl: Timeline, t: number, sig: Signals): boolean {
   return !!h.card && !sig[h.card] && e >= (h.cardTimeout ?? Infinity)
 }
 
-function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
+function advanceAuto(tl: Timeline, t: number, sig: Signals, skip = false): Step {
   const cur = CUES[tl.index]
+  // 「下一階段 ▶」 (CJ 10-22): end this hold now, or start the next step now (no waiting for its event)
+  if (skip) {
+    if (!tl.released) return cur.id === AUTO_FINAL ? { tl } : { tl: release(tl, t, 'continue') }
+    const k = nextAuto(tl.index)
+    return CUES[k] ? { tl: enter(tl, k, t, 'continue') } : { tl }
+  }
   if (!tl.released) {
     if (cur.id === AUTO_FINAL) return { tl }
     const u = AUTO_STEPS[cur.id]?.hold.until
@@ -224,8 +232,8 @@ function advanceAuto(tl: Timeline, t: number, sig: Signals): Step {
 
 /** One tick: `cont` = continue pressed since the last tick (A / Space / N, or the server's cue moved on); `auto` = the
  *  auto-play timeline (advanceAuto). */
-export function advance(tl: Timeline, t: number, sig: Signals, cont = false, auto = false): Step {
-  if (auto) return advanceAuto(tl, t, sig)
+export function advance(tl: Timeline, t: number, sig: Signals, cont = false, auto = false, skip = false): Step {
+  if (auto) return advanceAuto(tl, t, sig, skip)
   // the soft target: from 3:30 the last story beat (the Agent page) hands over to the pitch by itself; earlier beats only get the nudge
   // (CJ paces the story; a beat is never cut short)
   if (tl.index === LAST_STORY_INDEX && t >= AUTO_PITCH) return { tl: enter(tl, PITCH_INDEX, t, 'time') }

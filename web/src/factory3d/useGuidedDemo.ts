@@ -172,7 +172,7 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
   const cont = useCallback(async () => {
     const r = run.current
     if (!r || paused) return
-    if (r instanceof DemoRun && r.auto) return   // auto-play: nothing to continue by hand
+    if (r instanceof DemoRun && r.auto) { r.skip(); return }   // auto-play: 「下一階段 ▶」 skips to the next beat
     if (confirmExit) { setConfirmExit(false); return }
     const res = await r.continue()
     if (res === 'approval') setNote('要先核准（手機或核准卡），才能往下')

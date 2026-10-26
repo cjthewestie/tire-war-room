@@ -35,6 +35,15 @@ export function beatOf(cueId: string | null | undefined, atDesk = true, released
   }
 }
 
+/** The six stages CJ names (「訂單 / 離開電腦 / 7號機手機 / 維修 / 機器人 / 回到電腦」): the indicator 「2/6 離開電腦」. */
+export const STAGES = ['訂單', '離開電腦', '7號機手機', '維修', '機器人', '回到電腦'] as const
+export function stageOf(b: DemoBeat | null): { n: number; total: number; label: string } | null {
+  if (!b) return null
+  const i = b === 'overview' || b === 'walk' || b === 'orders' ? 0 : b === 'leave' ? 1 : b === 'phone' || (b as string) === 'approve' ? 2
+    : b === 'repair' ? 3 : b === 'robot' ? 4 : 5
+  return { n: i + 1, total: STAGES.length, label: STAGES[i] }
+}
+
 let current: DemoBeat | null = null
 const subs = new Set<() => void>()
 
