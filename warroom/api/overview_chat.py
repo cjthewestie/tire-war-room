@@ -89,6 +89,7 @@ FAILED = "我這次沒有順利查到資料，先不亂回答。你可以再問�
 
 _PLANT_Q_RX = re.compile(r"訂單|交期|交貨|出貨|急單|任務|事件|機台|號機|開煉機|硫化機|溫度|請假|病假|缺工|缺人|在班|人力|班表|"
                          r"庫存|原料|缺料|排程|工單|SOP|良率|保養|核准卡|待核准|在跑|最趕|到期|遲交")
+_IMPROVE_RX = re.compile(r"重新改進|改進.{0,2}計[畫劃]|重新規劃|重新排|重排|再排一次|幫我改一下|改一下(?:這個|這份)?計[畫劃]|重新.{0,2}計[畫劃]")
 _CONSTRAINT_RX = re.compile(r"不要.{0,4}(?:加班|跨組|調人|調派|動)|不加班|不跨組|改(?:用|選|成).{0,8}(?:方案|[AB]|夜班|早班|中班|補人|加班|調人)"
                             r"|夜班補人|補人|不能用|不可用|要保養|停用.{0,4}號機|[AB] ?方案")
 _KEY_RX = re.compile(r"\b(?:[a-z]+_[a-z_]+|null|None|true|false|topic|context)\b")
@@ -367,7 +368,7 @@ class OverviewChat:
             if _CANCEL_RX.match(text):
                 out.update(reply=f"好，不{CONTROL[pend['action']]}。", intent="control:cancelled", by="control")
                 return self._done(out, mem, text, t0)
-        self._task, self._discuss = task, discuss
+        self._task, self._discuss, self._propose = task, discuss, propose
         await asyncio.wait_for(self._loop(r, text, out, mem, tid, run_tool, read_plant, propose, control, slot,
                                           context, conversation), BUDGET_S)
         return self._done(out, mem, text, t0)
@@ -427,13 +428,18 @@ class OverviewChat:
         n = itertools.count(1)
         plant_q = bool(_PLANT_Q_RX.search(text) or orders_in(text) or machines_in(text))
         reply = ""
-        if self._task is not None and _CONSTRAINT_RX.search(text):
+        improve = bool(_IMPROVE_RX.search(text))
+        if self._task is not None and (_CONSTRAINT_RX.search(text) or (improve and self._discuss is None)):
             # live probe 10-22: 「不要跨組調人」 → 「好的，我記下來了」 and nothing ran. A stated condition goes to the
             # discuss path first; the model then words the result
             step = {"tool": "discuss_plan", "args": {"text": text}, "ok": True}
             out["steps"].append(step)
             result = await self._talk(r, {"text": text}, out, step)
             data_seen.append(result)
+            if out.get("one_line"):
+                # CJ 10-22: 「全權」 — acted, said in one line; no model rewording, no 「要不要」
+                out["reply"] = out.pop("one_line")
+                return
             msgs.append({"role": "user", "content": f"（系統已把這句交給重排流程，結果如下，請據此用一兩句回覆主管）\n<<<DATA\n{result}\nDATA>>>"})
         for i in range(MAX_STEPS + 1):
             last = i >= MAX_STEPS
@@ -661,15 +667,31 @@ class OverviewChat:
                 + "\n在這件任務的對話裡：\n"
                 "- 問這件現在怎樣：只講這件（狀態、在等什麼、核准卡內容、做到哪一步），不要列其他任務。\n"
                 "- 問交期、會不會延誤：先講這件的相關訂單（用 query_orders by_id 查它們），再一句帶過其他有風險的訂單。\n"
-                "- 問為什麼這樣排：用上面的判斷、計劃理由、核准卡的原因、已做、缺口和 A／B 方案，說明為什麼是這個做法、這些人、這個班；不要反問。\n"
+                "- 問為什麼這樣排：用 2–3 句白話說原因：排在哪幾台／哪一班／哪些人、為什麼（例如最早空出來、趕得上交期、人力夠），代價是什麼"
+                "（例如另一張單晚多少、要加班）。可以先用工具查訂單或排程補足原因。不要條列、不要照抄核准卡的欄位或 SOP 步驟、不要反問。\n"
+                "- 主管下指令時先用工具做，再用一句話回報；不要問「要不要」，只有真的看不懂他要什麼才問。\n"
                 "- 說得模糊（「重新改進計畫」「幫我改一下」「有更好的方法嗎」）：一句說目前的做法，再用一個問題給 2–3 個從這張核准卡來的具體選項"
                 "（例如核准卡的 A／B 方案各是什麼、不要加班、不要跨組調人、某台機不排）。不要重複你前面問過的同一句。\n"
                 + ("- 給了具體條件（不要跨組調人、不要加班、改用 A／B、改成夜班補人、某台機不能用…）：一定要呼叫 discuss_plan（text 照抄），"
                    "再依結果用一兩句說改了什麼、新一版核准卡（同一個 Nemo 編號）已送出等你核准，或照實說為什麼不能改。\n"
                    if waiting else
-                   "- 給了具體條件或要重新規劃：這件已經過了核准（目前狀態見上面），不能再改這張卡；呼叫 discuss_plan，它會照實說明，"
-                   "然後問主管要不要照這個條件開一件後續任務；主管說好就用 start_task 開（task 寫清楚條件和這件的內容）。\n")
+                   "- 給了具體條件或要重新規劃：這件已經過了核准，呼叫 discuss_plan（text 照抄），它會直接開一件後續重排任務；"
+                   "照結果用一句話回報開了哪個 Nemo 編號，不要問要不要。\n")
                 + "- 其他工廠的事照樣用任何工具查；要動現場的事照樣用寫入工具（經 Action Gate，R2／R3 出核准卡）。不要說已經改好，以工具結果為準。")
+
+    async def _follow_up(self, r, words: str, out: dict[str, Any], step: dict[str, Any]) -> str:
+        """A task past approval (or closed): open the follow-up re-plan task with the condition at once (CJ 10-22: 「全權」,
+        「不要問要不要」). It is a normal supervisor-command task: Action Gate, R2／R3 approval card."""
+        t = self._task or {}
+        task = f"重新規劃（條件：{words[:60]}）：{t.get('what') or ''}"[:200]
+        ev = await self._propose(task)
+        eid = ev["event_id"]
+        sess = self.session_of(r, eid)
+        out["event_id"] = eid
+        step.update(args={"event_id": eid, "task": task[:120]}, opened=True, session=sess, label="開後續重排",
+                    summary=f"開了 {sess or eid}")
+        out["one_line"] = f"已照「{words[:30]}」開 {sess or '一件新任務'} 重排，新卡出來請核准。"
+        return out["one_line"]
 
     async def _talk(self, r, args, out, step) -> str:
         """The existing discuss path (POST /api/events/{id}/discuss): replans the waiting card with a constraint."""
@@ -678,11 +700,10 @@ class OverviewChat:
             step.update(ok=False, summary="沒有條件")
             return "沒有給條件。請問主管要改哪個條件。"
         if self._discuss is None:
-            t = self._task or {}
-            step.update(ok=False, summary="這件沒有等核准的計劃")
-            return (f"這件現在是「{t.get('state_label') or t.get('state')}」，已經過了核准，這張卡不能再改。"
-                    f"可以照「{words}」開一件後續任務重新規劃（start_task），要先問主管要不要開。")
+            return await self._follow_up(r, words, out, step)
         d = await self._discuss(words)
+        if d.get("intent") == "not_waiting":
+            return await self._follow_up(r, words, out, step)
         intent = d.get("intent")
         step.update(label="討論計劃" + ("・重排" if d.get("replanned") else ""), summary=str(d.get("reply") or "")[:200])
         if d.get("replanned"):
@@ -690,6 +711,7 @@ class OverviewChat:
             sess = (self._task or {}).get("session")
             out["replanned"] = {"version": ap.get("version"), "session": sess}
             step["args"] = {"event_id": (self._task or {}).get("id"), "text": words}
+            out["one_line"] = (f"已照「{words[:30]}」重排，新一版核准卡 v{ap.get('version')} 已送出（{sess or '這件任務'}），請核准。")
             return (f"已照條件重排：新一版核准卡 v{ap.get('version')} 已送出（同一件任務 {sess or ''}），等主管按核准才執行。"
                     f"這次的變更：{'；'.join(d.get('changes') or []) or '見核准卡'}。重排流程的說明：{d.get('reply')}")
         if intent == "capped":
