@@ -115,6 +115,8 @@ export const AUTO_ORDER_EVENT = 'shift_start'
 export const AUTO_FAULT = { machine_id: 'CURE-07', kind: 'steam_pressure_drop', params: { target_c: 122 } }
 /** 回到電腦、Demo 結束：模擬速度回 1×、清掉 7 號機的故障（全廠正常），留給 CJ 手動 Demo 各頁面 */
 export const AUTO_END_SPEED = 1
+/** 注入之後到偵測器看到 7 號機溫降之前，模擬跑快一點（看著工廠的那幾秒不要空等），看到了就回 AUTO_LIVE_SPEED */
+export const AUTO_FAULT_BOOST = 60
 export const CURE07_FROM = 128
 
 /** 自動播放上方的一行字幕（每段一句；AutoOverlay 依 useDemoBeat() 顯示）。 */
