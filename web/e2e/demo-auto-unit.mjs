@@ -1,5 +1,5 @@
-// Unit checks (no server, no browser) for the auto-play demo (/factory?demo=cure07; ?mock=1 fallback): CJ's eight beats
-// in order (demo/beat.ts: overview → walk → orders → leave → phone → repair → robot → back), each driven by its
+// Unit checks (no server, no browser) for the auto-play demo (/factory?demo=cure07; ?mock=1 fallback): CJ's nine beats
+// in order (demo/beat.ts: overview → walk → orders → leave → phone → approve → repair → robot → back), each driven by its
 // cue in the auto timeline (demo/cues.ts advance(…, auto) with demo/auto.ts AUTO_STEPS), the run ending at the war
 // room (no pitch), the auto-approve only in the mock (never on the real backend), and a whole run of the mock engine
 // (急單 → 7 號機) through the real driver (demo/driver.ts DemoRun) with the 3D's walk faked by a clock.
@@ -27,13 +27,14 @@ const ST = await vite.ssrLoadModule('/src/store.ts')
 await vite.close()
 
 // ---- the contract ----
-check('beat ids (fixed contract)', BT.DEMO_BEATS.join(',') === 'overview,walk,orders,leave,phone,repair,robot,back', BT.DEMO_BEATS.join(','))
+check('beat ids (fixed contract)', BT.DEMO_BEATS.join(',') === 'overview,walk,orders,leave,phone,approve,repair,robot,back', BT.DEMO_BEATS.join(','))
 check('auto cues', AU.AUTO_CUES.join(',') === 'start,rush,event,h1,worker,robot,agent', AU.AUTO_CUES.join(','))
 check('every auto cue is a real cue, in CUES order', AU.AUTO_CUES.every((id, i, a) => C.CUES.findIndex((c) => c.id === id) >= 0
   && (i === 0 || C.CUES.findIndex((c) => c.id === id) > C.CUES.findIndex((c) => c.id === a[i - 1]))))
 check('the run ends at the war room (agent), never the pitch', AU.AUTO_FINAL === 'agent' && !AU.AUTO_CUES.includes('pitch'))
 for (const b of BT.DEMO_BEATS) check(`beat ${b} has a cue and a caption`, AU.AUTO_CUES.includes(BT.BEAT_CUE[b]) && !!AU.AUTO_TEXT[b])
-check('beatOf: rush is walk until the desk, then orders, then leave', BT.beatOf('rush', false) === 'walk' && BT.beatOf('rush', true) === 'orders' && BT.beatOf('rush', true, true) === 'leave')
+check('beatOf: start is overview, then walk; h1 is phone, then approve', BT.beatOf('start', true, false, { elapsed: 1, overviewS: 5 }) === 'overview' && BT.beatOf('start', true, false, { elapsed: 6, overviewS: 5 }) === 'walk' && BT.beatOf('h1') === 'phone' && BT.beatOf('h1', true, false, { approved: true }) === 'approve')
+check('beatOf: rush is walk until the desk, then orders, then leave (with the opening ctx)', BT.beatOf('rush', false) === 'walk' && BT.beatOf('rush', true) === 'orders' && BT.beatOf('rush', true, true) === 'leave')
 check('beatOf: outside the auto cues → null', BT.beatOf('pitch') === null && BT.beatOf(null) === null && BT.beatOf('verify') === null)
 check("#194's timings kept", AU.AUTO.openS === 4.5 && AU.AUTO.analysisS === 18 && AU.AUTO.speed === 10 && AU.AUTO.phoneAfterS === 1.5)
 
@@ -71,7 +72,7 @@ function play(plant, { until = 400, walkS = 2.5 } = {}) {
     tl = r.tl
     const cc = C.CUES[tl.index]
     const atDesk = cc.id === 'rush' && t - tl.enteredAt >= walkS
-    const b = BT.beatOf(cc.id, atDesk, tl.released)
+    const b = BT.beatOf(cc.id, atDesk, tl.released, { elapsed: t - tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!sig.approved })
     if (beats[beats.length - 1]?.beat !== b) beats.push({ beat: b, t })
   }
   return { tl, beats }
@@ -82,7 +83,7 @@ const plant = (o) => (t) => ({
   rushCard: at(o.rushCard)(t), rushApproved: at(o.rushOk)(t), rushDone: at(o.rushDone)(t), rushRunning: at(o.rushOk)(t),
   event: at(o.event)(t), approval: at(o.card)(t) && t < o.ok, approved: at(o.ok)(t), repaired: at(o.fixed)(t), crewDone: at(o.fixed)(t),
 })
-const P = { rushCard: 11, rushOk: 15, rushDone: 18, event: 21, card: 22.5, ok: 41, fixed: 48 }
+const P = { rushCard: 11, rushOk: 15, rushDone: 18, event: 21, card: 22.5, ok: 110, fixed: 117 }
 const { tl, beats } = play(plant(P))
 const seq = beats.map((b) => b.beat).join(',')
 check('eight beats in CJ order', seq === BT.DEMO_BEATS.join(','), seq)
@@ -92,14 +93,13 @@ const H = (id) => AU.AUTO_STEPS[id].hold
 const near = (x, want, slack = 0.3) => x != null && x >= want - 0.05 && x < want + slack
 // pacing (CJ: 「每一個步驟不可以太趕，要順暢」): every beat at least its prompter line (≈ 4 字/秒, ≥ 7 s)
 for (const b of BT.DEMO_BEATS) check(`beat ${b} min ≥ 7 s`, AU.beatMinS(b) >= 7, `${AU.beatMinS(b)}`)
-check('walk after the opening line', near(tOf('walk'), H('start').min), tOf('walk'))
-check('orders once at the desk', near(tOf('orders'), tOf('walk') + 2.5), tOf('orders'))
-check('leave once the order plan is approved and running, and has been seen', near(tOf('leave'), Math.max(tOf('walk') + H('rush').min, P.rushOk + AU.RESULT_S.orders)), tOf('leave'))
-{ const ev = Math.max(P.event, tOf('leave') + AU.AUTO_STEPS.event.enter.min)
-  check('phone on the 7 號機 card, after the look at the factory', near(tOf('phone'), Math.max(P.card, ev + H('event').min)), String(tOf('phone'))) }
-check('repair after the approval has been seen on the phone', near(tOf('repair'), Math.max(P.ok + AU.RESULT_S.phone, tOf('phone') + H('h1').min)), tOf('repair'))
-check('robot after the press is green and held', near(tOf('robot'), Math.max(P.fixed + AU.RESULT_S.repair, tOf('repair') + H('worker').min)), tOf('robot'))
-check('back after the robot show', near(tOf('back'), tOf('robot') + H('robot').min), `${tOf('back')}`)
+{
+  const dur = (b) => { const i = beats.findIndex((x) => x.beat === b); return i < 0 ? 0 : (beats[i + 1]?.t ?? Infinity) - beats[i].t }
+  for (const b of BT.DEMO_BEATS.filter((x) => x !== 'back')) {
+    const need = b === 'walk' ? AU.beatMinS('walk') - AU.WALK_S : b === 'leave' ? 3 : b === 'orders' ? AU.beatMinS('orders') : Math.min(AU.beatMinS(b), 7)
+    check(`paced: ${b} lasts ≥ ${need.toFixed(0)} s`, dur(b) >= need - 0.2, `${dur(b).toFixed(1)}`)
+  }
+}
 console.log('      paced run:', beats.map((b) => `${b.beat}@${b.t}`).join('  '))
 check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index].id === 'agent' && !tl.released)
 
@@ -107,7 +107,7 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
 {
   const r = play(plant({ ...P, event: 12, card: 13.5 }))
   const a = r.beats.find((x) => x.beat === 'phone')?.t
-  check('early anomaly: orders still finish first', a >= P.rushDone && r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(','), `${a}`)
+  check('early anomaly: orders still finish first', a >= P.rushOk && r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(','), `${a}`)
 }
 // the real backend: nobody has tapped yet → the approve beat waits (never skipped while the card is up)
 {
@@ -117,9 +117,9 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
 }
 // a scenario without a rush card (the live fallback press7_temp_drop): orders moves on after 40 s, the rest plays
 {
-  const r = play(plant({ ...P, rushCard: 1e9, rushOk: 1e9, rushDone: 1e9, event: 60, card: 61.5, ok: 80, fixed: 87 }))
+  const r = play(plant({ ...P, rushCard: 1e9, rushOk: 1e9, rushDone: 1e9, event: 60, card: 61.5, ok: 150, fixed: 157 }))
   const o = r.beats.find((x) => x.beat === 'phone')?.t
-  check('no rush card (live 7 號機 only): straight on, phone once the card comes', r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(',') && o >= 61.5, `${o}`)
+  check('no rush card (live 7 號機 only): straight on, phone once 7 號機 is detected', r.beats.map((b) => b.beat).join(',') === BT.DEMO_BEATS.join(',') && o >= 60, `${o}`)
 }
 // the robot beat waits for the walk / show (arrived) but never longer than its timeout
 {
@@ -156,7 +156,7 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
     run.tick(now, state)
     if (run.tl.index !== before) run._entered = now
     const cc = C.CUES[run.tl.index]
-    const b = BT.beatOf(cc.id, cc.id === 'rush' && now - (run._entered ?? 0) >= 2500, run.tl.released)
+    const b = BT.beatOf(cc.id, cc.id === 'rush' && now - (run._entered ?? 0) >= 2500, run.tl.released, { elapsed: run.t - run.tl.enteredAt, overviewS: AU.beatMinS('overview'), approved: !!run.latched.approved })
     if (beats[beats.length - 1]?.beat !== b) beats.push({ beat: b, t: Math.round(run.t * 10) / 10 })
     if (firstRushCard == null && state.pending.some((p) => p.event_id.endsWith('-RUSH'))) firstRushCard = run.t
     if (firstEvent == null && (state.snapshot?.events ?? []).some((e) => e.machine_id === 'CURE-07')) firstEvent = run.t

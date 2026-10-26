@@ -4,8 +4,10 @@
 // share of the 3 minutes. If the manifest is missing or empty, three placeholder slides are drawn here.
 import { useEffect, useState } from 'react'
 
-export interface Deck { slides: string[]; titles: (string | null)[]; seconds: (number | null)[]; placeholder: boolean }
-type Entry = string | { file?: unknown; title?: unknown; seconds?: unknown }
+export interface Deck { slides: string[]; titles: (string | null)[]; seconds: (number | null)[]; placeholder: boolean
+  /** the presenter's line for each slide (slides.json `say`), shown on the prompter while the slides are open */
+  says?: (string | null)[] }
+type Entry = string | { file?: unknown; title?: unknown; seconds?: unknown; say?: unknown }
 
 const W = 1600, H = 900
 const FONT = '"Noto Sans TC", "PingFang TC", "Heiti TC", sans-serif'
@@ -48,7 +50,8 @@ export function placeholderSlides(): string[] {
 /** Parse a manifest: { slides: [...] } or a bare array; each entry a file name or { file, title, seconds }. */
 export function parseDeck(m: unknown): Deck | null {
   const list: Entry[] = Array.isArray(m) ? m : Array.isArray((m as { slides?: unknown } | null)?.slides) ? (m as { slides: Entry[] }).slides : []
-  const rows = list.map((e) => (typeof e === 'string' ? { file: e, title: null, seconds: null } : {
+  const rows = list.map((e) => (typeof e === 'string' ? { file: e, title: null, seconds: null, say: null } : {
+    say: typeof e?.say === 'string' && e.say.trim() ? e.say.trim() : null,
     file: typeof e?.file === 'string' ? e.file : '',
     title: typeof e?.title === 'string' ? e.title : null,
     seconds: typeof e?.seconds === 'number' && e.seconds > 0 ? e.seconds : null,
@@ -56,7 +59,7 @@ export function parseDeck(m: unknown): Deck | null {
   if (!rows.length) return null
   return {
     slides: rows.map((r) => (/^(https?:|data:|\/)/.test(r.file) ? r.file : `/pitch/${r.file}`)),
-    titles: rows.map((r) => r.title), seconds: rows.map((r) => r.seconds), placeholder: false,
+    titles: rows.map((r) => r.title), seconds: rows.map((r) => r.seconds), says: rows.map((r) => r.say), placeholder: false,
   }
 }
 

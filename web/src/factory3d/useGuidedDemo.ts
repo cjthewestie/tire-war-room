@@ -7,7 +7,7 @@
 // Esc exit (confirm) · ← → / PageUp PageDown slides · P phone.
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { DemoFollow, DemoRun, type LogRow } from '../demo/driver'
-import { AUTO_FINAL, autoActive } from '../demo/auto'
+import { AUTO_FINAL, autoActive, beatMinS } from '../demo/auto'
 import { isOrderTask } from '../demo/signals'
 import { beatOf, setDemoBeat, type DemoBeat } from '../demo/beat'
 import { AUTO_PITCH, CHECKPOINTS, CUES, type Shot, STORY_TARGET, current, overTarget, pitchLeft, ready, upcoming, waiting } from '../demo/cues'
@@ -103,7 +103,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
     walker.reset()
     if (phoneUpRef.current) { phoneUpRef.current = false; onPhoneRef.current?.(false) }
     phoneWant.current = false
-    setDemoBeat(null)
+    // the auto demo ended at the desk: the last line (回到辦公室…) stays on the prompter for a minute
+    setDemoBeat(atDesk === true ? 'back' : null)
+    if (atDesk === true) setTimeout(() => { if (!run.current) setDemoBeat(null) }, 60_000)
     setAuto(false)
     setRunning(false); setSlideView(false); setConfirmExit(false); setPaused(false)
     director.on = false
@@ -258,7 +260,8 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
       }
       // the beat the prompter reads (demo/beat.ts): walk until the lead stands at the war-room computer, then orders,
       // then leave once the order's hold is over
-      const beat = isAuto ? beatOf(c.id, director.mode === 'walk' && walker.at === 'desk' && walker.done, r.tl.released) : null
+      const beat = isAuto ? beatOf(c.id, director.mode === 'walk' && walker.at === 'desk' && walker.done, r.tl.released,
+        { elapsed: (now - w.enteredAt) / 1000, overviewS: beatMinS('overview'), approved: !!r.latched.approved }) : null
       setDemoBeat(beat)
       if (!isAuto && r.refusedAt > lastRefused.current) {
         lastRefused.current = r.refusedAt

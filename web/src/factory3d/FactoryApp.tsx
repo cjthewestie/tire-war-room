@@ -507,6 +507,7 @@ export function FactoryApp() {
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
       <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>
       {FPS_ON && <FpsMeter />}
+      {(slideView || pitchView) && <PitchPrompter says={deck.says} index={Math.min(demo.slide, nSlides - 1)} />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
         <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
@@ -577,6 +578,21 @@ function FpsMeter() {
     return () => cancelAnimationFrame(id)
   }, [])
   return <div ref={el} data-testid="fps" style={{ position: 'fixed', right: 8, top: 8, zIndex: 60, padding: '2px 8px', borderRadius: 6, font: '600 12px/1.4 ui-monospace, monospace', background: 'rgba(0,0,0,.6)', color: '#7CFC9A', pointerEvents: 'none' }}>– fps</div>
+}
+
+/** The pitch's prompter: the current slide's line (slides.json `say`) and the next one, following ← / →. */
+function PitchPrompter({ says, index }: { says?: (string | null)[]; index: number }) {
+  const cur = says?.[index]
+  if (!cur) return null
+  const next = says?.[index + 1] ?? null
+  return (
+    <aside className="tp-box tp-bottom-left" style={{ zIndex: 90 }} aria-live="polite" aria-label="提詞機（Pitch）" data-testid="pitch-prompter">
+      <div className="tp-head"><div className="tp-bar"><i style={{ width: `${((index + 1) / (says?.length ?? 1)) * 100}%` }} /></div>
+        <span className="tp-meta">Pitch {index + 1}/{says?.length}</span></div>
+      <p key={index} className="tp-cur tp-pitch">{cur}</p>
+      {next && <p className="tp-next"><span className="tp-lab">下一頁</span>{next}</p>}
+    </aside>
+  )
 }
 
 function DemoPrompter() {

@@ -49,9 +49,9 @@ export const AUTO = {
   /** 訂單段至少停多久（走到電腦後） */
   ordersMinS: 3,
   /** 訂單解決後，離開電腦往 7 號機走至少多久，異常這段才開始（異常早就發生也一樣：先走出去） */
-  leaveS: 4,
-  /** 走到 7 號機附近、看著異常至少多久，手機才響 */
-  anomalyS: 4,
+  leaveS: 2,
+  /** 7 號機警示燈亮起後看一下，手機就響 */
+  anomalyS: 1,
   /** 維修段至少多久（CJ：「七號機維修等太久」：走幾秒、很快修好就往機器人走） */
   repairMinS: 7,
 }
@@ -62,6 +62,10 @@ export const BEAT_MIN_FLOOR = 7
 export const beatMinS = (b: DemoBeat): number => Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
 /** 動作完成之後，結果在畫面上至少再留幾秒（訂單結案、手機上的「已核准」、7 號機轉綠） */
 export const RESULT_S = { orders: 5, phone: 3, repair: 3 }
+/** 第一人稱走到電腦大約幾秒 */
+export const WALK_S = 3
+/** 真實後端：7 號機的卡在手機上多久才按核准＝「手機響」那句的長度（最少 3 秒） */
+export const phoneApproveS = (): number => Math.max(3, beatMinS('phone') - 2)
 
 /** 自動播放走的故事步驟（cues.ts 的 id，依 CUES 順序）；console／verify／h2／Pitch 略過。 */
 export const AUTO_CUES = ['start', 'rush', 'event', 'h1', 'worker', 'robot', 'agent']
@@ -80,22 +84,26 @@ export interface AutoStep {
 }
 export const AUTO_STEPS: Record<string, AutoStep> = {
   // 俯瞰：開場那句唸完（真實後端：沒有急單卡，訂單段只看日常訂單；Mock 的急單卡照舊自動核准）
-  start: { hold: { min: Math.max(AUTO.openS, beatMinS('overview')) } },
+  // 開場兩句都在俯瞰鏡頭上唸完（開場 → 鏡頭飛過產線），最後幾秒才交給第一人稱走向電腦（WALK_S）
+  start: { hold: { min: Math.max(AUTO.openS, beatMinS('overview') + beatMinS('walk') - WALK_S) } },
   // 走向電腦（walk）→ 電腦上急單進來、計劃、核准、完成（orders）；結案後畫面再留 RESULT_S.orders 秒
   // 真實後端（CJ 10-22：「是在主控台跑訂單任務跟核准」）：走向電腦時 Demo 開始今日訂單排程（早班開工計畫），主控台上
   // Agent Nemo 規劃 → 核准卡 → Demo 在主控台替主管按核准 → 執行 → 結案；結案後再留 RESULT_S.orders 秒。到了電腦最多再等
   // ORDERS_CAP_S 秒，模型慢也照樣往下（任務在背景跑完）。
   // (until rushRunning, not rushDone: the day's plan stays 驗證中 while the crews work through their tasks — the beat
   // used to wait for that until its 64 s cap, which looked stuck; the crews finish in the background, sim at 120×)
-  rush: { hold: { min: beatMinS('walk') + beatMinS('orders'), needArrive: true, until: 'rushRunning', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 45, timeout: beatMinS('walk') + beatMinS('orders') + 25 } },
+  rush: { hold: { min: WALK_S + beatMinS('orders'), needArrive: true, until: 'rushRunning', untilDwell: RESULT_S.orders, card: 'rushCard', cardTimeout: 45, timeout: WALK_S + beatMinS('orders') + 25 } },
   // 訂單結束 → 離開電腦、走到門口往工廠看（leave）→ 7 號機警示燈亮（事件進來，還是 leave）→ 看一下，手機才響
-  event: { enter: { on: 'event', timeout: 90, min: AUTO.leaveS }, hold: { min: AUTO.anomalyS, needArrive: true, timeout: 30 } },
+  // CJ 10-22「離開電腦到跳核准時間在短點」：轉身看一眼正常的工廠（leaveS），7 號機一偵測到（故障在訂單計畫開始執行時就注入、
+  // 偵測時模擬 150×）就響手機，不等 AI 的核准卡：卡在手機上規劃好再出現
+  event: { enter: { on: 'event', timeout: 40, min: AUTO.leaveS }, hold: { min: AUTO.anomalyS, needArrive: true, timeout: 10 } },
   // 手機這時才響（震動＋鈴聲＋舉起來）→ 核准：Mock 由 Demo 自動按；真實後端等人按
   // 核准後手機留著「已核准」RESULT_S.phone 秒才放下
-  h1: { enter: { on: 'approval', timeout: 60 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: RESULT_S.phone, card: 'approval', cardTimeout: 30, timeout: 600 } },
+  // 手機響（7 號機那句唸完）才核准（driver：卡出現 phoneApproveS 秒後），核准後「一鍵核准」那句唸完才放下手機
+  h1: { enter: { on: 'event', timeout: 5 }, hold: { min: beatMinS('phone'), until: 'approved', untilDwell: Math.max(RESULT_S.phone, beatMinS('approve')), card: 'approval', cardTimeout: 30, timeout: 600 } },
   // 員工跑去 7 號機：前往中 → 執行中 → 完成，機台轉綠
   // 核准後員工馬上出發；任務完成（不等溫度完全回升，回升在背景繼續）就轉綠、再留 RESULT_S.repair 秒（CJ：「七號機維修等太久」）
-  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: AUTO.repairMinS, needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 25 } },
+  worker: { enter: { on: 'approved', timeout: 5 }, hold: { min: Math.max(AUTO.repairMinS, beatMinS('repair')), needArrive: true, until: 'crewDone', untilDwell: RESULT_S.repair, timeout: 30 } },
   // 巡檢機器人：轉身、揮手、掃描、鞠躬（walk 的 arrived 含機器人表演完）
   // 巡檢機器人：整套表演做完（arrived）、那句唸完，才走回電腦
   robot: { hold: { min: beatMinS('robot'), needArrive: true, timeout: 30 } },
@@ -119,16 +127,17 @@ export const AUTO_FAULT = { machine_id: 'CURE-07', kind: 'steam_pressure_drop', 
 export const AUTO_END_SPEED = 1
 /** 模擬在 Demo 等工廠的時候跑快一點（不要空等），其他時候 AUTO_LIVE_SPEED：今日訂單排程核准後到結案（人員任務做完、
  *  轉綠）、7 號機注入後到偵測、7 號機核准後到員工做完。 */
-export const AUTO_BOOST = { orderDone: 120, detect: 60, repair: 90 }
+export const AUTO_BOOST = { orderDone: 120, detect: 150, repair: 90 }
 export const CURE07_FROM = 128
 
 /** 自動播放上方的一行字幕（每段一句；AutoOverlay 依 useDemoBeat() 顯示）。 */
 export const AUTO_TEXT: Record<DemoBeat, string> = {
   overview: '工廠運轉中',
-  walk: '走向戰情室電腦',
+  walk: '實心胎製程的主戰場：硫化',
   orders: '📋 今日訂單排程：Agent 規劃 → 主管核准 → 完成',
   leave: '🚶 訂單處理好了：離開電腦，往工廠看',
-  phone: '📱 手機響了：7 號硫化機溫度異常，主管核准',
+  phone: '📱 手機響了：7 號硫化機溫度往下掉',
+  approve: '✅ 一鍵核准：手機卡號＝主控台任務編號',
   repair: '👷 員工前往 7 號機維修',
   robot: '🤖 巡檢機器人',
   back: '回到戰情室：剛剛的任務都在這裡',

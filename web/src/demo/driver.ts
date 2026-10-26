@@ -9,7 +9,7 @@ import {
   BOOST_SPEED, CUES, DEMO_SPEED, FALLBACK_LOADS, MAIN_LOADS, PITCH_AT, PITCH_INDEX, advance, plantWait, clockPause, clockRead, clockResume, clockStart, latch, simPaused,
   startTimeline, waiting, type DemoClock, type DemoLoad, type Signals, type Timeline,
 } from './cues'
-import { AUTO, AUTO_BOOST, AUTO_END_SPEED, AUTO_FAULT, AUTO_ORDER_EVENT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
+import { phoneApproveS, AUTO, AUTO_BOOST, AUTO_END_SPEED, AUTO_FAULT, AUTO_ORDER_EVENT, AUTO_FINAL, AUTO_LIVE_SCENARIO, AUTO_LIVE_SPEED, AUTO_SCENARIO } from './auto'
 import { isOrderTask, freshSeen, signals, type Seen } from './signals'
 import type { DemoCommand, DemoState } from './state'
 
@@ -102,7 +102,9 @@ export class DemoRun {
       void this.io.fireEvent(AUTO_ORDER_EVENT).catch((e) => { this.orderSent = false; console.warn('[demo] fire order', e) })
     }
     // 真實後端：訂單段結束（離開電腦往工廠看）才注入 7 號機的溫降，開場與訂單段全廠正常
-    if (this.io.mode === 'live' && !this.faultSent && cue === 'rush' && this.tl.released && this.io.injectFault) {
+    // (injected as soon as the order plan is approved and running, so the detector has seen it by the time the lead
+    // has turned to the factory: the phone rings ~5–8 s after leaving the desk)
+    if (this.io.mode === 'live' && !this.faultSent && cue === 'rush' && (this.tl.released || this.latched.rushRunning) && this.io.injectFault) {
       this.faultSent = true
       console.info('[demo] inject', AUTO_FAULT.machine_id, AUTO_FAULT.kind)
       void this.io.injectFault(AUTO_FAULT).catch((e) => { this.faultSent = false; console.warn('[demo] inject fault', e) })
@@ -151,7 +153,7 @@ export class DemoRun {
       for (const p of pending.filter((x) => x.event_id === id)) {
         const first = this.approveAt.get(p.id)
         if (first == null && !this.hurry) { this.approveAt.set(p.id, now); continue }
-        if ((!this.hurry && now - (first ?? now) < AUTO.liveApproveS * 1000) || this.decided.has(p.id)) continue
+        if ((!this.hurry && (now - (first ?? now) < AUTO.liveApproveS * 1000 || (cue === 'h1' && this.t - this.tl.enteredAt < phoneApproveS()))) || this.decided.has(p.id)) continue
         this.decided.add(p.id)
         const opt = p.options.find((o) => o.recommended) ?? p.options[0]
         console.info(`[demo] auto approve ${p.id} (${p.event_id})`)

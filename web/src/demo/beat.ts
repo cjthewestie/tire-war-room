@@ -10,24 +10,27 @@
 // lines (script.ts) and the captions (auto.ts AUTO_TEXT): change all three together.
 import { useSyncExternalStore } from 'react'
 
-export type DemoBeat = 'overview' | 'walk' | 'orders' | 'leave' | 'phone' | 'repair' | 'robot' | 'back'
-export const DEMO_BEATS: readonly DemoBeat[] = ['overview', 'walk', 'orders', 'leave', 'phone', 'repair', 'robot', 'back']
+export type DemoBeat = 'overview' | 'walk' | 'orders' | 'leave' | 'phone' | 'approve' | 'repair' | 'robot' | 'back'
+export const DEMO_BEATS: readonly DemoBeat[] = ['overview', 'walk', 'orders', 'leave', 'phone', 'approve', 'repair', 'robot', 'back']
 
 /** Which auto cue each beat starts on (cues.ts ids). walk, orders and leave start on the 訂單 cue: walk until the lead
  *  is at the desk, orders while the day's orders are planned there, leave once that hold is over (the lead turns out to
  *  the factory); leave goes on through the 7 號機 cue (the alarm light comes on), the phone rings at h1. */
 export const BEAT_CUE: Record<DemoBeat, string> = {
-  overview: 'start', walk: 'rush', orders: 'rush', leave: 'rush', phone: 'h1', repair: 'worker', robot: 'robot', back: 'agent',
+  overview: 'start', walk: 'start', orders: 'rush', leave: 'rush', phone: 'h1', approve: 'h1', repair: 'worker', robot: 'robot', back: 'agent',
 }
 
 /** The beat for an auto cue; `atDesk` = the lead has walked to the war-room computer (splits walk / orders);
  *  `released` = the cue's hold is over (the 急單 cue: the order is done, the lead leaves the desk). */
-export function beatOf(cueId: string | null | undefined, atDesk = true, released = false): DemoBeat | null {
+export function beatOf(cueId: string | null | undefined, atDesk = true, released = false,
+  x: { elapsed?: number; overviewS?: number; approved?: boolean } = {}): DemoBeat | null {
   switch (cueId) {
-    case 'start': return 'overview'
+    // the opening shot carries two lines (CJ's 逐字稿): 開場, then 鏡頭飛過產線 (from overviewS s in)
+    case 'start': return x.overviewS != null && (x.elapsed ?? 0) >= x.overviewS ? 'walk' : 'overview'
     case 'rush': return released ? 'leave' : atDesk ? 'orders' : 'walk'
     case 'event': return 'leave'
-    case 'h1': return 'phone'
+    // the phone rings (the 7 號機 line), then, once its card is approved, 一鍵核准
+    case 'h1': return x.approved ? 'approve' : 'phone'
     case 'worker': return 'repair'
     case 'robot': return 'robot'
     case 'agent': return 'back'
@@ -39,7 +42,7 @@ export function beatOf(cueId: string | null | undefined, atDesk = true, released
 export const STAGES = ['訂單', '離開電腦', '7號機手機', '維修', '機器人', '回到電腦'] as const
 export function stageOf(b: DemoBeat | null): { n: number; total: number; label: string } | null {
   if (!b) return null
-  const i = b === 'overview' || b === 'walk' || b === 'orders' ? 0 : b === 'leave' ? 1 : b === 'phone' || (b as string) === 'approve' ? 2
+  const i = b === 'overview' || b === 'walk' || b === 'orders' ? 0 : b === 'leave' ? 1 : b === 'phone' || b === 'approve' ? 2
     : b === 'repair' ? 3 : b === 'robot' ? 4 : 5
   return { n: i + 1, total: STAGES.length, label: STAGES[i] }
 }
