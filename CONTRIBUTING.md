@@ -176,4 +176,4 @@ gh issue create --title "[C] 指揮官 JSON 錯誤時重問一次" --label seat-
 - 架構：`docs/ARCHITECTURE.md`
 - 3 分鐘展示稿：`docs/DEMO-SCRIPT.md`
 - 企劃書：`docs/proposal-final.pdf`
-- 跑在 DGX Spark：`README.md` 的「在 DGX Spark 上跑」
+- 跑在 DGX Spark：`README.zh-TW.md` 的「在 DGX Spark 上跑」
