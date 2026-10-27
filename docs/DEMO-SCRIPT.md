@@ -67,6 +67,24 @@
 
 「WAN 斷」按鈕只是讓畫面顯示斷網狀態，真正的證明是拔線。時間不夠就跳過 C 段，只講最後那句。
 
+## 簡易版 3D Demo（一條線的故事，約 1 分鐘）
+
+CJ 10-27：「make it an easy version just demo from bird angle then > new order flooded in > leave computer > emrgency no 7 temperature > aprrove the plan > worker finished it, check on the patrol little care > back to computer」。
+
+開法：3D 工廠右下角按「▶ 簡易 Demo」，或直接開 `http://<主機>:<埠>/factory?demo=simple`。按下去就自己跑完，不用再按任何鍵；跑完停在戰情室電腦前，再按一次同一顆按鈕就重播。沒有提詞機、沒有 dock、沒有 Pitch，只有上方一行字幕和「n/7」。
+
+| 段 | 畫面 |
+|---|---|
+| 1/7 俯瞰 | 俯瞰整座工廠，一切正常 |
+| 2/7 新訂單湧入 | 走到戰情室電腦，今日訂單排程卡在主控台上：Agent Nemo 規劃 → 主管核准 → 執行 |
+| 3/7 離開電腦 | 訂單處理好了，離開電腦走進工廠 |
+| 4/7 7 號機溫降 | 7 號硫化機警示燈亮，手機響 |
+| 5/7 核准方案 | 手機上的卡：走主管手機同一支核准 API（Action Gate、稽核照舊），Demo 只替主管按它自己這張卡 |
+| 6/7 維修・巡檢車 | 員工到 7 號機維修完成；轉身看巡檢機器車表演 |
+| 7/7 回到電腦 | 走回戰情室電腦，主控台上看得到剛剛的任務；Demo 結束 |
+
+檢查：`node web/e2e/demo-simple.mjs http://localhost:<埠>`（headless，mock 模式 `./start.sh` 就能跑），7 段各存一張截圖到 `docs/screenshots/simple-demo/`。
+
 ## 怎麼講 Agent Nemo（照實說）
 
 先看 `/api/health` 的 `agent_runtime`，或 AI 狀態句裡有沒有「（NemoClaw 沙箱）」。

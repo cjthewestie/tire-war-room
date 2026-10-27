@@ -41,7 +41,7 @@ import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
 import { DemoButtons } from '../components/DemoButtons'
-import { autoActive } from '../demo/auto'
+import { autoActive, simpleHref, simpleRequested } from '../demo/auto'
 import { stageOf, useDemoBeat } from '../demo/beat'
 import { musicMuted, startMusic, stopMusic, subscribeMusic, toggleMusic } from '../demo/music'
 import { Prompter, pagesOf } from '../demo/Prompter'
@@ -229,6 +229,8 @@ export function FactoryApp() {
   const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, onPhone: onDemoPhone, nSlides })
   const autoOn = demo.running && demo.auto
   const autoMode = autoActive(transport?.mode)
+  /** ?demo=simple (CJ 10-27): the one-line story; no prompter, no dock, 7-stage captions (AutoOverlay) */
+  const simpleMode = simpleRequested()
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
   // 簡報 from anywhere (CJ: 「白板我點不進去怎麼demo」): stand up from the desk first, then the full-screen slides
@@ -522,6 +524,11 @@ export function FactoryApp() {
         {!demoOn && (
           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
         )}
+        {/* the simple one-line story (CJ 10-27, ?demo=simple): opens the URL, so the whole page loads in simple mode and the
+            run starts by itself; after it ends the same button plays it again */}
+        {!demoOn && (
+          <button className="f3-demo-btn f3-simple-btn" onClick={() => location.assign(simpleHref())} data-testid="demo-simple" disabled={!transport}>{simpleMode ? '▶ 簡易 Demo 再播一次' : '▶ 簡易 Demo'}</button>
+        )}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
@@ -531,10 +538,11 @@ export function FactoryApp() {
       </div>}
       {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
-      {!slideView && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
+      {!slideView && !simpleMode && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
       {FPS_ON && <FpsMeter />}
-      <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
-        onNext={() => void demo.cont()} onPitch={openSlides} />
+      {/* the simple demo has no prompter, no dock, no pitch (CJ 10-27: 「make it an easy version」): captions only (AutoOverlay) */}
+      {!simpleMode && <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
+        onNext={() => void demo.cont()} onPitch={openSlides} />}
       {(slideView || pitchView) && <PitchPrompter says={deck.says} index={Math.min(demo.slide, nSlides - 1)} />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
@@ -579,6 +587,7 @@ export function FactoryApp() {
             </ul>}
             <button className="f3-go">點擊開始</button>
             <button className="f3-go f3-go-demo" data-testid="demo-start-intro" onClick={(e) => { e.stopPropagation(); void demo.begin() }}>▶ Demo（6 分鐘）</button>
+            <button className="f3-go f3-go-simple" data-testid="demo-simple-intro" onClick={(e) => { e.stopPropagation(); location.assign(simpleHref()) }}>▶ 簡易 Demo（一條線的故事）</button>
           </div>
         </div>
       )}

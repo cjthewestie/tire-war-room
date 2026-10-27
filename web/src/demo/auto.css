@@ -56,3 +56,13 @@ html[data-demo-auto] .f3-touch-btns { display: none !important; }
 @media (max-width: 599px) {
   .f3-root:has(.paa-wrap-corner) .f3-tp .tp-box { bottom: 256px; }
 }
+
+/* 簡易版（?demo=simple）：字幕前的「n/7」小籤，和右下角的「▶ 簡易 Demo」按鈕（和 ▶ Demo（6 分鐘）並排，淡藍） */
+.f3-auto-cap .f3-simple-stage { display: inline-block; margin-right: 10px; padding: 1px 8px; border-radius: 999px; background: #f3b43f; color: #1b1b1b; font-size: 13px; font-weight: 800; vertical-align: 2px; }
+.f3-hud > .f3-demo-btn.f3-simple-btn { color: #0f2f4a; background: #8ec9f0; box-shadow: 0 4px 0 #5f9fcb, var(--c-shadow); }
+.f3-hud > .f3-demo-btn.f3-simple-btn:hover { background: #79bbe8; }
+.f3-go.f3-go-simple { margin-top: 8px; background: #8ec9f0; color: #0f2f4a; box-shadow: 0 4px 0 #5f9fcb; cursor: pointer; }
+/* in simple mode the hud's demo buttons are hidden like the rest of the auto chrome, except the simple button itself (再播一次) */
+html[data-demo-auto] .f3-hud > .f3-demo-btn.f3-simple-btn { display: inline-block !important; }
+/* the simple version (?demo=simple): the corner 待核准 alert stays off too (the approval is the demo's own, the caption says so) */
+html[data-demo-simple] .paa-wrap { display: none !important; }

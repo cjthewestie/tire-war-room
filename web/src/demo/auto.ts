@@ -13,12 +13,26 @@ import { SCRIPT } from './script'
 
 export const AUTO_Q = 'demo'
 export const AUTO_VAL = 'cure07'
+/** 簡易版（CJ 10-27：「make it an easy version just demo from bird angle then > new order flooded in > leave computer >
+ *  emrgency no 7 temperature > aprrove the plan > worker finished it, check on the patrol little care > back to computer」）：
+ *  /factory?demo=simple。同一條自動播放流程（AUTO_CUES、driver.ts），只是：每段停得短（SIMPLE_MIN_S）、字幕換成 7 段的
+ *  （SIMPLE_TEXT）、沒有提詞機、沒有 dock、沒有 Pitch。3D 工廠右下角的「▶ 簡易 Demo」按鈕就是開這個網址。 */
+export const SIMPLE_VAL = 'simple'
 
 const q = () => (typeof location === 'undefined' ? null : new URLSearchParams(location.search))
-/** 網址要求自動播放（?demo=cure07；真實後端或 ?mock=1 都算）。每個頁面（3D、戰情局 iframe、手機 iframe）都帶同樣的參數。 */
-export const autoRequested = (): boolean => q()?.get(AUTO_Q) === AUTO_VAL
+const autoVal = (): string | null => q()?.get(AUTO_Q) ?? null
+/** 網址要求自動播放（?demo=cure07 或 ?demo=simple；真實後端或 ?mock=1 都算）。每個頁面（3D、戰情局 iframe、手機 iframe）都帶同樣的參數。 */
+export const autoRequested = (): boolean => { const v = autoVal(); return v === AUTO_VAL || v === SIMPLE_VAL }
+/** 網址要求簡易版（?demo=simple）。 */
+export const simpleRequested = (): boolean => autoVal() === SIMPLE_VAL
 /** 網址指定 Mock 備援（?mock=1&demo=cure07）：Mock 引擎用單一事件版情境、Demo 自動核准。 */
-export const autoMockRequested = (): boolean => { const p = q(); return !!p && p.has('mock') && p.get(AUTO_Q) === AUTO_VAL }
+export const autoMockRequested = (): boolean => { const p = q(); return !!p && p.has('mock') && autoRequested() }
+/** 開簡易版的網址：保留這一頁的其他參數（mock、test…），只換 demo=simple。 */
+export function simpleHref(search = typeof location === 'undefined' ? '' : location.search): string {
+  const p = new URLSearchParams(search)
+  p.set(AUTO_Q, SIMPLE_VAL)
+  return `/factory?${p}`
+}
 /** 可以自動播放：網址要求，且有 transport（真實後端或 Mock）。 */
 export const autoActive = (mode: string | undefined): boolean => autoRequested() && (mode === 'mock' || mode === 'live')
 /** 按鈕全藏的 Mock 自動卡（phone/AutoCard）只在 Mock 引擎。真實後端的自動播放也會自動核准（CJ 10-22：「3d 工廠 demo 核准要
@@ -29,6 +43,8 @@ export const autoApprovesLive = (mode: string | undefined): boolean => autoReque
 
 // html[data-demo-auto]：自動播放的畫面精簡（auto.css）。"mock" 才藏核准按鈕（Demo 自動核准）；真實後端要留著給人按。
 if (autoRequested() && typeof document !== 'undefined') document.documentElement.dataset.demoAuto = autoMockRequested() ? 'mock' : 'live'
+// html[data-demo-simple]：簡易版再藏右上角的待核准提醒（核准由 Demo 替主管按，字幕說得夠清楚）
+if (simpleRequested() && typeof document !== 'undefined') document.documentElement.dataset.demoSimple = '1'
 
 /** 時間表（秒，Demo 時鐘）。Mock 情境裡事件的時間見 mock/scripts.ts（single 版）與 mock/engine.ts。 */
 export const AUTO = {
@@ -59,7 +75,11 @@ export const AUTO = {
 /** 每段至少停多久（秒）：照提詞機那句的長度（約每秒 4 個字，CJ 唸得完），最少 7 秒。CJ 10-22：「每一個步驟不可以太趕，要順暢」。 */
 export const SPEECH_CPS = 4
 export const BEAT_MIN_FLOOR = 7
-export const beatMinS = (b: DemoBeat): number => Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
+/** 簡易版每段至少停幾秒（沒有提詞機的台詞要唸，只要看得清楚畫面）；AUTO_STEPS 在載入時讀一次，所以簡易版一定由網址開。 */
+/** overview + walk − WALK_S = the opening shot's hold (AUTO_STEPS.start): the 俯瞰 caption stays up for the whole bird's-eye shot. */
+export const SIMPLE_MIN_S: Record<DemoBeat, number> = { overview: 8, walk: 2, orders: 8, leave: 3, phone: 6, approve: 4, repair: 8, robot: 8, back: 0 }
+export const beatMinS = (b: DemoBeat): number => simpleRequested() ? SIMPLE_MIN_S[b]
+  : Math.max(BEAT_MIN_FLOOR, Math.ceil(SCRIPT[b].replace(/\s/g, '').length / SPEECH_CPS))
 /** 動作完成之後，結果在畫面上至少再留幾秒（訂單結案、手機上的「已核准」、7 號機轉綠） */
 export const RESULT_S = { orders: 5, phone: 1, repair: 3 }
 /** 第一人稱走到電腦大約幾秒 */
@@ -142,4 +162,27 @@ export const AUTO_TEXT: Record<DemoBeat, string> = {
   repair: '👷 員工前往 7 號機維修',
   robot: '🤖 巡檢機器人',
   back: '回到戰情室：剛剛的任務都在這裡',
+}
+
+/** 簡易版的 7 段（CJ 10-27 的順序，不重排）：俯瞰 → 新訂單湧入 → 離開電腦 → 緊急：7 號機溫降 → 核准方案 → 員工修好、看巡檢機器車 → 回到電腦。
+ *  內部的 9 個 beat（beat.ts）對到這 7 段：overview＋walk 是第 1 段，repair＋robot 是第 6 段。 */
+export const SIMPLE_STAGES = ['俯瞰', '新訂單湧入', '離開電腦', '7 號機溫降', '核准方案', '維修・巡檢車', '回到電腦'] as const
+export const SIMPLE_STAGE_OF: Record<DemoBeat, number> = { overview: 1, walk: 1, orders: 2, leave: 3, phone: 4, approve: 5, repair: 6, robot: 6, back: 7 }
+/** 簡易版每段上方的一行字幕（每個內部 beat 一句；repair 與 robot 同屬第 6 段，字幕各說自己那半）。 */
+export const SIMPLE_TEXT: Record<DemoBeat, string> = {
+  overview: '🏭 俯瞰整座工廠：一切正常',
+  walk: '🏭 走向戰情室電腦',
+  orders: '📋 新訂單湧入：Agent Nemo 排好排程，主管一眼核准',
+  leave: '🚶 訂單處理好了，離開電腦走進工廠',
+  phone: '🚨 緊急：7 號硫化機溫度往下掉，手機響了',
+  approve: '✅ 主管在手機上核准處置方案',
+  repair: '👷 員工前往 7 號機維修，修好轉綠',
+  robot: '🤖 順道看看巡檢機器車',
+  back: '🖥 回到電腦前：剛剛的任務紀錄都在這裡',
+}
+/** 簡易版的進度字（「3/7 離開電腦」）。 */
+export function simpleStageOf(b: DemoBeat | null): { n: number; total: number; label: string } | null {
+  if (!b) return null
+  const n = SIMPLE_STAGE_OF[b]
+  return { n, total: SIMPLE_STAGES.length, label: SIMPLE_STAGES[n - 1] }
 }
