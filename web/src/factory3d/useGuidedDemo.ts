@@ -125,7 +125,9 @@ export function useGuidedDemo({ state, transport, onBegin, onEnd, onWalk, onPhon
     teleport(START.x, START.z, START.yaw)
     director.on = true
     director.mode = 'orbit'
-    walk.current = { station: null, monitorAt: 0, enteredAt: 0 }
+    // enteredAt = now: the opening cue never fires as a 'cue', so the overview's elapsed time counts from here (a 0 made a
+    // replay in place skip the bird's-eye beat, since the page had been up longer than the overview lasts)
+    walk.current = { station: null, monitorAt: 0, enteredAt: performance.now() }
     phoneUpRef.current = false; phoneShown.current = false; phoneWant.current = false
     setMonitor(null)
     setSlide(0); setSlideView(false); setBigUntil(0); setConfirmExit(false); setPaused(false); setNote(null)

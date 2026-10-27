@@ -71,7 +71,14 @@
 
 CJ 10-27：「make it an easy version just demo from bird angle then > new order flooded in > leave computer > emrgency no 7 temperature > aprrove the plan > worker finished it, check on the patrol little care > back to computer」。
 
-開法：3D 工廠右下角按「▶ 簡易 Demo」，或直接開 `http://<主機>:<埠>/factory?demo=simple`。按下去就自己跑完，不用再按任何鍵；跑完停在戰情室電腦前，再按一次同一顆按鈕就重播。沒有提詞機、沒有 dock、沒有 Pitch，只有上方一行字幕和「n/7」。
+開法：3D 工廠右下角按「▶ 簡易 Demo」，或直接開 `http://<主機>:<埠>/factory?demo=simple`。按下去就自己跑完，不用再按任何鍵；跑完停在戰情室電腦前。沒有提詞機，只有上方一行字幕和「n/7」，加右下角四顆按鈕（CJ 10-27：「i need next step and pause button and start demo button and ptich button」）：
+
+| 按鈕 | 鍵 | 做什麼 |
+|---|---|---|
+| ▶ 開始 Demo（跑的時候是 ↺ 重新開始） | G | 原地從第 1 段開始，不重新載入頁面 |
+| 下一步 ▶ | N／Space／→ | 跳到下一段；暫停中不能按 |
+| ❚❚ 暫停／▶ 繼續 | B | Demo 時間軸和工廠時鐘一起停（字幕後面出現「❚❚ 已暫停」） |
+| Pitch ▶ | Shift+P | 隨時開白板簡報，Demo 先暫停；Esc 關掉後按 ▶ 繼續 |
 
 | 段 | 畫面 |
 |---|---|
@@ -83,7 +90,7 @@ CJ 10-27：「make it an easy version just demo from bird angle then > new order
 | 6/7 維修・巡檢車 | 員工到 7 號機維修完成；轉身看巡檢機器車表演 |
 | 7/7 回到電腦 | 走回戰情室電腦，主控台上看得到剛剛的任務；Demo 結束 |
 
-檢查：`node web/e2e/demo-simple.mjs http://localhost:<埠>`（headless，mock 模式 `./start.sh` 就能跑），7 段各存一張截圖到 `docs/screenshots/simple-demo/`。
+檢查：`node web/e2e/demo-simple.mjs http://localhost:<埠>`（headless，mock 模式 `./start.sh` 就能跑），7 段各存一張截圖到 `docs/screenshots/simple-demo/`，跑完再按一輪四顆按鈕（`controls.png`）。
 
 ## 怎麼講 Agent Nemo（照實說）
 
