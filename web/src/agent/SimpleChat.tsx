@@ -5,7 +5,7 @@
 // MainThread: the 主 agent's whole thread across subagents — its turns (audit kind=system actor=main_agent orch=chat,
 // backfilled once from GET /api/audit and then live), its dispatches / reports / interrupts, and what is being sent now.
 // SubProgress: one subagent's progress in the same panel (state, tools with results, worker tasks, 中斷).
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import type { Event } from '../contracts'
 import { fmtHM, ms } from '../format'
 import { plain } from '../plain'
@@ -68,7 +68,7 @@ export function Bubbles({ items, empty, extra = null, guide = null, follow = fal
   )
 }
 
-/** A long reply: the conclusion first, 「展開詳細」 shows the whole original text (unchanged). */
+/** The conclusion of a long reply (kept for callers that want a one-line lead; replies are no longer folded). */
 export function leadOf(text: string): { lead: string; rest: boolean } {
   const parts = text.split(/(?<=[。！？!?；;\n])/).map((x) => x.trim()).filter(Boolean)
   let lead = ''
@@ -81,19 +81,9 @@ export function leadOf(text: string): { lead: string; rest: boolean } {
   return { lead, rest: lead.length < text.trim().length }
 }
 
+// every Agent Nemo reply is shown whole: no 「展開詳細／收合」, no folded preview (CJ 2026-10-22: 「回覆的時候不要收合」)
 function ReplyText({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
-  const box = useRef<HTMLSpanElement>(null)
-  // keep the opened reply readable: bring it into view inside the chat scroller
-  useEffect(() => { if (open) box.current?.scrollIntoView({ block: 'nearest' }) }, [open])
-  const { lead, rest } = leadOf(text)
-  if (!rest || Array.from(text).length <= 90) return <>{text}</>
-  return (
-    <>
-      <span ref={box} data-testid="reply-text">{open ? text : lead}</span>
-      <button type="button" className="sc-more" aria-expanded={open} onClick={() => setOpen(!open)} data-testid="reply-more">{open ? '收合 ▴' : '展開詳細 ▾'}</button>
-    </>
-  )
+  return <span className="sc-text" data-testid="reply-text">{text}</span>
 }
 
 export function BubbleRow({ b, onLink }: { b: Bubble; onLink?: (eventId: string) => void }) {

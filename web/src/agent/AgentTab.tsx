@@ -82,13 +82,12 @@ function latestReq(pending: ApprovalRequest[], evId: string | undefined): Approv
   return [...pending].filter((p) => p.event_id === evId).sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0] ?? null
 }
 
-const GUIDE_QUESTIONS = ['今天有哪些訂單？', '哪些訂單有交期風險？', '7 號機現在怎樣？', '如果硫化機停機，會影響哪些訂單？']
 
 /** The 主控台 conversation panel: the one NemoClaw (主 agent) thread (CJ, 2026-10-21: 「我不要長這樣」 about the
  *  「主 agent ▸ 派出的子 agent」 switcher, so it is removed; issue #100: the 此事項／全部 switcher is gone too). The plan on
  *  screen sits in the thread as a short 待核准 notice (or the briefing of its state), placed by its own time. Each
  *  subagent's progress is on the Agent page, via 看完整過程. */
-function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, events, card, onSession }: {
+function Console({ items, asks, setAsks, focus, onFull, requested, events, card, onSession }: {
   items: Item[]
   asks: LocalItem[]; setAsks: React.Dispatch<React.SetStateAction<LocalItem[]>>; focus: BarFocus | null; onFull?: (eventId?: string) => void
   onGuide: (text: string) => void
@@ -155,12 +154,19 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
       <h3>我是 Agent Nemo</h3>
       <p className="muted small">戰情室的主 agent。我可以幫你：</p>
       <ul><li>查今日訂單與交期風險</li><li>看機台狀態與溫度</li><li>評估停機對訂單的影響</li></ul>
-      <p className="muted small">試試這些問題：</p>
-      {GUIDE_QUESTIONS.map((q) => <button key={q} type="button" className="con-guide-q" disabled={!askReady} onClick={() => onGuide(q)}>{q}</button>)}
       {!askReady && <p className="con-offline" role="status" data-testid="guide-offline">目前未連線後端，無法使用 Agent Nemo 問答</p>}
     </div>
   )
 
+  // CJ 10-22: 「沒有任務的話是不要有對話框的」: no task picked → no chat box on the 主控台, only how to open one
+  if (!sessionId) {
+    return (
+      <section className="console panel con-none" aria-label="Agent Nemo 對話" data-testid="con-none">
+        <header className="con-h"><div className="con-title"><h2>Agent Nemo 對話</h2></div></header>
+        <p className="muted con-empty">選左邊一個任務，就會開它的 Agent Nemo 對話。</p>
+      </section>
+    )
+  }
   return (
     <section className="console panel" aria-label="Agent Nemo 對話">
       <header className="con-h">
@@ -169,16 +175,16 @@ function Console({ items, asks, setAsks, focus, onFull, onGuide, requested, even
           <a className="con-full" href={`#console${sessionId ? `?event=${encodeURIComponent(sessionId)}` : ''}`} onClick={full} data-testid="see-full">看完整過程 →</a>
         </div>
         <div className="con-session" data-testid="con-session" data-session={sessionId ?? 'general'}>
-          <span className="con-session-name" title={sessionId ?? '不綁任務的對話'}>
+          <span className="con-session-name" title={sessionId ? [row?.session, sessionId].filter(Boolean).join('・') : (listing?.general_session?.session ?? '不綁任務的對話')}>
             <small className="muted">{sessionId ? '任務對話' : '對話'}</small>
+            {(sessionId ? row?.session_short : listing?.general_session?.session_short) && <span className="tss-no" data-testid="con-session-no">{sessionId ? row?.session_short : listing?.general_session?.session_short}</span>}
             <b>{sessionId ? plain(row?.title ?? (sessionEv ? sessionTitle(sessionEv) : sessionId === cardSession && card ? card.title : sessionId)) : '新對話'}</b>
             {row && <span className={`tss-st ${row.running ? 'run' : ''}`}>{row.state_label}</span>}
           </span>
           {sessionId && <code className="con-session-id" data-testid="session-id" title="任務編號（這個對話的 session）">{sessionId.replace(/^order:/, '訂單 ').replace(/^fyi:/, '通知 ').replace(/^safety:/, '安全核心 ')}</code>}
           <button type="button" className="btn-ghost con-switch" aria-expanded={picking} onClick={() => setPicking((p) => !p)} data-testid="session-switch">{picking ? '收起' : '切換 ▾'}</button>
-          {sessionId && <button type="button" className="btn-ghost" onClick={() => open(null)} data-testid="session-new">新對話</button>}
         </div>
-        {picking && <div className="con-picker" data-testid="session-picker"><TaskSessions current={sessionId} onPick={open} onGeneral={() => open(null)} /></div>}
+        {picking && <div className="con-picker" data-testid="session-picker"><TaskSessions current={sessionId} onPick={open} /></div>}
       </header>
       <Bubbles items={thread} empty={past ? (stored.loaded ? '這個任務的對話紀錄是空的。' : '讀取對話紀錄…') : '跟 Agent Nemo 說要做的事，或問工廠現在的狀況。'}
         extra={past ? null : extra} guide={past ? null : guide} follow />

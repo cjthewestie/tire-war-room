@@ -1306,7 +1306,7 @@ class AskAnswer(_M):
     # machine is guessed); model_cold: the model did not answer in time and the rules could not tell
     # needs_choice / needs_order (issue #95): the question points at an order (「那張單」「它」) and the conversation
     # does not say which one, so nothing was looked up; `choices` lists the orders it could be (none for needs_order)
-    intent: Literal["query", "chitchat", "unclear", "model_cold", "needs_choice", "needs_order"] = "query"
+    intent: Literal["query", "chitchat", "unclear", "model_cold", "needs_choice", "needs_order", "change_request"] = "query"
     conversation_id: str | None = None
     choices: list[str] = Field(default_factory=list)
 

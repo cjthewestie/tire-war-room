@@ -235,7 +235,7 @@ export interface AskAnswer {
   total_ms: number
   // issue #95: needs_choice / needs_order = the question pointed at an order (「那張單」「它」) and the conversation
   // does not say which one, so nothing was looked up; `choices` lists the orders it could be
-  intent?: 'query' | 'chitchat' | 'unclear' | 'model_cold' | 'needs_choice' | 'needs_order'
+  intent?: 'query' | 'chitchat' | 'unclear' | 'model_cold' | 'needs_choice' | 'needs_order' | 'change_request'
   conversation_id?: string | null
   choices?: string[]
 }
@@ -826,6 +826,7 @@ export const API = {
   simEvents: "/api/sim/events", // GET SimEventsView; POST SimEventsBody (issue #36 模擬事件)
   simEventsFire: "/api/sim/events/fire", // POST {kind} -> {ok, fired}
   simClear: "/api/sim/clear", // POST {machine_id?}: remove injected faults (demo; #72 現場處置完成)
+  simFault: "/api/sim/fault", // POST {machine_id, kind, params}: inject one fault now (demo)
   ask: "/api/ask", // POST AskRequest -> AskAnswer (問戰情室, read-only)
   world: "/api/world", // GET WorldSnapshot: the whole plant (issue #11)
   command: "/api/command", // POST {text} -> CommandReply (下新任務: opens a supervisor event)
@@ -879,10 +880,14 @@ export interface TaskRow {
   orders: string[]; state: string | null; state_label: string; opened_at: ISODate | null; closed_at: ISODate | null; outcome: string | null
   /** still in this scenario's events (its whole record and chat are on the page) */
   live: boolean; running: boolean; qa_demo?: boolean; day?: string | null; loop?: number | null
+  /** session number (CJ 10-22): 「Nemo-1022-#01」 full, 「Nemo#01 · 10/22」 compact; creation order per factory date */
+  session?: string | null; session_short?: string | null
 }
 /** 進行中, 今日已結案 (the current factory day) and 歷史任務 grouped by factory day, newest first; all filtered by `q`. */
 export interface TaskListing {
   today: { date: string; label: string }; q: string; running: TaskRow[]; closed_today: TaskRow[]
+  /** the 新對話 / 總覽 session of the day: 「Nemo-1022-#00」 */
+  general_session?: { session: string | null; session_short: string | null }
   history: { key: string; label: string; scenario: string | null; count: number; tasks: TaskRow[] }[]
 }
 /** GET /api/tasks/{id}/session: a task's turns from the chat log on disk (read-only). */

@@ -4,6 +4,7 @@
 // button here or anywhere. StopFollowUp: a SAFE_STOP's plain reason and its three buttons 請 AI 重新規劃 / 交給現場處理 / 確認結案.
 // Used on the 主控台 (red banner + the selected item's plan area) and on the phone.
 import { useState } from 'react'
+import { SHOW_SAFETY_CASES } from '../safetyFlag'
 import type { Event, SafetyCase, SafetyDecision } from '../contracts'
 import { fmtHM, fmtHMS } from '../format'
 import { plain } from '../plain'
@@ -32,12 +33,13 @@ export function SafetyCaseCard({ c, compact = false, disabled = false }: { c: Sa
   const now = c.reading ?? tile?.temp_c ?? null
   const fieldOk = tasksOk || (confirmed && reason.trim().length > 0)
   const resolved = c.status === 'resolved'
+  const qc = c.decisions.includes('qc_pass')
   const run = async (key: string, fn: () => Promise<unknown>) => {
     setBusy(key); setErr(null)
     try { await fn() } catch (e) { setErr(errText(e)) } finally { setBusy(null) }
   }
   const release = (decision: SafetyDecision) => run(decision, () => transport!.safetyRelease!(c.id, { decision, reason: reason.trim(), field_confirmed: confirmed && !tasksOk }))
-  const canRelease = (d: SafetyDecision) => !resolved && !disabled && !busy && !!transport?.safetyRelease && fieldOk && (d === 'scrap' || c.reading_ok)
+  const canRelease = (d: SafetyDecision) => !resolved && !disabled && !busy && !!transport?.safetyRelease && fieldOk && (d !== 'resume' || c.reading_ok)
   return (
     <div className={`rs-card ${compact ? 'rs-compact' : ''} ${resolved ? 'rs-done' : ''}`} role={resolved ? undefined : 'alert'} data-testid="safety-case" data-case={c.id}>
       <div className="rs-head">
@@ -78,7 +80,7 @@ export function SafetyCaseCard({ c, compact = false, disabled = false }: { c: Sa
         <li className={resolved ? 'ok' : ''} data-testid="safety-step-3">
           <span className="rs-n">③</span>
           <div className="rs-body">
-            <b>{c.decisions.includes('qc_pass') ? 'QC 判定：放行或報廢' : '確認恢復運轉'}</b>
+            <b>{qc ? 'QC 判定：放行或報廢' : '確認恢復運轉'}</b>
             {resolved ? (
               <span className="rs-sub">{c.resolved_by}・{fmtHM(c.resolved_at)}{c.reason ? `・${c.reason}` : ''}</span>
             ) : (
@@ -90,7 +92,12 @@ export function SafetyCaseCard({ c, compact = false, disabled = false }: { c: Sa
                     {confirmed && <input className="rs-reason" value={reason} maxLength={200} placeholder="理由（必填）" onChange={(e) => setReason(e.target.value)} data-testid="safety-reason" />}
                   </label>
                 )}
-                <span className="rs-sub">{!fieldOk ? '需先完成 ①（或勾選已現場確認並寫理由）' : !c.reading_ok ? '需等 ② 讀值穩定' : '條件都已滿足；按下後寫入稽核紀錄'}</span>
+                <span className="rs-sub" data-testid="safety-step-3-hint">{qc
+                  ? `QC 判定這條胎，只需 ①（或勾選已現場確認並寫理由）${fieldOk ? '；條件已滿足，按下後寫入稽核紀錄' : ''}`
+                  : !fieldOk ? '需先完成 ①（或勾選已現場確認並寫理由）' : !c.reading_ok ? '需等 ② 讀值穩定' : '條件都已滿足；按下後寫入稽核紀錄'}</span>
+                {qc && !c.reading_ok && (
+                  <span className="rs-sub" data-testid="safety-qc-out">讀值還沒回到安全範圍：「QC 合格，放行」後這一模出模計入訂單，機台停用待維修，不會再入模</span>
+                )}
               </>
             )}
           </div>
@@ -114,7 +121,7 @@ export function SafetyCaseCard({ c, compact = false, disabled = false }: { c: Sa
 export function SafetyBanner() {
   const { state, connected } = useWarRoom()
   const cases = openCases(state.snapshot?.safety_cases)
-  if (!cases.length) return null
+  if (!SHOW_SAFETY_CASES || !cases.length) return null
   return (
     <section className="rs-banner" aria-label="安全核心處置" data-testid="safety-banner">
       {cases.map((c) => <SafetyCaseCard key={c.id} c={c} disabled={!connected} />)}

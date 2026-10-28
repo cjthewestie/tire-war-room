@@ -21,8 +21,10 @@ export const isMachine = (machine: string | null | undefined) => !!machine && ma
 
 const isGranted = (status: string) => status === 'approved' || status === 'modified'
 const keyOf = (r: { id?: string; event_id: string }) => r.id ?? r.event_id
-/** morning_rush's events: the rush order is EV-…-RUSH, a supervisor command (the SO-012 pre-plan) EV-…-CMD. */
-const isRush = (eventId: string | null | undefined) => !!eventId && eventId.endsWith('-RUSH')
+/** The orders beat's task: morning_rush's rush order EV-…-RUSH, or the auto demo's 今日訂單排程 (早班開工, EV-…-PLAN). */
+export const isOrderTask = (eventId: string | null | undefined) => !!eventId && /-(RUSH|PLAN)(-\d+)?$/.test(eventId)
+const isRush = isOrderTask
+/** a supervisor command (the SO-012 pre-plan) is EV-…-CMD */
 const isCmd = (eventId: string | null | undefined) => !!eventId && eventId.endsWith('-CMD')
 
 export function signals(state: WarRoomState, seen: Seen): Signals {
@@ -50,6 +52,10 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     orders: (state.world?.orders.items.length ?? 0) > 0,
     rushCard: state.pending.some((p) => isRush(p.event_id)) || fresh.some((r) => isRush(r.event_id)),
     rushApproved: fresh.some((r) => isRush(r.event_id)),
+    // auto-play's 訂單 beat: this run's rush plan approved and its event done (plan → approved → done)
+    rushRunning: fresh.some((r) => isRush(r.event_id) && events.some((e) => e.id === r.event_id
+      && (e.state === 'execute' || e.state === 'verify' || e.state === 'closed' || e.state === 'safe_stop'))),
+    rushDone: fresh.some((r) => isRush(r.event_id) && events.some((e) => e.id === r.event_id && (e.state === 'closed' || e.state === 'safe_stop'))),
     // the SO-012 pre-plan (a supervisor command event): in and done
     preplan: cmd.length > 0 && cmd.every((e) => e.state === 'closed' || e.state === 'safe_stop'),
     event: !!ev,
@@ -64,6 +70,10 @@ export function signals(state: WarRoomState, seen: Seen): Signals {
     // 停用檢修, so 「all done」 alone would fire early). Never on status running: 7 號機 stays 停用 until 恢復運轉.
     workerDone: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))),
     closed,
+    // auto-play's 維修 beat: the crew's repair done, or (the mock: no crew) the incident closed with the press running again
+    repaired: approved && (!!tile?.repaired || (closed && tasks.length >= mine.length && tasks.every((k) => k.status === '完成'))
+      || (closed && tile?.status === 'running')),
+    crewDone: approved && ((tasks.length > 0 && tasks.every((k) => k.status === '完成')) || !!tile?.repaired || closed),
     // the walk to 7 號機 starts as soon as the last repair is approved (the crew works while the lead runs there)
     fixing: (rejected && mine.length >= 2) || (approved && (!!tile?.repaired || closed)),
   }

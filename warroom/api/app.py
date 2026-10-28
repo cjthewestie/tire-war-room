@@ -62,6 +62,7 @@ from warroom.contracts import (
     CommandReply,
     CommandRequest,
     DiscussReply,
+    LLMMode,
     DiscussRequest,
     ApprovalDecision,
     ApprovalRequest,
@@ -1020,7 +1021,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             raise HTTPException(status_code=409, detail="LAN 中斷：請至現場觸控螢幕下指令")
         _sm_ready(r)
         from warroom.agent.ask import smalltalk_reply
-        chat = smalltalk_reply(body.text)
+        # issue #195: the keyword greeting check is the rule mode's; with a model the commander reads the command
+        chat = smalltalk_reply(body.text) if r.llm_mode is not LLMMode.LLM else None
         if chat is not None:       # a greeting is not a task: no event, no tool; still audited
             r.audit.append(AuditKind.SYSTEM, session.actor, {"command": body.text, "intent": "chitchat",
                                                              "reply": chat, "event": None})
@@ -1029,7 +1031,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
         # 「我只需要一個幫忙分類的，現在先不要派發」); the same path as Agent Nemo's propose_plan
         ev = r.start_command(body.text.strip(), session.actor)
         from warroom.agent.talk import physical_request
-        refusal = physical_request(body.text)
+        refusal = physical_request(body.text) if r.llm_mode is not LLMMode.LLM else None
         return CommandReply(event_id=ev.id, accepted=refusal is None,
                             reply=refusal or "已開新任務：計劃擬好會送到計劃區給你核准，核准後才執行。")
 
@@ -1059,6 +1061,14 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             holder["main"] = MainAgent(r.settings, audit=r.audit)
             r.memory_resets.append(holder["main"].clear)     # scenario load / reset / day-loop wrap
         return holder["main"]
+
+    def _overview_chat(r: Runtime):
+        """The 總攬 / 新對話 orchestrator chat (warroom/api/overview_chat.py), on the MainAgent's model client."""
+        if "overview" not in holder:
+            from warroom.api.overview_chat import OverviewChat
+            holder["overview"] = OverviewChat(_main_agent(r))
+            r.memory_resets.append(holder["overview"].clear)
+        return holder["overview"]
 
     def _log_chat(r: Runtime, body: MainMessage, session: Session, text: str, res: dict[str, Any]) -> None:
         """Both sides of the turn into the chat log on disk (CJ 2026-10-22: 「這些對話紀錄跟訂單紀錄都要記錄下來」)."""
@@ -1129,9 +1139,12 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             if card is not None:
                 # the card as the supervisor sees it: title, what it does and the A／B staffing options (the title alone
                 # let the model invent changes: 「調低到 118°C、縮短硫化時間」, real run 2026-10-21)
-                opts = "；".join(f"{o.id} {o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
-                waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(card.actions) or '無'}"
-                           + (f"。人力方案：{opts}" if opts else ""))
+                opts = "；".join(f"方案 {o.id}：{o.label}{'（系統建議）' if o.recommended else ''}" for o in card.options)
+                # issue #195: 「A 夜班加班加上 B 線調 1 人」 (real run 10-22) — the options are alternatives, say so
+                acts = [re.sub(r"^S\d+\s*", "", a) for a in card.actions]       # 「S3 排程 v2 生效」: no step ids
+                waiting = (f"{card.title}（v{card.version}）。要做的事：{'；'.join(acts) or '無'}"
+                           + (f"。人力方案（{len(card.options)} 選 1，不是加在一起）：{opts}" if len(card.options) > 1
+                              else f"。方案：{opts}（只有這一個）" if opts else ""))
         from warroom.agent.ask import AskAgent
         from warroom.agent.orchestrator import ACTOR, PRIORITY
         from warroom.contracts import ToolName, ToolResult
@@ -1179,6 +1192,17 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                            event_id=eid)
             reads.append((topic, data))
             return {"ok": err is None, "data": data, "error": err}
+
+        if body.event_id and not overview_mode:
+            from warroom.api.task_sessions import TASK_LIST_TOPICS
+            _read_all = read_plant
+
+            async def read_plant(topic: str, call_id: str, order_id: str | None = None,  # noqa: F811
+                                 machine_id: str | None = None, date: str | None = None, q: str | None = None) -> dict[str, Any]:
+                # a task's session never lists the other tasks (issue #195); the 總覽 / 新對話 does
+                if topic in TASK_LIST_TOPICS:
+                    return {"ok": False, "data": None, "error": "這是單一任務的對話，其他任務請到新對話或總覽問"}
+                return await _read_all(topic, call_id, order_id, machine_id, date, q)
 
         reads: list[tuple[str, Any]] = []
 
@@ -1365,8 +1389,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             try:
                 if c is not None:
                     d = "scrap" if ("報廢" in words and "scrap" in c.decisions) else c.decisions[0]
-                    r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"), self.actor)
+                    done = r.safety_release(c.id, SafetyRelease(decision=d, reason="主管在對話中確認（Agent Nemo）"),
+                                            self.actor)
                     result = (f"已報廢{machine_label(mid)}這一模，換模後再入模。" if d == "scrap"
+                              else f"QC 合格放行：{machine_label(mid)}這一模出模計入訂單；讀值還沒回到安全範圍，機台停用待維修。"
+                              if d == "qc_pass" and not done.reading_ok
                               else f"已恢復{machine_label(mid)}運轉（{'QC 合格放行' if d == 'qc_pass' else '確認恢復運轉'}）。")
                 else:
                     r.return_to_service(mid, self.actor)
@@ -1394,8 +1421,41 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             _log_chat(r, body, session, text, blocked)
             return blocked
         from warroom.api import plant_query
+        res: dict[str, Any] | None = None
+        from warroom.agent.main_agent import control_intent as _control_intent
+        if _overview_chat(r).ready and _control_intent(text) is None:
+            # a task command (「7 號機那件中斷」「重新排」) keeps the confirmed control path of the task agent below
+            # every Agent Nemo chat (總攬 / 新對話, and a task's own session since CJ 10-22 「任務的個別agent也開啟最高回覆工具權限」):
+            # an orchestrator conversation with every tool; a write opens a gated task, a plan change goes through discuss
+            from warroom.api import task_sessions as _TS
+            task_info = None
+            ev_sel = _safe(lambda: sm.get(body.event_id), None) if body.event_id else None
+            if ev_sel is not None:
+                task_info = {"id": ev_sel.id, "session": _overview_chat(r).session_of(r, ev_sel.id),
+                             "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
+                                                         else ev_sel.anomaly.message))[:80],
+                             "state": ev_sel.state.value, "state_label": plant_query.STATE.get(ev_sel.state.value),
+                             "outcome": (ev_sel.outcome or "")[:160] or None, "waiting": waiting}
+            pend = _safe(lambda: r.approvals.pending(), []) if r.approvals is not None else []
+            listing = _safe(lambda: _TS.listing(r, None), {})
+            glance = {"進行中任務": len(listing.get("running", [])), "等你核准的卡": len(pend),
+                      "這段對話的編號": (listing.get("general_session") or {}).get("session_short")}
+            try:
+                res = await _overview_chat(r).turn(r, text, conversation=session_key(body, session.actor),
+                                                   run_tool=run_tool, read_plant=read_plant, propose=propose,
+                                                   control=Control(), slot=slot, context=glance, task=task_info,
+                                                   discuss=talk if (waiting and ev_sel is not None) else None)
+                reads.extend(res.pop("reads", []))
+            except Exception as e:  # noqa: BLE001 - the task-session agent below takes the turn
+                r.audit.append(AuditKind.SYSTEM, ACTOR, {"orch": "chat", "overview_fallback": f"{type(e).__name__}: {e}"[:200]})
+                res = None
         # 今日工廠概況 rides along with the read-only context (next shipment, headcount, progress, open events)
         context = {**r.ask_context(), "today": _safe(lambda: plant_query.overview(r), None)}
+        if body.event_id and not overview_mode:
+            # a task's own session (issue #195, live run 10-22: another task's card in the reply): this task only; the
+            # plant overview stays out (it was read back as 「今天的工廠概況：…」) and is a query_plant read away
+            from warroom.api.task_sessions import scope_context
+            context = scope_context(context, body.event_id)
         if overview_mode:
             from warroom.api import overview
             context["overview"] = {**_safe(lambda: overview.snapshot(r), {}),
@@ -1407,6 +1467,7 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
             ev_sel = _safe(lambda: sm.get(body.event_id), None)
             if ev_sel is not None:
                 context["selected_task"] = {"id": ev_sel.id, "state": ev_sel.state.value, "machine": ev_sel.machine_id,
+                                            "outcome": (ev_sel.outcome or "")[:160] or None,
                                             "what": (ev_sel.command or (ev_sel.alert_card.title if ev_sel.alert_card
                                                                         else ev_sel.anomaly.message))[:60]}
         memory = None
@@ -1448,10 +1509,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
                 def get(self, ids: list[str], call_id: str) -> list[dict[str, Any]]:
                     return self._audited("memory_get", {"ids": ids}, call_id, lambda: desk.obs.get(ids))
             memory = ChatMemory()
-        res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
-                                        propose=propose, discuss=talk if waiting else None, slot=slot,
-                                        read_plant=read_plant, conversation=session_key(body, session.actor),
-                                        control=Control(), mode=body.mode, memory=memory)
+        if res is None:
+            res = await _main_agent(r).turn(text, context=context, waiting_plan=waiting, run_tool=run_tool,
+                                            propose=propose, discuss=talk if waiting else None, slot=slot,
+                                            read_plant=read_plant, conversation=session_key(body, session.actor),
+                                            control=Control(), mode=body.mode, memory=memory)
         if overview_mode:
             from warroom.api import overview
             acted = [str(s["args"]["event_id"]) for s in res["steps"] if isinstance(s.get("args"), dict) and s["args"].get("event_id")]

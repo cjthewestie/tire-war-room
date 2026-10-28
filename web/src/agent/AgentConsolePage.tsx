@@ -86,6 +86,7 @@ export function AgentConsolePage({ asks, setAsks, initial, onSession }: {
   // 總覽: Agent Nemo over every task — its own conversation (mode overview), no task selected (CJ 2026-10-22)
   const thread = useMainThread(asks, 'overview')
   const [focus, setFocus] = useState<BarFocus | null>(null)
+  const overviewNo = useTaskListing('')?.general_session?.session ?? null
   if (!state.snapshot) return <div className="loading">等待工廠資料…</div>
   return (
     <>
@@ -116,7 +117,7 @@ export function AgentConsolePage({ asks, setAsks, initial, onSession }: {
       </aside>
       {main ? (
         <section className="panel trace-main main-thread" aria-label="總覽" data-testid="main-thread" data-mode="overview">
-          <h2 className="trace-h">總覽</h2>
+          <h2 className="trace-h">總覽{overviewNo && <small className="tss-no" data-testid="overview-session-no" style={{ marginLeft: 8 }}>{overviewNo} 新對話</small>}</h2>
           <TodaySummary />
           <Bubbles items={thread} empty="問全部任務的狀況、哪些有問題、過去的紀錄，或工廠的任何事。" onLink={onSession ?? pick} guide={(
             <div className="con-guide" data-testid="overview-guide">
@@ -142,7 +143,7 @@ function PastTask({ id, onSession }: { id: string; onSession?: (eventId: string)
       <header className="trace-h">
         <div>
           <h2>{row ? plain(row.title) : id}</h2>
-          <p className="muted small trace-id">{id}{row?.day ? `・${row.day}` : ''}{row ? `・${row.kind_label}` : ''}</p>
+          <p className="muted small trace-id">{row?.session && <b className="tss-no" data-testid="trace-session-no">{row.session}</b>}{row?.session ? '・' : ''}{id}{row?.day ? `・${row.day}` : ''}{row ? `・${row.kind_label}` : ''}</p>
         </div>
         {row && <span className="trace-h-r"><span className="state-pill">{row.state_label}</span></span>}
       </header>
@@ -216,6 +217,7 @@ function Trace({ ev, asks, setAsks }: {
   // the one conversation store: what this page and 主控台 are sending or asking, merged by time with the audit rows
   const items = useMemo(() => (ev ? evItems : withAsks([], asks)), [ev, evItems, asks])   // a subagent shows its own run only
   const talk = useMainThread(asks, 'task', ev?.id ?? null)    // this task's session (issue #189)
+  const sess = allRows(useTaskListing('')).find((r) => r.id === ev?.id)    // its session number (CJ 10-22)
   const waiting = !!ev && ev.state === 'await_approval' && state.pending.some((p) => p.event_id === ev.id)
   const ended = !!ev && (ev.state === 'closed' || ev.state === 'safe_stop')
   const [kind, setKind] = useState<Kind>('all')
@@ -234,7 +236,7 @@ function Trace({ ev, asks, setAsks }: {
       <header className="trace-h">
         <div>
           <h2>{ev ? <>{evName(ev)}・{fmtMD(ev.opened_at)} {fmtHMS(ev.opened_at)}</> : '問戰情室（只查不改）'}</h2>
-          {ev && <p className="muted small trace-id">{ev.id}{ev.goal ? `・目標：${plain(ev.goal)}` : ''}</p>}
+          {ev && <p className="muted small trace-id">{sess?.session && <><b className="tss-no" data-testid="trace-session-no">{sess.session}</b>・</>}{ev.id}{ev.goal ? `・目標：${plain(ev.goal)}` : ''}</p>}
         </div>
         {ev && <span className="trace-h-r">
           {ended && <button type="button" className="btn-ghost" data-testid="trace-to-report"

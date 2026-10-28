@@ -43,6 +43,9 @@ CATALOG: tuple[EventDef, ...] = (
     EventDef("steam_leak", "硫化機蒸汽洩漏", 1, "fault"),
     EventDef("sensor_glitch", "感測器壞資料（不叫醒 AI）", 1, "fault"),
     EventDef("rush_order", "急單插單", 2, "plant"),
+    # the 3D auto demo's orders beat (CJ 10-22: 「呈現一種日常訂單，早上 agent 安排完」): the day's order plan, fired on
+    # purpose only (weight 0: the random generator never picks it)
+    EventDef("shift_start", "今日訂單排程（早班開工）", 0, "plant"),
     EventDef("staff_sick", "人員請病假", 2, "plant"),
     EventDef("delivery_late", "原料到貨延遲", 1, "world"),
     EventDef("stock_out", "原料缺料（一批驗退）", 1, "world"),
@@ -140,6 +143,11 @@ class SimEvents:
                              params={"delta": round(rng.uniform(20.0, 30.0), 1)})
         if kind == "rush_order":
             return self._rush(sim, now)
+        if kind == "shift_start":
+            orders = [o for o in (sim.orders() if hasattr(sim, "orders") else []) if o.done < o.qty]
+            return PlantInput(kind="shift_start",
+                              text=f"今日訂單排程（{now:%m/%d} 早班）：{len(orders)} 張訂單 → 排機台與班別"
+                              if orders else f"今日訂單排程（{now:%m/%d} 早班）：排機台與班別")
         if kind == "staff_sick":
             return self._sick(sim, now)
         world = getattr(sim, "world", None)

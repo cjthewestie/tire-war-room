@@ -671,8 +671,8 @@ export function Lights() {
     const s = new THREE.DirectionalLight('#ffe9c9', 2.4)
     s.position.set(1.8 + 7, 16, 0.6 + 8)
     s.target.position.set(1.8, 0, 0.6)
-    s.castShadow = true
-    s.shadow.mapSize.set(2048, 2048)
+    s.castShadow = false   // perf (CJ: 「太頓了」): no real-time shadow map
+    s.shadow.mapSize.set(1024, 1024)
     Object.assign(s.shadow.camera, { left: -13, right: 13, top: 11, bottom: -11, near: 1, far: 45 })
     s.shadow.bias = -0.0005
     s.shadow.normalBias = 0.03

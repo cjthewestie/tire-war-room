@@ -583,7 +583,10 @@ class StateMachine:
         ev = run.ev
         text = ev.command or ""
         self._to(ev, EventState.CLASSIFY, "supervisor command: read context")
-        refusal = physical_request(text)
+        # issue #195: with a model the commander reads the command itself (its plan has no actuator to call, and every
+        # action still meets the Action Gate and the supervisor's approval); the keyword refusal is the rule mode's
+        llm = str(getattr(getattr(self.commander, "mode", None), "value", getattr(self.commander, "mode", ""))) == "llm"
+        refusal = None if llm else physical_request(text)
         if refusal:
             # nothing on the allow-list can do it: say so, never invent an action (page 5: no actuator)
             self.audit.append(AuditKind.SYSTEM, "state_machine", {"command_refused": refusal, "command": text},
@@ -626,7 +629,7 @@ class StateMachine:
                           {"from": None, "to": EventState.DETECTED.value, "reason": "plant event"}, event_id=eid)
         self.audit.append(AuditKind.SYSTEM, "plant", {"plant_input": pin.model_dump(mode="json")}, event_id=eid)
         self._note(ev, "事件偵測", f"[工具] {pin.text} → 喚醒指揮官", "tool", ts=now)
-        title = {"shift_start": "早班開工", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
+        title = {"shift_start": "今日訂單排程", "rush_order": "插單", "absence": "人力缺口"}[pin.kind]
         self._set_alert(ev, AlertCard(title=title, summary=pin.text[:60]), source="detector")
         return ev
 

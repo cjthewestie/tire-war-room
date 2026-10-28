@@ -4,7 +4,6 @@ import { SCENARIOS } from '../mock/engine'
 import { useWarRoom } from '../useWarRoom'
 import { overlayNote, runningScenarios, scenarioClick } from './scenarioOverlay'
 import { SimEventControls } from './SimEvents'
-import { useDemoCtx } from '../demo/useDemo'
 
 const Q = new URLSearchParams(location.search)
 /** ?demo=1: the 3D presenter mode (key strip listed, key 4 隨機事件 off). The demo strip no longer depends on it. */
@@ -33,7 +32,6 @@ export function DemoStrip() {
   const [busy, setBusy] = useState(false)
   const [loading, setLoading] = useState<string | null>(null)   // 情境切換中: the server builds the new plant
   const [overlaid, setOverlaid] = useState<string | null>(null)  // 情境疊加: 「已疊加：…（新增 N 件）」
-  const guided = useDemoCtx()      // the war room's guided demo, shared with the 3D factory (null inside the 3D page)
   if (!transport) return null
   const mock = transport.mode === 'mock'
   const run = async (fn: () => Promise<unknown>) => { setBusy(true); try { await fn() } catch (e) { console.warn(e) } finally { setBusy(false) } }
@@ -58,17 +56,7 @@ export function DemoStrip() {
   const overlays = runningScenarios(state).overlays
   return (
     <div className="demo" aria-label="展示">
-      {/* CJ, 2026-10-22: 「這邊其實不用了給我一個demo mode就是跟著3d工廠demo的模式時序照著走 QA mode是評審遇到技術框架問題的時候
-          可以幫我回答的」: two big buttons; the scenario, speed, reset and network controls stay behind ⚙ 展示控制 */}
-      <div className="demo-modes">
-        {guided && transport.demo && (
-          <button className={`demo-mode ${guided.running ? 'on' : ''}`} data-testid="demo-mode-button"
-            title="跟著 3D 工廠的導覽時序：主控台 → 事件 → 手機核准 → 員工完成 → Agent 頁面 → Pitch"
-            onClick={() => void (guided.running ? guided.exit() : guided.start())}>{guided.running ? '■ 結束 Demo' : '▶ Demo 模式'}</button>
-        )}
-        <button className="demo-mode qa" data-testid="qa-mode-button" title="評審問技術框架時，幫你回答"
-          onClick={() => { location.hash = 'qa' }}>💬 QA 模式</button>
-      </div>
+      {/* CJ, 2026-10-22: 「demo mode 跟 QA mode 那欄刪掉」: the two big buttons are gone (QA 模式 still opens at #qa) */}
       <details className="demo-more" data-testid="demo-more">
       <summary>⚙ 展示控制</summary>
       <div className="demo-ctl">

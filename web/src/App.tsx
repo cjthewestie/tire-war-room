@@ -6,7 +6,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import type { Line } from './contracts'
 import type { LocalItem } from './agent/transcript'
-import { DemoStrip } from './components/DemoStrip'
 import { Header, type Tab } from './components/Header'
 import { MachineDrawer } from './components/MachineDrawer'
 import { MonitorTab } from './components/MonitorTab'
@@ -21,6 +20,7 @@ import { embedSearch } from './transport'
 import { DemoOverlay } from './demo/DemoOverlay'
 import { anchorsFor, focusEvent } from './demo/beats'
 import { DemoCtx, useDemo } from './demo/useDemo'
+import { DemoButtons } from './components/DemoButtons'
 
 const AgentTab = lazy(() => import('./agent/AgentTab').then((m) => ({ default: m.AgentTab })))
 const AgentConsolePage = lazy(() => import('./agent/AgentConsolePage').then((m) => ({ default: m.AgentConsolePage })))
@@ -104,11 +104,7 @@ function Dashboard() {
       {demo.running && <DemoOverlay d={demo} anchors={beat ? anchorsFor(beat, focusEv) : []} caption={beat?.caption ?? ''} />}
       <Header tab={tab} onTab={go} />
       <PendingApprovalAlert variant={tab === 'agent' ? 'compact' : 'bar'} onGo={goApprove} stickyBelow=".topbar" />
-      <div className="demo-sheet" role="region" aria-label="展示控制">
-        <div className="demo-sheet-h"><b>展示控制</b><button className="x" onClick={() => setDemoOpen(false)} aria-label="關閉展示控制">✕</button></div>
-        <DemoStrip />
-      </div>
-      {demoOpen && <div className="demo-scrim" onClick={() => setDemoOpen(false)} aria-hidden />}
+      {/* CJ, 2026-10-22: 「demo 那欄框框要整個拿掉」: the 展示控制 sheet (DemoStrip) is no longer shown */}
       {/* the light is on only while an approval or an open event needs a person (header.warning_light) */}
       {lanDown && <div className="banner">LAN 中斷：手機連不上，核准改在現場觸控螢幕操作，{state.snapshot?.header.warning_light ? '警示燈已亮' : '有待處理事項時警示燈會亮'}。AI 與安全核心照常在邊緣主機運作。</div>}
       {budget && (
@@ -125,6 +121,8 @@ function Dashboard() {
         : tab === 'qa' ? <Suspense fallback={<div className="loading">載入 QA 模式…</div>}><QaPage /></Suspense>
         : <Suspense fallback={<div className="loading">載入主控台…</div>}><AgentTab asks={asks} setAsks={setAsks} picked={agentEvent} setPicked={setAgentEvent} onMonitor={() => go('monitor')} onFull={openConsole} onFocus={focusPlant} /></Suspense>}</main>
       {machine && <MachineDrawer id={machine} onClose={() => setMachine(null)} />}
+      {/* CJ, 2026-10-22: 「把我這些想要 demo 的東西都做成小按鈕，因為可能會被斷網」: a tiny collapsed ⚙ in the corner, local /api only */}
+      {!EMBEDDED && <DemoButtons />}
       {/* DESIGN.md: no extra buttons in the header, so the 3D walk-through is linked here and in the phone 「更多」 sheet */}
       <footer className="foot-note">示意畫面；剩餘時間依硫化機產能與班別估算・物理與排程數值由公式與求解器計算，不由 AI 推測
         {!EMBEDDED && <a className="foot-link" href={`/factory${embedSearch()}`} target="_blank" rel="noopener" data-testid="factory-link">3D 工廠 ↗</a>}</footer>
@@ -146,9 +144,6 @@ function Dashboard() {
         </button>
         <button className={tab === 'sm' || tab === 'admin' || moreOpen ? 'on' : ''} aria-expanded={moreOpen} aria-haspopup="menu" aria-label={EMBEDDED ? '更多：狀態機、後台' : '更多：狀態機、後台、3D 工廠'} onClick={() => setMoreOpen((o) => !o)} data-testid="nav-more">
           <svg viewBox="0 0 24 24" aria-hidden><circle cx="5" cy="12" r="1.6" /><circle cx="12" cy="12" r="1.6" /><circle cx="19" cy="12" r="1.6" /></svg>{tab === 'sm' ? '狀態機' : tab === 'admin' ? '後台' : '更多'}
-        </button>
-        <button className={demoOpen ? 'on' : ''} aria-expanded={demoOpen} onClick={() => setDemoOpen((o) => !o)}>
-          <svg viewBox="0 0 24 24" aria-hidden><path d="M8 5v14l11-7z" /></svg>展示控制
         </button>
       </nav>
       {moreOpen && (

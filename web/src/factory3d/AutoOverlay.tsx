@@ -1,19 +1,23 @@
-// Auto-play demo overlay (?mock=1&demo=cure07): one caption line on top, a pause / replay bar at the bottom.
-// Nothing here can block the run: no "press Space", no next-step hints, no audit prompts.
-import { AUTO_TEXT } from '../demo/cues'
+// Auto-play demo overlay (/factory?demo=cure07, ?demo=simple, or ?mock=1&demo=cure07): one caption line on top (the
+// beat's, demo/beat.ts) and one small 「下一階段 ▶」 button (CJ 10-22; also N / Space / →) that skips to the next beat now
+// — the demo's own pending card is approved on the way. No pause / replay (「不需要下面暫停跟重新播放」); Esc still leaves.
+// The simple version (?demo=simple, CJ 10-27) shows its own 7-stage captions, a 「n/7」 chip and, when the presenter's ❚❚ 暫停
+// (SimpleDock) holds the story, a 「❚❚ 已暫停」 chip after the caption; no prompter.
+import { AUTO_TEXT, SIMPLE_TEXT, simpleRequested, simpleStageOf } from '../demo/auto'
+import { useDemoBeat } from '../demo/beat'
 import type { GuidedDemo } from './useGuidedDemo'
 
 export function AutoOverlay({ demo }: { demo: GuidedDemo }) {
-  const title = AUTO_TEXT[demo.cue.id]?.title ?? demo.cue.title
+  const beat = useDemoBeat()
+  const simple = simpleRequested()
+  const title = beat ? (simple ? SIMPLE_TEXT : AUTO_TEXT)[beat] : demo.cue.title
+  const stage = simple ? simpleStageOf(beat) : null
   return (
     <>
-      <div className="f3-auto-cap" data-testid="auto-cap">{title}</div>
-      <div className="f3-auto-bar" data-testid="auto-bar">
-        <b>{demo.autoStatus || '準備中'}</b>
-        <span>
-          <button type="button" onClick={demo.togglePause}>{demo.paused ? '▶ 播放' : '❚❚ 暫停'}</button>
-          <button type="button" onClick={async () => { await demo.exit(); void demo.begin() }}>↻ 重新播放</button>
-        </span>
+      <div className="f3-auto-cap" data-testid="auto-cap" data-beat={beat ?? undefined} data-stage={stage?.n}>
+        {stage && <span className="f3-simple-stage" data-testid="simple-stage">{stage.n}/{stage.total}</span>}
+        {title}
+        {simple && demo.paused && <span className="f3-simple-paused" role="status" data-testid="simple-paused">❚❚ 已暫停</span>}
       </div>
     </>
   )

@@ -45,14 +45,24 @@ def test_when_done_is_a_where_question(q):
     assert intent is not None and intent.kind == "where" and intent.ids == ("SO-004",)
 
 
-async def test_so004_when_done_is_answered_by_code(plant, audit):
-    """The order fast path: no model call, the order's completion from the order list, never a bare 查不到."""
+async def test_so004_when_done_goes_to_the_model_with_the_order_facts(plant, audit):
+    """issue #195: with a model the order question is the model's (no code fast path in front); its facts are the order
+    list's own line (progress, machines, due, 預計完成), so it is never a bare 查不到."""
     ctx, reg = plant
-    agent = _llm_agent()                                          # nothing queued: a model call would fail
+    agent = _llm_agent(_plan(("query_orders_shifts", {"order_ids": ["SO-004"]}), intent="question"),
+                       "SO-004 還沒開始做，預計完成時間要等排程。")
     a = await agent.ask("SO-004 什摸時候完成", tools=reg, audit=audit, context={}, now=ctx.clock.now())
-    assert agent.client.calls == []
-    assert a.answer.startswith("SO-004 的機台與預計完成") and "預計完成" in a.answer and "查不到" not in a.answer
+    assert len(agent.client.calls) == 2 and a.answer == "SO-004 還沒開始做，預計完成時間要等排程。"
+    facts = agent.client.calls[1]["messages"][1]["content"]
+    assert "SO-004" in facts and "預計完成" in facts and "查無訂單" not in facts
     assert [s.tool for s in a.steps] == ["query_orders_shifts"] and a.steps[0].args == {"order_ids": ["SO-004"]}
+
+
+async def test_so004_when_done_without_a_model_is_answered_by_code(plant, audit):
+    """Rule mode (LLM_MODE=mock) keeps the keyword routes as the fallback: the order fast path answers."""
+    ctx, reg = plant
+    a = await _mock_agent().ask("SO-004 什摸時候完成", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert a.answer.startswith("SO-004 的機台與預計完成") and "查不到" not in a.answer
 
 
 async def test_order_ids_match_however_written(plant):
@@ -62,9 +72,9 @@ async def test_order_ids_match_however_written(plant):
                                    args={"order_ids": ["#so-004"]}))
     assert res.ok and [o["id"] for o in res.data["orders"]] == ["SO-004"]
     line = summarize(ToolName.QUERY_ORDERS_SHIFTS, res.data, {"order_ids": ["#so-004"]})
-    assert line.startswith("SO-004（") and "沒有這張訂單" not in line
+    assert "SO-004" in line and "預計完成" in line and "查無訂單" not in line and "沒有這張訂單" not in line
     missing = summarize(ToolName.QUERY_ORDERS_SHIFTS, res.data, {"order_ids": ["SO-999"]})
-    assert missing == "沒有這張訂單：SO-999"
+    assert "SO-999" in missing and ("查無訂單" in missing or "沒有這張訂單" in missing)
 
 
 async def test_bare_not_found_with_data_gets_one_rewrite(plant, audit):
@@ -89,27 +99,29 @@ def test_follow_up_machines(q, mids):
     assert follow_up_machines(q) == mids
 
 
-async def test_follow_up_repeats_the_last_question_for_the_new_machine(plant, audit):
+async def test_follow_up_within_a_session_reaches_the_model(plant, audit):
+    """「那 8 號呢」 in the same conversation: the model plans it, given the previous question and its steps (this
+    conversation only); the answer is told what the previous question was."""
     ctx, reg = plant
     mem = AskMemory()
-    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"], "minutes": 30})), "7 號機溫度偏低。",
-                       "8 號機溫度正常。", "9 號機溫度正常。")
+    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"], "minutes": 30}), intent="question"),
+                       "7 號機溫度偏低。",
+                       _plan(("read_sensors", {"machine_ids": ["CURE-08"], "minutes": 30}), intent="question"),
+                       "8 號機溫度正常。")
     kw = {"tools": reg, "audit": audit, "context": {"abnormal": ["CURE-07"]}, "now": ctx.clock.now(),
-          "conversation_id": "c-1", "memory": mem}
+          "conversation_id": "task-A", "memory": mem}
     await agent.ask("現在7號機溫度", **kw)
     a = await agent.ask("那8號呢", **kw)
-    # no planner call, no broad lookup: the same read for 8 號 only
-    assert len(agent.client.calls) == 3
+    plan_in = agent.client.calls[2]["messages"][1]["content"]
+    assert '"previous_question": "現在7號機溫度"' in plan_in and "CURE-07" in plan_in
     assert [(s.tool, s.args) for s in a.steps] == [("read_sensors", {"machine_ids": ["CURE-08"], "minutes": 30})]
     assert a.answer == "8 號機溫度正常。"
-    prompt = agent.client.calls[2]["messages"][1]["content"]
-    assert "接續上一題「現在7號機溫度」" in prompt and "8 號機" in prompt
-    plan = _entries(audit, a.id, AuditKind.LLM_CALL)[0].payload
-    assert plan["planner"] == "follow-up rule" and plan["model"] is None
-    # a chain of follow-ups keeps the root question
-    b = await agent.ask("那9號呢", **kw)
-    assert [s.args["machine_ids"] for s in b.steps] == [["CURE-09"]]
-    assert "接續上一題「現在7號機溫度」" in agent.client.calls[3]["messages"][1]["content"]
+    assert "上一題：「現在7號機溫度」" in agent.client.calls[3]["messages"][1]["content"]
+    assert _entries(audit, a.id, AuditKind.LLM_CALL)[0].payload["planner"] == "llm"
+    # another task's conversation has no previous question
+    other = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-08"]}), intent="question"), "8 號機溫度正常。")
+    await other.ask("那8號呢", **{**kw, "conversation_id": "task-B"})
+    assert "previous_question" not in other.client.calls[0]["messages"][1]["content"]
 
 
 async def test_follow_up_history_stays_in_its_conversation(plant, audit):
@@ -137,16 +149,12 @@ SPARK_PLAN_FOR_8 = _plan(("query_orders_shifts", {"press_ids": ["CURE-08"]}),
                          ("cure_formula", {"actual_temp_c": 115.11, "elapsed_h": 2, "size": "M"}))
 
 
-async def test_spark_plan_for_8_is_pruned_to_what_was_asked(plant, audit):
-    """The Spark 10-03 plan for 「那8號呢」 (no memory): orders, forecast and cure_formula are not asked for."""
+async def test_the_planner_gets_no_readings(plant, audit):
+    """The planner is not handed readings to copy into args (Spark 10-03: 7 號's 115.11 °C went into 8 號's plan)."""
     ctx, reg = plant
     agent = _llm_agent(SPARK_PLAN_FOR_8, "8 號機溫度正常。")
-    a = await agent.ask("那8號呢", tools=reg, audit=audit, context={"abnormal_temp_c": {"CURE-07": 115.11}},
-                        now=ctx.clock.now())
-    assert [s.tool for s in a.steps] == ["read_sensors"]
-    pruned = [e.payload for e in _entries(audit, a.id, AuditKind.SYSTEM) if "dropped" in e.payload]
-    assert [d["tool"] for d in pruned[0]["dropped"]] == ["query_orders_shifts", "predict_anomaly", "cure_formula"]
-    # the planner is not handed readings to copy into args
+    await agent.ask("那8號呢", tools=reg, audit=audit, context={"abnormal_temp_c": {"CURE-07": 115.11}},
+                    now=ctx.clock.now())
     assert "115.11" not in agent.client.calls[0]["messages"][1]["content"]
 
 
@@ -245,16 +253,18 @@ async def test_approval_question_sees_the_open_events(plant, audit):
 
 
 async def test_change_request_still_gets_facts_only(plant, audit):
+    """The model reads 「幫我把 7 號機停掉」 as a change request: facts only, the approval-flow note, no model answer."""
     ctx, reg = plant
-    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"]})))
+    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"]}), intent="change_request"))
     a = await agent.ask("幫我把 7 號機停掉", tools=reg, audit=audit, context={}, now=ctx.clock.now())
     assert len(agent.client.calls) == 1 and a.answer.endswith("請走事件核准流程）")
 
 
-async def test_model_planning_nothing_for_a_factory_question_uses_the_rules(plant, audit):
-    """Spark 10-22: the real model planned 「今晚夜班缺誰？」 as small talk (no step) -> 「我不確定要查什麼」."""
+async def test_model_planning_nothing_for_a_question_gets_the_rules_steps(plant, audit):
+    """The model said 「question」 and planned no read (Spark 10-22: 「今晚夜班缺誰？」): its plan is incomplete, so the
+    keyword planner fills the steps (a repair of the model's output, audited)."""
     ctx, reg = plant
-    agent = _llm_agent(_plan(), "今晚夜班沒有人力缺口。")
+    agent = _llm_agent(_plan(intent="question"), "今晚夜班沒有人力缺口。")
     a = await agent.ask("今晚夜班缺誰？", tools=reg, audit=audit, context={}, now=ctx.clock.now())
     assert [s.tool for s in a.steps] == ["query_orders_shifts"] and a.answer == "今晚夜班沒有人力缺口。"
     plan = _entries(audit, a.id, AuditKind.LLM_CALL)[0].payload
@@ -264,6 +274,47 @@ async def test_model_planning_nothing_for_a_factory_question_uses_the_rules(plan
 async def test_event_question_with_no_step_answers_from_the_open_events(plant, audit):
     ctx, reg = plant
     ev = {"id": "EV-20261003-021400-CURE-07", "machine_id": "CURE-07", "state": "await_approval", "goal": ""}
-    agent = _llm_agent(_plan(), "7 號機的事件在等待主管核准。")
+    agent = _llm_agent(_plan(intent="question"), "7 號機的事件在等你核准。")
     a = await agent.ask("核准卡在等什麼？", tools=reg, audit=audit, context={"open_events": [ev]}, now=ctx.clock.now())
-    assert a.steps == [] and a.answer == "7 號機的事件在等待主管核准。"
+    assert a.steps == [] and a.answer == "7 號機的事件在等你核准。"
+
+
+# ---------------------------------------------------------------- issue #195: the model reads the message itself
+async def test_greeting_is_the_models(plant, audit):
+    ctx, reg = plant
+    agent = _llm_agent(_plan(intent="chitchat", reply="你好，有什麼要我看的嗎？"))
+    a = await agent.ask("哈摟", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert len(agent.client.calls) == 1 and a.intent == "chitchat" and a.answer == "你好，有什麼要我看的嗎？" and not a.steps
+    agent = _llm_agent(_plan(intent="chitchat", reply="不客氣！"))
+    assert (await agent.ask("謝謝", tools=reg, audit=audit, context={}, now=ctx.clock.now())).answer == "不客氣！"
+
+
+async def test_chitchat_with_an_invented_number_gets_the_canned_line(plant, audit):
+    ctx, reg = plant
+    agent = _llm_agent(_plan(intent="chitchat", reply="你好！7 號機現在 128°C。"))
+    a = await agent.ask("你好", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert "128" not in a.answer and a.intent == "chitchat"
+
+
+async def test_unclear_gets_the_models_clarifying_question(plant, audit):
+    ctx, reg = plant
+    agent = _llm_agent(_plan(intent="unclear", reply="你是要看 7 號機的溫度，還是它的排程？"))
+    a = await agent.ask("那個", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert a.intent == "unclear" and a.answer == "你是要看 7 號機的溫度，還是它的排程？"
+
+
+async def test_stop_request_is_refused_with_the_reason(plant, audit):
+    """「把 7 號機停掉」 read by the model as a change request, with nothing to read: the refusal says why and where."""
+    ctx, reg = plant
+    agent = _llm_agent(_plan(intent="change_request"))
+    a = await agent.ask("把 7 號機停掉", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert a.intent == "change_request" and "不能變更" in a.answer and "核准" in a.answer
+
+
+async def test_without_a_model_the_keyword_routes_stay(plant, audit):
+    """Rule mode: the greeting is code's canned line (the fallback, not a pre-chat check with a model)."""
+    ctx, reg = plant
+    a = await _mock_agent().ask("哈摟", tools=reg, audit=audit, context={}, now=ctx.clock.now())
+    assert a.intent == "chitchat" and a.answer.startswith("你好")
+
+
