@@ -1,10 +1,10 @@
 # tire-war-room — instructions for any Claude working in this repo
 
-Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` section 0). Follow `CONTRIBUTING.md` for every step; it is the source of truth for setup, issues, branches, commits, PRs and the rules. Reply to teammates in Traditional Chinese, plain words, one step at a time.
+Teammates drive Claude with short Chinese requests. This file holds the team rules; `CONTRIBUTING.md` was deleted (CJ, 2026-10-26: 「contributing 刪掉」). Setup and run steps are in `README.md`. Reply to teammates in Traditional Chinese, plain words, one step at a time.
 
 ## Always
 
-- Work on an issue: open one with `gh issue create` (template 前端體驗改進 for UX work) before changing code, unless the request names an existing issue.
+- Open an issue only when it is needed: work someone else must pick up or track, a request for CJ outside `web/`, or a bug you can't fix now. Small or docs-only changes go straight to a branch and PR. CJ, 2026-10-26: "dont need issue for this" (on the README rewrite), "only write issue if needed". Use template 前端體驗改進 for UX issues.
 - Branch `座位/issue號-簡述` (teammates: `d/<n>-<slug>`); never commit or push to `main`.
 - Teammates change the front end only: `web/`. Anything in `warroom/`, `deploy/`, `bench/` or `warroom/contracts.py` → open an issue for CJ instead of editing. CJ, 2026-10-18: 「我希望他們改的是前端客戶體驗」.
 - Before a PR: `cd web && pnpm build && pnpm lint`, then `uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py`; all green. Attach before/after screenshots at 1440 and 390 width (headless browser).
@@ -24,6 +24,6 @@ Teammates drive Claude with short Chinese requests (see `CONTRIBUTING.md` sectio
 
 ## Notes for CJ's sessions
 
-- The team guide is `CONTRIBUTING.md` (Traditional Chinese); keep it, `.github/` templates and `docs/onboarding/` in step when the workflow changes.
+- Keep this file, `.github/` templates and `docs/onboarding/` in step when the workflow changes.
 
 - Work dispatch: from now on, send work through `/dispatch` and report results only; do not run long work in CJ's main session (CJ, 2026-10-20: 「從現在開始都用/dispatch 派發工作不要佔用我這邊主頁面」「回報結果就好了」).
