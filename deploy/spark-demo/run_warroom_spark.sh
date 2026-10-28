@@ -9,5 +9,6 @@ export API_KEY=$(grep VLLM_API_KEY ~/.westie/vllm.env | cut -d= -f2)
 set -a; . ~/.westie/warroom.env; set +a
 export HOST=0.0.0.0 PORT=8090 PYTHONPATH=.
 echo "戰情室版本：$(git log -1 --format="%h %s")"
-echo "網址：http://192.168.1.193:8090  手機：http://192.168.1.193:8090/phone  3D：/factory?demo=1"
+IP=$(hostname -I | awk '{print $1}')
+echo "網址：http://$IP:8090  手機：http://$IP:8090/phone  3D：/factory?demo=1"
 exec .venv/bin/python -m warroom.api serve
