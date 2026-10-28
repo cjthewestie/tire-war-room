@@ -231,6 +231,61 @@ def install_admin(app: FastAPI, rt: Callable[[], Any], supervisor: Callable[...,
         from warroom.agent import budget
         return (getattr(rt(), "budget", None) or budget.get()).view()
 
+    # ------------------------------------------------------------------ 效能與追蹤 (issue #199, warroom/api/admin_perf.py)
+    from warroom.api import admin_perf as PF
+    load_job = PF.LoadJob()
+
+    def queue_view(r: Any) -> dict[str, Any] | None:
+        orch = getattr(r, "orch", None)
+        return _safe(lambda: orch.queue.view(), None) if orch is not None else None
+
+    @app.get(P + "/bench")
+    async def bench_view(_: Any = ADMIN) -> dict[str, Any]:
+        """實測數據: the page-9/10 metrics from the files in bench/results/ (read-only), plus the load-test job."""
+        out = await asyncio.to_thread(PF.bench)
+        out["load"] = load_job.as_dict()
+        return out
+
+    @app.get(P + "/trace")
+    async def trace_view(limit: int = Query(200, ge=1, le=2000), scope: str = Query("day", pattern="^(day|recent)$"),
+                         _: Any = ADMIN) -> dict[str, Any]:
+        """即時追蹤: model / tool / queue numbers from the audit log (this factory day, or the newest `limit` calls)."""
+        r = rt()
+        newest, _oldest = AA.source(r.audit)
+        day = r.now().date().isoformat() if scope == "day" else None
+        tl = getattr(r, "tasklog", None)
+        out = await asyncio.to_thread(lambda: PF.trace(newest(), limit=limit, day=day,
+                                                       session_no=getattr(tl, "session_no", None)))
+        live = _safe(lambda: [e for e in r.events() if e.state.value not in ("closed", "safe_stop")], [])
+        out["now"] = {"queue": queue_view(r), "open_events": len(live), "factory_time": r.now().isoformat(),
+                      "open": [{"id": e.id, "machine_id": e.machine_id, "state": e.state.value} for e in live[:12]],
+                      "model": r.settings.model, "llm_mode": r.llm_mode.value}
+        return out
+
+    @app.post(P + "/bench/load")
+    async def load_start(session: Any = ADMIN) -> dict[str, Any]:
+        """跑一次負載測試: bench.concurrent against the local model server, in the background; refused while the model
+        queue is busy. Audited at start and end."""
+        r = rt()
+        why = PF.LoadJob.refuse(r.llm_mode.value, r.settings.base_url, queue_view(r))
+        if why:
+            raise HTTPException(status_code=409, detail=why)
+
+        def done(j: Any) -> None:
+            r.audit.append(AuditKind.SYSTEM, f"admin:{session.actor}",
+                           {"admin": "load_test_done", "state": j.state, "file": j.file, "error": j.error,
+                            "elapsed_s": j.as_dict()["elapsed_s"],
+                            "verdicts": [{k: v.get(k) for k in ("name", "measured", "verdict")} for v in j.verdicts]})
+        if not load_job.start(r.settings.base_url, r.settings.model, session.actor, done,
+                              api_key=getattr(r.settings, "api_key_effective", None) or None):
+            raise HTTPException(status_code=409, detail="負載測試進行中")
+        audit(session, {"action": "load_test_start", "model": r.settings.model})
+        return load_job.as_dict()
+
+    @app.get(P + "/bench/load")
+    async def load_status(_: Any = ADMIN) -> dict[str, Any]:
+        return load_job.as_dict()
+
     @app.get(P + "/runs")
     async def runs(limit: int = Query(200, ge=1, le=2000), _: Any = ADMIN) -> dict[str, Any]:
         r = rt()

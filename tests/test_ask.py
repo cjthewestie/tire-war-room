@@ -77,8 +77,10 @@ def _mock_agent() -> AskAgent:
     return AskAgent(Settings(llm_mode="mock"))
 
 
-def _plan(*steps) -> str:
-    return json.dumps({"steps": [{"tool": t, "args": a} for t, a in steps], "rationale": "test"})
+def _plan(*steps, intent: str | None = None, reply: str = "") -> str:
+    """The model's plan. `intent` is the model's own reading (issue #195); left out, steps mean a question."""
+    return json.dumps({**({"intent": intent, "reply": reply} if intent else {}),
+                       "steps": [{"tool": t, "args": a} for t, a in steps], "rationale": "test"})
 
 
 def _entries(audit, ask_id, kind=None):
@@ -262,7 +264,7 @@ async def test_invented_number_replaces_model_answer(plant, audit):
 
 async def test_change_request_never_gets_a_model_answer(plant, audit):
     ctx, reg = plant
-    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"]})))   # no answer queued
+    agent = _llm_agent(_plan(("read_sensors", {"machine_ids": ["CURE-07"]}), intent="change_request"))   # no answer queued
     a = await agent.ask("把 7 號機停掉並重排", tools=reg, audit=audit, context={}, now=ctx.clock.now())
     assert len(agent.client.calls) == 1                           # plan only
     assert a.answer.startswith("查詢結果：7 號機") and a.answer.endswith("請走事件核准流程）")

@@ -85,6 +85,8 @@ export interface Transport {
   fireEvent?(kind: string): Promise<SimEventFired>
   /** Live only (#72): 現場處置完成 in the 3D factory, remove the injected faults on one machine (POST /api/sim/clear). */
   clearFault?(machineId: string): Promise<void>
+  /** Live only: inject one fault now (POST /api/sim/fault; the 3D auto demo's 7 號機 溫降 at the leave beat). */
+  injectFault?(f: { machine_id: string; kind: string; params?: Record<string, number> }): Promise<void>
   /** Live only: the guided demo's shared cue (POST /api/demo/state); every screen follows the WS "demo" push. */
   demo?(c: DemoCommand): Promise<DemoState>
 }
@@ -256,6 +258,7 @@ export class LiveTransport implements Transport {
   setSimEvents(b: SimEventsBody) { return postJSON<SimEventsView>(API.simEvents, b) }
   async fireEvent(kind: string) { return (await postJSON<{ ok: boolean; fired: SimEventFired }>(API.simEventsFire, { kind })).fired }
   async clearFault(machineId: string) { await postJSON(API.simClear, { machine_id: machineId }) }
+  async injectFault(f: { machine_id: string; kind: string; params?: Record<string, number> }) { await postJSON(API.simFault, f) }
   rollback(version?: number, confirm = false) {
     return postJSON<ScheduleVersion>(API.scheduleRollback, { ...(version == null ? {} : { version }), confirm })
   }

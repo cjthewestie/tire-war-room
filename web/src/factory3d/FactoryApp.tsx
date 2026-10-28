@@ -5,8 +5,8 @@
 // F at a machine with an anomaly also shows its SOP 處置步驟 to tick off and report done (#72, FieldSop).
 // Presenter keys (#25): 1 loads the 7 號硫化機溫降 scenario, 5 the 3 件同時異常 one, 6 正常運轉 (the demo strip's
 // default three), 2 / 3 run at 10× / 60×, 0 pauses or plays, so the demo never has to leave the 3D view; ?demo=1 also
-// lists them in the key strip and turns key 4 (隨機事件) off. #71: the ⚡ 觸發異常 button (or T) does the same with a
-// click, for presenters and touch devices. 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
+// lists them in the key strip. (The ⚡ 觸發異常 menu / T and the 4 隨機事件 key are gone, CJ 10-22: 「觸發異常先幫我刪掉，
+// 我只需要 demo」; T is the teleprompter's toggle now.) 情境疊加: 5 (or a menu scenario) while another scenario's event or approval
 // is open adds it on top instead of reloading (components/scenarioOverlay.ts); the note says what was added.
 // ▶ Demo（6 分鐘） (G, or Menu on the pad): the guided run for the finals (useGuidedDemo.ts, demo/cues.ts): presenter
 // checkpoints (Space / N / A continue, the sim waits meanwhile), one continuous camera take (demoCamera.ts), the robot's
@@ -18,7 +18,7 @@
 // All state comes from the same WarRoomProvider as the dashboard (live /ws, or the mock engine).
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { DEMO_MODE } from '../components/DemoStrip'
 import { MachineDrawer } from '../components/MachineDrawer'
 import { OVERLAY_NOTE_MS, overlayNote, scenarioClick } from '../components/scenarioOverlay'
@@ -32,7 +32,6 @@ import { repairStage } from '../aiStatus'
 import { SCENARIOS } from '../mock/engine'
 import { primaryEvent } from '../store'
 import { useWarRoom } from '../useWarRoom'
-import { AnomalyMenu } from './AnomalyMenu'
 import { DeskMonitor } from './DeskMonitor'
 import { FieldSop } from './FieldSop'
 import { DemoOverlay, PadHelp, SlideView } from './GuidedDemo'
@@ -41,7 +40,11 @@ import { BTN, approach, usePad, type Btn, type PadFrame } from './gamepad'
 import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
+import { DemoButtons } from '../components/DemoButtons'
 import { autoActive } from '../demo/auto'
+import { stageOf, useDemoBeat } from '../demo/beat'
+import { musicMuted, startMusic, stopMusic, subscribeMusic, toggleMusic } from '../demo/music'
+import { Prompter, pagesOf } from '../demo/Prompter'
 import { useDeck } from './pitchSlides'
 import { AiStatusLine } from '../AiStatusLine'
 import { successTitle, useSuccessMoments } from './success'
@@ -134,7 +137,6 @@ export function FactoryApp() {
   const [buzzUntil, setBuzzUntil] = useState(0)
   const [buzz, setBuzz] = useState(false)
   const [demoNote, setDemoNote] = useState<{ text: string; at: number; ms?: number } | null>(null)
-  const [anomOpen, setAnomOpen] = useState(false)      // #71 觸發異常 menu
   const success = useSuccessMoments(state.world)         // issue #36: 訂單完成 / 出貨已出廠
   const [shown, setShown] = useState<string | null>(null)     // the success moment whose 5 s are over
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -163,7 +165,8 @@ export function FactoryApp() {
   // New approval (or fast-repair notice) → phone buzz + ring + HUD toast (same diff the phone page uses), in every space.
   useEffect(() => {
     const out = diffPending(push.current, [...pending, ...notices], connected && !lanDown)
-    if (!out.fire.length) return
+    // the auto demo rings the phone itself, at its phone beat (onDemoPhone), not when a card shows up
+    if (!out.fire.length || document.documentElement.dataset.demoBeat) return
     const { title, body } = alertText(out.fire, out.flushed)
     setToast({ title, body, at: Date.now(), notice: out.fire.every((a) => a.notice) })
     setBuzzUntil(performance.now() + 2200)
@@ -204,22 +207,59 @@ export function FactoryApp() {
   // ▶ Demo（6 分鐘）: the camera is the director's while it runs, so the lead stands still and the overview is on
   const deck = useDeck()
   const onDemoBegin = useCallback(() => {
-    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); setAnomOpen(false); releaseLook()
+    setStarted(true); setMode('third'); setPanel(null); setPhoneUp(false); releaseLook()
   }, [])
-  const onDemoEnd = useCallback(() => { setPanel(null); window.focus(); canvasRef.current?.focus() }, [])
+  // the auto demo ended at the desk: the lead stays seated with the real war-room page (主控台) up; Esc / F stands up
+  const onDemoEnd = useCallback((atDesk?: boolean) => {
+    if (atDesk) { setMode('first'); setPanel({ kind: 'monitor', hash: '#agent' }); releaseLook(); return }
+    setPanel(null); window.focus(); canvasRef.current?.focus()
+  }, [])
   const onDemoWalk = useCallback(() => setMode('first'), [])
   const nSlides = deck.slides.length
   const raisePhoneRef = useRef<(up: boolean) => void>(() => {})
-  const onDemoPhone = useCallback((up: boolean) => raisePhoneRef.current(up), [])
+  // auto-play's phone beat: the phone rings (buzz + vibrate + ring), then comes up
+  const onDemoPhone = useCallback((up: boolean) => {
+    raisePhoneRef.current(up)
+    if (!up) return
+    setBuzzUntil(performance.now() + 2200)
+    setBuzz(true)
+    try { navigator.vibrate?.([200, 100, 200]) } catch { /* unsupported */ }
+    ring()
+  }, [])
   const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, onPhone: onDemoPhone, nSlides })
   const autoOn = demo.running && demo.auto
   const autoMode = autoActive(transport?.mode)
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
+  // 簡報 from anywhere (CJ: 「白板我點不進去怎麼demo」): stand up from the desk first, then the full-screen slides
+  const openSlides = useCallback(() => { setPanel(null); releaseLook(); setSlideView(true) }, [setSlideView])
+  // background music: during the 3D demo only, faded out for the pitch
+  useEffect(() => { if (demoOn && !slideView && !pitchView) startMusic(); else stopMusic() }, [demoOn, slideView, pitchView])
+  useEffect(() => () => stopMusic(0.3), [])
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      const tg = e.target as HTMLElement | null
+      if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable) || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
+      if (e.code === 'KeyM') { toggleMusic(); return }
+      if (e.code === 'KeyP' && e.shiftKey) { e.stopImmediatePropagation(); openSlides(); return }
+      // F / Esc always stand up from the desk computer (when the page itself has the keys, DeskMonitor does it)
+      if (!demoOn && !slideView && panel?.kind === 'monitor' && (e.code === 'KeyF' || e.code === 'Escape')) {
+        e.stopImmediatePropagation(); setPanel(null); window.focus(); canvasRef.current?.focus(); return
+      }
+      // the slides outside the demo (the demo's own keys handle them while it runs)
+      if (slideView && !demoOn) {
+        if (e.code === 'ArrowRight' || e.code === 'PageDown' || e.code === 'Space') { e.preventDefault(); changeSlide(1) }
+        else if (e.code === 'ArrowLeft' || e.code === 'PageUp') { e.preventDefault(); changeSlide(-1) }
+        else if (e.code === 'Escape') { e.stopImmediatePropagation(); setSlideView(false) }
+      }
+    }
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
+  }, [openSlides, slideView, demoOn, changeSlide, setSlideView, panel])
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
-    else if (act === 'continue') { if (!demo.auto) void demo.cont() }
+    else if (act === 'continue') void demo.cont()   // auto-play: 下一階段 (skip)
     else if (act === 'pause') demo.togglePause()
     else if (act === 'exit-ask') { if (demo.auto) void demo.exit(); else demo.setConfirmExit(true) }
     else if (act === 'exit-yes') void demo.exit()
@@ -306,17 +346,8 @@ export function FactoryApp() {
         sent.then(() => setDemoNote({ text: label, at: Date.now() }), (err) => { console.warn(err); setDemoNote({ text: `${label}：沒有成功`, at: Date.now() }) })
         return
       }
-      if (e.code === 'Digit4' && !DEMO_MODE) {   // issue #36: 隨機事件 on / off (the same switch as the demo strip)
-        if (!transport?.setSimEvents || e.repeat) return
-        const on = !state.clock?.random_events?.enabled
-        transport.setSimEvents({ enabled: on }).then(
-          (v) => setDemoNote({ text: v.enabled ? `隨機事件：開（每 ${v.every_min} 分）` : '隨機事件：關', at: Date.now() }),
-          (err) => { console.warn(err); setDemoNote({ text: '隨機事件：沒有成功', at: Date.now() }) })
-        return
-      }
-      if (e.code === 'KeyT' && !e.repeat) { if (!anomOpen) releaseLook(); setAnomOpen(!anomOpen); return }
       if (e.code === 'KeyP') { raisePhone(!phoneUp); return }
-      if (e.code === 'Escape') { if (anomOpen) setAnomOpen(false); else if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
+      if (e.code === 'Escape') { if (phoneUp) raisePhone(false); else if (panel) closePanel(); return }
       if (e.code === 'KeyV' && started && !overlay) { setMode((m) => (m === 'first' ? 'third' : 'first')); return }
       if (e.code === 'KeyF') {
         if (panel) { closePanel(); return }
@@ -330,7 +361,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k)
     return () => window.removeEventListener('keydown', k)
-  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, state.clock?.random_events?.enabled, anomOpen, demoOn])
+  }, [started, phoneUp, panel, overlay, start, raisePhone, closePanel, goTo, transport, paused, demoOn])
 
   // Test hook (headless e2e moves the player without a mouse). Only in dev or with ?test=1,
   // so a normal viewer's bundle does not expose teleport.
@@ -364,8 +395,8 @@ export function FactoryApp() {
   const padIdx = useRef(-1)
   const padLook = useRef({ x: 0, y: 0, fw: 0, st: 0 })
   const bHeldFired = useRef(false)
-  const live = useRef({ demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction })
-  useEffect(() => { live.current = { demo, demoOn, started, panel, phoneUp, anomOpen, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction } })
+  const live = useRef({ demo, demoOn, started, panel, phoneUp, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction })
+  useEffect(() => { live.current = { demo, demoOn, started, panel, phoneUp, slideView, pitchView, tiles: state.snapshot?.machines, alarms: alarmMap, run: runAction } })
   useEffect(() => { phoneUpRef.current = phoneUp }, [phoneUp])
   useEffect(() => { if (!padFocus) return; const id = setTimeout(() => setPadFocus(null), 4000); return () => clearTimeout(id) }, [padFocus])
   const pad = usePad(useCallback((f: PadFrame, edges: Btn[], held: Record<number, number>, dt: number) => {
@@ -411,7 +442,7 @@ export function FactoryApp() {
         else if (nr) { releaseLook(); setPanel(nr.kind === 'desk' ? { kind: 'monitor' } : { kind: 'machine', id: nr.id }) }
         else if (padIdx.current >= 0) setPanel({ kind: 'machine', id: PLACED[padIdx.current].id })
       } else if (act === 'back') {
-        if (L.anomOpen) setAnomOpen(false); else if (L.phoneUp) raisePhone(false); else if (L.panel) closePanel()
+        if (L.phoneUp) raisePhone(false); else if (L.panel) closePanel()
       } else if (act === 'fly') {
         // an abnormal machine first (the off-screen arrows point at the same ones), else the whiteboard
         const hot = Object.entries(L.alarms).filter(([id]) => PLACED_BY_ID[id]).map(([id]) => id)
@@ -430,9 +461,9 @@ export function FactoryApp() {
       <Canvas
         className="f3-canvas"
         camera={{ fov: 32, near: 0.1, far: 200, position: [0, 20, 20] }}
-        dpr={[1, 1.5]}
-        shadows="percentage"
-        gl={{ antialias: true, powerPreference: 'high-performance', alpha: true }}
+        dpr={[1, 1.25]}
+        shadows={false}
+        gl={{ antialias: false, powerPreference: 'high-performance', alpha: true }}
         onCreated={({ gl, camera }) => {
           canvasRef.current = gl.domElement
           cameraRef.current = camera
@@ -442,7 +473,6 @@ export function FactoryApp() {
         }}
       >
         <color attach="background" args={['#e9dfcf']} />
-        <fog attach="fog" args={['#e9dfcf', 46, 110]} />
         <Lights />
         <World state={state} active={scene === 'factory'} fp={fp} celebrate={success.latest?.kind === 'shipment_departed' ? success.latest.at : null} focusId={started && !overlay && near?.kind === 'machine' ? near.id : null}
           board={{ slides: deck.slides, index: demo.slide, onOpen: () => setSlideView(true) }} alarms={alarmMap} arrows={!demoOn && scene === 'factory'} quiet={demo.quiet} />
@@ -464,6 +494,8 @@ export function FactoryApp() {
         : <div className="f3-look-hint">點一下畫面，用滑鼠看四周・<kbd>Q</kbd><kbd>E</kbd> 也能轉身</div>)}
 
       <PendingApprovalAlert variant="corner" newTab />
+      {/* 斷網備援的 Demo 小按鈕 (CJ 2026-10-22): bottom-right, collapsed; hidden while the auto-play demo runs */}
+      {!autoOn && <DemoButtons where="factory" />}
 
       {/* HUD */}
       <div className="f3-hud" data-testid="f3-hud">
@@ -490,14 +522,20 @@ export function FactoryApp() {
         {!demoOn && (
           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
         )}
-        {started && !phoneUp && !demoOn && <AnomalyMenu open={anomOpen} onOpen={setAnomOpen} onNote={(text, ms) => setDemoNote({ text, at: Date.now(), ms })} />}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
         <span><kbd>W A S D</kbd> 走</span><span><kbd>Shift</kbd> 跑</span><span><kbd>滑鼠</kbd>/<kbd>Q E</kbd> 看</span>
-        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>T</kbd> 觸發異常</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
+        <span><kbd>F</kbd> 操作・進門</span><span><kbd>P</kbd> 手機</span><span><kbd>V</kbd> {mode === 'first' ? '俯瞰' : '第一人稱'}</span><span><kbd>G</kbd> Demo</span>{!pad.connected && !TOUCH_DEVICE && <span className="f3-pad-hint">🎮 按任一鍵連接搖桿</span>}
         {DEMO_MODE && <span className="f3-demo-keys"><kbd>1</kbd> 7 號機溫降 <kbd>5</kbd> 3 件同時 <kbd>6</kbd> 正常運轉 <kbd>2</kbd> 10× <kbd>3</kbd> 60× <kbd>0</kbd> 暫停／播放</span>}
       </div>}
+      {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
+          Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
+      {!slideView && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
+      {FPS_ON && <FpsMeter />}
+      <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
+        onNext={() => void demo.cont()} onPitch={openSlides} />
+      {(slideView || pitchView) && <PitchPrompter says={deck.says} index={Math.min(demo.slide, nSlides - 1)} />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
         <button key={id} className={`f3-alarm-arrow ${alarmMap[id].level}`} style={{ display: 'none' }} data-testid={`f3-arrow-${id}`}
@@ -550,4 +588,68 @@ export function FactoryApp() {
       <PhoneOverlay up={phoneUp} onLower={() => raisePhone(false)} buzzing={buzz} />
     </div>
   )
+}
+
+/** The teleprompter on the auto demo's beat; its own component so a beat change re-renders only this. */
+/** ?fps=1: a tiny frame-rate readout (rAF count, written to the DOM twice a second; no React state per frame). */
+const FPS_ON = (() => { try { return new URLSearchParams(location.search).get('fps') === '1' } catch { return false } })()
+function FpsMeter() {
+  const el = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    let n = 0, t0 = performance.now(), id = 0
+    const f = (t: number) => {
+      n++
+      if (t - t0 >= 500) { if (el.current) el.current.textContent = `${Math.round((n * 1000) / (t - t0))} fps`; n = 0; t0 = t }
+      id = requestAnimationFrame(f)
+    }
+    id = requestAnimationFrame(f)
+    return () => cancelAnimationFrame(id)
+  }, [])
+  return <div ref={el} data-testid="fps" style={{ position: 'fixed', right: 8, top: 8, zIndex: 60, padding: '2px 8px', borderRadius: 6, font: '600 12px/1.4 ui-monospace, monospace', background: 'rgba(0,0,0,.6)', color: '#7CFC9A', pointerEvents: 'none' }}>– fps</div>
+}
+
+/** Bottom-right: the stage 「n/7」 and 「下一階段 ▶」 in the auto demo (at 回到電腦 / after it: 「Pitch ▶」),
+ *  「▶ Demo 開始」 when no demo runs, 「簡報 ▶」 (Shift+P) and the music 🔊/🔇 (M) always. */
+function DemoDock({ running, auto, slides, onStart, onNext, onPitch }: { running: boolean; auto: boolean; slides: boolean; onStart: () => void; onNext: () => void; onPitch: () => void }) {
+  const beat = useDemoBeat()
+  const muted = useSyncExternalStore(subscribeMusic, musicMuted, () => false)
+  const stage = slides ? stageOf(null, true) : auto || beat === 'back' ? stageOf(beat) : null
+  const atEnd = beat === 'back' || (!running && !!stage)
+  return (
+    <div className="f3-dock" data-testid="demo-dock">
+      {stage && <span className="f3-dock-stage" data-testid="auto-stage">{stage.n}/{stage.total} {stage.label}</span>}
+      {auto && !atEnd && <button type="button" className="f3-dock-next" data-testid="auto-next" onClick={onNext} title="跳到下一階段（N / →）">下一階段 ▶</button>}
+      {atEnd && !slides && <button type="button" className="f3-dock-next" data-testid="auto-pitch" onClick={onPitch} title="下一階段：Pitch（Shift+P）">Pitch ▶</button>}
+      {!running && <button type="button" data-testid="demo-start-btn" onClick={onStart} title="從第 1 階段重新開始自動 Demo（G）">▶ Demo 開始</button>}
+      {!atEnd && !slides && <button type="button" data-testid="slides-open" onClick={onPitch} title="打開簡報（Shift+P）">簡報 ▶</button>}
+      <button type="button" className="f3-dock-mute" data-testid="music-toggle" onClick={toggleMusic} aria-pressed={!muted} title={muted ? '開啟背景音樂（M）' : '關閉背景音樂（M）'}>{muted ? '🔇' : '🔊'}</button>
+    </div>
+  )
+}
+
+/** The pitch's prompter (CJ 10-22 「pitch框框要再小一點」): a compact box in the bottom-left strip under the slide
+ *  (the slide view keeps that strip free, so the slide is never covered), the current slide's line only, ~15px, paged
+ *  by sentence when it is long (the pages turn by themselves at about reading speed), following ← / →. */
+function PitchPrompter({ says, index }: { says?: (string | null)[]; index: number }) {
+  const cur = says?.[index] ?? null
+  const pages = cur ? pagesOf(cur) : []
+  const [pg, setPg] = useState({ index: -1, i: 0 })
+  const i = pg.index === index ? Math.min(pg.i, pages.length - 1) : 0
+  const n = pages.length, len = pages[i]?.length ?? 0
+  useEffect(() => {
+    if (i >= n - 1) return
+    const id = setTimeout(() => setPg({ index, i: i + 1 }), Math.max(3500, len * 230))
+    return () => clearTimeout(id)
+  }, [index, i, n, len])
+  if (!cur) return null
+  return (
+    <aside className="tp-box tp-pitch-box" aria-live="polite" aria-label="提詞機（Pitch）" data-testid="pitch-prompter">
+      <span className="tp-meta">Pitch {index + 1}/{says?.length}{n > 1 ? ` · ${i + 1}/${n}` : ''}</span>
+      <p key={`${index}-${i}`} className="tp-cur tp-pitch">{pages[i]}</p>
+    </aside>
+  )
+}
+
+function DemoPrompter() {
+  return <Prompter beat={useDemoBeat()} />
 }

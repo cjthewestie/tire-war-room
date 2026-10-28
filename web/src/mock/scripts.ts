@@ -355,6 +355,80 @@ export function press7Script(A: number, single = false): Script & { versions(now
 }
 
 // =====================================================================================
+// 自動播放 Demo（?mock=1&demo=cure07）的訂單段：急單進來 → Agent 規劃 → 主管核准 → 完成（PLANT 事件，不是機台異常）
+// =====================================================================================
+export function rushOrderScript(A: number): Script {
+  const EV = `EV-${isoTaipei(A).slice(0, 10).replace(/-/g, '')}-${isoTaipei(A).slice(11, 19).replace(/:/g, '')}-RUSH`
+  const at = (s: number) => A + s * SEC
+  const K = { plan: 4, sim: 10, card: 20 }
+  const CARD = at(K.card)
+  const res = (now: number, ctx: Ctx) => resolve(ctx, 'APR-RUSH-1', CARD, now, null,
+    { decision: 'approve', option_id: 'A', reason: '', decided_by: '主管（示範腳本）', via: 'auto' })
+  function world(now: number, ctx: Ctx): ScriptWorld {
+    const empty: ScriptWorld = { event: null, approvals: [], safety: [], focus: null, machine: {} }
+    if (now < A) return empty
+    const r = res(now, ctx)
+    const d = r?.at ?? Infinity
+    const closeT = d + 30 * SEC
+    const state = stateAt(now, [[A, 'detected'], [at(1), 'classify'], [at(K.plan), 'plan'], [at(K.sim), 'simulate'], [at(K.sim + 4), 'gate'],
+      [CARD, 'await_approval'], [d, 'execute'], [d + 15 * SEC, 'verify'], [closeT, 'closed']])
+    const T: TimelineItem[] = []
+    const push = (t: number, a: TimelineItem['actor'], text: string, tag: TimelineItem['tag']) => { if (now >= t) T.push(tl(t, a, text, tag)) }
+    push(A, '事件偵測', '急單 SO-017 到單：小胎 8 條，交期 10/05 → 喚醒 AI 規劃', 'info')
+    push(at(K.plan), '指揮官', '[工具] 查訂單與班表、[工具] 求解排程 → 把 SO-017 插進 4 號機空檔', 'decision')
+    push(at(K.sim), '求解器', '[工具] 排程 v2：SO-017 排 4 號機，其他訂單交期全部滿足', 'tool')
+    if (r) push(r.at, '主管', '[人工] 主管核准急單排程；寫入稽核日誌', 'human')
+    push(closeT, '系統', '已通知硫化機組；急單任務完成', 'info')
+    const s1 = step('S1', 'query_orders_shifts', { order_ids: ['SO-017'] }, [], '急單的數量、交期與班表')
+    const s2 = step('S2', 'solve_schedule', { insert_orders: ['SO-017'] }, ['S1'], '把急單排進去，其他訂單不延誤')
+    const s3 = step('S3', 'confirm_schedule', { reason: '急單 SO-017 插單' }, ['S2'], '主管核准新排程')
+    const s4 = step('S4', 'notify_teams', { teams: ['curing'], kind: 'info', message: '急單 SO-017 排 4 號機' }, ['S3'], '通知硫化機組')
+    const st = (t: number, after: StepRun['state'], before: StepRun['state'] = 'pending') => (now >= t ? after : before)
+    const steps: StepRun[] = [
+      run(s1, st(at(K.sim), 'ok', now >= at(K.plan) ? 'running' : 'pending'), now >= at(K.sim) ? result('query_orders_shifts', { order: 'SO-017', qty: 8, due_in_days: 2 }, 15) : null),
+      run(s2, st(at(K.sim + 4), 'ok', now >= at(K.sim) ? 'running' : 'pending'), now >= at(K.sim + 4) ? result('solve_schedule', { feasible: true, solver: 'cp-sat', all_due_met: true, proposed_version: 2 }, 1500) : null),
+      run(s3, r ? (r.d.decision === 'reject' ? 'rejected' : 'ok') : st(CARD, 'awaiting_approval'), r && r.d.decision !== 'reject' ? result('confirm_schedule', { active_version: 2 }, 10) : null, now >= at(K.sim + 4) ? gate('S3', 'confirm_schedule', 'R2') : null),
+      run(s4, r && now >= d + 15 * SEC ? (r.d.decision === 'reject' ? 'skipped' : 'ok') : 'pending', r && r.d.decision !== 'reject' && now >= d + 15 * SEC ? result('notify_teams', { sent: 1 }, 6) : null, now >= at(K.sim + 4) ? gate('S4', 'notify_teams', 'R1', 'allow') : null),
+    ]
+    const HR: Hypothesis = {
+      id: 'H1', statement: '4 號機有空檔，插單不影響其他交期', cause_code: 'rush_order', status: state === 'closed' ? 'confirmed' : 'active',
+      expectation: null, evidence: ['SO-017 小胎 8 條，交期 2 天後', '4 號機今天有空檔'],
+    }
+    const card = { title: '急單 SO-017：小胎 8 條插單', summary: '排進 4 號機空檔，其他訂單交期不受影響' }
+    const plan: Event['plan'] = now >= at(K.plan) ? {
+      goal: '急單 SO-017 準時交貨，其他訂單不延誤', hypothesis: HR, rejected_hypothesis_ids: [], steps: [s1, s2, s3, s4],
+      alert_card: card, safe_stop: false, rationale: '4 號機有空檔，插單不影響其他交期',
+    } : null
+    const approvals: ApprovalRequest[] = now >= CARD ? [approval({
+      id: 'APR-RUSH-1', event: EV, step: 'S3', round: 1, created: CARD, risk: 'R2',
+      title: '急單 SO-017 排進 4 號機', reason: '急單到單：小胎 8 條，交期 2 天後',
+      done: ['已查訂單與班表', '求解器：交期全部滿足'], gaps: [], impact: '其他訂單交期不受影響',
+      options: [{ id: 'A', label: '核准新排程（SO-017 排 4 號機）', tool: 'confirm_schedule', args: { schedule_version: 2 }, recommended: true }],
+      res: r,
+    })] : []
+    const focus: FocusPanel = {
+      event_id: EV, machine_id: 'PLANT', title: '訂單：急單 SO-017 插單', detail: '小胎 8 條，交期 2 天後；Agent 規劃排程，主管核准後生效',
+      tiles: [{ label: '時間', value: '交期 2 天', status: 'warn' }],
+      auto_done: now >= at(K.sim + 4) ? ['S1 查訂單與班表', 'S2 求解：排 4 號機，交期全部滿足'] : [],
+      pending: approvals.filter((a) => a.status === 'pending').flatMap((a) => a.options.map((o) => ({ approval_id: a.id, option_id: o.id, label: `${o.id} ${o.label}` }))),
+      schedule_impact: now >= at(K.sim + 4) ? 'SO-017 排 4 號機；其他訂單交期全部滿足' : '計算中…', state, timeline: T,
+    }
+    const event: Event = {
+      id: EV, opened_at: isoTaipei(A), machine_id: 'PLANT', source: 'plant',
+      anomaly: {
+        id: `AN-${EV.slice(3)}`, ts: isoTaipei(A), machine_id: 'PLANT', kind: 'order_rush', channel: 'temp_c', value: 0, baseline: 0,
+        prediction: null, severity: 'warn', message: '急單 SO-017 到單：小胎 8 條', related_machines: [], detection_latency_s: null,
+      },
+      state, goal: plan?.goal ?? null, hypotheses: plan ? [HR] : [], plan, steps: plan ? steps : [], approvals: approvals.map((a) => a.id),
+      safety_actions: [], timeline: T, alert_card: plan ? card : null, consecutive_failures: 0, replans: 0,
+      closed_at: state === 'closed' ? isoTaipei(closeT) : null, outcome: state === 'closed' ? '急單 SO-017 排進 4 號機；交期全部滿足' : null,
+    }
+    return { event, approvals, safety: [], focus: state === 'closed' ? null : focus, machine: {} }
+  }
+  return { id: 'rush', machine: 'PLANT', world, signal: () => null }
+}
+
+// =====================================================================================
 // Page 2 — A 線大開煉機 溫度過高 (cooling insufficient)
 // =====================================================================================
 /** tag: suffix for the approval / safety ids when the script is overlaid (情境疊加) beside an earlier copy. */

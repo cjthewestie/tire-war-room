@@ -1,9 +1,10 @@
-/* 自動播放 Demo：只在 html[data-demo-auto]（?mock=1&demo=cure07）生效，正式／Live 畫面完全不受影響。
-   隱藏：核准按鈕列、待核准提示條、手機通知提醒條、重複的操作提示。後端 Logs／稽核資料不動，只是不出現在展示畫面。 */
-html[data-demo-auto] [data-demo-anchor="approve-bar"],
-html[data-demo-auto] .paa-wrap,
+/* 自動播放 Demo：只在 html[data-demo-auto]（?demo=cure07）生效，平常的畫面完全不受影響。
+   隱藏：手機通知提醒條、重複的操作提示；Mock（data-demo-auto="mock"，Demo 自動核准）另外藏核准按鈕列與待核准提示條。
+   真實後端（"live"）的核准按鈕留著：核准一定是人按。後端 Logs／稽核資料不動，只是不出現在展示畫面。 */
+html[data-demo-auto="mock"] [data-demo-anchor="approve-bar"],
+html[data-demo-auto="mock"] .paa-wrap,
+html[data-demo-auto="mock"] .f3-pend,
 html[data-demo-auto] .f3-ev,
-html[data-demo-auto] .f3-pend,
 html[data-demo-auto] .f3-toast,
 html[data-demo-auto] .f3-keys,
 html[data-demo-auto] .f3-demo-btn,
@@ -19,5 +20,39 @@ html[data-demo-auto] .f3-demo-badge { display: none !important; }
   padding: 8px 14px; border-radius: 999px; background: rgba(255,255,255,.92); box-shadow: 0 4px 18px rgba(0,0,0,.18); font-size: 14px; }
 .f3-auto-bar b { font-weight: 700; }
 .f3-auto-bar button { border: 0; border-radius: 999px; padding: 5px 12px; background: #f3b43f; font-weight: 700; cursor: pointer; }
+.f3-auto-stage { position: fixed; right: 16px; bottom: 16px; z-index: 41; display: flex; align-items: center; gap: 8px;
+  padding: 4px 4px 4px 12px; border-radius: 999px; background: rgba(30,30,30,.6); color: #fff; font-size: 13px; font-weight: 600; }
+.f3-auto-next { border: 0; border-radius: 999px; padding: 5px 12px; font-size: 13px; font-weight: 700; color: #1b1b1b;
+  background: #f3b43f; cursor: pointer; opacity: .85; }
+.f3-auto-next:hover, .f3-auto-next:focus-visible { opacity: 1; background: rgba(30,30,30,.82); }
+/* bottom-right dock: stage, 下一階段 ▶ / Pitch ▶, ▶ Demo 開始, 簡報 ▶, 🔊 — clear of the prompter (bottom-left) */
+.f3-dock { position: fixed; right: 16px; bottom: 16px; z-index: 95; display: flex; align-items: center; gap: 6px; padding: 4px;
+  border-radius: 999px; background: rgba(30,30,30,.62); color: #fff; font-size: 13px; font-weight: 600; }
+.f3-dock-stage { padding: 0 6px 0 8px; white-space: nowrap; }
+.f3-dock button { border: 0; border-radius: 999px; padding: 5px 11px; font-size: 13px; font-weight: 700; color: #fff;
+  background: rgba(255,255,255,.14); cursor: pointer; white-space: nowrap; }
+.f3-dock button:hover, .f3-dock button:focus-visible { background: rgba(255,255,255,.28); }
+.f3-dock .f3-dock-next { color: #1b1b1b; background: #f3b43f; }
+.f3-dock .f3-dock-mute { padding: 4px 9px; font-size: 15px; }
 .f3-auto-cap { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 40; padding: 10px 18px; border-radius: 14px;
   background: rgba(30,30,30,.82); color: #fff; font-size: 17px; font-weight: 700; max-width: 80vw; text-align: center; }
+
+/* 提詞機（demo/Prompter.tsx，只在自動播放 Demo 有 beat 時出現）在 3D 工廠裡的位置：左下、自動播放列（.f3-auto-bar，置中、bottom 14px）
+   的上方，不碰上方字幕、左上 HUD（待核准）、右上待核准卡、右下手機。窄螢幕手機舉起來會蓋滿畫面，這時提詞機先讓開。 */
+.f3-tp .tp-box { left: 16px; bottom: 16px; top: auto; right: auto; width: min(400px, calc(100vw - 32px)); }
+@media (max-width: 960px) {
+  .f3-tp .tp-box { width: auto; right: 16px; }
+  .f3-tp[data-phone="up"] .tp-box { display: none; }
+}
+/* 自動播放時由 Demo 帶鏡頭：觸控搖桿與按鈕不需要，也不跟提詞機搶左下角 */
+html[data-demo-auto] .f3-stick,
+html[data-demo-auto] .f3-touch-btns { display: none !important; }
+/* 手機寬度：自動播放列會折成兩行（約 100px 高），提詞機移到它上方；下一句只留一行，少遮一點戰情室畫面 */
+@media (max-width: 600px) {
+  .f3-tp .tp-box { bottom: 124px; }
+  .f3-tp .tp-next { -webkit-line-clamp: 1; line-clamp: 1; }
+}
+/* 手機寬度下「待核准」卡在底部 bottom 150px（index.css .paa-wrap-corner），出現時提詞機疊到它上面 */
+@media (max-width: 599px) {
+  .f3-root:has(.paa-wrap-corner) .f3-tp .tp-box { bottom: 256px; }
+}

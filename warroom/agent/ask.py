@@ -59,18 +59,25 @@ _MACHINES = "；".join(
     [f"{m.id}={machine_label(m.id)}" for m in F.MACHINES if m.line is not F.Line.CURE]
     + [f"CURE-01..CURE-11 = 1..11 號硫化機（{F.ML_RANGE} 號可做中大胎）"])
 
-PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管問一個問題，你只決定要查哪些資料，不回答、不做任何變更。
-只輸出一個 JSON 物件：{{"steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
+PLAN_SYSTEM = f"""你是實心胎工廠戰情室的查詢助理。主管（跟你說話的人）傳來一句話。你先自己判斷這句話是什麼（intent），
+再決定要查哪些資料；你不寫答案（答案由下一步依查詢結果寫），也不做任何變更。沒有程式先幫你分類，由你決定。
+只輸出一個 JSON 物件：{{"intent": "...", "reply": "...", "steps": [{{"tool": "...", "args": {{...}}}}], "rationale": "一句話"}}。
+intent：
+- chitchat：打招呼、道謝、閒聊。steps 留空陣列；reply 寫一句簡短自然的回覆，稱主管「你」，不要提任何數字。
+- question：問這座工廠的事（機台、訂單、交期、人力、班表、加班、出貨、核准、事件、通知、怎麼處理）。steps 列要查的唯讀工具；
+  reply 留空字串。問核准、事件進度時 steps 可以留空（程式會附上進行中的事件）。
+- change_request：要你停機、關機、重排、調人、加班、通知、核准、改設定這類「做」的事。你沒有任何寫入、排程或通知的權限：
+  steps 只列能讓主管看清現況的唯讀查詢（例如停 7 號機 → read_sensors CURE-07），reply 留空；回覆會由程式提醒走事件核准流程。
+- unclear：看不懂或不知道要查什麼。steps 留空陣列；reply 問一個簡短的確認問題（例如「你是要看 7 號機的溫度，還是它的排程？」）。
 規則：
-0. 只有打招呼、道謝、閒聊、看不懂的字才把 steps 留空陣列。人力、班表、加班、缺人、交期、訂單、核准、事件、通知、
-   怎麼處理都是工廠的問題，一定要查。
-1. 最多 {ASK_MAX_STEPS} 步，只能用下列唯讀工具；你沒有任何寫入、排程或通知的權限。
+1. 最多 {ASK_MAX_STEPS} 步，只能用下列唯讀工具。
 2. 機台用代號（例如 CURE-07）。問題沒指名機台時，查「目前異常機台」。
-3. 問到人力、班表、加班、缺誰、交期、下一模 → 只用 query_orders_shifts 一步；問到怎麼處理、過熱怎麼辦 → sop_search，
-   再加 read_sensors 讀該機台現況；問核准、事件進度 → steps 留空（程式會附上進行中的事件）。
+3. 問到人力、班表、加班、缺誰、交期、下一模、某張訂單（例如 SO-004、#A-311）→ query_orders_shifts（某張訂單就帶 order_ids）；
+   問到怎麼處理、過熱怎麼辦 → sop_search，再加 read_sensors 讀該機台現況。
 4. 只查回答這個問題需要的資料，不要順便多查：問溫度、讀值 → read_sensors；問會不會再掉、接下來 → read_sensors 加
    predict_anomaly；問硫化要多久、會延長多久 → cure_formula（只給 press_id）。問溫度不要去查排程或硫化時數。
-5. 有 previous_question 且這題是接續（例如「那 8 號呢？」）時，照上一題的意圖只換對象，不要擴大查詢。
+5. 有 previous_question（同一段對話的上一題，previous_steps 是它查過的步驟）且這題是接續（例如「那 8 號呢？」）時，
+   照上一題的意圖與步驟只換對象，不要擴大查詢；不是接續就不要理它。
 工具：
 {_CATALOGUE}
 機台代號：{_MACHINES}"""
@@ -80,12 +87,20 @@ ANSWER_SYSTEM = """你是實心胎工廠戰情室的查詢助理。只根據「�
 2. 只用和問題有關的查詢結果；和問題無關的結果（例如問溫度時的硫化時數、排程、人力）不要提。
 3. 數字照抄查詢結果，不估算、不補充結果裡沒有的事（沒有讀值就不要說溫度高低或正不正常）；不要加「目前無…資訊」「如需…請…」這類填充句。
 4. 結果裡的「無」也是答案（「人力缺口：無」就是沒有缺人）。被問的資料真的不在結果裡時，具體說查不到什麼（例如「查詢結果裡沒有核准卡的資料」），不要只回「查不到」。
-5. 你不能做任何變更；主管要求變更時，請他走事件核准流程。"""
+5. 你不能做任何變更；主管要求變更時，請他走事件核准流程。
+6. 你是在跟主管本人說話：稱他「你」，不要寫「主管是想…」「可以問主管…」，也不要寫你對問題的判讀或理由，只回答被問的那件事。"""
+
+
+INTENTS = ("chitchat", "question", "change_request", "unclear")
 
 
 def ask_plan_schema() -> dict[str, Any]:
+    """AskPlan plus the model's own reading of the message (issue #195: no keyword router in front of it)."""
     s = AskPlan.model_json_schema()
-    s["required"] = ["steps"]
+    s["properties"] = {"intent": {"type": "string", "enum": list(INTENTS)},
+                       "reply": {"type": "string", "description": "chitchat / unclear only: the one-line reply"},
+                       **s.get("properties", {})}
+    s["required"] = ["intent", "steps"]
     return s
 
 
@@ -96,6 +111,7 @@ HELP_EXAMPLES = "「7 號機現在怎樣？」「今晚夜班缺誰？」「大�
 HELLO_REPLY = "你好，我是戰情室助理。可以問我機台狀況、訂單、班表，或討論待核准的計劃。"
 THANKS_REPLY = "不客氣，有需要再叫我。可以問我機台狀況、訂單、班表，或討論待核准的計劃。"
 UNCLEAR_REPLY = f"我不確定要查什麼，所以沒有查任何資料。你可以這樣問：{HELP_EXAMPLES}"
+CHANGE_REPLY = "問戰情室只能查詢，不能變更；停機、重排、調人這類變更請走事件核准流程（下新任務，計劃送你核准後才執行）。"
 COLD_REPLY = (f"AI 模型還在載入（冷啟動，約半分鐘），這次來不及判讀你的問題，我沒有亂猜去查。請稍等再問一次，或換個明確的問法：{HELP_EXAMPLES}")
 
 
@@ -340,6 +356,12 @@ def summarize(tool: ToolName, data: dict[str, Any], args: dict[str, Any] | None 
     question get its own orders' line (「#A-311 會不會晚交？」) instead of the nearest due date."""
     try:
         if tool is ToolName.QUERY_ORDERS_SHIFTS and (args or {}).get("order_ids"):
+            today = data.get("orders_today")
+            if today and today.get("orders") is not None:
+                # issue #195: the model answers order questions now; its facts are the one rule set's lines (progress,
+                # machines, due, 預計完成, risk) — the same text the code answer used (order_ask.compose)
+                ids = [str(o) for o in args["order_ids"]]
+                return order_ask.compose(order_ask.OrderIntent("status", ids=tuple(ids)), today, ids)[0]
             return _orders_line(data, list(args["order_ids"]))
         if tool is ToolName.READ_SENSORS:
             parts = []
@@ -531,11 +553,14 @@ class AskAgent:
         extra = thinking_off(self.server_kind)
         return {"extra_body": extra} if extra else {}
 
-    async def _llm_plan(self, question: str, context: dict[str, Any], previous: str | None = None) -> AskPlan:
-        # the planner picks tools; it gets no readings to copy into args (Spark 10-03: 7 號's 115.11 °C went into
-        # 8 號's cure_formula). The previous question lets 「那 8 號呢？」 keep its intent (issue #182)
+    async def _llm_plan(self, question: str, context: dict[str, Any], previous: str | None = None,
+                        previous_steps: list[dict[str, Any]] | None = None) -> tuple[AskPlan, str, str]:
+        """(plan, intent, reply): the model reads the message itself (issue #195) and picks the read tools. It gets no
+        readings to copy into args (Spark 10-03: 7 號's 115.11 °C went into 8 號's cure_formula); the previous question
+        and its steps (this conversation only) let 「那 8 號呢？」 keep its intent."""
         now = {k: v for k, v in context.items() if k != "abnormal_temp_c"}
-        user = json.dumps({"question": question, **({"previous_question": previous} if previous else {}), "now": now},
+        user = json.dumps({"question": question, **({"previous_question": previous} if previous else {}),
+                           **({"previous_steps": previous_steps} if previous and previous_steps else {}), "now": now},
                           ensure_ascii=False, default=str)
         r = await budget.create(  # metered; over the day's budget it raises and the keyword rules plan
             self.client, "qa", model=self.settings.model, temperature=0.0, max_tokens=400,
@@ -544,7 +569,15 @@ class AskAgent:
             **self._extra())
         text = (r.choices[0].message.content or "").strip()
         text = re.sub(r"^```(?:json)?\s*|\s*```$", "", text)
-        return AskPlan.model_validate_json(text)
+        raw = json.loads(text)
+        if not isinstance(raw, dict):
+            raise ValueError(f"plan is not an object: {text[:120]!r}")
+        intent = str(raw.pop("intent", "") or "")
+        reply = str(raw.pop("reply", "") or "").strip()
+        plan = AskPlan.model_validate(raw)
+        if intent not in INTENTS:            # an older / partial answer: steps mean a question, none mean unclear
+            intent = "question" if plan.steps else "unclear"
+        return plan, intent, reply
 
     async def _llm_answer(self, question: str, results: list[AskStepResult], facts: list[str] | None = None,
                           feedback: tuple[str, str] | None = None) -> str:
@@ -673,63 +706,92 @@ class AskAgent:
         ask_id = f"ASK-{next(self._ids):04d}"
         audit.append(AuditKind.SYSTEM, actor, {"msg": "ask", "question": question}, event_id=ask_id)
         fell_back = False
-        chat = smalltalk_reply(question)
-        if chat is not None:      # a greeting / thanks: answered by code, no model call, no tool call
-            audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": chat, "intent": "chitchat",
-                                                   "tool_calls": 0}, event_id=ask_id)
-            return AskAnswer(id=ask_id, question=question, answer=chat, mode=self.mode, factory_time=now,
-                             intent="chitchat", total_ms=round((time.perf_counter() - t0) * 1000, 1))
         conv = memory.get(actor, conversation_id) if memory is not None else ConvContext()
-        intent = order_ask.classify(question, has_machine=bool(machines_in(question)), memory=conv)
-        if intent is not None:
-            return await self._order_question(question, intent, conv, tools=tools, audit=audit, now=now, actor=actor,
-                                              conversation_id=conversation_id, memory=memory, ask_id=ask_id, t0=t0)
+        ms = lambda: round((time.perf_counter() - t0) * 1000, 1)        # noqa: E731
         cold = False
-        # issue #182: 「那 8 號呢？」 right after 「現在 7 號機溫度」 is the same question for 8 號: code repeats the last
-        # question's read steps for the new machine (no broad lookup), and the answer is told what was asked
-        follow_mids = follow_up_machines(question)
-        follow = follow_up_plan(conv, follow_mids) if follow_mids else None
+        follow: AskPlan | None = None
+        follow_mids: list[str] = []
         answer_q = question
-        if follow is not None:
-            answer_q = (f"{question}（接續上一題「{conv.last_question}」，只是對象換成"
-                        f"{'、'.join(machine_label(m) for m in follow_mids)}）")
-            audit.append(AuditKind.SYSTEM, "ask", {"msg": "follow-up", "previous_question": conv.last_question,
-                                                   "previous_steps": conv.last_steps, "machines": follow_mids},
-                         event_id=ask_id)
+        model_intent: str | None = None          # the model's own reading of the message (issue #195)
+        model_reply = ""
 
-        # 1. PLAN
+        async def rules_route() -> AskAnswer | None:
+            """The keyword routes, only when there is no model answer (LLM_MODE=mock, or the model failed): a greeting,
+            an order question by code, 「那 X 呢」 repeating the last steps. None: the keyword planner takes it."""
+            nonlocal follow, follow_mids, answer_q
+            chat = smalltalk_reply(question)
+            if chat is not None:
+                audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": chat, "intent": "chitchat",
+                                                       "tool_calls": 0, "by": "rules"}, event_id=ask_id)
+                return AskAnswer(id=ask_id, question=question, answer=chat, mode=self.mode, factory_time=now,
+                                 intent="chitchat", fell_back_to_mock=fell_back, total_ms=ms())
+            oi = order_ask.classify(question, has_machine=bool(machines_in(question)), memory=conv)
+            if oi is not None:
+                ans = await self._order_question(question, oi, conv, tools=tools, audit=audit, now=now, actor=actor,
+                                                 conversation_id=conversation_id, memory=memory, ask_id=ask_id, t0=t0)
+                return ans.model_copy(update={"fell_back_to_mock": fell_back})
+            follow_mids = follow_up_machines(question)
+            follow = follow_up_plan(conv, follow_mids) if follow_mids else None
+            if follow is not None:
+                answer_q = (f"{question}（接續上一題「{conv.last_question}」，只是對象換成"
+                            f"{'、'.join(machine_label(m) for m in follow_mids)}）")
+                audit.append(AuditKind.SYSTEM, "ask", {"msg": "follow-up", "previous_question": conv.last_question,
+                                                       "previous_steps": conv.last_steps, "machines": follow_mids},
+                             event_id=ask_id)
+            return None
+
+        # 1. PLAN — with a model, the message goes to it as it is: no code check in front (CJ 10-22: 「取消對話前的程式
+        # 檢查 完全讓 LLM 跟 system prompt 擋」). It says what the message is (intent) and which read tools answer it.
         tp = time.perf_counter()
         error: str | None = None
-        if follow is not None:
-            plan = follow
-        elif self.mode is LLMMode.LLM:
+        plan: AskPlan | None = None
+        if self.mode is LLMMode.LLM:
             try:
-                plan = await self._llm_plan(question, context, previous=conv.last_question)
-                plan, pruned = prune_plan(question, plan)
-                if pruned:
-                    audit.append(AuditKind.SYSTEM, "ask", {"msg": "plan pruned: steps the question does not ask for",
-                                                           "dropped": pruned}, event_id=ask_id)
-                if not plan.steps and (rules := mock_plan(question, context)).steps:
-                    # Spark 10-22: 「今晚夜班缺誰？」 planned as small talk. A question the keyword rules can look up
-                    # is never answered 「我不確定要查什麼」 (issue #182)
-                    error = f"model planned no step ({plan.rationale}): keyword rules used"
+                plan, model_intent, model_reply = await self._llm_plan(question, context, previous=conv.last_question,
+                                                                       previous_steps=conv.last_steps)
+                if model_intent == "question" and not plan.steps and not context_facts(question, context) \
+                        and (rules := mock_plan(question, context)).steps:
+                    # the model said 「a question」 and planned nothing to read (Spark 10-22: 「今晚夜班缺誰？」): its own
+                    # plan is incomplete, so the keyword planner fills the steps (a repair of the model's output)
+                    error = f"model planned no step for a question ({plan.rationale}): keyword rules used"
                     plan = rules
             except Exception as e:  # noqa: BLE001 - model down / invalid JSON
                 error = f"{type(e).__name__}: {e}"[:300]
                 if not self.settings.llm_fallback_to_mock:
                     return self._strict_answer(e, "plan", error, ask_id, question, audit, now, t0, tp)
-                plan, fell_back = mock_plan(question, context), True
+                fell_back = True
                 cold = "timeout" in type(e).__name__.lower() or "timed out" in str(e).lower()
-        else:
-            plan = mock_plan(question, context)
+                plan = None
+        if plan is None:                                  # rule mode, or the model failed
+            routed = await rules_route()
+            if routed is not None:
+                return routed
+            plan = follow or mock_plan(question, context)
         audit.append(AuditKind.LLM_CALL, "ask", {
             "phase": "plan", "mode": self.mode.value,
-            "model": self.settings.model if self.mode is LLMMode.LLM and follow is None else None,
-            "planner": "follow-up rule" if follow is not None else (
-                "llm" if self.mode is LLMMode.LLM and not fell_back and not error else "rules"),
-            "total_ms": round((time.perf_counter() - tp) * 1000, 1), "fell_back_to_mock": fell_back, "error": error,
+            "model": self.settings.model if self.mode is LLMMode.LLM and not fell_back else None,
+            "planner": "llm" if model_intent is not None and not error else (
+                "follow-up rule" if follow is not None else "rules"),
+            "intent": model_intent, "total_ms": round((time.perf_counter() - tp) * 1000, 1),
+            "fell_back_to_mock": fell_back, "error": error,
             "steps": [s.model_dump(mode="json") for s in plan.steps], "rationale": plan.rationale,
             "plant_sha256": plant.active_sha()}, event_id=ask_id)
+        if model_intent in ("chitchat", "unclear") and not plan.steps:
+            # the model answered it itself: a greeting, or one clarifying question. A number in it that the question does
+            # not hold is not used (the canned line instead)
+            # (a machine number — 「7 號機」 in a clarifying question — is a name, not a reading)
+            known = [json.dumps(context, ensure_ascii=False, default=str), " ".join(str(n) for n in range(1, 12))]
+            text = model_reply if model_reply and not ungrounded_numbers(model_reply, question, [], known) else (
+                HELLO_REPLY if model_intent == "chitchat" else UNCLEAR_REPLY)
+            if memory is not None:
+                memory.remember(actor, conversation_id, question=question, steps=[], machines=[])
+            audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": text, "intent": model_intent,
+                                                   "tool_calls": 0, "by": "model"}, event_id=ask_id)
+            return AskAnswer(id=ask_id, question=question, answer=text, mode=self.mode, factory_time=now,
+                             intent=model_intent, total_ms=ms())
+        if model_intent is not None and conv.last_question and not follow:
+            # the answer sees the previous question too, so 「那 8 號呢」 is answered as the same question for 8 號
+            answer_q = f"{question}（同一段對話的上一題：「{conv.last_question}」；這題若是接續就照同樣的問法回答）"
 
         # 2. RUN: only ASK_TOOLS, at most ASK_MAX_STEPS
         press_hint = next((m for m in machines_in(question) if m in F.CURE_PRESS_IDS), None)
@@ -767,6 +829,8 @@ class AskAgent:
             # nothing to look up: say so (or that the model is still loading), never guess a machine
             intent = "model_cold" if cold else "unclear"
             answer = COLD_REPLY if cold else UNCLEAR_REPLY
+            if model_intent == "change_request":
+                intent, answer = "change_request", CHANGE_REPLY
             audit.append(AuditKind.SYSTEM, "ask", {"msg": "answered", "answer": answer, "intent": intent,
                                                    "tool_calls": 0}, event_id=ask_id)
             return AskAnswer(id=ask_id, question=question, answer=answer, mode=self.mode, fell_back_to_mock=fell_back,
@@ -781,7 +845,8 @@ class AskAgent:
         mids = follow_mids or machines_in(question)
         # a change request gets the facts only: the model never phrases what "will happen" to the plant. A question
         # about a change (「核准卡在等什麼？」「今天有加班嗎？」) is answered like any other (issue #182)
-        change = change_request(question)
+        # the model's reading decides (issue #195); the keyword test only without one (rule mode / model failed)
+        change = model_intent == "change_request" if model_intent is not None else change_request(question)
         if self.mode is LLMMode.LLM and not fell_back and not change:
             try:
                 answer, repair = await self._checked_answer(answer_q, results, facts, mids)
