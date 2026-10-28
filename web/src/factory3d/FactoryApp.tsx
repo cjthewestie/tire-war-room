@@ -41,7 +41,7 @@ import { demoKey, padActions, type Action } from './demoInput'
 import { useGuidedDemo } from './useGuidedDemo'
 import { AutoOverlay } from './AutoOverlay'
 import { DemoButtons } from '../components/DemoButtons'
-import { autoActive } from '../demo/auto'
+import { autoActive, simpleHref, simpleRequested } from '../demo/auto'
 import { stageOf, useDemoBeat } from '../demo/beat'
 import { musicMuted, startMusic, stopMusic, subscribeMusic, toggleMusic } from '../demo/music'
 import { Prompter, pagesOf } from '../demo/Prompter'
@@ -229,10 +229,18 @@ export function FactoryApp() {
   const demo = useGuidedDemo({ state, transport, onBegin: onDemoBegin, onEnd: onDemoEnd, onWalk: onDemoWalk, onPhone: onDemoPhone, nSlides })
   const autoOn = demo.running && demo.auto
   const autoMode = autoActive(transport?.mode)
+  /** ?demo=simple (CJ 10-27): the one-line story; no prompter, 7-stage captions (AutoOverlay), its own four-button dock (SimpleDock) */
+  const simpleMode = simpleRequested()
   const pitchView = demo.running && demo.cue.shot.kind === 'whiteboard'
   const { running: demoOn, setSlide, setSlideView, slideView, changeSlide } = demo
   // 簡報 from anywhere (CJ: 「白板我點不進去怎麼demo」): stand up from the desk first, then the full-screen slides
   const openSlides = useCallback(() => { setPanel(null); releaseLook(); setSlideView(true) }, [setSlideView])
+  // the simple demo's Pitch ▶ / Shift+P (CJ 10-27): the story freezes (demo clock and plant) while the slides are up
+  const { togglePause: demoTogglePause, paused: demoPaused } = demo
+  const openPitch = useCallback(() => {
+    if (simpleMode && demoOn && !demoPaused) demoTogglePause()
+    openSlides()
+  }, [simpleMode, demoOn, demoPaused, demoTogglePause, openSlides])
   // background music: during the 3D demo only, faded out for the pitch
   useEffect(() => { if (demoOn && !slideView && !pitchView) startMusic(); else stopMusic() }, [demoOn, slideView, pitchView])
   useEffect(() => () => stopMusic(0.3), [])
@@ -241,7 +249,7 @@ export function FactoryApp() {
       const tg = e.target as HTMLElement | null
       if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable) || e.repeat || e.ctrlKey || e.metaKey || e.altKey) return
       if (e.code === 'KeyM') { toggleMusic(); return }
-      if (e.code === 'KeyP' && e.shiftKey) { e.stopImmediatePropagation(); openSlides(); return }
+      if (e.code === 'KeyP' && e.shiftKey) { e.stopImmediatePropagation(); openPitch(); return }
       // F / Esc always stand up from the desk computer (when the page itself has the keys, DeskMonitor does it)
       if (!demoOn && !slideView && panel?.kind === 'monitor' && (e.code === 'KeyF' || e.code === 'Escape')) {
         e.stopImmediatePropagation(); setPanel(null); window.focus(); canvasRef.current?.focus(); return
@@ -255,7 +263,7 @@ export function FactoryApp() {
     }
     window.addEventListener('keydown', k, true)
     return () => window.removeEventListener('keydown', k, true)
-  }, [openSlides, slideView, demoOn, changeSlide, setSlideView, panel])
+  }, [openPitch, slideView, demoOn, changeSlide, setSlideView, panel])
   // demo keys (demoInput.ts): while the demo runs these are the only keys that work
   const runAction = useCallback((act: Action) => {
     if (act === 'start') void demo.begin()
@@ -522,6 +530,11 @@ export function FactoryApp() {
         {!demoOn && (
           <button className="f3-demo-btn" onClick={() => void demo.begin()} data-testid="demo-start" disabled={!transport}>▶ Demo（6 分鐘）{!TOUCH_DEVICE && <kbd>G</kbd>}</button>
         )}
+        {/* the simple one-line story (CJ 10-27, ?demo=simple): opens the URL, so the whole page loads in simple mode and the
+            run starts by itself; in simple mode itself the dock's ▶ 開始 Demo replays it in place (hidden here like the other demo buttons) */}
+        {!demoOn && (
+          <button className="f3-demo-btn f3-simple-btn" onClick={() => location.assign(simpleHref())} data-testid="demo-simple" disabled={!transport}>▶ 簡易 Demo</button>
+        )}
       </div>
       {started && !overlay && TOUCH_DEVICE && <TouchControls action={prompt} mode={mode} />}
       {!demoOn && <div className={`f3-keys${TOUCH_DEVICE ? ' touch' : ''}`}>
@@ -531,10 +544,15 @@ export function FactoryApp() {
       </div>}
       {/* the presenter's teleprompter (demo/Prompter.tsx): CJ's line for the auto demo's beat; null (nothing) outside it.
           Bottom-left above the auto bar; on a narrow screen it steps aside while the phone is up (factory3d.css .f3-tp). */}
-      {!slideView && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
+      {!slideView && !simpleMode && <div className="f3-tp" data-phone={phoneUp ? 'up' : undefined}><DemoPrompter /></div>}
       {FPS_ON && <FpsMeter />}
-      <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
-        onNext={() => void demo.cont()} onPitch={openSlides} />
+      {/* the simple demo (CJ 10-27: 「make it an easy version」) has no prompter: captions (AutoOverlay) and its own four buttons
+          (CJ 10-27: 「i need next step and pause button and start demo button and ptich button」) instead of the 6-minute dock */}
+      {simpleMode
+        ? <SimpleDock running={demoOn} paused={demo.paused} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
+          onNext={() => void demo.cont()} onPause={demo.togglePause} onPitch={openPitch} />
+        : <DemoDock running={demoOn} auto={autoOn} slides={slideView} onStart={() => { setSlideView(false); void demo.begin() }}
+          onNext={() => void demo.cont()} onPitch={openSlides} />}
       {(slideView || pitchView) && <PitchPrompter says={deck.says} index={Math.min(demo.slide, nSlides - 1)} />}
       {autoOn ? <AutoOverlay demo={demo} /> : <DemoOverlay demo={demo} deck={deck} onPhone={() => raisePhone(true)} pad={pad.connected} />}
       {!demoOn && scene === 'factory' && alarmIds.map((id) => (
@@ -579,6 +597,7 @@ export function FactoryApp() {
             </ul>}
             <button className="f3-go">點擊開始</button>
             <button className="f3-go f3-go-demo" data-testid="demo-start-intro" onClick={(e) => { e.stopPropagation(); void demo.begin() }}>▶ Demo（6 分鐘）</button>
+            <button className="f3-go f3-go-simple" data-testid="demo-simple-intro" onClick={(e) => { e.stopPropagation(); location.assign(simpleHref()) }}>▶ 簡易 Demo（一條線的故事）</button>
           </div>
         </div>
       )}
@@ -623,6 +642,31 @@ function DemoDock({ running, auto, slides, onStart, onNext, onPitch }: { running
       {!running && <button type="button" data-testid="demo-start-btn" onClick={onStart} title="從第 1 階段重新開始自動 Demo（G）">▶ Demo 開始</button>}
       {!atEnd && !slides && <button type="button" data-testid="slides-open" onClick={onPitch} title="打開簡報（Shift+P）">簡報 ▶</button>}
       <button type="button" className="f3-dock-mute" data-testid="music-toggle" onClick={toggleMusic} aria-pressed={!muted} title={muted ? '開啟背景音樂（M）' : '關閉背景音樂（M）'}>{muted ? '🔇' : '🔊'}</button>
+    </div>
+  )
+}
+
+/** The simple demo's controls (CJ 10-27: 「i need next step and pause button and start demo button and ptich button」), bottom-right
+ *  where the 6-minute dock sits, always the same four so the presenter's hand knows where they are:
+ *  ▶ 開始 Demo (G) — starts the run in place (no reload); while it runs it reads ↺ 重新開始 and starts over from stage 1.
+ *  下一步 ▶ (N / Space / →) — skips to the next cue; off while paused (demo.cont() ignores it then).
+ *  ❚❚ 暫停 / ▶ 繼續 (B) — demo.togglePause(): freezes the demo clock and, through /api/demo/state, the plant's sim clock.
+ *  Pitch ▶ (Shift+P) — the whiteboard slides, reachable at any time; the demo is paused first (openPitch). Hidden while the slides are up. */
+function SimpleDock({ running, paused, slides, onStart, onNext, onPause, onPitch }: {
+  running: boolean; paused: boolean; slides: boolean; onStart: () => void; onNext: () => void; onPause: () => void; onPitch: () => void
+}) {
+  if (slides) return null
+  const key = (k: string) => (TOUCH_DEVICE ? null : <kbd>{k}</kbd>)
+  return (
+    <div className="f3-dock f3-simple-dock" data-testid="simple-dock">
+      <button type="button" className="f3-dock-start" data-testid="simple-start" onClick={onStart} title={running ? '從第 1 階段重新開始' : '開始簡易 Demo（G）'}>
+        {running ? '↺ 重新開始' : <>▶ 開始 Demo{key('G')}</>}
+      </button>
+      <button type="button" className="f3-dock-next" data-testid="simple-next" onClick={onNext} disabled={!running || paused} title="下一步（N／Space／→）">下一步 ▶{key('N')}</button>
+      <button type="button" className="f3-dock-pause" data-testid="simple-pause" onClick={onPause} disabled={!running} aria-pressed={paused} title={paused ? '繼續（B）' : '暫停（B）'}>
+        {paused ? '▶ 繼續' : '❚❚ 暫停'}{key('B')}
+      </button>
+      <button type="button" className="f3-dock-pitch" data-testid="simple-pitch" onClick={onPitch} title="打開 Pitch 簡報，Demo 先暫停（Shift+P）">Pitch ▶{key('⇧P')}</button>
     </div>
   )
 }

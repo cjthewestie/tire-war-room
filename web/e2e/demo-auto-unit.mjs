@@ -177,5 +177,18 @@ check('the run stays at the war room (no pitch, nothing after)', C.CUES[tl.index
   check('mock run: ends at the war room', C.CUES[run.tl.index].id === 'agent' && decided.length === 2)
 }
 
+// ---- the simple version (?demo=simple; CJ 10-27: one straight line, 7 stages, no prompter / dock / pitch) ----
+setUrl('?demo=simple&test=1')
+check('?demo=simple: auto on the real backend, not the mock, simple', AU.autoRequested() && AU.simpleRequested() && AU.autoActive('live') && !AU.autoMockRequested() && !AU.autoApproves('live') && AU.autoApprovesLive('live'))
+check('simple: the same auto cues and the same end (no pitch)', AU.AUTO_CUES.join(',') === 'start,rush,event,h1,worker,robot,agent' && AU.AUTO_FINAL === 'agent')
+check('simple: 7 stages in CJ\'s order', AU.SIMPLE_STAGES.join(',') === '俯瞰,新訂單湧入,離開電腦,7 號機溫降,核准方案,維修・巡檢車,回到電腦')
+check('simple: every beat maps to a stage 1..7, in order, and has its caption', BT.DEMO_BEATS.every((b, i, a) => AU.SIMPLE_STAGE_OF[b] >= 1 && AU.SIMPLE_STAGE_OF[b] <= 7 && (i === 0 || AU.SIMPLE_STAGE_OF[b] >= AU.SIMPLE_STAGE_OF[a[i - 1]]) && !!AU.SIMPLE_TEXT[b]) && AU.SIMPLE_STAGE_OF.overview === 1 && AU.SIMPLE_STAGE_OF.back === 7)
+check('simple: simpleStageOf', JSON.stringify(AU.simpleStageOf('leave')) === JSON.stringify({ n: 3, total: 7, label: '離開電腦' }) && AU.simpleStageOf(null) === null)
+check('simple: short holds (SIMPLE_MIN_S), the 6-minute holds untouched', AU.beatMinS('orders') === AU.SIMPLE_MIN_S.orders && AU.beatMinS('orders') < 15 && AU.phoneApproveS() === Math.max(3, AU.SIMPLE_MIN_S.phone - 2))
+check('simple: simpleHref keeps the page\'s params, swaps demo', AU.simpleHref('?mock=1&demo=cure07&test=1') === '/factory?mock=1&demo=simple&test=1' && AU.simpleHref('') === '/factory?demo=simple')
+setUrl('?demo=cure07')
+check('cure07 after simple: the 6-minute holds are back', AU.beatMinS('orders') >= AU.BEAT_MIN_FLOOR && AU.beatMinS('orders') > AU.SIMPLE_MIN_S.orders && !AU.simpleRequested())
+setUrl('?mock=1&scenario=press7_temp_drop&demo=cure07')
+
 console.log(failed ? `\n${failed} FAILED` : '\nall passed')
 process.exit(failed ? 1 : 0)

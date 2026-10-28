@@ -56,3 +56,20 @@ html[data-demo-auto] .f3-touch-btns { display: none !important; }
 @media (max-width: 599px) {
   .f3-root:has(.paa-wrap-corner) .f3-tp .tp-box { bottom: 256px; }
 }
+
+/* 簡易版（?demo=simple）：字幕前的「n/7」小籤，和右下角的「▶ 簡易 Demo」按鈕（和 ▶ Demo（6 分鐘）並排，淡藍） */
+.f3-auto-cap .f3-simple-stage { display: inline-block; margin-right: 10px; padding: 1px 8px; border-radius: 999px; background: #f3b43f; color: #1b1b1b; font-size: 13px; font-weight: 800; vertical-align: 2px; }
+.f3-hud > .f3-demo-btn.f3-simple-btn { color: #0f2f4a; background: #8ec9f0; box-shadow: 0 4px 0 #5f9fcb, var(--c-shadow); }
+.f3-hud > .f3-demo-btn.f3-simple-btn:hover { background: #79bbe8; }
+.f3-go.f3-go-simple { margin-top: 8px; background: #8ec9f0; color: #0f2f4a; box-shadow: 0 4px 0 #5f9fcb; cursor: pointer; }
+/* the simple demo's four controls (SimpleDock, CJ 10-27 「i need next step and pause button and start demo button and ptich button」):
+   the same bottom-right dock; ▶ 開始 Demo light blue like the 簡易 Demo button, 暫停／繼續 amber-tinted, keys as small chips */
+.f3-simple-dock button:disabled { opacity: .45; cursor: default; }
+.f3-simple-dock .f3-dock-start { color: #0f2f4a; background: #8ec9f0; }
+.f3-simple-dock .f3-dock-start:hover, .f3-simple-dock .f3-dock-start:focus-visible { background: #79bbe8; }
+.f3-simple-dock .f3-dock-pause[aria-pressed="true"] { color: #1b1b1b; background: #fbecd0; }
+.f3-simple-dock kbd { margin-left: 6px; padding: 0 5px; border-radius: 4px; background: rgba(0,0,0,.22); font: 700 11px/1.5 ui-monospace, Menlo, monospace; vertical-align: 1px; }
+.f3-simple-dock .f3-dock-start kbd { background: rgba(15,47,74,.18); }
+.f3-auto-cap .f3-simple-paused { display: inline-block; margin-left: 10px; padding: 1px 8px; border-radius: 999px; background: #fbecd0; color: #a0561a; font-size: 13px; font-weight: 800; vertical-align: 2px; }
+/* the simple version (?demo=simple): the corner 待核准 alert stays off too (the approval is the demo's own, the caption says so) */
+html[data-demo-simple] .paa-wrap { display: none !important; }
