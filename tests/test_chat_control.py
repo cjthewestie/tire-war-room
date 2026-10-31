@@ -126,12 +126,15 @@ async def test_a_control_request_the_model_did_not_turn_into_a_tool_is_asked_by_
 
 
 async def test_asking_to_approve_never_proposes_a_plan():
+    """#195 (CJ 10-22: 「取消對話前的程式檢查」): with a model the words are its call, but no tool approves anything;
+    the rule mode still answers with the button."""
     from warroom.agent.main_agent import APPROVE_REPLY
     f = Floor()
-    m = Model(("tool", "propose_plan", {"task": "核准 10 號機"}), ("say", "已擬計劃送你核准。"))
-    out = await MainAgent(_settings(), client=m).turn("幫我核准 10 號機的計劃", context={"abnormal": []}, waiting_plan=None,
-                                                      run_tool=f.run_tool, propose=f.propose, discuss=None, control=FakeControl())
-    assert not f.proposed and out["event_id"] is None and out["reply"] == APPROVE_REPLY
+    m = Model(("say", "核准要你自己按核准卡。"))
+    agent = MainAgent(_settings(), client=m)
+    await agent.turn("幫我核准 10 號機的計劃", context={"abnormal": []}, waiting_plan=None,
+                     run_tool=f.run_tool, propose=f.propose, discuss=None, control=FakeControl())
+    assert not [n for n in m.offered() if "approv" in n or "核准" in n]
     rules = await MainAgent(None).turn("幫我核准 10 號機的計劃", context={"abnormal": []}, waiting_plan=None,
                                        run_tool=f.run_tool, propose=f.propose, discuss=None)
     assert not f.proposed and rules["reply"] == APPROVE_REPLY
@@ -177,11 +180,11 @@ class Picked(FakeControl):
 
 async def test_bare_replan_on_the_selected_task_asks_then_runs():
     ctl = Picked(selected="EV-7")
-    m = Model(("tool", "query_plant", {"topic": "schedule"}), ("say", "我查了排程。"))
+    # #195: the model reads 「重新排」 and calls the control; the question is code's, word for word
+    m = Model(("tool", "replan_task", {"event_id": ""}), ("say", "我查了排程。"))
     agent = MainAgent(_settings(), client=m)
     q = await _say(agent, "重新排", ctl)
-    assert q["reply"] == CONFIRM_Q.format(verb="重新規劃", label="7 號硫化機那件", eid="EV-7")
-    assert not m.calls and q["by"] == "control"           # a bare command is acted on by code: no lookups, no model call
+    assert q["reply"] == CONFIRM_Q.format(verb="重新規劃", label="7 號硫化機那件", eid="EV-7") and not ctl.ran
     done = await _say(agent, "好", ctl)
     assert ctl.ran == [("replan_task", "EV-7")] and done["by"] == "control"
 
