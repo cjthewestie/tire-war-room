@@ -1208,8 +1208,8 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
 
         class Control:
             """Task control from chat (CJ 2026-10-22: 「A」): only existing supervisor actions, on an event that exists,
-            run after the supervisor confirmed in chat, audited as the supervisor via Agent Nemo. Approval and a Safety
-            Core release are not here: they stay buttons."""
+            run after the supervisor confirmed in chat, audited as the supervisor via Agent Nemo. Approval stays a
+            button. A machine's release is here since CJ 2026-10-22 「開放」, through the button's own path (see below)."""
             actor = f"{session.actor} via Agent Nemo"
 
             @staticmethod
