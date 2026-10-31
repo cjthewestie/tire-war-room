@@ -38,7 +38,10 @@ from warroom.agent.main_agent import (
     _CANCEL_RX,
     _INJECTED_DATA_RX,
     _THIRD_RX,
+    _APPROVE_RX,
+    APPROVE_REPLY,
     CONTROL,
+    NOT_DONE,
     PLANT_TOPICS,
     normalize_machine,
     speak_to_you,
@@ -98,6 +101,8 @@ _MD_RX = re.compile(r"\*\*|__|^#+\s*", re.MULTILINE)
 _BULLET_RX = re.compile(r"^\s*(?:[-*•・]|\d+[.、)])\s*", re.MULTILINE)
 _REASON_RX = re.compile(r"[^。！!？?\n]*(?:這句(?:話)?是在|我判斷|我的判讀|使用者(?:想|在問|的意思)|根據(?:你的)?問題，?我)[^。！!？?\n]*[。！!？?]?")
 _CLAIM_RX = re.compile(r"已(?:經)?(?:幫你|替你|為你)?(?:改好|改成|調整好|執行|核准|通知了|重排好|更新好|完成設定)")
+# a supervisor action said as done: only code runs these, after 「好」 (the control path returns before the model)
+_ACTED_RX = re.compile(r"已(?:經)?(?:幫你|替你|為你)?(?:恢復|放行|核准|批准|中斷|結案|報廢|交給現場|重新規劃|重新排)")
 _SENT_RX = re.compile(r"[^。！!？?]+[。！!？?]*")
 
 
@@ -487,7 +492,22 @@ class OverviewChat:
             async with (slot() if slot else contextlib.nullcontext()):
                 m = await self._llm(conversation, tid, MAX_STEPS + 1, messages=msgs, temperature=0.2, max_tokens=MAX_TOKENS)
             reply = (m.content or "").strip()
-        out["reply"] = self._polish(r, reply, out)
+        out["reply"] = self._checked(text, self._polish(r, reply, out), out)
+
+    @staticmethod
+    def _checked(text: str, words: str, out: dict[str, Any]) -> str:
+        """The reply code writes instead of the model's, as MainAgent does (live probe 10-31: 「已經幫你恢復了。」 reached
+        the supervisor while the press stayed stopped): the confirmation question is code's, word for word; approving
+        is the button; a supervisor action the model says it did, with nothing run, is not done."""
+        if out.get("control_reply"):
+            return out.pop("control_reply")
+        acted = out.get("event_id") or out.get("replanned") or any(s.get("opened") for s in out["steps"])
+        if _APPROVE_RX.search(text) and not acted:
+            return APPROVE_REPLY
+        if _ACTED_RX.search(words) and not acted:
+            out["error"] = "said a supervisor action was done; nothing ran"
+            return NOT_DONE
+        return words
 
     def _problems(self, reply: str, source: str, out: dict[str, Any]) -> list[str]:
         bad = []
@@ -593,7 +613,10 @@ class OverviewChat:
             elif name == "discuss_plan" and self._discuss is not None:
                 return await self._talk(r, args, out, step)
             elif name == "task_control":
-                return self._control(r, args, step, control, conversation)
+                return self._control(r, args, step, control, conversation, out)
+            elif name in CONTROL:                   # the task agent's own name for it (release_safety_stop {event_id})
+                target = str(args.get("target") or args.get("event_id") or "")
+                return self._control(r, {"action": name, "target": target}, step, control, conversation, out)
             else:
                 data, err = None, f"沒有 {name} 這個工具"
         except Exception as e:  # noqa: BLE001 - a failed tool is said to the model, never a 500
@@ -747,7 +770,7 @@ class OverviewChat:
                 f"要改排程、硫化時間、加班、調人或停料的步驟會出核准卡，等主管在核准卡上按核准才執行。現在還沒有任何改變。"
                 f"主管可以到 {sess or '那件任務'} 的對話看進度。")
 
-    def _control(self, r, args, step, control, conversation) -> str:
+    def _control(self, r, args, step, control, conversation, out) -> str:
         if control is None:
             step.update(ok=False, summary="沒有任務操作")
             return "這裡不能操作任務。"
@@ -778,4 +801,5 @@ class OverviewChat:
         self.main.set_pending(conversation, {"action": action, "event_id": eid})
         q = control.question(action, eid, label) or f"要{CONTROL[action]}{label}嗎？回「好」或「確認」就執行，其他回覆就不做。"
         step.update(label=f"問確認：{CONTROL[action]} {label}", summary=q)
+        out["control_reply"] = q
         return f"還沒執行，要先問主管確認。請用這句問他：{q}"
