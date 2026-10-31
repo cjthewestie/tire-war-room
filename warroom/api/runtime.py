@@ -1273,7 +1273,7 @@ class Runtime:
         return c
 
     def safety_release(self, case_id: str, body: Any, actor: str) -> Any:
-        """③ 確認恢復運轉 / QC 放行 / 報廢 (supervisor session only; never the agent). KeyError / ValueError as above."""
+        """③ 確認恢復運轉 / QC 放行 / 報廢 (supervisor session only: the button, or the supervisor's 好 in chat; never the commander or state machine). KeyError / ValueError as above."""
         c = self.cases.release(case_id, body, actor, self.sim, self._board(), self.clock.now())
         out = c.resolution == "qc_pass" and not c.reading_ok      # QC 放行, press still out of range: out of service
         if out:
