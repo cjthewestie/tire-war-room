@@ -171,7 +171,6 @@ class OverviewChat:
     def __init__(self, main: Any):
         self.main = main                         # the MainAgent: its client, settings and server kind
         self._conv: dict[str, deque[tuple[str, str]]] = {}
-        self._pending: dict[str, dict[str, Any]] = {}
         self._ids = itertools.count(1)
         self._task: dict[str, Any] | None = None
         self._discuss = None
@@ -182,14 +181,13 @@ class OverviewChat:
 
     def clear(self) -> None:
         self._conv.clear()
-        self._pending.clear()
+        self.main.clear_pending()
 
     def _mem(self, key: str) -> deque[tuple[str, str]]:
         if key not in self._conv:
             if len(self._conv) >= MAX_CONVERSATIONS:
                 old = next(iter(self._conv))
                 self._conv.pop(old)
-                self._pending.pop(old, None)
             self._conv[key] = deque(maxlen=HISTORY_TURNS)
         return self._conv[key]
 
@@ -356,7 +354,7 @@ class OverviewChat:
         out: dict[str, Any] = {"id": tid, "reply": "", "steps": steps, "event_id": None, "by": "model",
                                "fell_back": False, "error": None, "intent": None}
         mem = self._mem(conversation)
-        pend = self._pending.pop(conversation, None)
+        pend = self.main.take_pending(conversation)
         if pend is not None and control is not None:
             if _CONFIRM_RX.match(text) or (pend["action"] == "release_safety_stop"
                                            and re.match(r"\s*(?:報廢|放行|合格|QC\s*合格)", text, re.IGNORECASE)):
@@ -777,7 +775,7 @@ class OverviewChat:
             step.update(ok=False, summary=why[:200])
             return f"不能做：{why}"
         control.audit_request(action, eid)
-        self._pending[conversation] = {"action": action, "event_id": eid}
+        self.main.set_pending(conversation, {"action": action, "event_id": eid})
         q = control.question(action, eid, label) or f"要{CONTROL[action]}{label}嗎？回「好」或「確認」就執行，其他回覆就不做。"
         step.update(label=f"問確認：{CONTROL[action]} {label}", summary=q)
         return f"還沒執行，要先問主管確認。請用這句問他：{q}"

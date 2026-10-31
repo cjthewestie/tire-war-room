@@ -793,7 +793,7 @@ class MainAgent:
         self._slot_fn = slot
         self._control = control
         self._memory = memory if context.get("today_index") is not None else None   # overview chat only
-        pending = self.notes.pop("pending", None)
+        pending = self.take_pending(self._key)
         if pending is not None and control is not None:
             # a control action the agent asked to confirm: 「好」 runs it (code, the exact action and event it named);
             # 「不要」 drops it; anything else drops it and is answered as usual
@@ -948,6 +948,18 @@ class MainAgent:
     def notes(self) -> dict[str, Any]:
         """The current conversation's 前情摘要, pinned constraints and the turns waiting to be summarised."""
         return self._notes.setdefault(self._key, {"summary": "", "pins": [], "overflow": []})
+
+    # the chat control waiting for 「好」, one per conversation and shared with the overview chat (warroom/api/
+    # overview_chat.py): app.py sends 「恢復 X」 here and 「好」 there, so both loops must see the same question
+    def set_pending(self, conversation: str | None, pending: dict[str, Any]) -> None:
+        self._notes.setdefault(conversation or "", {"summary": "", "pins": [], "overflow": []})["pending"] = pending
+
+    def take_pending(self, conversation: str | None) -> dict[str, Any] | None:
+        return self._notes.get(conversation or "", {}).pop("pending", None)
+
+    def clear_pending(self) -> None:
+        for n in self._notes.values():
+            n.pop("pending", None)
 
     @staticmethod
     def _pin_of(text: str) -> str | None:
@@ -1212,7 +1224,7 @@ class MainAgent:
             steps.append({"tool": name, "args": {"event_id": eid}, "ok": False, "summary": why, "label": f"{CONTROL[name]}：不能做"})
             out["control_reply"] = why
             return why
-        self.notes["pending"] = {"action": name, "event_id": eid, "label": label}
+        self.set_pending(self._key, {"action": name, "event_id": eid, "label": label})
         ctl.audit_request(name, eid)
         q = (ctl.question(name, eid, label) if hasattr(ctl, "question") else None) or \
             CONFIRM_Q.format(verb=CONTROL[name], label=label, eid=eid)
