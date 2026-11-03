@@ -29,8 +29,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from warroom.agent import plant
-from warroom.agent.commander import SYSTEM_PROMPT, build_messages, parse_plan, scan_intercepted
+from warroom.agent.commander import SYSTEM_PROMPT, build_messages, fit_context, parse_plan, scan_intercepted
 from warroom.agent.strict import failure_cause
+from warroom.config import Settings
 from warroom.contracts import CommanderPlan, CommanderRequest, LLMCallInfo, LLMMode
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "plans"
@@ -97,11 +98,17 @@ class ReplayCommander:
         if verify_hashes:
             check_hashes(scenario)
         self.scenario = scenario
-        self.settings = SimpleNamespace(llm_fallback_to_mock=not strict, base_url=REPLAY_URL, model="replay")
+        # the context-budget fields are the code defaults, never .env, so the replay is the same on every machine
+        d = Settings.model_fields
+        self.max_tokens = d["commander_max_tokens"].default
+        self.settings = SimpleNamespace(llm_fallback_to_mock=not strict, base_url=REPLAY_URL, model="replay",
+                                        llm_context_tokens=d["llm_context_tokens"].default,
+                                        prompt_token_factor=d["prompt_token_factor"].default)
         self.model = f"replay:{scenario['scenario']}" + (f"/{scenario['variant']}" if scenario.get("variant") else "")
         self._rounds: dict[str, Counter] = {}
         self.served: list[tuple[str, str, int, str]] = []    # (phase, cause_code, round, file) per call
         self.misses: list[tuple[str, str, int]] = []
+        self.trims: list[list[str]] = []                     # TRIM_STEPS fit_context applied, per call that fit
         self.last_intercepted: list[dict[str, Any]] = []
         self.last_raw = ""
         self.last_error: str | None = None
@@ -114,6 +121,7 @@ class ReplayCommander:
     async def plan(self, req: CommanderRequest, on_alert=None) -> tuple[CommanderPlan, LLMCallInfo]:
         t0 = time.perf_counter()
         self.last_intercepted, self.last_raw, self.last_error, self.last_cause = [], "", None, None
+        self.last_prompt_est, self.last_trimmed = None, []
         caught: list[dict[str, Any]] = []
         # build the request as the live client does: the prompt it would send must still be buildable
         messages = build_messages(req, self.plant_override)
@@ -125,6 +133,11 @@ class ReplayCommander:
         n = rounds[(phase, cause)]
         rounds[(phase, cause)] += 1
         try:
+            # same context budget as the live client: a prompt that no longer fits raises PromptTooLong (too_long),
+            # and TRIM_STEPS applied show up in last_trimmed / LLMCallInfo.trimmed
+            _sent, self.last_prompt_est, self.last_trimmed = fit_context(req, messages[0]["content"], self.settings,
+                                                                         self.max_tokens)
+            self.trims.append(list(self.last_trimmed))
             hit = self.scenario["responses"].get((phase, cause, n))
             if hit is None:
                 self.misses.append((phase, cause, n))
@@ -137,7 +150,8 @@ class ReplayCommander:
             if on_alert:
                 on_alert(plan.alert_card)
             return plan, LLMCallInfo(mode=LLMMode.LLM, model=self.model, base_url=REPLAY_URL, ttft_ms=0.0,
-                                     total_ms=(time.perf_counter() - t0) * 1000, valid_json=True)
+                                     total_ms=(time.perf_counter() - t0) * 1000, valid_json=True,
+                                     prompt_tokens_est=self.last_prompt_est, trimmed=list(self.last_trimmed))
         except Exception as e:
             self.last_error = f"{type(e).__name__}: {e}"[:500]
             self.last_cause = failure_cause(e)

@@ -96,6 +96,8 @@ async def test_p11_replay_passes(tmp_path):
     assert [(c["phase"], c["plan_source"], c["hypothesis"]) for c in calls] == [
         ("plan", "commander", "H1"), ("replan", "commander", "H2")]
     assert all(c["plant_sha256"] == plant.active_sha() and c["model"] == "replay:p11" for c in calls)
+    # the replayed prompts fit the context budget without trimming (a longer prompt would show up here)
+    assert cmd.trims == [[], []]
 
 
 async def test_p11_wrong_fixture_is_red_strict(tmp_path):
@@ -138,8 +140,10 @@ async def test_recorded_spark_command_plan_replays(tmp_path):
     _clock, audit, _sim, _store, _tools, approvals, sm = make_sm(tmp_path, commander=QueuedCommander(cmd, ModelQueue()))
     ev = sm.open_command("重排保交期 #M-201", "supervisor")
     task = asyncio.create_task(sm.run_command(ev.id))
-    while not approvals.pending() and not task.done():
-        await asyncio.sleep(0.001)
+    async def until_waiting():
+        while not approvals.pending() and not task.done():
+            await asyncio.sleep(0.001)
+    await asyncio.wait_for(until_waiting(), 10)
     assert ev.state in OK_END, ev.outcome
     assert replay_failures(ev, audit, cmd) == []
     if approvals.pending():
