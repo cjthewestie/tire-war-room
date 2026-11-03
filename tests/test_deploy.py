@@ -641,7 +641,7 @@ def test_spark_compose_audit_key_outside_data_and_required():
             mounts = yaml.safe_dump(svc.get("volumes", []))
             assert "audit.key" not in mounts and "secrets" not in mounts, name
     unit = (DEPLOY / "systemd" / "warroom-stack.service").read_text()
-    assert "ExecStartPre=/opt/warroom/current/deploy/bin/init-audit-key.sh --check" in unit
+    assert "exec /opt/warroom/current/deploy/bin/init-audit-key.sh --check'" in unit
 
 
 def test_spark_demo_controls_default_off():

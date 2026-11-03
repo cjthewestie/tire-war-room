@@ -73,7 +73,8 @@ chmod 600 "$envf" 2>/dev/null || true
 for var in VLLM_IMAGE QDRANT_IMAGE MQTT_IMAGE; do
   ref="$(sed -n "s/^$var=//p" "$envf" | tail -1)"
   if [[ -n "$ref" && "$ref" != *@sha256:* ]]; then
-    echo "WARNING: $envf sets $var=$ref without @sha256:<digest>; remove the line to use the pinned default"          "from deploy/spark/images.lock, or pin it" >&2
+    echo "WARNING: $envf sets $var=$ref without @sha256:<digest>; remove the line to use the pinned default" \
+         "from deploy/spark/images.lock, or pin it" >&2
   fi
 done
 # Audit HMAC key outside the data volume; the compose app refuses to start without it. The paths go into .env
