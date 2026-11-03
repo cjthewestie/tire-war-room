@@ -52,16 +52,17 @@ class TracedTools:
                              input=call.args, output=res.data if res.ok else {"error": res.error},
                              metadata={"event_id": call.event_id, "ok": res.ok, "duration_ms": res.duration_ms}))
 
-    def call(self, call: ToolCall) -> ToolResult:
+    def call(self, call: ToolCall, **kw: Any) -> ToolResult:
+        """kw: passed through untouched (a write's Action Gate permit)."""
         sid = self._start(call)
-        res = self._inner.call(call)
+        res = self._inner.call(call, **kw)
         self._end(sid, call, res)
         return res
 
-    async def acall(self, call: ToolCall) -> ToolResult:
+    async def acall(self, call: ToolCall, **kw: Any) -> ToolResult:
         sid = self._start(call)
         inner = getattr(self._inner, "acall", None)
-        res = await inner(call) if inner is not None else self._inner.call(call)
+        res = await inner(call, **kw) if inner is not None else self._inner.call(call, **kw)
         self._end(sid, call, res)
         return res
 

@@ -163,9 +163,9 @@ def _stale_rig(tmp_path, staffing: bool = True):
     tools._confirm_schedule, tools._solve_schedule = flaky, solve
     real_call = tools.call
 
-    def call(c):
+    def call(c, **kw):            # kw: the Action Gate permit a write carries
         try:
-            return real_call(c)
+            return real_call(c, **kw)
         except RuntimeError as e:
             return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
     tools.call = call

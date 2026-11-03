@@ -24,17 +24,34 @@ With ``evidence`` (the state machine passes what THIS event computed) more check
 confirm_schedule only for a version a feasible solve_schedule produced in this event;
 set_cure_time and every solve_schedule.cure_overrides_h value only with the cure_formula's own
 value for that same press (physics numbers never come from the LLM).
+
+Writes only through the gate (G2/G3): a write the gate let through (ALLOW, or NEEDS_APPROVAL that a
+supervisor approved) gets an opaque, single-use permit from issue_permit(). The tool registry runs a
+write tool only with a permit it can redeem here for that step id, tool and args digest; anything
+else is refused as ``ungated_write`` and logged INTERCEPTED. gated_call() is the one path for writes
+outside the state machine's own EXECUTE loop (runtime rollback notices): GATE -> TOOL_CALL ->
+TOOL_RESULT in the audit log, in that order.
+
+Code-only notices (CODE_NOTICE_TEMPLATES): the staffing revocation and rollback notices the code
+writes itself. They are never shown to the model (not in R1_TEMPLATES, so not in the system
+prompt) and are R1 only when evidence["code_notice"] carries exactly that message and those teams.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
+import secrets
+import threading
 import unicodedata
+from collections import OrderedDict
 from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
 from warroom.contracts import (
     APPROVAL_REQUIRED,
+    AuditKind,
     READ_COMPUTE_TOOLS,
     TOOLS_BY_STATE,
     WRITE_TOOLS,
@@ -54,7 +71,9 @@ from warroom.contracts import (
     SolveScheduleArgs,
     SopSearchArgs,
     TeamId,
+    ToolCall,
     ToolName,
+    ToolResult,
 )
 from warroom.contracts import Line
 from warroom.factory import CURE_PRESS_IDS, MACHINE_BY_ID, MACHINE_IDS
@@ -106,6 +125,71 @@ R1_TEMPLATES: dict[NotifyKind, tuple[str, ...]] = {
         "{m}異常處置中，請留意後續通知",
     ),
 }
+# Notices only the CODE writes (never shown to the model: not in R1_TEMPLATES, so not in the system
+# prompt or its prefix cache). Every field is filled by the code from a StaffingChange and schedule
+# versions, never from an earlier round's (possibly model-written) message. Built by revoke_notice()
+# and rollback_notice(); R1 only with evidence["code_notice"] naming exactly that message and teams.
+CODE_NOTICE_TEMPLATES: dict[str, str] = {
+    "revoke": "撤回：{date} {shift} {label}（主管改選{new_label}）",
+    "rollback": "排程回復 v{from_v} → v{to_v}：{verb} {date} {shift}{label}",
+}
+ROLLBACK_VERBS = ("撤回", "恢復")
+
+
+def _shift_date_text(d: Any) -> str:
+    """"MM/DD" from a date, a datetime or an ISO date string; "" when it is none of those."""
+    from datetime import date, datetime
+    if isinstance(d, (date, datetime)):
+        return f"{d:%m/%d}"
+    try:
+        return f"{datetime.fromisoformat(str(d)):%m/%d}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _field(c: Any, name: str) -> Any:
+    return c.get(name) if isinstance(c, dict) else getattr(c, name, None)
+
+
+def revoke_notice(prev: Any, new: Any) -> str:
+    """The withdrawal notice for an earlier round's staffing change ``prev`` that the supervisor
+    replaced by ``new`` (StaffingChange or its dict). Only code-owned fields, no free text."""
+    return CODE_NOTICE_TEMPLATES["revoke"].format(
+        date=_shift_date_text(_field(prev, "shift_date")), shift=str(_field(prev, "shift_name") or ""),
+        label=str(_field(prev, "label") or ""), new_label=str(_field(new, "label") or ""))
+
+
+def rollback_notice(from_v: int, to_v: int, verb: str, change: Any) -> str:
+    """The notice a schedule rollback sends for a staffing change it revokes or brings back."""
+    if verb not in ROLLBACK_VERBS:
+        raise ValueError(f"rollback verb {verb!r}")
+    return CODE_NOTICE_TEMPLATES["rollback"].format(
+        from_v=int(from_v), to_v=int(to_v), verb=verb, date=_shift_date_text(_field(change, "shift_date")),
+        shift=str(_field(change, "shift_name") or ""), label=str(_field(change, "label") or ""))
+
+
+def change_teams(change: Any) -> list[str]:
+    """Teams a staffing change concerns: the receiving team, plus the giving team of a transfer."""
+    out: list[str] = []
+    for t in (_field(change, "to_team"), _field(change, "from_team") if _field(change, "kind") == "transfer" else None):
+        v = getattr(t, "value", t)
+        if v and v not in out:
+            out.append(str(v))
+    return out
+
+
+def _code_notice_ok(args: NotifyTeamsArgs, evidence: dict[str, Any] | None) -> bool:
+    """True when this info notice is exactly the code-built notice the evidence names."""
+    want = (evidence or {}).get("code_notice")
+    if not isinstance(want, dict) or NotifyKind(args.kind) is not NotifyKind.INFO:
+        return False
+    if _norm(str(want.get("message") or "")) != _norm(args.message) or not args.message:
+        return False
+    if sorted(str(t) for t in want.get("teams") or []) != sorted(TeamId(t).value for t in args.teams):
+        return False
+    return any(_compile_code(t).match(_norm(args.message)) for t in CODE_NOTICE_TEMPLATES.values())
+
+
 R1_ALWAYS_TEAMS = frozenset({TeamId.MAINTENANCE, TeamId.QC, TeamId.SUPERVISOR})
 CURE_H_TOLERANCE = 0.05            # h; the formula rounds to 0.1 h
 
@@ -130,6 +214,20 @@ def _compile(tpl: str) -> re.Pattern[str]:
         else:
             out.append(re.escape(p))
     return re.compile(rf"^{''.join(out)}$")
+
+
+_CODE_FIELD_RX = {"from_v": r"\d+", "to_v": r"\d+", "date": r"(?:\d{2}/\d{2})?",
+                  "verb": "(?:" + "|".join(ROLLBACK_VERBS) + ")"}
+_CODE_TEXT_RX = r"[^，,。；;：:！!？?「」]*?"       # a label / shift name: no sentence punctuation
+
+
+def _compile_code(tpl: str) -> re.Pattern[str]:
+    """Code-only template -> full-match regex; a free field cannot carry a second sentence."""
+    out = []
+    for p in re.split(r"(\{[a-z_]+\})", _norm(tpl)):
+        f = re.fullmatch(r"\{([a-z_]+)\}", p)
+        out.append(_CODE_FIELD_RX.get(f.group(1), _CODE_TEXT_RX) if f else re.escape(p))
+    return re.compile("^" + "".join(out) + "$")
 
 
 _R1_RX: dict[NotifyKind, tuple[re.Pattern[str], ...]] = {k: tuple(_compile(t) for t in v)
@@ -188,6 +286,8 @@ def r1_violation(args: NotifyTeamsArgs, evidence: dict[str, Any] | None = None) 
     kind = NotifyKind(args.kind)
     if kind not in _R1_RX:
         return None
+    if _code_notice_ok(args, evidence):
+        return None
     if not args.machine_id or args.machine_id not in MACHINE_BY_ID:
         return "R1 notice must name the machine it is about"
     ev_mid = (evidence or {}).get("event_machine_id")
@@ -232,6 +332,68 @@ def _bad_ids(tool: ToolName, a: BaseModel) -> list[str]:
     return bad
 
 
+def args_digest(args: dict[str, Any]) -> str:
+    """Stable digest of a tool call's args (key order and enum-vs-string do not matter)."""
+    blob = json.dumps(args, sort_keys=True, ensure_ascii=False, default=lambda o: getattr(o, "value", str(o)))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+
+class UnknownToolDecision(GateDecision):
+    """A REJECT for a tool name that is not a ToolName at all: it keeps the name exactly as asked
+    (the contract's GateDecision.tool can only hold allow-listed names)."""
+    tool: str  # type: ignore[assignment]
+
+
+class PermitBook:
+    """Gate-side record of what the gate let through, and the permits it signed for it.
+
+    note() remembers the verdict of every EXECUTE-state write check by (step id, tool, args digest).
+    issue() signs an opaque single-use token only for a write the gate allowed, or one that needed
+    approval and carries the approval id. redeem() (called by the tool registry) consumes a token
+    when it matches the call's step id, tool and args digest. Bounded, thread-safe."""
+
+    MAX = 4096
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._verdicts: OrderedDict[tuple[str, str, str], GateVerdict] = OrderedDict()
+        self._tokens: OrderedDict[str, tuple[str, str, str]] = OrderedDict()
+
+    @staticmethod
+    def _key(step_id: str | None, tool: Any, args: dict[str, Any]) -> tuple[str, str, str]:
+        return (str(step_id or ""), str(getattr(tool, "value", tool)), args_digest(args))
+
+    def note(self, step: PlanStep, decision: GateDecision) -> None:
+        with self._lock:
+            k = self._key(step.id, step.tool, step.args)
+            self._verdicts[k] = decision.verdict
+            self._verdicts.move_to_end(k)
+            while len(self._verdicts) > self.MAX:
+                self._verdicts.popitem(last=False)
+
+    def issue(self, step: PlanStep, *, approval_id: str | None = None) -> str | None:
+        k = self._key(step.id, step.tool, step.args)
+        with self._lock:
+            v = self._verdicts.get(k)
+            if v is GateVerdict.ALLOW or (v is GateVerdict.NEEDS_APPROVAL and approval_id):
+                tok = secrets.token_urlsafe(18)
+                self._tokens[tok] = k
+                while len(self._tokens) > self.MAX:
+                    self._tokens.popitem(last=False)
+                return tok
+        return None
+
+    def redeem(self, token: str | None, call: ToolCall) -> bool:
+        if not token:
+            return False
+        with self._lock:
+            k = self._tokens.get(token)
+            if k is None or k != self._key(call.step_id, call.tool, call.args):
+                return False
+            del self._tokens[token]
+            return True
+
+
 class RuleGate:
     """Implements contracts.ActionGate.
 
@@ -241,6 +403,12 @@ class RuleGate:
 
     def __init__(self, store=None):
         self._store = store
+        self.permits = PermitBook()
+
+    def issue_permit(self, step: PlanStep, *, approval_id: str | None = None) -> str | None:
+        """A single-use permit for this exact write (step id, tool, args), or None. Only for a step
+        this gate last judged ALLOW in EXECUTE, or NEEDS_APPROVAL with the approval that cleared it."""
+        return self.permits.issue(step, approval_id=approval_id)
 
     def _schedule_has_transfer(self, version: int) -> bool:
         if self._store is None:
@@ -281,8 +449,8 @@ class RuleGate:
             tool = ToolName(step.tool)
         except ValueError:
             reasons.append(f"tool {step.tool!r} is not on the allow-list (intercepted)")
-            return GateDecision(step_id=step.id, tool=ToolName.READ_SENSORS, verdict=GateVerdict.REJECT,
-                                risk=None, checks=checks, reasons=reasons)
+            return UnknownToolDecision(step_id=step.id, tool=str(getattr(step.tool, "value", step.tool)),
+                                       verdict=GateVerdict.REJECT, risk=None, checks=checks, reasons=reasons)
         checks["allow_list"] = tool in READ_COMPUTE_TOOLS or tool in WRITE_TOOLS
         if not checks["allow_list"]:
             reasons.append(f"{tool.value} not on the allow-list")
@@ -333,8 +501,11 @@ class RuleGate:
             reasons.append(f"{risk.value}: supervisor approval required")
         else:
             verdict = GateVerdict.ALLOW
-        return GateDecision(step_id=step.id, tool=tool, verdict=verdict, risk=risk, checks=checks,
-                            reasons=reasons)
+        decision = GateDecision(step_id=step.id, tool=tool, verdict=verdict, risk=risk, checks=checks,
+                                reasons=reasons)
+        if is_write and state is EventState.EXECUTE:
+            self.permits.note(step, decision)
+        return decision
 
     @staticmethod
     def _formula_for(evidence: dict[str, Any], press: str) -> list[float] | None:
@@ -376,3 +547,34 @@ class RuleGate:
                 if why:
                     return why
         return None
+
+
+def gated_call(gate: Any, tools: Any, audit: Any, step: PlanStep, *, actor: str, event_id: str | None = None,
+               simulation_feasible: bool = True, evidence: dict[str, Any] | None = None,
+               call_id: str | None = None) -> tuple[GateDecision, ToolResult | None]:
+    """Run one write outside the state machine's EXECUTE loop, through the gate: check it (EXECUTE),
+    audit GATE (INTERCEPTED when out of scope), and only on ALLOW sign a permit, audit TOOL_CALL, call
+    the registry with the permit and audit TOOL_RESULT, in that order. NEEDS_APPROVAL / REJECT: no
+    call, the result is None (the caller decides who must approve). Never raises on a tool error."""
+    kw: dict[str, Any] = {} if evidence is None else {"evidence": evidence}
+    gd = gate.check(step, EventState.EXECUTE, simulation_feasible, **kw)
+    kind = AuditKind.INTERCEPTED if gd.risk is None else AuditKind.GATE
+    audit.append(kind, "gate", {"step_id": step.id, "tool": str(getattr(step.tool, "value", step.tool)),
+                                "args": step.args, "by": actor, "decision": gd.model_dump(mode="json")},
+                 event_id=event_id)
+    if gd.verdict is not GateVerdict.ALLOW or tools is None:
+        return gd, None
+    issue = getattr(gate, "issue_permit", None)
+    permit = issue(step) if callable(issue) else None
+    call = ToolCall(id=call_id or step.id, event_id=event_id, step_id=step.id, tool=step.tool, args=step.args)
+    audit.append(AuditKind.TOOL_CALL, f"tool:{step.tool.value}",
+                 {"call_id": call.id, "step_id": step.id, "args": step.args, "attempt": 1,
+                  "state": EventState.EXECUTE.value, "by": actor}, event_id=event_id)
+    try:
+        res = tools.call(call, permit=permit)
+    except Exception as e:  # noqa: BLE001 - the registry never raises; be safe anyway
+        res = ToolResult(call_id=call.id, tool=step.tool, ok=False, error=f"{type(e).__name__}: {e}")
+    audit.append(AuditKind.TOOL_RESULT, f"tool:{step.tool.value}",
+                 {"call_id": call.id, "step_id": step.id, "ok": res.ok, "error": res.error,
+                  "duration_ms": res.duration_ms, "attempt": 1}, event_id=event_id)
+    return gd, res

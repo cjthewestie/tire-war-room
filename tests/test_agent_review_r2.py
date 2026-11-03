@@ -57,9 +57,9 @@ async def test_stale_confirm_skips_round_and_resolves(tmp_path):
     tools._confirm_schedule = flaky
     real_call = tools.call
 
-    def call(c):
+    def call(c, **kw):            # kw: the Action Gate permit a write carries
         try:
-            return real_call(c)
+            return real_call(c, **kw)
         except RuntimeError as e:
             return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
     tools.call = call

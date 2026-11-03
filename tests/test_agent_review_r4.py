@@ -352,10 +352,10 @@ async def test_stale_approval_with_different_content_asks_again(tmp_path):
     tools._confirm_schedule, tools._solve_schedule = flaky, solve
     real_call = tools.call
 
-    def call(c):
+    def call(c, **kw):            # kw: the Action Gate permit a write carries
         from warroom.contracts import ToolResult
         try:
-            return real_call(c)
+            return real_call(c, **kw)
         except RuntimeError as e:
             return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
     tools.call = call
@@ -392,10 +392,10 @@ async def test_stale_confirm_timeline_has_no_raw_english(tmp_path):
     tools._confirm_schedule = flaky
     real_call = tools.call
 
-    def call(c):
+    def call(c, **kw):            # kw: the Action Gate permit a write carries
         from warroom.contracts import ToolResult
         try:
-            return real_call(c)
+            return real_call(c, **kw)
         except RuntimeError as e:
             return ToolResult(call_id=c.id, tool=c.tool, ok=False, error=f"ToolError: {e}", attempt=c.attempt)
     tools.call = call
