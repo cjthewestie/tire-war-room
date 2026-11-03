@@ -21,10 +21,14 @@ from warroom.contracts import (
     ToolRegistry,
 )
 from warroom.tools import TOOL_SPECS, Registry, ToolContext, build_registry
+from tests.agent_fakes import sign_write
 
 
 def call(reg, tool, **args):
-    return reg.call(ToolCall(id=f"t-{tool}", tool=ToolName(tool), args=args))
+    c = ToolCall(id=f"t-{tool}", step_id=f"t-{tool}", tool=ToolName(tool), args=args)
+    if c.tool in WRITE_TOOLS:          # writes run only with an Action Gate permit
+        return reg.call(c, permit=sign_write(reg, c))
+    return reg.call(c)
 
 
 @pytest.fixture(scope="module")

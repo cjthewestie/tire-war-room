@@ -24,6 +24,7 @@ from warroom.contracts import (
     ToolName,
     ToolResult,
     ToolSpec,
+    WRITE_TOOLS,
 )
 from warroom.factory import GAS_CONSTANT_J_MOL_K, MACHINE_BY_ID, MACHINES, TZ
 
@@ -136,6 +137,13 @@ class FakeRegistry:
         self.fail = dict(fail or {})
         self.feasible, self.fell_back = feasible, fell_back
         self.calls: list[ToolCall] = []
+        self.permits: dict[str, str | None] = {}     # call id -> the Action Gate permit a write carried
+        self.gate_permits = None                     # the gate's PermitBook once a StateMachine attaches it
+        self.ungated: list[ToolCall] = []            # writes refused for want of a valid permit
+
+    def attach_gate(self, gate) -> None:
+        """Like Registry.attach_gate: from now on a write runs only with a permit this gate signed."""
+        self.gate_permits = getattr(gate, "permits", None)
 
     def specs(self, names=None) -> list[ToolSpec]:
         return []
@@ -143,8 +151,13 @@ class FakeRegistry:
     def openai_tools(self, names):
         return []
 
-    def call(self, call: ToolCall) -> ToolResult:
+    def call(self, call: ToolCall, permit: str | None = None) -> ToolResult:
         self.calls.append(call)
+        if call.tool in WRITE_TOOLS:
+            self.permits[call.id] = permit
+            if self.gate_permits is not None and not self.gate_permits.redeem(permit, call):
+                self.ungated.append(call)
+                return ToolResult(call_id=call.id, tool=call.tool, ok=False, error="ungated_write", attempt=call.attempt)
         if self.fail.get(call.tool, 0) > 0:
             self.fail[call.tool] -= 1
             return ToolResult(call_id=call.id, tool=call.tool, ok=False, error="simulated failure", attempt=call.attempt)
@@ -203,3 +216,19 @@ class FakeRegistry:
 
     def _notify_teams(self, a):
         return {"delivered": a["teams"], "kind": a["kind"]}
+
+
+def sign_write(reg: Any, call: ToolCall, approval_id: str | None = "test-approval") -> str | None:
+    """Tool-level tests call a write tool directly: get it a permit the way the state machine does, from a real
+    RuleGate (EXECUTE check, then issue_permit with an approval id for an R2/R3 write). A step the gate rejects
+    gets None, so the registry refuses it (ungated_write)."""
+    from warroom.agent.gate import RuleGate
+    from warroom.contracts import EventState, PlanStep
+    gate = getattr(reg, "_test_gate", None)
+    if gate is None:
+        gate = RuleGate()
+        reg.attach_gate(gate)
+        reg._test_gate = gate
+    step = PlanStep(id=call.step_id or "", tool=call.tool, args=call.args, purpose="test")
+    gate.check(step, EventState.EXECUTE, True)
+    return gate.issue_permit(step, approval_id=approval_id)

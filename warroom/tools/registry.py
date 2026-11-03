@@ -11,6 +11,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from warroom.contracts import (
+    AuditKind,
     AuditLog,
     Bus,
     Clock,
@@ -56,15 +57,48 @@ class Registry:
     (schedule store activate, notification on the bus) — no PLC/actuator writes exist.
 
     Only names in contracts.ToolName can be registered (the allow-list); anything else is refused
-    at register() and at call()."""
+    at register() and at call().
 
-    def __init__(self, ctx: ToolContext):
+    Writes only through the Action Gate: a write tool (gate.WRITE_TOOLS) runs only with a permit the
+    gate signed for that exact step id, tool and args (call(..., permit=) / acall(..., permit=)).
+    Without one the call returns ok=False, error="ungated_write" and an INTERCEPTED audit entry; the
+    tool function is never reached. With no gate attached (attach_gate) every write is refused.
+    Read/compute tools take no permit and behave as before."""
+
+    def __init__(self, ctx: ToolContext, permits: Any = None):
+        from warroom.agent import gate as _gate  # lazy: warroom.agent imports warroom.tools
+        self._write_tools = frozenset(_gate.WRITE_TOOLS)
+        self.permits = permits                       # gate.PermitBook (RuleGate.permits) or None
         self.ctx = ctx
         self._specs: dict[ToolName, ToolSpec] = {}
         self._fns: dict[ToolName, ToolFn] = {}
         self._pool = cf.ThreadPoolExecutor(max_workers=4, thread_name_prefix="tool")
         self._busy_lock = threading.Lock()
         self.inflight = 0      # long compute calls running now; the Runtime holds sim time while > 0
+
+    def attach_gate(self, gate: Any) -> None:
+        """Accept writes only with permits this gate signed."""
+        self.permits = getattr(gate, "permits", None)
+
+    def _ungated(self, call: ToolCall, t0: float, name: ToolName, permit: str | None) -> ToolResult | None:
+        """None when this call may run: a read/compute tool, or a write with a permit the gate signed
+        for exactly this call. Otherwise the refusal (and an INTERCEPTED audit entry)."""
+        if name not in self._write_tools:
+            return None
+        redeem = getattr(self.permits, "redeem", None)
+        if callable(redeem) and redeem(permit, call):
+            return None
+        why = "no permit" if not permit else "permit not valid for this step / tool / args"
+        audit = self.ctx.audit
+        if audit is not None:
+            try:
+                audit.append(AuditKind.INTERCEPTED, "tool_registry",
+                             {"tool": name.value, "call_id": call.id, "step_id": call.step_id, "args": call.args,
+                              "reason": f"ungated_write: {why} (writes run only through the Action Gate)"},
+                             event_id=call.event_id)
+            except Exception:  # noqa: BLE001 - the refusal stands even if the audit log is down
+                pass
+        return self._fail(call, t0, "ungated_write")
 
     def register(self, spec: ToolSpec, fn: ToolFn) -> None:
         name = ToolName(spec.name)          # raises if not on the allow-list
@@ -123,14 +157,18 @@ class Registry:
             with self._busy_lock:
                 self.inflight -= 1
 
-    def call(self, call: ToolCall) -> ToolResult:
+    def call(self, call: ToolCall, permit: str | None = None) -> ToolResult:
         """Synchronous call. Blocks the calling thread for up to timeout_s — never call this from the
-        asyncio loop thread for a read tool; use acall() there so the safety tick keeps running."""
+        asyncio loop thread for a read tool; use acall() there so the safety tick keeps running.
+        permit: required for a write tool (see the class doc)."""
         t0 = time.perf_counter()
         prep = self._prepare(call, t0)
         if isinstance(prep, ToolResult):
             return prep
         name, fn, spec, args = prep
+        refused = self._ungated(call, t0, name, permit)
+        if refused is not None:
+            return refused
         data: dict[str, Any] | None = None
         exc: BaseException | None = None
         try:
@@ -142,19 +180,22 @@ class Registry:
             exc = e
         return self._finish(call, t0, name, spec, data, exc)
 
-    async def acall(self, call: ToolCall) -> ToolResult:
+    async def acall(self, call: ToolCall, permit: str | None = None) -> ToolResult:
         """Async call for the event loop: never blocks the loop on a read/compute tool, so the
         Runtime's tick (and safety_pass) keeps its <0.2 s cadence while an event runs on a cold KB.
         - read/compute tools: run on the tool pool, awaited with timeout_s;
         - solve_schedule: run in a worker thread (CP-SAT has its own time limit);
         - write tools: run on the loop thread, because they publish on the loop-bound bus; they only
           record intent (store activate, notification) and return in milliseconds.
-        Never raises."""
+        permit: required for a write tool (see the class doc). Never raises."""
         t0 = time.perf_counter()
         prep = self._prepare(call, t0)
         if isinstance(prep, ToolResult):
             return prep
         name, fn, spec, args = prep
+        refused = self._ungated(call, t0, name, permit)
+        if refused is not None:
+            return refused
         data: dict[str, Any] | None = None
         exc: BaseException | None = None
         if spec.kind is ToolKind.WRITE:
@@ -181,8 +222,9 @@ class Registry:
                 self.inflight -= 1
         return self._finish(call, t0, name, spec, data, exc)
 
-def build_registry(ctx: ToolContext) -> Registry:
-    """Registry with all 9 tools registered."""
+def build_registry(ctx: ToolContext, gate: Any = None) -> Registry:
+    """Registry with all 9 tools registered. gate: the Action Gate whose permits writes need
+    (also settable later with attach_gate); without one every write is refused."""
     from warroom.tools import impl
     from warroom.tools.specs import TOOL_SPECS
     fns: dict[ToolName, ToolFn] = {
@@ -197,6 +239,8 @@ def build_registry(ctx: ToolContext) -> Registry:
         ToolName.NOTIFY_TEAMS: impl.notify_teams,
     }
     reg = Registry(ctx)
+    if gate is not None:
+        reg.attach_gate(gate)
     for name, fn in fns.items():
         reg.register(TOOL_SPECS[name], fn)
     return reg

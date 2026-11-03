@@ -265,6 +265,8 @@ class ComponentBuilder:
             from warroom.agent import RuleGate
             return RuleGate(store=store) if "store" in inspect.signature(RuleGate).parameters else RuleGate()
         gate = self._t("gate", gate_real, lambda: None)
+        if tools is not None and gate is not None and callable(getattr(tools, "attach_gate", None)):
+            tools.attach_gate(gate)             # writes run only with a permit this gate signed
 
         def sm_real():
             if None in (self.commander, tools, gate):
@@ -2847,27 +2849,34 @@ class Runtime:
 
     def after_rollback(self, pv: dict[str, Any], version: Any, actor: str, approval_id: str) -> None:
         """What an approved rollback changes for people: every staffing change it revokes or brings
-        back is sent to the affected teams (R1 info notice; the rollback itself was the approval), and
-        the event that produced the rolled-back version gets a timeline row, so its outcome no longer
-        reads as if that version were still in force."""
-        from warroom.contracts import NotifyKind, TimelineItem, ToolCall
+        back is sent to the affected teams, and the event that produced the rolled-back version gets a
+        timeline row, so its outcome no longer reads as if that version were still in force.
+
+        Each notice goes through the Action Gate (gate.gated_call: GATE -> TOOL_CALL -> TOOL_RESULT):
+        a code-only template (gate.rollback_notice) filled from the StaffingChange, passed to the gate
+        as evidence, so it is R1 (auto; the rollback itself was the approval). One the gate does not
+        let through is not sent, and the SYSTEM entry says so (delivered False, the gate's verdict)."""
+        from warroom.agent.gate import change_teams, gated_call, rollback_notice
+        from warroom.contracts import NotifyKind, PlanStep, TimelineItem
         store = self.c.store
         cur = store.get(pv["from_version"])
         revoked, restored = self._rollback_staffing_diff(cur.schedule, version.schedule)
         for verb, changes in (("撤回", revoked), ("恢復", restored)):
             for c in changes:
-                teams = [c.to_team] + ([c.from_team] if c.kind == "transfer" and c.from_team else [])
-                msg = (f"排程回復 v{pv['from_version']} → v{version.version}：{verb} {c.shift_date:%m/%d} "
-                       f"{c.shift_name}{c.label}")
-                res = None
-                if self.c.tools is not None:
-                    res = self.c.tools.call(ToolCall(id=f"{approval_id}-{verb}-{c.shift_date:%m%d}-{c.kind}",
-                                                     tool=ToolName.NOTIFY_TEAMS,
-                                                     args={"teams": [t.value for t in teams],
-                                                           "kind": NotifyKind.INFO.value, "message": msg}))
+                teams = change_teams(c)
+                msg = rollback_notice(pv["from_version"], version.version, verb, c)
+                res, verdict = None, None
+                if self.c.tools is not None and self.c.gate is not None:
+                    sid = f"{approval_id}-{verb}-{c.shift_date:%m%d}-{c.kind}"
+                    step = PlanStep(id=sid, tool=ToolName.NOTIFY_TEAMS, purpose=f"排程回復：{verb}{c.label}",
+                                    args={"teams": teams, "kind": NotifyKind.INFO.value, "message": msg})
+                    gd, res = gated_call(self.c.gate, self.c.tools, self.audit, step, actor=actor,
+                                         event_id=cur.event_id,
+                                         evidence={"code_notice": {"message": msg, "teams": teams}})
+                    verdict = gd.verdict.value
                 self.audit.append(AuditKind.SYSTEM, actor,
                                   {"msg": "rollback staffing notice", "text": msg, "approval_id": approval_id,
-                                   "teams": [t.value for t in teams], "delivered": bool(res and res.ok)},
+                                   "teams": teams, "delivered": bool(res and res.ok), "gate": verdict},
                                   event_id=cur.event_id)
         eid = cur.event_id
         sm = self.c.state_machine

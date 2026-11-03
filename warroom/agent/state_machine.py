@@ -125,7 +125,7 @@ from warroom.contracts import (
     ToolResult,
     WsType,
 )
-from warroom.agent.gate import cure_notice_press
+from warroom.agent.gate import change_teams, cure_notice_press, revoke_notice
 from warroom.agent.strict import failure_cause, strict_reason
 from warroom.data import machine_memory as MM
 from warroom.factory import (
@@ -332,6 +332,10 @@ class StateMachine:
             self._gate_takes_evidence = "evidence" in inspect.signature(gate.check).parameters
         except (TypeError, ValueError):
             self._gate_takes_cross_team = self._gate_takes_evidence = False
+        # writes only through the gate: the registry runs a write only with a permit this gate signed
+        attach = getattr(tools, "attach_gate", None)
+        if callable(attach) and getattr(gate, "permits", None) is not None:
+            attach(gate)
 
     # ------------------------------------------------------------------ public API
     def events(self) -> list[Event]:
@@ -1152,7 +1156,10 @@ class StateMachine:
                 await self._execute(run, chosen, auto_tag=False)
                 run.current_req = None
                 if change is not None and not run.round_problems:
-                    await self._execute(run, self._revoke_steps(run, change, res), auto_tag=False)
+                    revoke_now, revoke_held = self._revoke_steps(run, change, res)
+                    await self._execute(run, revoke_now, auto_tag=False)
+                    if revoke_held:
+                        await self._approve_revocations(run, revoke_held)
                 if chosen and not run.round_problems and ev.consecutive_failures:
                     # an approved round that executed cleanly ends the failure streak (page 7 counts
                     # CONSECUTIVE failures)
@@ -1235,7 +1242,9 @@ class StateMachine:
 
     # ------------------------------------------------------------------ tool calls
     async def _call(self, run: _Run, state: EventState, step_id: str | None, tool: ToolName,
-                    args: dict[str, Any]) -> ToolResult:
+                    args: dict[str, Any], approval_id: str | None = None) -> ToolResult:
+        """approval_id: the approval that cleared this write (a NEEDS_APPROVAL step); the gate signs a
+        permit for a write only when it let that exact step through (see gate.PermitBook)."""
         ev = run.ev
         if state is not ev.state or tool not in TOOLS_BY_STATE.get(state, frozenset()):
             self.audit.append(AuditKind.INTERCEPTED, "state_machine",
@@ -1254,6 +1263,7 @@ class StateMachine:
             self.audit.append(AuditKind.TOOL_CALL, f"tool:{tool.value}",
                               {"call_id": call.id, "step_id": step_id, "args": args, "attempt": attempt,
                                "state": state.value}, event_id=ev.id)
+            permit = self._permit(step_id, tool, args, approval_id) if tool in WRITE_TOOLS else None
             try:
                 if tool is ToolName.SOLVE_SCHEDULE:      # CP-SAT may take seconds: keep the loop free
                     self.compute_inflight += 1           # the Runtime holds sim time while > 0
@@ -1262,7 +1272,7 @@ class StateMachine:
                     finally:
                         self.compute_inflight -= 1
                 else:
-                    res = await self._invoke(tool, call)
+                    res = await self._invoke(tool, call, permit)
             except Exception as e:  # noqa: BLE001 - registry should never raise; be safe anyway
                 res = ToolResult(call_id=call.id, tool=tool, ok=False, error=f"{type(e).__name__}: {e}",
                                  attempt=attempt)
@@ -1286,15 +1296,27 @@ class StateMachine:
         await self._pace(started, model_s)
         return res
 
-    async def _invoke(self, tool: ToolName, call: ToolCall) -> ToolResult:
+    def _permit(self, step_id: str | None, tool: ToolName, args: dict[str, Any],
+                approval_id: str | None) -> str | None:
+        """The gate's single-use permit for this write, or None (the registry then refuses it)."""
+        issue = getattr(self.gate, "issue_permit", None)
+        if not callable(issue):
+            return None
+        step = PlanStep(id=step_id or "", tool=tool, args=args, purpose="")
+        return issue(step, approval_id=approval_id)
+
+    async def _invoke(self, tool: ToolName, call: ToolCall, permit: str | None = None) -> ToolResult:
         """Never block the loop on a tool: a cold KB / slow Qdrant once froze the Runtime tick (and so
         safety_pass) for 3 s. Registry.acall awaits read tools off-loop; a registry without acall gets
-        read/compute tools pushed to a thread. Write tools stay on the loop (the bus is loop-bound)."""
+        read/compute tools pushed to a thread. Write tools stay on the loop (the bus is loop-bound) and
+        carry the gate's permit (read/compute calls keep their plain signature)."""
         acall = getattr(self.tools, "acall", None)
+        if tool in WRITE_TOOLS:
+            if acall is not None:
+                return await acall(call, permit=permit)
+            return self.tools.call(call, permit=permit)
         if acall is not None:
             return await acall(call)
-        if tool in WRITE_TOOLS:
-            return self.tools.call(call)
         return await asyncio.to_thread(self.tools.call, call)
 
     # ------------------------------------------------------------------ CLASSIFY / context
@@ -3118,6 +3140,9 @@ class StateMachine:
                 for r in run.results.values():
                     if r.tool is ToolName.SOLVE_SCHEDULE and r.data.get("schedule_version") == ver.version:
                         r.data["schedule_version"] = target
+                # the approved confirm now names another version: the gate judges that exact call again,
+                # so the permit it signs matches what runs (otherwise the registry refuses it)
+                sr.gate = self._check(run, sr.step)
             self.audit.append(AuditKind.SYSTEM, "state_machine",
                               {"schedule_amended": target, "from_version": ver.version,
                                "staffing": [c.model_dump(mode="json") for c in staffing],
@@ -3134,35 +3159,97 @@ class StateMachine:
                            + "、".join(f"{self._gap_prefix(c.model_dump(mode='json'))} {c.label}" for c in dropped)
                            + "（未列入核准、未通知，該班缺口維持原狀）", "dynamic")
 
-    def _revoke_steps(self, run: _Run, change: dict[str, Any], req: ApprovalRequest) -> list[StepRun]:
+    def _revoke_steps(self, run: _Run, change: dict[str, Any], req: ApprovalRequest
+                      ) -> tuple[list[StepRun], list[StepRun]]:
         """An earlier round's staffing for the same shift that the supervisor has now replaced is
-        withdrawn with a compensating notice (R1 info), so only the decision actually taken stands."""
-        key, out = _staff_key(change), []
+        withdrawn with a compensating notice, so only the decision actually taken stands. The notice
+        is a code-only template (gate.revoke_notice) filled from the StaffingChange records, never
+        from the earlier round's message, and the gate gets it as evidence, so it is R1 (auto).
+        Returns (allowed now, needing approval): a withdrawal is never silently dropped."""
+        key, out, held = _staff_key(change), [], []
         new_done = any(p["key"] == key and p["kind"] == change.get("kind") and p["label"] == change.get("label")
                        and not p["revoked"] for p in run.staffing_done)
         if not new_done:
-            return out                                     # the new choice did not run: keep the old one
+            return out, held                               # the new choice did not run: keep the old one
         for prev in run.staffing_done:
             if prev["revoked"] or prev["key"] != key or (prev["kind"], prev["label"]) == (change.get("kind"),
                                                                                       change.get("label")):
                 continue
             n = len(run.revocations) + 1
-            args = {"teams": list(prev["args"].get("teams") or []), "kind": NotifyKind.INFO.value,
-                    "message": f"撤回：{prev['args'].get('message') or prev['label']}（主管改選{change.get('label')}）"}
+            old = prev.get("change") or {"shift_date": key[0], "shift_name": key[1], "to_team": key[2],
+                                         "kind": prev.get("kind"), "label": prev.get("label")}
+            # the teams the withdrawn notice reached, plus the teams the change itself concerns
+            teams = list(dict.fromkeys([*(str(getattr(t, "value", t)) for t in prev["args"].get("teams") or []),
+                                        *change_teams(old)]))
+            msg = revoke_notice(old, change)
+            args = {"teams": teams, "kind": NotifyKind.INFO.value, "message": msg}
             step = PlanStep(id=f"{req.id}-revoke-{n}", tool=ToolName.NOTIFY_TEAMS, args=args,
-                            purpose=f"撤回{prev['label']}")
-            gd = self.gate.check(step, EventState.EXECUTE, run.feasible)
+                            purpose=f"撤回{old.get('label') or prev['label']}")
+            kw = {"evidence": {"code_notice": {"message": msg, "teams": teams}}} if self._gate_takes_evidence else {}
+            gd = self.gate.check(step, EventState.EXECUTE, run.feasible, **kw)
             sr = StepRun(step=step, state="pending", gate=gd)
             run.ev.steps.append(sr)
             if gd.verdict is GateVerdict.REJECT:
                 sr.state = "rejected"
                 self._log_reject(run, step, gd)
                 continue
+            self.audit.append(AuditKind.GATE, "gate", {"step_id": step.id, "decision": gd.model_dump(mode="json")},
+                              event_id=run.ev.id)
             run.revocations[step.id] = prev
+            if gd.verdict is GateVerdict.NEEDS_APPROVAL:
+                sr.state = "awaiting_approval"
+                held.append(sr)
+                continue
             self._note(run.ev, "系統", f"依主管改選「{change.get('label')}」→ "
                        f"撤回第 {prev.get('round', '?')} 輪已執行的「{prev['label']}」", "dynamic")
             out.append(sr)
-        return out
+        return out, held
+
+    async def _approve_revocations(self, run: _Run, held: list[StepRun]) -> None:
+        """A withdrawal notice the gate did not let through on its own: never dropped silently (the
+        old staffing notice would stay in force). SYSTEM audit, an alert, and its own approval card;
+        it runs only after the supervisor approves it."""
+        ev = run.ev
+        labels = "、".join(sr.step.purpose for sr in held)
+        self.audit.append(AuditKind.SYSTEM, "state_machine",
+                          {"revocation_needs_approval": [sr.step.id for sr in held],
+                           "risk": [sr.gate.risk.value if sr.gate and sr.gate.risk else None for sr in held],
+                           "reason": "a staffing withdrawal notice needs approval; it is not sent until approved"},
+                          event_id=ev.id)
+        self._set_alert(ev, AlertCard(title="撤回通知待核准", summary=f"{labels}：主管核准後才送出，舊通知仍有效"[:60]))
+        self._note(ev, "系統", f"⚠ {labels}需主管核准才會送出（舊的人力通知目前仍有效）", "human")
+        now = self._now()
+        rid = f"AP-{ev.id}-revoke-{len(ev.approvals) + 1}"
+        options = [ApprovalOption(id="A", label=sr.step.purpose, tool=sr.step.tool, args=dict(sr.step.args),
+                                  recommended=True) for sr in held[:1]]
+        risk = max((sr.gate.risk for sr in held if sr.gate and sr.gate.risk), key=RISK_ORDER.index,
+                   default=RiskLevel.R3_CRITICAL)
+        req = ApprovalRequest(id=rid, event_id=ev.id, step_id=held[0].step.id, round=max(run.approvals_made, 1),
+                              created_at=now, risk=risk, title="撤回人力通知", reason="主管改選人力方案，撤回先前的通知",
+                              actions=[f"通知 {'、'.join(sr.step.args.get('teams') or [])}：{sr.step.args.get('message')}"
+                                       for sr in held],
+                              options=options, expires_at=self._approval_expires_at(now))
+        req = self.approvals.request(req)
+        ev.approvals.append(req.id)
+        self._to(ev, EventState.AWAIT_APPROVAL, "revocation notice needs approval")
+        res = await self.approvals.wait(req.id, timeout_s=self.approval_timeout_s)
+        self._to(ev, EventState.EXECUTE, f"revocation card {req.id} {res.status.value}")
+        approved = res.decision is not None and res.decision.decision is not DecisionKind.REJECT and \
+            res.status in (ApprovalStatus.APPROVED, ApprovalStatus.MODIFIED)
+        if not approved:
+            for sr in held:
+                sr.state = "rejected"
+                run.revocations.pop(sr.step.id, None)
+            self.audit.append(AuditKind.SYSTEM, "state_machine",
+                              {"revocation_not_sent": [sr.step.id for sr in held], "approval_id": req.id,
+                               "status": res.status.value}, event_id=ev.id)
+            self._note(ev, "系統", f"⚠ {labels}未獲核准，未送出：舊的人力通知仍有效，請主管人工處理", "human")
+            return
+        prev_req, run.current_req = run.current_req, req
+        try:
+            await self._execute(run, held, auto_tag=False)
+        finally:
+            run.current_req = prev_req
 
     # ------------------------------------------------------------------ EXECUTE
     async def _execute(self, run: _Run, steps: list[StepRun], auto_tag: bool) -> None:
@@ -3207,7 +3294,8 @@ class StateMachine:
                                                "why": "；".join(gd.reasons)[:300]})
                     continue
             sr.state = "running"
-            res = await self._call(run, EventState.EXECUTE, step.id, step.tool, step.args)
+            approval_id = run.current_req.id if (not auto_tag and run.current_req is not None) else None
+            res = await self._call(run, EventState.EXECUTE, step.id, step.tool, step.args, approval_id=approval_id)
             sr.result = res
             if not res.ok:
                 sr.state = "failed"
@@ -3289,7 +3377,7 @@ class StateMachine:
                     run.staffing_done.append({"key": _staff_key(change), "kind": change.get("kind"),
                                               "label": change.get("label") or label, "args": dict(step.args),
                                               "step_id": step.id, "executed_label": label, "revoked": False,
-                                              "round": run.approvals_made})
+                                              "round": run.approvals_made, "change": dict(change)})
             elif step.id in run.revocations:
                 prev = run.revocations[step.id]
                 prev["revoked"] = True
