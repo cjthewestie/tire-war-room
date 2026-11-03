@@ -60,7 +60,6 @@ def test_tool_allow_list():
     assert len(C.RiskLevel) == 4
 
 
-
 # ------------------------------------------------------------------ config self-check (report 建議 2)
 # A table edit that silently opens, closes or re-levels a tool must fail CI. Changing any of these on
 # purpose means changing this pinned copy in the same PR, so the reviewer sees it.
@@ -140,6 +139,7 @@ def test_read_tools_never_need_approval(tool):
         if tool in tools:
             d = RuleGate().check(step, state, False)
             assert d.verdict is C.GateVerdict.ALLOW and d.risk is C.RiskLevel.R0_READ, (state, d.reasons)
+
 
 def test_commander_schema_and_roundtrip():
     schema = C.CommanderPlan.model_json_schema()
