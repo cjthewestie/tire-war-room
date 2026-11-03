@@ -31,6 +31,8 @@ import { APPROVAL_CUES } from '../demo/beats'
 import { autoApproves, autoApprovesLive, autoRequested } from '../demo/auto'
 import { AutoCard } from './AutoCard'
 import { useSessionNo } from '../agent/sessionStore'
+import { ApprovalJudge } from '../agent/ApprovalJudge'
+import { DISCUSS_LABEL, PHONE_DISCUSS_HINT } from '../agent/approvalCard'
 
 const ROUND = ['', '第一輪', '第二輪', '第三輪', '第四輪']
 const CUE_TITLE: Record<string, string> = Object.fromEntries(CUES.map((c) => [c.id, c.title]))
@@ -234,6 +236,8 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
         </div>
       )}
       <AiStatusLine ev={ev} className="ph-ai" />
+      {/* 規則／程式判定 above AI 建議 (stacked on the phone) */}
+      <ApprovalJudge req={a} ev={ev} stack />
       </div>
       <div className="ph-col-b">
       {staffing.length > 0 && <>
@@ -262,10 +266,10 @@ function ApprovalCard({ a, disabled, onSent }: { a: ApprovalRequest; disabled: b
         <button className="ph-approve" disabled={locked || (a.options.length > 0 && !chosen)} onClick={() => void approve()}>
           {busy ? '送出中…' : submitted ? '已送出，等待系統確認…' : `核准${picked && staffing.length && opts.length > 1 ? ` ${picked.id}：${picked.label.replace(/（[^）]*）$/, '')}` : ''}`}
         </button>
-        <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss">{talk ? '送出' : '討論'}</button>
+        <button className="ph-sec" disabled={disabled || busy || submitted || !transport?.discuss} onClick={() => (talk ? void discuss() : setTalk(true))} data-testid="phone-discuss" title={PHONE_DISCUSS_HINT}>{talk ? '送出' : DISCUSS_LABEL}</button>
       </div>
       </div>
-      <p className="ph-foot">要改或不同意，按「討論」跟 AI 說；決定寫入稽核日誌。</p>
+      <p className="ph-foot" data-testid="phone-discuss-hint">{PHONE_DISCUSS_HINT}；決定寫入稽核日誌。</p>
       <details className="ph-why">
         <summary>查看處置依據</summary>
         <RepairEta ev={ev} />
