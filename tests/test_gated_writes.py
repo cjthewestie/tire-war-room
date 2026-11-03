@@ -280,3 +280,17 @@ def test_runtime_rollback_notice_goes_through_the_gate(tmp_path):
     seq = [e.kind for e in entries if e.payload.get("step_id") == sid]
     assert seq == [AuditKind.GATE, AuditKind.TOOL_CALL, AuditKind.TOOL_RESULT], seq
     assert not [e for e in entries if e.kind is AuditKind.INTERCEPTED and "ungated_write" in str(e.payload)]
+
+
+async def test_confirm_retargeted_to_a_corrected_version_is_gated_again(tmp_path):
+    """A store without amend_proposed gets a corrected proposal: the approved confirm then names that
+    version, and the gate judges that exact call again so its permit matches (no ungated_write)."""
+    clock, bus, audit, sim, store, tools, approvals, sm = build(tmp_path)
+    store.amend_proposed = None                            # the "propose a corrected version" path
+    sup = asyncio.create_task(supervisor(clock, approvals, PAGE11))
+    ev = await asyncio.wait_for(sm.handle(page11_anomaly()), 10)
+    await sup
+    amended = [e for e in audit.tail(0, 10_000) if e.kind is AuditKind.SYSTEM and "schedule_amended" in e.payload]
+    assert amended, "the page-11 flow no longer amends the schedule's staffing"
+    assert not tools.ungated, [(c.id, c.args) for c in tools.ungated]
+    assert ev.state is EventState.CLOSED

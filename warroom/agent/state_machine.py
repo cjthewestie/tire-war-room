@@ -3140,6 +3140,9 @@ class StateMachine:
                 for r in run.results.values():
                     if r.tool is ToolName.SOLVE_SCHEDULE and r.data.get("schedule_version") == ver.version:
                         r.data["schedule_version"] = target
+                # the approved confirm now names another version: the gate judges that exact call again,
+                # so the permit it signs matches what runs (otherwise the registry refuses it)
+                sr.gate = self._check(run, sr.step)
             self.audit.append(AuditKind.SYSTEM, "state_machine",
                               {"schedule_amended": target, "from_version": ver.version,
                                "staffing": [c.model_dump(mode="json") for c in staffing],
