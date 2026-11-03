@@ -214,14 +214,21 @@ class QueuedCommander:
         if br is not None and not await br.admit(getattr(self._inner, "probe", None)):
             return await self._cooldown(req, on_alert, br)
         t, p = self._queue.tags.get(req.event_id) or route(req.anomaly.kind.value, req.anomaly.severity)
+        cooled = False
         try:
             async with self._queue.slot(p, "commander", req.event_id, TYPES.get(t, t)):
-                if on_alert is None:
+                # asked again once the slot is ours: events queued behind the calls that tripped the breaker must
+                # not each send (and wait out llm_timeout_s) after it opened
+                if br is not None and not await br.admit(getattr(self._inner, "probe", None)):
+                    cooled = True
+                elif on_alert is None:
                     return await self._inner.plan(req)
-                return await self._inner.plan(req, on_alert=on_alert)
+                else:
+                    return await self._inner.plan(req, on_alert=on_alert)
         finally:
-            if br is not None:
+            if br is not None and not cooled:
                 self._breaker_notes[req.event_id] = {"breaker_state": br.state.value}
+        return await self._cooldown(req, on_alert, br)
 
     async def _cooldown(self, req, on_alert, br):
         from warroom.agent.strict import LLMUnavailable

@@ -175,6 +175,19 @@ async def test_cooldown_skips_the_model_queue():
         task.cancel()
 
 
+async def test_events_already_queued_when_the_breaker_opens_do_not_send():
+    """Three events queue at once while CLOSED (slots=1): the first two time out and open the breaker, so the third,
+    which got past the pre-queue check, is re-checked once it holds the slot and gets the rule plan unsent."""
+    srv = _Server(hang=True)
+    cmd = _cmd(srv)
+    qc = QueuedCommander(cmd, ModelQueue(slots=1))
+    results = await asyncio.gather(*(qc.plan(_req(f"EV-{i}")) for i in (1, 2, 3)))
+    assert all(info.fell_back_to_mock for _plan, info in results)
+    assert srv.plans == 2 and not srv.probes
+    notes = [qc.breaker_audit(f"EV-{i}") for i in (1, 2, 3)]
+    assert [n.get("fallback_reason") for n in notes].count("cooldown") == 1
+
+
 async def test_cooldown_is_audited_through_the_state_machine(tmp_path):
     srv = _Server(hang=True)
     cmd = _cmd(srv)
