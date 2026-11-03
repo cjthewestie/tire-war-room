@@ -56,6 +56,18 @@ def _compile(term: str) -> re.Pattern[str]:
     return re.compile(esc, re.IGNORECASE)
 
 
+def _untrusted_rules(section: Any) -> list[tuple[str, str, re.Pattern[str]]]:
+    """(category, rule, pattern) of `untrusted_categories`. A malformed section (not a mapping, a bad regex) gives []
+    and never raises: it only feeds the commander's audit flags, and must not take Agent Nemo's chat filter down."""
+    try:
+        return [(str(cat), str(rule), _compile(str(t)))
+                for cat, c in (section or {}).items()
+                for rule, terms in ((c or {}).get("rules") or {}).items()
+                for t in ([terms] if isinstance(terms, str) else terms or [])]
+    except Exception:  # noqa: BLE001 - see docstring
+        return []
+
+
 class SafetyFilter:
     def __init__(self, path: Path = PATH):
         self.path = Path(path)
@@ -89,10 +101,7 @@ class SafetyFilter:
             self.qa_allow = [str(a) for a in data.get("qa_allow") or []]
             self._out_reply = str(data.get("output_reply") or self._out_reply)
             self._out = [_compile(str(t)) for t in data.get("output_patterns") or []]
-            self._untrusted = [(str(cat), str(rule), _compile(str(t)))
-                               for cat, c in (data.get("untrusted_categories") or {}).items()
-                               for rule, terms in ((c or {}).get("rules") or {}).items()
-                               for t in ([terms] if isinstance(terms, str) else terms or [])]
+            self._untrusted = _untrusted_rules(data.get("untrusted_categories"))
             self._mtime = mtime
 
     def _scan(self, text: str, side: str, extra_allow: list[str] | None = None) -> tuple[str, str, str] | None:
