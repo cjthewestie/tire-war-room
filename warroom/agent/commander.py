@@ -534,6 +534,10 @@ class OpenAICommander:
         self.last_cause: str | None = None     # failure_cause of that: timeout | truncated | too_long | invalid_output | error
         self.last_prompt_est: int | None = None  # approx_tokens() of the latest request as sent (issue #33)
         self.last_trimmed: list[str] = []        # TRIM_STEPS applied to it
+        from warroom.agent.breaker import ModelBreaker
+        # cooldown breaker (proposal 5): QueuedCommander checks it before queueing; plan() reports each outcome
+        self.breaker = ModelBreaker(fails=getattr(settings, "llm_breaker_fails", 2),
+                                    cooldown_s=getattr(settings, "llm_breaker_cooldown_s", 120.0))
 
     def request_kwargs(self, req: CommanderRequest) -> dict[str, Any]:
         from warroom.agent import plant
@@ -604,6 +608,7 @@ class OpenAICommander:
                                prompt_tokens=getattr(usage, "prompt_tokens", None),
                                completion_tokens=getattr(usage, "completion_tokens", None), valid_json=True,
                                prompt_tokens_est=est, trimmed=trimmed)
+            self.breaker.record_success()
             if on_alert and not alert_sent:
                 on_alert(plan.alert_card)
             return plan, info
@@ -616,6 +621,8 @@ class OpenAICommander:
             # out-of-scope steps in a plan that was then rejected as a whole are still intercepted
             # and logged (page 7); with no parseable JSON, scan the raw text for tool names
             self.last_intercepted = caught or scan_intercepted(text)
+            if sent:                           # budget / too-long refusals sent nothing: not a model outcome
+                self.breaker.record_failure(e)
             if not self.settings.llm_fallback_to_mock:
                 raise
             plan, _ = await self._fallback.plan(req, on_alert=None if alert_sent else on_alert)
@@ -639,6 +646,18 @@ class OpenAICommander:
             return True
         except Exception:  # noqa: BLE001
             return False
+
+    async def probe(self) -> bool:
+        """Breaker probe: a 1-token completion with a short timeout. Not ping(): a hung vLLM still lists /models,
+        only generation stops. Not a real event either (no CommanderRequest, nothing planned or audited as a plan)."""
+        kw: dict[str, Any] = dict(model=self.model, messages=[{"role": "user", "content": "ok"}], max_tokens=1,
+                                  temperature=0.0, stream=False,
+                                  timeout=float(getattr(self.settings, "llm_breaker_probe_timeout_s", 5.0)))
+        extra = thinking_off(self.server_kind)
+        if extra:
+            kw["extra_body"] = extra
+        await self.client.chat.completions.create(**kw)
+        return True
 
 
 # =====================================================================================

@@ -587,7 +587,7 @@ class Runtime:
         self._world_rev = -1
         self._world_sent: dict[str, str] = {}    # section -> JSON last published (WORLD deltas)
         self._kb_ok: bool | None = None
-        self._llm_probe: tuple[float, bool] = (-1e9, False)
+        self._llm_probe_local: tuple[float, bool] = (-1e9, False)   # used only when the commander has no breaker
         self.ticks = 0
         self.compute_hold_max_s = 120.0          # never freeze the plant longer than this per tick
         self._switching = False                  # a scenario load is swapping components: no ticks
@@ -3027,8 +3027,38 @@ class Runtime:
     def kb_ok(self) -> bool:
         return bool(self._kb_ok) and "kb" not in self.c.degraded
 
+    def llm_breaker(self) -> Any:
+        """The commander's cooldown breaker (warroom/agent/breaker.py), or None (mock commander, degraded)."""
+        return getattr(getattr(self.c, "commander", None), "breaker", None)
+
+    @property
+    def _llm_probe(self) -> tuple[float, bool]:
+        """GET /models cache: kept on the commander's breaker so health and the breaker share one state."""
+        br = self.llm_breaker()
+        return br.models_probe if br is not None else self._llm_probe_local
+
+    @_llm_probe.setter
+    def _llm_probe(self, v: tuple[float, bool]) -> None:
+        br = self.llm_breaker()
+        if br is not None:
+            br.models_probe = v
+        else:
+            self._llm_probe_local = v
+
+    def llm_health(self) -> dict[str, Any] | None:
+        """/api/health/components "llm": the breaker's view; status "degraded" while it is OPEN. None in mock mode."""
+        if self.llm_mode is LLMMode.MOCK:
+            return None
+        br = self.llm_breaker()
+        if br is None:
+            return {"state": None, "status": "degraded" if "commander" in self.degraded else "ok"}
+        return br.view()
+
     async def llm_reachable(self) -> bool:
         if self.llm_mode is LLMMode.MOCK:
+            return False
+        br = self.llm_breaker()
+        if br is not None and br.state.value == "open":   # cooling down: the model is not usable, no request sent
             return False
         ts, ok = self._llm_probe
         if time.monotonic() - ts < 10:

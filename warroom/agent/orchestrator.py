@@ -197,17 +197,68 @@ class ModelQueue:
 
 class QueuedCommander:
     """Wraps the commander so every plan / replan call takes its event's slot in the ModelQueue.
-    Same plan() signature (on_alert streaming kept); everything else is forwarded unchanged."""
+    Same plan() signature (on_alert streaming kept); everything else is forwarded unchanged.
+
+    Cooldown breaker (warroom/agent/breaker.py, proposal 5): before taking a slot the inner commander's breaker is
+    asked. OPEN means nothing is sent: with the fallback allowed the rule plan comes back at once
+    (fell_back_to_mock, fallback_reason="cooldown"); --strict raises LLMUnavailable, which the state machine
+    ends with SAFE_STOP like any other strict model failure. ``breaker_audit(event_id)`` gives the LLM_CALL record
+    its breaker_state / fallback_reason for that event's latest call."""
 
     def __init__(self, inner: Any, queue: ModelQueue):
         self._inner, self._queue = inner, queue
+        self._breaker_notes: dict[str, dict[str, Any]] = {}
 
     async def plan(self, req, on_alert=None):
+        br = getattr(self._inner, "breaker", None)
+        if br is not None and not await br.admit(getattr(self._inner, "probe", None)):
+            return await self._cooldown(req, on_alert, br)
         t, p = self._queue.tags.get(req.event_id) or route(req.anomaly.kind.value, req.anomaly.severity)
-        async with self._queue.slot(p, "commander", req.event_id, TYPES.get(t, t)):
-            if on_alert is None:
-                return await self._inner.plan(req)
-            return await self._inner.plan(req, on_alert=on_alert)
+        cooled = False
+        try:
+            async with self._queue.slot(p, "commander", req.event_id, TYPES.get(t, t)):
+                # asked again once the slot is ours: events queued behind the calls that tripped the breaker must
+                # not each send (and wait out llm_timeout_s) after it opened
+                if br is not None and not await br.admit(getattr(self._inner, "probe", None)):
+                    cooled = True
+                elif on_alert is None:
+                    return await self._inner.plan(req)
+                else:
+                    return await self._inner.plan(req, on_alert=on_alert)
+        finally:
+            if br is not None and not cooled:
+                self._breaker_notes[req.event_id] = {"breaker_state": br.state.value}
+        return await self._cooldown(req, on_alert, br)
+
+    async def _cooldown(self, req, on_alert, br):
+        from warroom.agent.strict import LLMUnavailable
+        state = br.state.value
+        msg = f"model cooldown: breaker {state}, {br.consecutive} consecutive failures, {br.remaining_s():.0f} s left"
+        self._breaker_notes[req.event_id] = {"breaker_state": state}
+        settings = getattr(self._inner, "settings", None)
+        if getattr(settings, "llm_fallback_to_mock", True) is False:
+            raise LLMUnavailable(msg)
+        t0 = time.perf_counter()
+        from warroom.agent.commander import MockCommander
+        from warroom.contracts import LLMCallInfo, LLMMode
+        fallback = getattr(self._inner, "_fallback", None) or MockCommander()
+        # what inner.plan() resets at the start of a call: this event's record must not carry the last event's raw
+        # output or intercepted steps
+        for name, val in (("last_intercepted", []), ("last_raw", ""), ("last_error", f"LLMUnavailable: {msg}"),
+                          ("last_cause", "cooldown"), ("last_prompt_est", None), ("last_trimmed", [])):
+            if hasattr(self._inner, name):
+                setattr(self._inner, name, val)
+        plan, _ = await (fallback.plan(req) if on_alert is None else fallback.plan(req, on_alert=on_alert))
+        info = LLMCallInfo(mode=LLMMode.LLM, model=str(getattr(self._inner, "model", "") or ""),
+                           base_url=getattr(settings, "base_url", None), total_ms=(time.perf_counter() - t0) * 1000,
+                           valid_json=False, fell_back_to_mock=True)
+        self._breaker_notes[req.event_id] = {"breaker_state": state, "fallback_reason": "cooldown",
+                                             "cause": "cooldown", "error": f"LLMUnavailable: {msg}"}
+        return plan, info
+
+    def breaker_audit(self, event_id: str | None) -> dict[str, Any]:
+        """breaker_state (and, for a cooldown rule plan, fallback_reason / cause) of this event's latest call."""
+        return self._breaker_notes.pop(event_id, {}) if event_id is not None else {}
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._inner, name)

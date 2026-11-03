@@ -527,7 +527,11 @@ def create_app(runtime: Runtime | None = None, *, supervisor_pin: str | None = N
     async def health_components() -> dict[str, Any]:
         r = rt()
         ingest = getattr(r, "ingest", None)
-        return {"degraded": r.degraded, "ticks": r.ticks, "paused": r.paused, "speed": r.speed,
+        llm = _safe(r.llm_health, None)        # commander cooldown breaker (warroom/agent/breaker.py)
+        degraded = dict(r.degraded)
+        if llm and llm.get("status") == "degraded" and "llm" not in degraded:
+            degraded["llm"] = f"cooldown: breaker {llm.get('state')}, {llm.get('remaining_s')} s left"
+        return {"degraded": degraded, "llm": llm, "ticks": r.ticks, "paused": r.paused, "speed": r.speed,
                 "scenario": r.scenario.value, "loop_running": r.running,
                 "audit_chain_ok": _safe(r.audit.verify_chain, False),
                 "ingest": ingest.stats.as_dict() if ingest else None,

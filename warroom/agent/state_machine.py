@@ -1419,7 +1419,8 @@ class StateMachine:
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
                                "fell_back_to_mock": False, "plan_source": None, "strict": strict,
                                "reason": run.commander_error, "plant_sha256": self._plant_sha(),
-                               "machine_memory": MM.attached(mem), "untrusted_flags": flags}, event_id=ev.id)
+                               "machine_memory": MM.attached(mem), "untrusted_flags": flags,
+                               **self._breaker_audit(ev.id)}, event_id=ev.id)
             self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
@@ -1446,6 +1447,9 @@ class StateMachine:
             payload.update({"plan_source": "commander", "hypothesis": plan.hypothesis.id,
                             "cause_code": plan.hypothesis.cause_code, "steps": [s.id for s in plan.steps],
                             "safe_stop": plan.safe_stop, "rationale": plan.rationale})
+        payload.update(self._breaker_audit(ev.id))   # breaker_state; a cooldown rule plan: fallback_reason="cooldown"
+        if info.fell_back_to_mock:
+            payload.setdefault("fallback_reason", payload.get("cause"))
         self.audit.append(AuditKind.LLM_CALL, "commander", payload, event_id=ev.id)
         for s in getattr(self.commander, "last_intercepted", None) or []:
             self.audit.append(AuditKind.INTERCEPTED, "commander",
@@ -1453,6 +1457,17 @@ class StateMachine:
                                + ("; the rest of the model's plan was invalid, fallback plan used"
                                   if info.fell_back_to_mock else "")}, event_id=ev.id)
         return plan, info
+
+    def _breaker_audit(self, event_id: str) -> dict[str, Any]:
+        """The commander cooldown breaker's fields for this event's LLM_CALL record ({} without a breaker)."""
+        fn = getattr(self.commander, "breaker_audit", None)
+        if not callable(fn):
+            return {}
+        try:
+            out = fn(event_id)
+        except Exception:  # noqa: BLE001 - audit enrichment never breaks a plan
+            return {}
+        return dict(out) if isinstance(out, dict) else {}
 
     def _machine_memory(self, run: _Run) -> dict[str, Any] | None:
         """The event machine's notes and last past events for this plan / replan, or None. A timeline line says what

@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     # measured against the server's prompt_tokens (every commander LLM_CALL audit entry carries both numbers)
     prompt_token_factor: float = 2.0
     llm_fallback_to_mock: bool = True     # invalid JSON / unreachable -> mock plan, logged
+    # Commander cooldown breaker (warroom/agent/breaker.py): after LLM_BREAKER_FAILS consecutive timeouts / connection
+    # errors the commander stops sending for LLM_BREAKER_COOLDOWN_S (rule plan at once, or --strict SAFE_STOP), then
+    # one 1-token probe with LLM_BREAKER_PROBE_TIMEOUT_S decides whether it closes again. LLM_BREAKER_FAILS=0 turns it off.
+    llm_breaker_fails: int = 2
+    llm_breaker_cooldown_s: float = 120.0
+    llm_breaker_probe_timeout_s: float = 5.0
     guided_json: bool = True              # vLLM extra_body guided_json; else response_format json_schema
 
     qdrant_path: Path = ROOT / "data" / "runtime" / "qdrant"
