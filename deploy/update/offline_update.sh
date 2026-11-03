@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 # Apply an offline update bundle on the Spark, with automatic rollback if the new release is unhealthy.
 #   sudo deploy/update/offline_update.sh /media/usb/warroom-<ver>.tar
-# Steps: verify SHA256SUMS -> unpack to releases/<ver> -> docker load images -> carry .env over and pin
+# Steps: verify SHA256SUMS -> unpack to releases/<ver> -> docker load images (app image ID must match MANIFEST) -> carry .env over and pin
 # APP_IMAGE=warroom-app:<ver> -> switch `current` symlink -> restart stack -> health check.
 # Unhealthy within HEALTH_TIMEOUT_S -> deploy/update/rollback.sh to the previous release.
 # Data (/opt/warroom/data: audit log, schedules, qdrant) is outside releases and is never touched.
+# Audit key: on a box whose key still sits beside the log, run deploy/bin/migrate-audit-key.sh once by hand before
+# the first release whose compose sets WARROOM_AUDIT_REQUIRE_KEY; until then that release fails health and rolls back.
 # Env: WARROOM_ROOT=/opt/warroom  HEALTH_URL=http://127.0.0.1:8000/api/health  HEALTH_TIMEOUT_S=180
 #      RESTART_CMD="systemctl restart warroom-stack warroom-preload"  DOCKER=docker
 set -euo pipefail
@@ -29,6 +31,16 @@ if [[ "$PREV" == "$REL" ]]; then echo "update: $VER already current"; exit 0; fi
 rm -rf "$REL.tmp"; mkdir -p "$REL.tmp"
 tar -C "$REL.tmp" -xzf "$work/src.tar.gz"
 if [[ -f "$work/images.tar" ]]; then $DOCKER load -i "$work/images.tar"; fi
+# The app image has no registry digest; its pin is the image ID make_bundle.sh wrote into the checksummed MANIFEST.
+want_id="$(sed -n 's/^app_image_id=//p' "$work/MANIFEST")"
+if [[ -n "$want_id" ]]; then
+  got_id="$($DOCKER image inspect --format '{{.Id}}' "warroom-app:$VER" 2>/dev/null || true)"
+  if [[ "$got_id" != "$want_id" ]]; then
+    rm -rf "$REL.tmp"
+    echo "update: warroom-app:$VER is ${got_id:-missing}, MANIFEST pins $want_id; current release untouched" >&2
+    exit 3
+  fi
+fi
 if [[ -n "$PREV" && -f "$PREV/deploy/spark/.env" ]]; then cp "$PREV/deploy/spark/.env" "$REL.tmp/deploy/spark/.env"
 elif [[ -f "$REL.tmp/deploy/spark/.env.example" ]]; then cp "$REL.tmp/deploy/spark/.env.example" "$REL.tmp/deploy/spark/.env"
 else mkdir -p "$REL.tmp/deploy/spark"; : >"$REL.tmp/deploy/spark/.env"; fi

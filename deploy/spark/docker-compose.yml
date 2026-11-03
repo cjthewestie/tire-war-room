@@ -25,6 +25,19 @@
 # deploy/network/nftables-warroom-inbound.nft (same boot unit): :8000 (app) only from @app_clients (RFC1918
 # by default) and :1883 (MQTT) only from @mqtt_gateways (empty by default). deploy/bin/set_inbound_allow.sh
 # narrows/fills them.
+#
+# Images (G19): every external image is pinned as tag@sha256:<multi-arch index digest>; the same refs live in
+# images.lock (tests/test_deploy.py keeps the two equal). An .env override (VLLM_IMAGE=..., e.g. NVIDIA's
+# nvcr.io/nvidia/vllm build) must be pinned the same way. warroom-app is built here or `docker load`ed from an
+# update bundle, so it has no registry digest: APP_IMAGE is its version tag (install_spark.sh /
+# offline_update.sh write it into .env) and its image ID is recorded in the bundle MANIFEST (make_bundle.sh).
+#
+# Audit key (G1): the HMAC key for data/runtime/audit.jsonl lives OUTSIDE the data volume, in a host file only
+# the app uid can read (deploy/bin/init-audit-key.sh creates it on first install and refuses wrong
+# permissions; deploy/bin/migrate-audit-key.sh moves an old <log>.key that sat beside the log). Only the app
+# mounts it, read-only, and WARROOM_AUDIT_REQUIRE_KEY=1 makes the app refuse to start without it. The signed
+# head anchor is mirrored to AUDIT_ANCHOR_DIR (put it on a different disk from APP_DATA) so cutting entries off
+# the end AND rewriting <log>.head is still caught.
 
 name: warroom
 
@@ -36,9 +49,9 @@ x-offline-env: &offline-env
 
 services:
   vllm: &vllm-svc
-    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.28.0}
+    image: ${VLLM_IMAGE:-vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14}
     # NVIDIA's own Spark build is the fallback if the upstream arm64 image lacks GB10 (sm_121) kernels:
-    #   VLLM_IMAGE=nvcr.io/nvidia/vllm:<yy.mm>-py3
+    #   VLLM_IMAGE=nvcr.io/nvidia/vllm:<yy.mm>-py3@sha256:<digest>   (pin it: docker buildx imagetools inspect)
     entrypoint: ["/bin/bash", "/opt/warroom/vllm-serve.sh"]
     environment: &vllm-env
       <<: *offline-env
@@ -88,7 +101,7 @@ services:
     ports: ["127.0.0.1:8002:8000"]
 
   qdrant:
-    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.15.4}
+    image: ${QDRANT_IMAGE:-qdrant/qdrant:v1.15.4@sha256:6ac4807063bbecddca0250bfbcff52acf18c22263b904d12919349e6d0a408f1}
     environment:
       QDRANT__TELEMETRY_DISABLED: "true"
       QDRANT__SERVICE__HTTP_PORT: "6333"
@@ -105,7 +118,7 @@ services:
       retries: 5
 
   mqtt-init:                      # writes the broker password file (users warroom-app, gateway) before mqtt starts
-    image: ${MQTT_IMAGE:-eclipse-mosquitto:2}
+    image: ${MQTT_IMAGE:-eclipse-mosquitto:2.0.22@sha256:09b62ff32c2e7b64d4b431b9a89236073289b68db273de2b089edeb9b0d92b5c}
     entrypoint: ["/bin/sh", "/mosquitto/init-auth.sh"]
     user: "0"
     environment:
@@ -119,7 +132,7 @@ services:
     restart: "no"
 
   mqtt:                           # page 10: Modbus/OPC UA gateway -> MQTT -> app (validation + time-series DB)
-    image: ${MQTT_IMAGE:-eclipse-mosquitto:2}
+    image: ${MQTT_IMAGE:-eclipse-mosquitto:2.0.22@sha256:09b62ff32c2e7b64d4b431b9a89236073289b68db273de2b089edeb9b0d92b5c}
     # Authenticated broker: no anonymous clients; deploy/spark/mosquitto/acl lets `gateway` only publish to
     # warroom/telemetry/# and `warroom-app` read it. MQTT_BIND=<Spark LAN IP> lets a real gateway reach it;
     # deploy/network/nftables-warroom-inbound.nft then accepts :1883 only from the IPs in @mqtt_gateways
@@ -135,7 +148,7 @@ services:
     restart: unless-stopped
 
   app:
-    image: ${APP_IMAGE:-warroom-app:latest}
+    image: ${APP_IMAGE:?set APP_IMAGE=warroom-app:<version> in deploy/spark/.env (install_spark.sh and offline_update.sh write it)}
     build:
       context: ../..
       dockerfile: deploy/Dockerfile
@@ -158,11 +171,26 @@ services:
       WARROOM_MQTT_PASSWORD_FILE: /app/mqtt-auth/app.pass   # written by mqtt-init, readable by uid 10001 only
       # REQUIRED: the supervisor phone sends it as X-Supervisor-Pin over the LAN. compose refuses to start without it.
       WARROOM_SUPERVISOR_PIN: ${WARROOM_SUPERVISOR_PIN:?set WARROOM_SUPERVISOR_PIN (8+ random chars) in deploy/spark/.env}
-      WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-1}  # 0 on a real line: /api/sim/* refused
+      # /api/sim/* (scenario, speed, step) off on a real line. Demo: deploy/spark-demo/compose-demo.env turns it on.
+      WARROOM_DEMO_CONTROLS: ${WARROOM_DEMO_CONTROLS:-0}
       WARROOM_LOOPBACK_LOCAL: "1"   # host network: 127.0.0.1 really is the on-box touchscreen (the app turns loopback off by default inside a NAT'd container)
+      WARROOM_AUDIT_KEY_FILE: /run/warroom/audit.key     # the bind mount below; never inside /app/data/runtime
+      WARROOM_AUDIT_REQUIRE_KEY: "1"                      # no key file -> the app refuses to start (no <log>.key fallback)
+      WARROOM_AUDIT_ANCHOR: /app/audit-anchor/audit.jsonl.head
     volumes:
       - ${APP_DATA:-/opt/warroom/data/runtime}:/app/data/runtime
       - ${MQTT_DATA:-/opt/warroom/data/mqtt}:/app/mqtt-auth:ro
+      # Only the app mounts the key. create_host_path: false = a missing key fails `up` instead of Docker creating an
+      # empty directory in its place. The host file is uid 10001, 0400, in a 0700 dir (init-audit-key.sh checks).
+      - type: bind
+        source: ${AUDIT_KEY_FILE:-/opt/warroom/secrets/audit.key}
+        target: /run/warroom/audit.key
+        read_only: true
+        bind: { create_host_path: false }
+      - type: bind
+        source: ${AUDIT_ANCHOR_DIR:-/opt/warroom/audit-anchor}
+        target: /app/audit-anchor
+        bind: { create_host_path: false }
     mem_limit: 6g                 # page 9: scheduling + app 6 GB
     network_mode: host            # real client addresses; see the header. No `ports:` / `networks:` here.
     depends_on:

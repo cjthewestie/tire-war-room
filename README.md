@@ -79,6 +79,13 @@ curl -s 127.0.0.1:8000/api/health
 
 After install, the box boots straight into the war room with the model preloaded and all non-LAN traffic blocked. Details: [README.zh-TW.md](README.zh-TW.md) ("在 DGX Spark 上跑").
 
+Hardening on the Spark stack:
+
+- **Audit key outside the data volume.** `install_spark.sh` runs `deploy/bin/init-audit-key.sh`, which creates `/opt/warroom/secrets/audit.key` (app uid only, mode 0400) and `/opt/warroom/audit-anchor/` (the mirrored head anchor; put it on another disk if you have one). Only the app container mounts the key. The app runs with `WARROOM_AUDIT_REQUIRE_KEY=1`, so it refuses to start without the key, and `warroom-stack.service` runs `init-audit-key.sh --check` before every start.
+- **Upgrading a box whose key still sits beside the log** (`data/runtime/audit.jsonl.key`): stop the stack, run `sudo deploy/bin/migrate-audit-key.sh` once, then start it. This moves the key and seeds the anchor so the existing chain keeps verifying. Without this step the app would archive the whole log as `audit.jsonl.broken-N`. After the migration, `rollback.sh` refuses to go back to a release that predates the key file.
+- **Pinned images.** vLLM, Qdrant and Mosquitto are pinned as `tag@sha256:...` in `deploy/spark/images.lock` and in the compose defaults. `warroom-app` is pinned by its release tag (`APP_IMAGE=warroom-app:<ver>`, never `:latest`) and by the image ID in the update bundle's MANIFEST.
+- **Demo controls are off by default** (`WARROOM_DEMO_CONTROLS=0`: `/api/sim/*` is refused on a real line). For a stage demo: `docker compose --env-file .env --env-file ../spark-demo/compose-demo.env up -d app`.
+
 ## How it works
 
 ```
