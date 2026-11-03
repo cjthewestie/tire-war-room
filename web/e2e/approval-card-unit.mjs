@@ -72,6 +72,10 @@ const ev = (over = {}) => ({
     notifyOnlyLabel(closed([step('S3', 'set_cure_time', 'ok', gate('needs_approval', 'R2', {}))])) === null &&
     notifyOnlyLabel({ state: 'execute', approvals: [], steps: [step('S1', 'read_sensors', 'ok', gate('allow', 'R0', {}))] }) === null &&
     notifyOnlyLabel({ state: 'safe_stop', approvals: [], steps: [step('S1', 'read_sensors', 'ok', gate('allow', 'R0', {}))] }) === null)
+  check('a safety-core action / an R2 step in an earlier round: none',
+    notifyOnlyLabel({ ...closed([step('S1', 'read_sensors', 'ok', gate('allow', 'R0', {}))]), safety_actions: [{ id: 'SA-1' }] }) === null &&
+    notifyOnlyLabel({ ...closed([step('S1', 'read_sensors', 'ok', gate('allow', 'R0', {}))]),
+      prior_rounds: [{ round: 1, hypothesis_id: null, goal: null, steps: [step('S3', 'set_cure_time', 'ok', gate('needs_approval', 'R2', {}))] }] }) === null)
 }
 
 // ---------------------------------------------------------------- the 主控台 plan card (server render)

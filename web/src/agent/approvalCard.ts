@@ -85,12 +85,15 @@ export function cardJudge(req: ApprovalRequest, ev: Event | null): CardJudge {
   }
 }
 
-/** 「只讀取／只通知（系統未動作）」 for an event that closed without any approval and whose every step the gate rated R0
- *  (read / compute) or R1 (fixed notice): nothing on the floor was changed. null otherwise (approvals, safe stop,
- *  still open, an R2/R3 step, a step without a gate record). For the list / step rows only, never the approval card. */
-export function notifyOnlyLabel(ev: Pick<Event, 'state' | 'approvals' | 'steps'> | null | undefined): string | null {
-  if (!ev || ev.state !== 'closed' || ev.approvals.length > 0 || !ev.steps.length) return null
-  const risks = ev.steps.map((s) => s.gate?.risk ?? null)
+/** 「只讀取／只通知（系統未動作）」 for an event that closed without any approval or safety-core action and whose every
+ *  step, earlier rounds included, the gate rated R0 (read / compute) or R1 (fixed notice): nothing on the floor was
+ *  changed. null otherwise (approvals, a safety action, safe stop, still open, an R2/R3 step, a step without a gate
+ *  record). For the list / step rows only, never the approval card. */
+export function notifyOnlyLabel(ev: Pick<Event, 'state' | 'approvals' | 'steps' | 'safety_actions' | 'prior_rounds'> | null | undefined): string | null {
+  if (!ev || ev.state !== 'closed' || ev.approvals.length > 0 || (ev.safety_actions?.length ?? 0) > 0) return null
+  const all = [...(ev.prior_rounds ?? []).flatMap((r) => r.steps), ...ev.steps]
+  if (!all.length) return null
+  const risks = all.map((s) => s.gate?.risk ?? null)
   if (risks.some((r) => r !== 'R0' && r !== 'R1')) return null
   return risks.includes('R1') ? '只通知（系統未動作）' : '只讀取（系統未動作）'
 }
