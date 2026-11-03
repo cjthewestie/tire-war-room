@@ -1,0 +1,36 @@
+{
+  "scenario": "p11",
+  "about": "page 11: CURE-07 128 -> 122 °C, H1 steam_pressure_low rejected at 119.5 °C, replan to H2 停用重排",
+  "system_prompt_sha256": "583be929ca6b6d74805629a92cdcb4309a177858d566c03136429b792dd2ef7a",
+  "plant_sha256": "bac76e8491d737235c68ce862a7b0c8b2cc4d9bd9ae5022587261e1402c22cfb",
+  "responses": [
+    {
+      "phase": "plan",
+      "cause_code": "temp_drop",
+      "round": 0,
+      "file": "plan.json"
+    },
+    {
+      "phase": "replan",
+      "cause_code": "steam_pressure_low",
+      "round": 0,
+      "file": "replan_h2.json"
+    }
+  ],
+  "variants": {
+    "repeat_h1": [
+      {
+        "phase": "replan",
+        "cause_code": "steam_pressure_low",
+        "round": 0,
+        "file": "replan_repeat_h1.json"
+      },
+      {
+        "phase": "replan",
+        "cause_code": "steam_pressure_low",
+        "round": 1,
+        "file": "replan_repeat_h1.json"
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "scenario": "cmd_m201",
+  "about": "supervisor command 「重排保交期 #M-201」: the only commander call recorded with its raw output",
+  "note": "system_prompt_sha256 pins the prompt this recorded output was last re-checked against; the prompt it was recorded under is recorded_system_prompt_sha256 in plan.json",
+  "system_prompt_sha256": "583be929ca6b6d74805629a92cdcb4309a177858d566c03136429b792dd2ef7a",
+  "plant_sha256": "bac76e8491d737235c68ce862a7b0c8b2cc4d9bd9ae5022587261e1402c22cfb",
+  "responses": [
+    {
+      "phase": "plan",
+      "cause_code": "supervisor_command",
+      "round": 0,
+      "file": "plan.json"
+    }
+  ]
+}
