@@ -15,13 +15,22 @@ LLM latency; it is not the state machine and is reported as pipeline_p50 when bo
   uv run python -m bench.full_event --runs 3                       # both; headline = state machine
   uv run python -m bench.full_event --mode state-machine --runs 3
   uv run python -m bench.full_event --mode pipeline --think        # cost of reasoning (pipeline only)
+  uv run python -m bench.full_event --mode state-machine --runs 10 --label mac   # plan evaluation, see below
+
+Plan evaluation (--label mac|spark, edge-agent-harness 建議 3b): over the --runs state-machine runs, the commander's
+schema-valid rate, the Action Gate pass rate (decisions that were not REJECT), the simulate-feasible rate
+(solve_schedule), SAFE_STOP and replan counts, from each event's own audit (plan_counts). Written to
+bench/results/<YYYYMMDD>-<label>-planeval/ (planeval.json + README.md, the full full_event JSON beside them), labelled
+with the machine. The offline counterpart, with recorded answers instead of a model, is tests/test_plan_replay.py.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import math
 import os
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -149,6 +158,117 @@ def _valid_plan(text: str) -> bool:
         return False
 
 
+# ------------------------------------------------------------------ plan evaluation (--label, edge-agent-harness 3b)
+PLANEVAL_LABELS = ("mac", "spark")
+
+
+def plan_counts(entries: list[Any], ev: Any) -> dict[str, Any]:
+    """One event's plan-quality counts from its own audit rows (AuditEntry) and the Event:
+      schema   commander answers that parsed and validated into the plan that ran (plan_source=commander) / all
+      gate     Action Gate decisions that were not REJECT / all (consecutive repeats of one decision count once; a
+               write the gate dropped counts as a reject)
+      sim      solve_schedule results that came back ok and feasible / all solve_schedule results
+      safe_stop transitions into SAFE_STOP, replans = Event.replans."""
+    from warroom.contracts import AuditKind, EventState, GateVerdict
+    calls = [e.payload for e in entries if e.kind is AuditKind.LLM_CALL and e.actor == "commander"]
+    schema_ok = sum(1 for c in calls if c.get("plan_source") == "commander" and c.get("valid_json", True)
+                    and not c.get("fell_back_to_mock") and not c.get("error"))
+    gate_total = gate_ok = 0
+    last = None
+    for e in entries:
+        if e.actor != "gate" or e.kind not in (AuditKind.GATE, AuditKind.INTERCEPTED):
+            continue
+        p = e.payload
+        if "decision" in p:
+            verdict = (p["decision"] or {}).get("verdict")
+        elif p.get("dropped") == "rejected":
+            verdict = GateVerdict.REJECT.value
+        else:
+            continue
+        key = (p.get("step_id"), json.dumps(p.get("decision"), sort_keys=True, default=str), verdict)
+        if key == last:
+            continue
+        last = key
+        gate_total += 1
+        gate_ok += verdict != GateVerdict.REJECT.value
+    solves = [e.payload for e in entries if e.kind is AuditKind.TOOL_RESULT and e.actor == "tool:solve_schedule"]
+    feasible = sum(1 for p in solves if p.get("ok") and (p.get("data") or {}).get("feasible"))
+    safe_stops = sum(1 for e in entries if e.kind is AuditKind.STATE_TRANSITION
+                     and e.payload.get("to") == EventState.SAFE_STOP.value)
+    return {"schema": [schema_ok, len(calls)], "gate": [gate_ok, gate_total], "sim": [feasible, len(solves)],
+            "safe_stop": safe_stops, "replans": int(getattr(ev, "replans", 0) or 0),
+            "final_state": getattr(getattr(ev, "state", None), "value", None)}
+
+
+def _rate(pairs: list[list[int]]) -> dict[str, Any]:
+    ok, n = sum(p[0] for p in pairs), sum(p[1] for p in pairs)
+    return {"ok": ok, "total": n, "rate": round(ok / n, 3) if n else None}
+
+
+def planeval_summary(runs: list[dict[str, Any]]) -> dict[str, Any]:
+    """Pool the per-run plan_counts of the runs that ran (skipped / fell-back runs are counted, not pooled)."""
+    done = [r["planeval"] for r in runs if isinstance(r.get("planeval"), dict)]
+    return {
+        "runs": len(runs),
+        "runs_measured": len(done),
+        "runs_skipped": sum(1 for r in runs if "skipped" in r),
+        "schema_valid": _rate([d["schema"] for d in done]),
+        "gate_pass": _rate([d["gate"] for d in done]),
+        "sim_feasible": _rate([d["sim"] for d in done]),
+        "safe_stop_total": sum(d["safe_stop"] for d in done),
+        "safe_stop_runs": sum(1 for d in done if d["safe_stop"]),
+        "replans_total": sum(d["replans"] for d in done),
+        "replans_per_run": round(sum(d["replans"] for d in done) / len(done), 3) if done else None,
+        "closed": _rate([[d["final_state"] == "closed", 1] for d in done]),
+        "per_run": done,
+    }
+
+
+def planeval_dir(label: str, root: Path | None = None, now: datetime | None = None) -> Path:
+    from bench.llm import RESULTS_DIR
+    if label not in PLANEVAL_LABELS:
+        raise ValueError(f"--label must be one of {PLANEVAL_LABELS}, not {label!r}")
+    now = now or datetime.now(UTC).astimezone()
+    return (root or RESULTS_DIR) / f"{now:%Y%m%d}-{label}-planeval"
+
+
+def write_planeval(label: str, out: dict[str, Any], root: Path | None = None, now: datetime | None = None) -> Path:
+    """bench/results/<YYYYMMDD>-<label>-planeval/: planeval.json (everything) and README.md (what was run, how to read
+    it). The numbers live only here, labelled with the machine; docs do not quote them."""
+    from bench.llm import host_info
+    now = now or datetime.now(UTC).astimezone()
+    d = planeval_dir(label, root, now)
+    d.mkdir(parents=True, exist_ok=True)
+    pe = out["planeval"]
+    ep = out.get("endpoint") or {}
+    machine = {"mac": "Mac", "spark": "DGX Spark"}[label]
+    payload = {"bench": "full_event --label", "label": label, "machine": machine, "recorded_at": now.isoformat(),
+               "host": host_info(), "endpoint": ep, "scenario": "page 11 press-7 (state machine, real Runtime)",
+               "planeval": pe, "full_event_result": out.get("saved_to")}
+    (d / "planeval.json").write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str) + "\n",
+                                     encoding="utf-8")
+
+    def r(k: str) -> str:
+        x = pe[k]
+        return f"{x['ok']}/{x['total']}" + (f" ({x['rate']})" if x["rate"] is not None else "")
+    rows = [("schema 合格（指揮官輸出通過解析與驗證）", r("schema_valid")),
+            ("gate 通過（不是 REJECT 的決定）", r("gate_pass")),
+            ("模擬可行（solve_schedule feasible）", r("sim_feasible")),
+            ("SAFE_STOP 次數（有 SAFE_STOP 的 run 數）", f"{pe['safe_stop_total']} ({pe['safe_stop_runs']} runs)"),
+            ("replan 次數（每 run 平均）", f"{pe['replans_total']} ({pe['replans_per_run']})"),
+            ("CLOSED", r("closed"))]
+    lines = [f"# 指揮官計畫合格率 — {machine}", "",
+             (f"`bench/full_event.py --mode state-machine --runs {pe['runs']} --label {label}` 在 {machine} 上跑的結果，"
+              f"{now:%Y-%m-%d %H:%M}。情境：p.11 7 號硫化機降溫，真的 Runtime 跑完整狀態機。"),
+             "", f"- 模型：`{ep.get('model')}`，端點：`{ep.get('base_url')}`",
+             f"- 跑了 {pe['runs']} 次，有量到 {pe['runs_measured']} 次，略過 {pe['runs_skipped']} 次", "",
+             "| 項目 | 結果 |", "|---|---|", *[f"| {a} | {b} |" for a, b in rows], "",
+             ("每一次 run 的計數在 `planeval.json` 的 `planeval.per_run`；完整的 full_event 結果在 "
+              f"`{Path(str(out.get('saved_to') or '')).name}`。計數方式見 `bench/full_event.py` 的 `plan_counts`。"), ""]
+    (d / "README.md").write_text("\n".join(lines), encoding="utf-8")
+    return d
+
+
 SUPERVISOR_SCRIPT = (            # page 11: approve the solver's plan at 02:16:40, then at 02:31:30 reject the
     ("02:16:40", "approve", None, "同意"),               # cross-team move and pick night overtime (option A)
     ("02:31:30", "modify", "夜班加班", "不跨組調人，改夜班加班"),
@@ -258,6 +378,7 @@ async def via_state_machine(ep: Endpoint, max_wall_s: float = 900.0,
             "tool_calls": len(tools),
             "tools_failed": sum(1 for p in tools if not p.get("ok")),
             "decisions": decisions,
+            "planeval": plan_counts(entries, ev),
             "page11_checks": {
                 "h1_rejected": "H1 不成立" in timeline,
                 "cure_36_5h": "36.5" in timeline,
@@ -319,7 +440,16 @@ async def main_async(args) -> dict[str, Any]:
                                 None if p50 is None else p50 <= LATENCY_FULL_EVENT_S,
                                 note="scripted breakdown (commander plan + replan calls), synthetic solve; not the state machine"))
     out["verdicts"] = [v.__dict__ for v in verdicts]
-    out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
+    label = getattr(args, "label", None)
+    if label:
+        out["label"] = label
+        out["planeval"] = planeval_summary(out.get("state_machine", {}).get("runs", []))
+        now = datetime.now(UTC).astimezone()
+        pdir = planeval_dir(label, args.out_dir, now)            # the full result goes next to planeval.json
+        out["saved_to"] = str(save_result("full_event", ep, out, pdir))
+        out["planeval_dir"] = str(write_planeval(label, out, args.out_dir, now))
+    else:
+        out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
     return out
 
 
@@ -333,7 +463,15 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                    help="state-machine = the headline (real Runtime); pipeline = scripted commander plan/replan breakdown")
     p.add_argument("--via-state-machine", action="store_true", help="kept for old scripts; same as --mode both")
     p.add_argument("--out-dir", type=Path)
-    out = run(main_async(p.parse_args(argv)))
+    p.add_argument("--label", choices=PLANEVAL_LABELS,
+                   help="plan evaluation over --runs state-machine runs (schema / gate / sim-feasible rates, SAFE_STOP "
+                        "and replan counts) into <out-dir or bench/results>/<date>-<label>-planeval/")
+    args = p.parse_args(argv)
+    if args.label and args.mode == "pipeline" and not args.via_state_machine:
+        p.error("--label needs the state-machine runs: use --mode state-machine or both")
+    if args.label and args.think:
+        p.error("--label measures the commander as the app runs it (reasoning off): drop --think")
+    out = run(main_async(args))
     if "state_machine" in out:
         sm = out["state_machine"]
         print(f"full event (state machine) compute_s: {sm['compute_s']}  closed_rate={sm['closed_rate']}")
@@ -342,6 +480,11 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
                                                    "replans", "skipped")})
     if "total_s" in out:
         print(f"pipeline breakdown total: {out['total_s']}  plan_valid_rate={out['plan_valid_rate']}")
+    if "planeval" in out:
+        pe = out["planeval"]
+        print(f"planeval ({out['label']}): schema {pe['schema_valid']['rate']}  gate {pe['gate_pass']['rate']}  "
+              f"sim {pe['sim_feasible']['rate']}  safe_stop {pe['safe_stop_total']}  replans {pe['replans_total']}")
+        print("planeval saved", out["planeval_dir"])
     print("saved", out["saved_to"])
     return out
 
