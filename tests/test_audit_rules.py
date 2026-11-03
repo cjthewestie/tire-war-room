@@ -58,9 +58,14 @@ class _Trace:
         return self.add("tool_call", f"tool:{tool}", {"call_id": f"c{len(self.rows)}", "step_id": step,
                                                        "attempt": 1, "state": "execute", **extra})
 
-    def decide(self, decision, request_id="AP-EV-1-1", option_id=None):
+    def decide(self, decision, request_id="AP-EV-1-1", option_id=None, reason=""):
         return self.add("approval_decision", "supervisor",
-                        {"request_id": request_id, "decision": decision, "option_id": option_id})
+                        {"request_id": request_id, "decision": decision, "option_id": option_id, "reason": reason})
+
+    def discuss(self, request_id):
+        """state_machine.discuss: SYSTEM constraints_added naming the card, then the supersede."""
+        self.add("system", "supervisor", {"constraints_added": [], "text": "改", "approval_id": request_id})
+        return self.decide("superseded", request_id, reason="主管討論：改")
 
 
 def _rules(trace: _Trace) -> list[str]:
@@ -112,6 +117,27 @@ def test_changed_hash_is_caught_without_the_key_and_with_an_explicit_key_file(tm
     assert audit_check.main([str(path), "--key-file", str(moved)]) == 1
     assert json.loads(capsys.readouterr().out)["chain"]["key_source"] == "key_file"
     assert audit_check.main([str(path), "--key-file", str(tmp_path / "missing.key")]) == 2
+
+
+def test_raw_beside_log_key_works_as_key_file_even_with_whitespace_bytes(tmp_path, capsys):
+    """A <log>.key is 32 raw bytes and is used unstripped by the log; --key-file must not strip it into a
+    wrong key (about 1 in 20 random keys start or end with a whitespace byte)."""
+    path = tmp_path / "audit.jsonl"
+    key = b"\n" + bytes(range(1, 31)) + b" "
+    log = JsonlAuditLog(path, key=key)
+    for i in range(3):
+        log.append(AuditKind.SYSTEM, "test", {"i": i})
+    kf = tmp_path / "raw.key"
+    kf.write_bytes(key)
+    assert audit_check.main([str(path), "--key-file", str(kf)]) == 0
+    capsys.readouterr()
+    # a text key file with a trailing newline is stripped (as WARROOM_AUDIT_KEY_FILE is)
+    p2 = tmp_path / "b" / "audit.jsonl"
+    log2 = JsonlAuditLog(p2, key=b"plain-text-key")
+    log2.append(AuditKind.SYSTEM, "test", {"i": 0})
+    text = tmp_path / "text.key"
+    text.write_bytes(b"plain-text-key\n")
+    assert audit_check.main([str(p2), "--key-file", str(text)]) == 0
 
 
 def test_a_cut_off_last_entry_fails_on_the_signed_head(tmp_path):
@@ -222,12 +248,20 @@ def test_rd_r1_notify_after_a_failed_verify_needs_a_new_simulate():
 def test_re_discussion_replans_are_capped():
     t = _Trace()
     for n in range(MAX_DISCUSS_REPLANS):
-        t.decide("superseded", f"AP-EV-1-1-v{n}")
+        t.discuss(f"AP-EV-1-1-v{n}")
     assert _rules(t) == []
-    t.decide("superseded", "AP-EV-1-1-vX")
+    # a card superseded because the supervisor interrupted the event is not a discussion re-plan
+    t.decide("superseded", "AP-EV-1-1-vI", reason="主管中斷")
+    assert _rules(t) == []
+    t.discuss("AP-EV-1-1-vX")
     assert _rules(t) == ["R-e"]
-    t.decide("superseded", "AP-EV-1-1-vY")
+    t.discuss("AP-EV-1-1-vY")
     assert _rules(t) == ["R-e"]                      # reported once per event
+    # the reason alone (no SYSTEM entry in the capture) still counts
+    r = _Trace()
+    for n in range(MAX_DISCUSS_REPLANS + 1):
+        r.decide("superseded", f"AP-EV-1-1-v{n}", reason="主管討論：延後")
+    assert _rules(r) == ["R-e"]
 
 
 # ---------------------------------------------------------------- real traces break no rule

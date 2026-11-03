@@ -15,8 +15,10 @@ return violations; nothing here writes, calls a tool or imports the agent, the A
   R-d  after a VERIFY failure of an event (a ``verifier`` SYSTEM entry with ``ok: false``, or the
        transition verify -> replan), an R1 notify of that event needs a new transition to ``simulate``
        first: a fresh plan was simulated before anything goes out automatically.
-  R-e  the supervisor discussion re-plans of one event (approval cards ``superseded``) never exceed
-       contracts.MAX_DISCUSS_REPLANS.
+  R-e  the supervisor discussion re-plans of one event (approval cards ``superseded`` by a discussion:
+       the state machine's SYSTEM ``constraints_added`` entry names the card, or the reason is
+       「主管討論：…」) never exceed contracts.MAX_DISCUSS_REPLANS. A card superseded because the
+       supervisor interrupted the event (orchestrator.interrupt) is not a re-plan and is not counted.
 
 Logs written before the writes-through-gate work (commit ``afb2553`` and earlier, the Spark p.11
 captures in bench/results/spark-lightning-20261021/p11/) are skipped by ``legacy_reason``: their trace
@@ -43,6 +45,7 @@ LEGACY_MARKERS: tuple[str, ...] = ("afb2553",)
 
 WRITE_TOOL_NAMES = frozenset(t.value for t in WRITE_TOOLS)
 APPROVING = frozenset({"approve", "modify"})
+DISCUSS_REASON = "主管討論"     # state_machine.discuss: supersede(reason=f"主管討論：{text}")
 
 
 def _p(e: dict[str, Any]) -> dict[str, Any]:
@@ -87,6 +90,7 @@ def check_rules(entries: Iterable[dict[str, Any]], *,
     safe_stopped: dict[str | None, dict[str, Any]] = {}
     verify_failed: dict[str | None, dict[str, Any]] = {}            # event -> failure entry, until a SIMULATE
     superseded: dict[str | None, int] = {}
+    discussed: set[tuple[str | None, str]] = set()                # (event, approval id) a discussion re-plans
     for i, e in enumerate(entries):
         kind, p, ev = _kind(e), _p(e), e.get("event_id")
         if kind == "gate" and p.get("step_id") is not None:
@@ -94,7 +98,8 @@ def check_rules(entries: Iterable[dict[str, Any]], *,
         elif kind == "approval_decision":
             d = str(p.get("decision") or "")
             approvals.setdefault(ev, []).append((i, p))
-            if d == "superseded":
+            if d == "superseded" and ((ev, str(p.get("request_id"))) in discussed
+                                      or str(p.get("reason") or "").startswith(DISCUSS_REASON)):
                 superseded[ev] = superseded.get(ev, 0) + 1
                 if superseded[ev] == max_discuss_replans + 1:
                     out.append(_v("R-e", e, f"discussion re-plan {superseded[ev]} of this event exceeds "
@@ -109,6 +114,8 @@ def check_rules(entries: Iterable[dict[str, Any]], *,
                 verify_failed.setdefault(ev, e)
         elif kind == "system" and e.get("actor") == "verifier" and p.get("ok") is False:
             verify_failed.setdefault(ev, e)
+        elif kind == "system" and "constraints_added" in p and p.get("approval_id") is not None:
+            discussed.add((ev, str(p["approval_id"])))     # state_machine.discuss, just before the supersede
 
         tool = write_tool(e)
         if tool is None:

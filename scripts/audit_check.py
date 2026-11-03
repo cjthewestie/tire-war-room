@@ -66,6 +66,14 @@ def entries_for_rules(log: Path) -> list[dict[str, Any]]:
 def check(log: Path, key_file: Path | None = None, head: Path | None = None) -> dict[str, Any]:
     key, source = read_key(log, key_file)
     chain = verify_file(log, key, head_path=head)
+    if not chain["ok"] and key_file is not None:
+        # --key-file may be the raw 32-byte <log>.key (used unstripped, like resolve_key does) or a text key
+        # file (WARROOM_AUDIT_KEY_FILE, stripped): try the raw bytes too before calling it a break
+        raw = key_file.read_bytes()
+        if raw != key:
+            alt = verify_file(log, raw, head_path=head)
+            if alt["ok"]:
+                chain = alt
     chain["key_source"] = source
     rules = analyze(entries_for_rules(log) if log.exists() else [], path=log)
     ok = bool(chain["ok"]) and not rules["violations"]
