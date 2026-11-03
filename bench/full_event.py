@@ -444,10 +444,14 @@ async def main_async(args) -> dict[str, Any]:
     if label:
         out["label"] = label
         out["planeval"] = planeval_summary(out.get("state_machine", {}).get("runs", []))
-        now = datetime.now(UTC).astimezone()
-        pdir = planeval_dir(label, args.out_dir, now)            # the full result goes next to planeval.json
-        out["saved_to"] = str(save_result("full_event", ep, out, pdir))
-        out["planeval_dir"] = str(write_planeval(label, out, args.out_dir, now))
+        if out["planeval"]["runs_measured"]:
+            now = datetime.now(UTC).astimezone()
+            pdir = planeval_dir(label, args.out_dir, now)        # the full result goes next to planeval.json
+            out["saved_to"] = str(save_result("full_event", ep, out, pdir))
+            out["planeval_dir"] = str(write_planeval(label, out, args.out_dir, now))
+        else:                                # nothing measured (endpoint down, every run skipped): no labelled folder
+            out["planeval_dir"] = None
+            out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
     else:
         out["saved_to"] = str(save_result("full_event", ep, out, args.out_dir))
     return out
@@ -484,7 +488,7 @@ def main(argv: list[str] | None = None) -> dict[str, Any]:
         pe = out["planeval"]
         print(f"planeval ({out['label']}): schema {pe['schema_valid']['rate']}  gate {pe['gate_pass']['rate']}  "
               f"sim {pe['sim_feasible']['rate']}  safe_stop {pe['safe_stop_total']}  replans {pe['replans_total']}")
-        print("planeval saved", out["planeval_dir"])
+        print("planeval saved", out["planeval_dir"] or "nowhere: no run was measured, no planeval folder written")
     print("saved", out["saved_to"])
     return out
 
