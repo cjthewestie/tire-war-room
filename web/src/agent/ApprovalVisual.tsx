@@ -14,6 +14,8 @@ import {
 } from './approvalView'
 import { ToolIcon } from './ToolIcon'
 import { OptionGuideNote } from '../OptionGuideNote'
+import { DISCUSS_HINT, cardCountdown } from './approvalCard'
+import { ApprovalJudge } from './ApprovalJudge'
 import { expectationText, type Item, type ToolItem } from './transcript'
 import { useTranscript, useVersions } from './useTranscript'
 import './agent.css'
@@ -81,6 +83,8 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide', showB
   // 核准期限 (factory time, from the card): only while the card is still waiting; gone once decided / closed
   const deadline = req.expires_at && req.status === 'pending' && !done && !isNaN(ms(req.expires_at))
     ? `請於 ${fmtMD(req.expires_at).slice(5)} ${fmtHM(req.expires_at)} 前核准` : null
+  // the countdown on the card itself (it was only on the 待核准 bar): wall time left, ticks with the server clock
+  const left = deadline ? cardCountdown(req, now, state.clock?.speed ?? 1) : null
   const expires = req.expires_at ? `${fmtMD(req.expires_at)} ${fmtHM(req.expires_at)} 前` : null
   // one delivery line for all options when the solver gives no per-option figure
   const dLine = deliveryLine(req.delivery_impact, facts)
@@ -211,8 +215,14 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide', showB
       {nodes.length ? <PlanFlow nodes={nodes} board lines={lines} changed={changedIds} /> : <p className="muted small">尚無計畫步驟資料</p>}
     </Block>
   )
-  // plan: impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
-  const order = planLayout ? [...(showBoard ? [boardBlock] : []), impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
+  // 規則／程式判定 | AI 建議 (the plan layout's first block): the gate's verdict next to the model's words
+  const judge = (n: number) => (
+    <Block key="judge" n={n} title="程式判定與 AI 建議" hint="規則先判，AI 只是第二意見" className="apv-judge-b">
+      <ApprovalJudge req={req} ev={ev} />
+    </Block>
+  )
+  // plan: judge, impact, who, option picker; wide (產線監控): plan + schedule | options + tools + conclusion
+  const order = planLayout ? [...(showBoard ? [boardBlock] : []), judge, impact, who, optionPick] : [plan, sched, options, toolsUsed, conclusion]
   let k = 0
   const blocks = order.map((f) => { const el = f(k + 1); if (el) k++; return el })
 
@@ -266,9 +276,16 @@ export function ApprovalVisual({ req, ev, items, onAgent, layout = 'wide', showB
             <button className="btn-approve" disabled={busy || (req.options.length > 0 && !chosen)} onClick={() => void send()} data-testid="visual-approve">
               {busy ? '送出中…' : `核准${chosen && req.options.length > 1 ? `（${chosen}）` : ''}`}
             </button>
-            {deadline && <span className="apv-deadline" data-testid="approve-deadline" title="期限依模擬工廠時間計算">{deadline}<small>模擬工廠時間</small></span>}
+            {deadline && (
+              <span className={`apv-deadline ${left?.urgent ? 'urgent' : ''}`} data-testid="approve-deadline" title="期限依模擬工廠時間計算；倒數已換算成實際時間">
+                {deadline}<small>模擬工廠時間</small>
+                {left && <b className="apv-left" data-testid="approve-countdown" data-left-s={Math.round(left.leftS)}>{left.text}</b>}
+              </span>
+            )}
           </div>
-          {!planLayout && <p className="apv-hint">核准後 Agent Nemo 派人執行並回報；要改，直接在旁邊的對話框跟 Agent Nemo 說</p>}
+          {planLayout
+            ? <p className="apv-hint apv-disagree" data-testid="discuss-hint">{DISCUSS_HINT}</p>
+            : <p className="apv-hint">核准後 Agent Nemo 派人執行並回報；{DISCUSS_HINT}</p>}
         </>}
       </footer>
     </section>

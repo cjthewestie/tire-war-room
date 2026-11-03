@@ -1215,3 +1215,31 @@ button.early-k { text-decoration: underline; text-underline-offset: 3px; cursor:
 /* 模型用量 cap crossing (warroom/agent/budget.py): a warning, not an alarm */
 .budget-banner { background: var(--warn-soft); color: var(--ink); border-color: var(--warn); display: flex; align-items: center; gap: 12px; justify-content: space-between; }
 .budget-banner .x { background: none; border: 0; color: inherit; cursor: pointer; font-size: 15px; }
+
+/* 核准卡 UX (建議 8): 規則／程式判定 | AI 建議 side by side; stacked on the phone and on narrow screens */
+.apv-judge { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; min-width: 0; }
+.apv-judge.stack { grid-template-columns: 1fr; margin-top: 10px; }
+.apj-col { min-width: 0; border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; background: var(--panel-2); }
+.apj-rules { border-left: 3px solid var(--accent); }
+.apj-ai { border-left: 3px solid var(--warn); }
+.apj-h { margin: 0 0 6px; font-size: 13px; font-weight: 700; display: flex; gap: 8px; align-items: baseline; }
+.apj-h small { font-weight: 500; color: var(--ink-faint); font-size: 12px; }
+.apj-line { margin: 0 0 4px; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.apj-sub { color: var(--ink-dim); }
+.apj-risk { font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 999px; background: var(--warn-soft); color: var(--warn); }
+.apj-risk.r-R3 { background: var(--alarm-soft); color: var(--alarm); }
+.apj-risk.r-R0, .apj-risk.r-R1 { background: var(--accent-soft); color: var(--accent); }
+.apj-sim.ok, .apj-c.ok { color: var(--accent); }
+.apj-sim.no, .apj-c.no, .apj-v.v-reject { color: var(--alarm); }
+.apj-v { font-weight: 700; }
+.apj-gates { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.apj-gh { display: block; }
+.apj-checks { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; margin-top: 2px; }
+.apj-args { display: block; margin-top: 3px; font-size: 11.5px; color: var(--ink-dim); overflow-wrap: anywhere; white-space: pre-wrap; }
+@media (max-width: 720px) { .apv-judge { grid-template-columns: 1fr; } }
+/* the countdown inside the 「請於…前核准」 pill; red under 2 min, the same point the 待核准 bar turns red */
+.apv-left { font-variant-numeric: tabular-nums; font-size: 14px; }
+.apv-deadline.urgent { background: var(--alarm); color: #fff; }
+.apv-disagree { font-size: 13px; }
+/* ⑤ events closed on R0/R1 steps alone: 只通知（系統未動作） in the list row, never on the card */
+.hl-notify { display: inline-block; margin-top: 4px; font-size: 11.5px; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }

@@ -7,6 +7,7 @@ import { useWarRoom } from '../useWarRoom'
 import { SUB_STATUS } from './subagents'
 import { allRows, useTaskListing } from './sessionStore'
 import type { TaskRow } from '../contracts'
+import { notifyOnlyLabel } from './approvalCard'
 
 export function ApprovalList({ items, selected, onPick }: {
   items: HomeItem[]; selected: string | null; onPick: (key: string) => void
@@ -46,7 +47,10 @@ export function ApprovalList({ items, selected, onPick }: {
 
 /** `rp`: a ② item's replan (null = not asked yet → the hint line; undefined = not an order item). */
 function Row({ i, on, onPick, rp, no }: { i: HomeItem; on: boolean; onPick: (key: string) => void; rp?: Replan | null; no?: TaskRow }) {
-  const sub = useWarRoom().state.subagents?.items.find((s) => s.id === i.eventId)
+  const { state } = useWarRoom()
+  const sub = state.subagents?.items.find((s) => s.id === i.eventId)
+  // ⑤ events that closed on R0/R1 steps alone: 「只通知（系統未動作）」 here in the list, never on the approval card
+  const fyiOnly = i.rank === 5 && i.eventId ? notifyOnlyLabel(state.snapshot?.events.find((e) => e.id === i.eventId)) : null
   const planning = rp?.state === 'sending' || rp?.state === 'planning'
   return (
     <button type="button" className={`hl-item tone-${i.tone} ${i.req ? `has-req r-${i.req.risk}` : ''} ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => onPick(i.key)} data-testid={`home-item-${i.key}`} title={no?.session ? `${no.session}・${i.eventId}` : undefined}>
@@ -65,6 +69,7 @@ function Row({ i, on, onPick, rp, no }: { i: HomeItem; on: boolean; onPick: (key
             <span className="hl-pill-row">{i.progress != null && <ProgressRing value={i.progress} tone={i.progress >= 1 ? 'done' : 'live'} size={20} title={`完成 ${Math.round(i.progress * 100)}%`} />}<span className={`hl-pill tone-${planning ? 'run' : i.tone}`}>{planning ? 'Agent Nemo 規劃中…' : rp?.state === 'ready' ? '計劃待核准' : i.pill}</span></span>
             <span className="hl-t">{i.title}</span>
           </span>
+          {fyiOnly && <span className="hl-notify" data-testid="item-notify-only">{fyiOnly}</span>}
           <span className="hl-s">{i.sub}</span>
         </>
       )}
