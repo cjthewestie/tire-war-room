@@ -186,7 +186,7 @@ const slow = { ...s.tasks.find((t) => t.id === 'TK-0002'), progress: 1 }
   const ev = { ...base, repaired_at: iso(now), recovered_at: iso(now + 4000), review: { status: 'done', requested_at: iso(now + 4000), done_at: iso(now + 60_000), by: 'supervisor' } }
   const r = buildReport({ ev, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
   const head = Object.fromEntries(r.head.map((h) => [h.k, h.text]))
-  check('report head: 維修完成 / 恢復正常 / 主管已讀 with seconds', /^10\/03 10:32:40$/.test(head['維修完成'] ?? '') && /^10\/03 10:32:44$/.test(head['恢復正常'] ?? '') && /^10\/03 10:33:40/.test(head['主管已讀'] ?? ''), JSON.stringify([head['維修完成'], head['恢復正常'], head['主管已讀']]))
+  check('report head: 維修完成 / 恢復正常 / 主管已讀 with seconds', /^2026\/10\/03 10:32:40 AM$/.test(head['維修完成'] ?? '') && /^2026\/10\/03 10:32:44 AM$/.test(head['恢復正常'] ?? '') && /^2026\/10\/03 10:33:40/.test(head['主管已讀'] ?? ''), JSON.stringify([head['維修完成'], head['恢復正常'], head['主管已讀']]))
   const p = buildReport({ ev: { ...ev, review: { ...ev.review, status: 'pending', done_at: null, by: null } }, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })
   check('… unread → 尚未讀取', /^尚未讀取/.test(p.head.find((h) => h.k === '主管已讀')?.text ?? ''), p.head.find((h) => h.k === '主管已讀')?.text)
   const none = buildReport({ ev: base, approvals: [], tasks: s.tasks, chainOk: true, auditCount: null })

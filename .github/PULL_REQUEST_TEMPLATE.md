@@ -7,14 +7,16 @@ Closes #
 ## 怎麼驗證
 
 ```bash
-uv run pytest -q
+cd web && pnpm build && pnpm lint && pnpm test:unit && cd ..
+uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py tests/test_schema_parity.py
 ```
 
-<!-- 貼結果，例如：596 passed, 6 skipped -->
+<!-- 貼最後一行結果。PR 上的 CI（.github/workflows/ci.yml）會自動跑同一組，py、web 兩個 job 都要綠 -->
 
 ## 檢查清單
 
-- [ ] 全部測試綠
+- [ ] 上面的測試綠，CI 的 py、web 兩個 job 也綠
+- [ ] 附 1440 和 390 寬的前後截圖（改到 web/ 時）
 - [ ] 只改了自己座位的資料夾（或已在 issue 說明）
 - [ ] 沒有提交 data/runtime/、.env、金鑰或 PIN
 - [ ] 沒有加任何能動到機台的工具

@@ -1,0 +1,62 @@
+# CI self-check (docs/research/edge-agent-harness-2026-11.md, 建議 2).
+# py:  the three pytest groups CLAUDE.md requires before a PR, plus the config self-checks
+#      (tool table / risk levels in tests/test_contracts.py, response_format schemas vs llama.cpp
+#      in tests/test_schema_parity.py). Offline: no LLM, no Qdrant, no Hugging Face download.
+# web: build + lint + the server-less e2e/*-unit.mjs checks.
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  py:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # these tests must not fetch models; fail fast instead of downloading if one ever tries
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true            # ortools, qdrant-client[fastembed] etc. are large
+          cache-dependency-glob: uv.lock
+      - run: uv sync --frozen
+      - name: pytest (CLAUDE.md pre-PR set + config self-checks)
+        run: >-
+          uv run pytest -q
+          tests/test_web.py tests/test_ui_state.py tests/test_contracts.py
+          tests/test_schema_parity.py
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: web/package.json   # pnpm version from "packageManager"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm lint
+      - run: pnpm test:unit
