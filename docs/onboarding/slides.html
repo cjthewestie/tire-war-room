@@ -111,8 +111,9 @@ pnpm install --frozen-lockfile
 git switch -c c/12-reask-commander
 <b># commit：類型(範圍): 做了什麼</b>
 git commit -m "feat(agent): 指揮官 JSON 錯誤時重問一次"
-<b># 測試全綠後</b>
-uv run pytest -q
+<b># 測試全綠後（PR 上的 CI 也會自動再跑一次）</b>
+cd web &amp;&amp; pnpm build &amp;&amp; pnpm lint &amp;&amp; pnpm test:unit &amp;&amp; cd ..
+uv run pytest -q tests/test_web.py tests/test_ui_state.py tests/test_contracts.py tests/test_schema_parity.py
 git push -u origin c/12-reask-commander
 gh pr create --fill        <b># 說明寫 Closes #12</b></pre>
 </section>

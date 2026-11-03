@@ -60,6 +60,87 @@ def test_tool_allow_list():
     assert len(C.RiskLevel) == 4
 
 
+# ------------------------------------------------------------------ config self-check (report 建議 2)
+# A table edit that silently opens, closes or re-levels a tool must fail CI. Changing any of these on
+# purpose means changing this pinned copy in the same PR, so the reviewer sees it.
+_S = C.EventState
+_T = C.ToolName
+PINNED_TOOLS_BY_STATE = {
+    _S.CLASSIFY: {_T.READ_SENSORS, _T.PREDICT_ANOMALY, _T.SOP_SEARCH},
+    _S.PLAN: {_T.READ_SENSORS, _T.PREDICT_ANOMALY, _T.SOP_SEARCH, _T.CURE_FORMULA, _T.QUERY_ORDERS_SHIFTS},
+    _S.SIMULATE: {_T.CURE_FORMULA, _T.QUERY_ORDERS_SHIFTS, _T.SOLVE_SCHEDULE, _T.READ_SENSORS},
+    _S.EXECUTE: {_T.CONFIRM_SCHEDULE, _T.SET_CURE_TIME, _T.NOTIFY_TEAMS},
+    _S.VERIFY: {_T.READ_SENSORS, _T.PREDICT_ANOMALY},
+    _S.REPLAN: {_T.READ_SENSORS, _T.PREDICT_ANOMALY, _T.SOP_SEARCH, _T.CURE_FORMULA, _T.QUERY_ORDERS_SHIFTS},
+}
+
+# One valid args sample per tool and the risk level the gate must give it. Keyed by every ToolName:
+# a new tool fails test_every_tool_has_an_explicit_risk until someone decides its level here.
+_RISK_CASES = {
+    _T.READ_SENSORS: ({"machine_ids": ["CURE-07"]}, C.RiskLevel.R0_READ),
+    _T.PREDICT_ANOMALY: ({"machine_id": "CURE-07"}, C.RiskLevel.R0_READ),
+    _T.CURE_FORMULA: ({"size": "M", "actual_temp_c": 122, "elapsed_h": 10}, C.RiskLevel.R0_READ),
+    _T.SOLVE_SCHEDULE: ({"unavailable_presses": ["CURE-07"]}, C.RiskLevel.R0_READ),
+    _T.SOP_SEARCH: ({"query": "硫化溫度下降"}, C.RiskLevel.R0_READ),
+    _T.QUERY_ORDERS_SHIFTS: ({"press_ids": ["CURE-07"]}, C.RiskLevel.R0_READ),
+    _T.CONFIRM_SCHEDULE: ({"schedule_version": 2, "reason": "r"}, C.RiskLevel.R2_CHANGE),
+    _T.SET_CURE_TIME: ({"press_id": "CURE-07", "total_cure_h": 36.5, "reason": "r"}, C.RiskLevel.R2_CHANGE),
+    _T.NOTIFY_TEAMS: ({"teams": ["maintenance"], "kind": "pause_feed", "message": "m", "machine_id": "CURE-07"},
+                      C.RiskLevel.R3_CRITICAL),
+}
+
+
+def test_tools_by_state_pinned():
+    got = {s: set(t) for s, t in C.TOOLS_BY_STATE.items()}
+    assert got == PINNED_TOOLS_BY_STATE
+    opened = set().union(*C.TOOLS_BY_STATE.values())
+    assert opened == set(C.ToolName), f"tools open in no state: {set(C.ToolName) - opened}"
+    assert C.ASK_TOOLS <= C.READ_COMPUTE_TOOLS and _T.SOLVE_SCHEDULE not in C.ASK_TOOLS
+
+
+def test_every_tool_has_an_explicit_risk():
+    from warroom.agent.gate import ARGS_MODELS, NOTIFY_RISK, RuleGate
+
+    assert set(_RISK_CASES) == set(C.ToolName)
+    assert set(ARGS_MODELS) == set(C.ToolName)
+    assert set(NOTIFY_RISK) == set(C.NotifyKind)
+    g = RuleGate()
+    for tool, (args, want) in _RISK_CASES.items():
+        parsed = ARGS_MODELS[tool].model_validate(args)
+        assert g.risk_of(tool, parsed, cross_team=False) is want, tool
+    for kind, level in NOTIFY_RISK.items():
+        assert isinstance(level, C.RiskLevel), kind
+    # writes are never R0; only notify can be R1, and only through its fixed templates
+    assert all(NOTIFY_RISK[k] is not C.RiskLevel.R0_READ for k in C.NotifyKind)
+
+
+@pytest.mark.parametrize("tool", sorted(C.WRITE_TOOLS, key=lambda t: t.value))
+def test_write_tools_have_gate_rules(tool):
+    from warroom.agent.gate import RuleGate
+
+    g = RuleGate()
+    step = C.PlanStep(id="S9", tool=tool, purpose="self-check", args=_RISK_CASES[tool][0])
+    ok = g.check(step, C.EventState.EXECUTE, True, cross_team=False)
+    assert ok.verdict is C.GateVerdict.NEEDS_APPROVAL and ok.risk in C.APPROVAL_REQUIRED, ok.reasons
+    # no feasible simulation -> blocked; not open outside EXECUTE -> intercepted
+    assert g.check(step, C.EventState.EXECUTE, False, cross_team=False).verdict is C.GateVerdict.REJECT
+    for state in C.EventState:
+        if state is not C.EventState.EXECUTE:
+            d = g.check(step, state, True, cross_team=False)
+            assert d.verdict is C.GateVerdict.REJECT and d.risk is None, state
+
+
+@pytest.mark.parametrize("tool", sorted(C.READ_COMPUTE_TOOLS, key=lambda t: t.value))
+def test_read_tools_never_need_approval(tool):
+    from warroom.agent.gate import RuleGate
+
+    step = C.PlanStep(id="S1", tool=tool, purpose="self-check", args=_RISK_CASES[tool][0])
+    for state, tools in C.TOOLS_BY_STATE.items():
+        if tool in tools:
+            d = RuleGate().check(step, state, False)
+            assert d.verdict is C.GateVerdict.ALLOW and d.risk is C.RiskLevel.R0_READ, (state, d.reasons)
+
+
 def test_commander_schema_and_roundtrip():
     schema = C.CommanderPlan.model_json_schema()
     assert schema["type"] == "object" and "steps" in schema["properties"]

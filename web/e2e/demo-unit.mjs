@@ -137,7 +137,10 @@ function story(times) {
   const steps = []
   for (let s = 0; s < 7; s += 0.1) { const st = P.showStep(s); if (st && steps.at(-1) !== st) steps.push(st) }
   check('robot show: turn → wave → scan → bow, then done', steps.join(',') === 'turn,wave,scan,bow' && P.showStep(7) === null, steps.join(','))
-  check('robot checkpoint lasts at least the show', D.CUES.find((c) => c.id === 'robot').hold.min >= P.ROBOT_SHOW.at(-1)[1])
+  // PatrolRobot.tsx plays the show SHOW_RATE (1.35) times faster than its ROBOT_SHOW script
+  const SHOW_RATE = 1.35
+  check('robot checkpoint lasts at least the show', D.CUES.find((c) => c.id === 'robot').hold.min >= P.ROBOT_SHOW.at(-1)[1] / SHOW_RATE,
+    `hold ${D.CUES.find((c) => c.id === 'robot').hold.min} s vs show ${(P.ROBOT_SHOW.at(-1)[1] / SHOW_RATE).toFixed(2)} s`)
 }
 
 // live signals for H1 → H2 (demo/signals.ts) on fake war-room states

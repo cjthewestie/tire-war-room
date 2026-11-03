@@ -8,6 +8,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "test:unit": "rc=0; for f in e2e/*-unit.mjs; do echo \"== $f\"; node \"$f\" || rc=1; done; exit $rc",
     "preview": "vite preview"
   },
   "dependencies": {
