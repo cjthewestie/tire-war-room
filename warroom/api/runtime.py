@@ -39,6 +39,7 @@ from warroom.clock import SimClock
 from warroom.config import Settings, get_settings
 from warroom.contracts import (
     TERMINAL_STATES,
+    AlertCard,
     Anomaly,
     ApprovalRequest,
     ApprovalStatus,
@@ -484,6 +485,20 @@ RUNNING_MARKER = "running.json"      # in schedule_dir: written by start(), remo
 RESUME_REQUEST = "resume.request"    # in schedule_dir: a watchdog asks the next start to resume
 _TRUE = ("1", "true", "yes", "on")
 _FALSE = ("0", "false", "no", "off")
+# 建議 4 (G8): the Runtime re-verifies the audit hash chain every AUDIT_VERIFY_INTERVAL_S wall seconds
+# (WARROOM_AUDIT_VERIFY_S; 0 = off), in a worker thread so it never holds up the tick / safety_pass. A log
+# bigger than AUDIT_VERIFY_MAX_BYTES (WARROOM_AUDIT_VERIFY_MAX_BYTES) is not re-read periodically: run
+# scripts/audit_check.py on it instead (one SYSTEM entry says so).
+AUDIT_VERIFY_INTERVAL_S = 600.0
+AUDIT_VERIFY_MAX_BYTES = 64 * 1024 * 1024
+
+
+def _env_number(name: str, default: float) -> float:
+    try:
+        return float(os.environ.get(name, "").strip() or default)
+    except ValueError:
+        log.warning("%s is not a number; using %s", name, default)
+        return default
 
 
 class _NullAudit:
@@ -584,6 +599,13 @@ class Runtime:
         self._holds: dict[str, dict[str, Any]] = {}
         self._oob_seen: dict[str, datetime] = {}
         self._safety_unrecorded: list[SafetyAction] = []   # applied, but audit/attach failed: retried
+        # 建議 4 (G8): periodic audit-chain self-check (verify_audit_once); a failure lights the warning light
+        self.audit_verify_interval_s = _env_number("WARROOM_AUDIT_VERIFY_S", AUDIT_VERIFY_INTERVAL_S)
+        self.audit_verify_max_bytes = int(_env_number("WARROOM_AUDIT_VERIFY_MAX_BYTES", AUDIT_VERIFY_MAX_BYTES))
+        self.audit_integrity: dict[str, Any] | None = None   # the last periodic report
+        self._audit_broken = False
+        self._audit_too_large_noted = False
+        self._audit_verify_task: asyncio.Task | None = None
         self._last_plant_persist = -1e9
         from warroom.sim.events import SimEvents
         self.sim_events = SimEvents()            # issue #36 模擬事件: off by default, kept across scenario loads
@@ -710,6 +732,8 @@ class Runtime:
             asyncio.get_running_loop().run_in_executor(None, self._ingest_kb)
         if self.run_loop and not self.running:
             self._loop_task = asyncio.create_task(self._loop(), name="warroom-loop")
+        if self.run_loop and self.audit_verify_interval_s > 0 and self._audit_verify_task is None:
+            self._audit_verify_task = asyncio.create_task(self._audit_verify_loop(), name="warroom-audit-verify")
 
     def _ingest_kb(self) -> None:
         try:
@@ -731,6 +755,13 @@ class Runtime:
             except (asyncio.CancelledError, Exception):  # noqa: BLE001
                 pass
             self._loop_task = None
+        if self._audit_verify_task is not None:
+            self._audit_verify_task.cancel()
+            try:
+                await self._audit_verify_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+            self._audit_verify_task = None
         await self._cancel_events(shutdown=True)
         if self.builder is not None:
             self._clear_running_marker()         # clean stop: the next start replays fresh
@@ -810,7 +841,8 @@ class Runtime:
             self._persist_plant()
         except Exception:  # noqa: BLE001 - persistence must never break the loop
             log.exception("persist holds")
-        if self.network == "lan_down" or self._safety_unrecorded or getattr(self, "_light_on", False):
+        if self.network == "lan_down" or self._safety_unrecorded or getattr(self, "_light_on", False) \
+                or getattr(self, "_audit_broken", False):
             try:
                 self.sync_warning_light()
             except Exception:  # noqa: BLE001 - the light must never break the loop
@@ -2561,11 +2593,79 @@ class Runtime:
         calls a person to the touch screen whenever an approval is waiting or an event is open."""
         if self._safety_unrecorded:            # a safety action acted on the plant but is not audited yet
             return True
+        if getattr(self, "_audit_broken", False):   # the periodic audit-chain check failed (建議 4)
+            return True
         if self.network != "lan_down":
             return False
         if list(self.approvals.pending()):
             return True
         return any(e.state not in TERMINAL_STATES for e in self.events())
+
+    # ------------------------------------------------------------------ audit self-check (建議 4, G8)
+    async def _audit_verify_loop(self) -> None:
+        while True:
+            await asyncio.sleep(self.audit_verify_interval_s)
+            try:
+                await self.verify_audit_once()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - the self-check must never stop the runtime
+                log.exception("audit self-check")
+
+    async def verify_audit_once(self) -> dict[str, Any] | None:
+        """Re-verify the audit hash chain once, in a worker thread (never on the event loop, so the tick and
+        safety_pass keep running). Read-only. A failure is recorded once as SYSTEM, lights the warning light
+        and pushes an alert card to the supervisor; it stays lit until a later check verifies again (a
+        restart archives the broken log and starts a new chain). Returns the report, or None when the audit
+        log cannot verify itself (a test double)."""
+        report = getattr(self.audit, "verify_report", None)
+        if not callable(report):
+            return None
+        path = getattr(self.audit, "path", None)
+        try:
+            size = os.path.getsize(path) if path is not None else 0
+        except OSError:
+            size = 0
+        if size > self.audit_verify_max_bytes:
+            rep: dict[str, Any] = {"ok": None, "skipped": "too_large", "bytes": size,
+                                   "max_bytes": self.audit_verify_max_bytes}
+            if not self._audit_too_large_noted:
+                self._audit_too_large_noted = True
+                self.audit.append(AuditKind.SYSTEM, "system",
+                                  {"msg": "audit self-check skipped: log too large for the periodic check",
+                                   "bytes": size, "max_bytes": self.audit_verify_max_bytes,
+                                   "hint": "run scripts/audit_check.py on the log"})
+        else:
+            try:
+                rep = dict(await asyncio.to_thread(report))
+            except Exception as e:  # noqa: BLE001 - an unreadable log is a failed check, not a crash
+                rep = {"ok": False, "checked": 0, "broken_at": None, "problem": f"{type(e).__name__}: {e}"[:300]}
+        rep["at"] = self.now().isoformat()
+        self.audit_integrity = rep
+        self._on_audit_report(rep)
+        return rep
+
+    def _on_audit_report(self, rep: dict[str, Any]) -> None:
+        if rep.get("ok") is False:
+            if not self._audit_broken:
+                self._audit_broken = True
+                self.audit.append(AuditKind.SYSTEM, "system",
+                                  {"msg": "audit chain verification failed", "problem": rep.get("problem"),
+                                   "broken_at": rep.get("broken_at"), "checked": rep.get("checked"),
+                                   "action": "warning light on, supervisor alerted; run scripts/audit_check.py"})
+                where = f"第 {rep['broken_at']} 筆" if rep.get("broken_at") else "檔案"
+                card = AlertCard(title="稽核紀錄驗證失敗", summary=f"{where}斷裂，紀錄可能被改動，請主管檢查")
+                try:
+                    self.bus.publish(WsType.ALERT_CARD, {"event_id": None, "card": card.model_dump(mode="json"),
+                                                         "source": "system"})
+                except Exception:  # noqa: BLE001 - the light and the audit entry already say it
+                    log.exception("publish audit alert")
+            self.sync_warning_light()
+        elif rep.get("ok") is True and self._audit_broken:
+            self._audit_broken = False
+            self.audit.append(AuditKind.SYSTEM, "system", {"msg": "audit chain verifies again",
+                                                           "checked": rep.get("checked")})
+            self.sync_warning_light()
 
     def sync_warning_light(self) -> bool:
         """Publish + audit a change of the warning-light state (called from the loop and the API)."""
