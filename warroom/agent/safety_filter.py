@@ -6,12 +6,17 @@ The list lives in config/safety/blocked_terms.yaml (editable without code) and i
 - Output: a model reply with a blocked term or a secret-looking string (a key or PIN value from the environment, the
   audit key, an IP address, a home / runtime path, a long hex string) is replaced by a safe line.
 The caller audits each hit (kind SYSTEM, actor "safety_filter") with the matched text redacted to its first
-character + ***. This is not the plant's Safety Core (warroom/safety/), which never imports the agent."""
+character + ***. This is not the plant's Safety Core (warroom/safety/), which never imports the agent.
+
+Untrusted data (建議 6, G12): `untrusted_categories` in the same file (the `injection` rules) are never used on the
+chat. check_untrusted() scans the segments the Event Commander reads as data (SOP chunks, machine memory, PLANT.md;
+warroom/agent/commander.py untrusted_flags()) and returns one flag per hit for the LLM_CALL audit. It blocks nothing."""
 from __future__ import annotations
 
 import os
 import re
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -61,6 +66,7 @@ class SafetyFilter:
         self._cats: list[tuple[str, str, str, list[re.Pattern[str]]]] = []
         self._out_reply = "這段回覆含有不該顯示的內容，已由系統擋下。"
         self._out: list[re.Pattern[str]] = []
+        self._untrusted: list[tuple[str, str, re.Pattern[str]]] = []   # (category, rule, pattern)
         self._load()
 
     # ---------------------------------------------------------------- the file
@@ -83,6 +89,10 @@ class SafetyFilter:
             self.qa_allow = [str(a) for a in data.get("qa_allow") or []]
             self._out_reply = str(data.get("output_reply") or self._out_reply)
             self._out = [_compile(str(t)) for t in data.get("output_patterns") or []]
+            self._untrusted = [(str(cat), str(rule), _compile(str(t)))
+                               for cat, c in (data.get("untrusted_categories") or {}).items()
+                               for rule, terms in ((c or {}).get("rules") or {}).items()
+                               for t in ([terms] if isinstance(terms, str) else terms or [])]
             self._mtime = mtime
 
     def _scan(self, text: str, side: str, extra_allow: list[str] | None = None) -> tuple[str, str, str] | None:
@@ -116,6 +126,26 @@ class SafetyFilter:
                 return Hit("secret", m.group(0), self._out_reply, "output")
         hit = self._scan(text, "output")
         return Hit(hit[0], hit[1], self._out_reply, "output") if hit else None
+
+    def check_untrusted(self, segments: Iterable[tuple[str, str, str]]) -> list[dict[str, Any]]:
+        """segments: (segment id, source, text) of untrusted data. One flag per (segment, rule) that matches:
+        {"segment", "source", "category", "rule", "matched"}, the matched text redacted. The `allow` list does not
+        apply (it is for the chat's plant questions). [] when nothing matches."""
+        self._load()
+        flags: list[dict[str, Any]] = []
+        for seg, source, text in segments:
+            if not text:
+                continue
+            seen: set[tuple[str, str]] = set()
+            for cat, rule, p in self._untrusted:
+                if (cat, rule) in seen:
+                    continue
+                m = p.search(text)
+                if m:
+                    seen.add((cat, rule))
+                    flags.append({"segment": seg, "source": source, "category": cat, "rule": rule,
+                                  "matched": redact(m.group(0))})
+        return flags
 
 
 def env_secrets() -> list[str]:
