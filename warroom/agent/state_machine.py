@@ -875,6 +875,19 @@ class StateMachine:
         from warroom.agent import plant
         return plant.active_sha()
 
+    def _untrusted_flags(self, req: CommanderRequest) -> list[dict[str, Any]]:
+        """建議 6 (G12): injection hits in the request's untrusted parts (SOP hits, machine memory, the PLANT.md the
+        prompt carries), for the LLM_CALL audit. Flags only: nothing here changes the plan, the gate or the approval."""
+        from warroom.agent import plant
+        from warroom.agent.commander import untrusted_flags
+        text = getattr(self.commander, "plant_override", None)
+        if text is None:
+            try:
+                text = plant.current().active_text()
+            except Exception:  # noqa: BLE001 - a broken plant file: the core prompt still works (plant.section)
+                text = None
+        return untrusted_flags(req.context, text)
+
     def _now(self) -> datetime:
         return self.clock.now() if self.clock else datetime.now(TZ)
 
@@ -1387,6 +1400,7 @@ class StateMachine:
         reason is in run.commander_error."""
         ev = run.ev
         mem = (req.context or {}).get("machine_memory")         # 「接記憶」: which notes / past events went in (audited)
+        flags = self._untrusted_flags(req)                       # 建議 6: instructions hidden in untrusted data (audited)
 
         def on_alert(card: AlertCard) -> None:
             self._set_alert(ev, card)
@@ -1405,14 +1419,15 @@ class StateMachine:
                               {"phase": phase, "error": f"{type(e).__name__}: {e}"[:500], "cause": failure_cause(e),
                                "fell_back_to_mock": False, "plan_source": None, "strict": strict,
                                "reason": run.commander_error, "plant_sha256": self._plant_sha(),
-                               "machine_memory": MM.attached(mem)}, event_id=ev.id)
+                               "machine_memory": MM.attached(mem), "untrusted_flags": flags}, event_id=ev.id)
             self._note(ev, "指揮官", run.commander_error, "dynamic")
             return None
         finally:
             self.compute_inflight -= 1
         payload: dict[str, Any] = {"phase": phase, **info.model_dump(mode="json"), "plant_sha256": self._plant_sha(),
                                    "machine_memory": {**MM.attached(mem),
-                                                      "trimmed": "context.machine_memory" in (info.trimmed or [])}}
+                                                      "trimmed": "context.machine_memory" in (info.trimmed or [])},
+                                   "untrusted_flags": flags}
         if info.fell_back_to_mock:
             # the model's output was rejected: what runs is the deterministic fallback's plan, and the
             # record says so (never credit the mock's steps to the model), with why and what it sent
