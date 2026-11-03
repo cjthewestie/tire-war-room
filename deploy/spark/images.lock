@@ -1,0 +1,12 @@
+# Pinned images for deploy/spark/docker-compose.yml (G19). Shell-sourceable KEY=ref lines.
+# External images: tag@sha256:<multi-arch index digest> (linux/arm64 for the Spark is inside the index).
+# Digests read from Docker Hub on 2026-11-03. To bump one: change the tag, then
+#   docker buildx imagetools inspect <image>:<tag>     # "Digest:" line
+# and update BOTH this file and the compose default (tests/test_deploy.py checks they match).
+VLLM_IMAGE=vllm/vllm-openai:v0.28.0@sha256:61fc8a896b0a4fbbbdc063bc4b0dbc25ce98e02b5050c24aeb7830ac02039b14
+QDRANT_IMAGE=qdrant/qdrant:v1.15.4@sha256:6ac4807063bbecddca0250bfbcff52acf18c22263b904d12919349e6d0a408f1
+MQTT_IMAGE=eclipse-mosquitto:2.0.22@sha256:09b62ff32c2e7b64d4b431b9a89236073289b68db273de2b089edeb9b0d92b5c
+# warroom-app is built locally (install_spark.sh) or `docker load`ed from an update bundle, so it has no registry
+# digest. It is pinned by version tag instead: APP_IMAGE=warroom-app:<ver> in deploy/spark/.env, and its image ID
+# is recorded as app_image_id= in the bundle MANIFEST (make_bundle.sh), which SHA256SUMS covers;
+# offline_update.sh refuses a bundle whose loaded image ID differs. Never :latest.

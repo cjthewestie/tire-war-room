@@ -17,6 +17,7 @@
    - 真的跑在 OpenShell 沙箱裡時，再加 `WARROOM_AGENT_RUNTIME="NemoClaw 沙箱"`；沒有用沙箱就不要設。
    - `deploy/spark/docker-compose.yml` 的 app 和 `deploy/openshell/run_sandboxed.sh` 只傳它們自己列出的變數，上面三個傳不進去，會用程式預設值。不管用哪一種，都用下一步的健康檢查確認。
    - 10-21 決賽機的沙箱版在 :8090。以當天實際的埠號為準，下面寫成 `<埠>`。
+   - 用 `deploy/spark/docker-compose.yml` 的 app 時，展示控制（鍵列 `1`～`6`、⚡ 觸發選單）預設是關的。要先開：`cd /opt/warroom/current/deploy/spark && docker compose --env-file .env --env-file ../spark-demo/compose-demo.env up -d app`。`run_warroom_spark.sh`（:8090）不受影響。
 
 2. **健康檢查**：`curl -s 127.0.0.1:<埠>/api/health`，要看到：
    - `llm_mode` 是 `llm`、`llm_reachable` 是 `true`

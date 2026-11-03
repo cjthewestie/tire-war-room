@@ -10,6 +10,10 @@ Type=oneshot
 RemainAfterExit=yes
 WorkingDirectory=/opt/warroom/current/deploy/spark
 ExecStartPre=/usr/bin/docker compose config --quiet
+# audit key outside the data volume, uid 10001, 0400 (G1); wrong or missing -> the stack does not start.
+# Wrapped in `test ! -e ||` so a rollback to a release that predates the script (rollback.sh does not
+# daemon-reload; this cached unit keeps running) still starts; such a release has no key file in its compose.
+ExecStartPre=/bin/sh -c 'test ! -e /opt/warroom/current/deploy/bin/init-audit-key.sh || exec /opt/warroom/current/deploy/bin/init-audit-key.sh --check'
 ExecStart=/usr/bin/docker compose up -d --remove-orphans
 ExecStop=/usr/bin/docker compose down
 TimeoutStartSec=300

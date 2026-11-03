@@ -110,6 +110,10 @@ curl -s 127.0.0.1:8000/api/health
 - 堆疊：`deploy/spark/docker-compose.yml`、vLLM 參數 `deploy/spark/vllm-serve.sh`、環境 `deploy/spark/.env.example`。
 - 開機自啟 + 模型預載 + watchdog：`deploy/systemd/`、`deploy/bin/watchdog.sh`、`deploy/bin/preload.sh`。
 - 離線更新 / 一鍵回復：`deploy/update/offline_update.sh`、`deploy/update/rollback.sh`。
+- 稽核金鑰不放在資料夾裡：`install_spark.sh` 會跑 `deploy/bin/init-audit-key.sh`，產生 `/opt/warroom/secrets/audit.key`（只有 app 的 uid 讀得到，權限 0400）和 `/opt/warroom/audit-anchor/`（head anchor 的副本，有第二顆磁碟就放那裡）。只有 app 容器掛這把金鑰；沒有金鑰 app 不會啟動，`warroom-stack.service` 每次啟動前都會先檢查。
+- 舊機器（金鑰還在 `data/runtime/audit.jsonl.key`）升級：先停 stack，跑一次 `sudo deploy/bin/migrate-audit-key.sh`，再啟動。這樣舊的稽核鏈還能驗證；沒做這一步，app 會把整份日誌封存成 `audit.jsonl.broken-N`。搬遷之後，`rollback.sh` 不會回到還沒有金鑰檔的舊版本。
+- 映像固定版本：vLLM、Qdrant、Mosquitto 在 `deploy/spark/images.lock` 和 compose 預設值都寫成 `tag@sha256:...`；`warroom-app` 用版本 tag（`APP_IMAGE=warroom-app:<版本>`，不用 `:latest`），更新包的 MANIFEST 另外記 image ID。
+- 展示控制預設關閉（`WARROOM_DEMO_CONTROLS=0`，正式產線拒絕 `/api/sim/*`）。上台展示時：`docker compose --env-file .env --env-file ../spark-demo/compose-demo.env up -d app`。
 - 沙箱（NemoClaw/OpenShell）：`deploy/openshell/run_sandboxed.sh`；對外網路白名單：`deploy/network/`。
 - 安全核心獨立程序（PLC 替身）：`uv run python -m warroom.safety.plc --demo`。
 - 第 10 頁量測：`bench/spark_ablation.sh`（FP8 無快取無推測解碼對照組 + 各項最佳化貢獻），`bench/py.sh -m bench.report` 產生 `bench/results/SUMMARY.md`。

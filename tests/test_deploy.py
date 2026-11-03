@@ -51,6 +51,7 @@ def healthy_url():
 def sh(cmd: list[str], env: dict[str, str] | None = None, check: bool = True, timeout: float = 60):
     e = os.environ.copy()
     e["NO_BENCH_VENV"] = "1"          # install_spark.sh's bench venv step syncs from PyPI; tests/test_bench_runner.py covers it
+    e.setdefault("APP_UID", str(os.getuid()))   # init-audit-key.sh chowns to the app uid (10001 on the box)
     e["WARROOM_SUPERVISOR_PIN"] = TEST_PIN   # install_spark.sh refuses to finish without one
     e.update(env or {})
     r = subprocess.run(cmd, capture_output=True, text=True, env=e, timeout=timeout)
@@ -299,7 +300,8 @@ def test_install_pulls_every_service_compose_lists():
 
 def test_bundle_carries_mosquitto_by_default():
     text = (DEPLOY / "update" / "make_bundle.sh").read_text()
-    assert "${IMAGES-eclipse-mosquitto:2}" in text
+    assert "${IMAGES-$lock_mqtt}" in text and "s/^MQTT_IMAGE=//p" in text and "images.lock" in text
+    assert "app_image_id=" in text                     # the locally built app is pinned by image ID in MANIFEST
 
 
 def test_install_fails_when_an_image_is_missing(tmp_path):
@@ -553,8 +555,15 @@ def test_live_compose_app_touchscreen_and_phone_can_approve(tmp_path):
     data = tmp_path / "data"
     data.mkdir()
     data.chmod(0o777)
+    if os.geteuid() != 0:
+        pytest.skip("needs root: the audit key must be owned by the container uid 10001")
+    key, anchor = tmp_path / "secrets" / "audit.key", tmp_path / "audit-anchor"
+    sh(["bash", str(DEPLOY / "bin" / "init-audit-key.sh")],
+       env={"WARROOM_ROOT": str(tmp_path), "AUDIT_KEY_FILE": str(key), "AUDIT_ANCHOR_DIR": str(anchor),
+            "APP_DATA": str(data), "APP_UID": "10001"})
     env = {"WARROOM_SUPERVISOR_PIN": TEST_PIN, "APP_IMAGE": image, "APP_DATA": str(data), "LLM_MODE": "mock",
-           "SCENARIO": "open_mill_overheat"}
+           "SCENARIO": "open_mill_overheat", "AUDIT_KEY_FILE": str(key), "AUDIT_ANCHOR_DIR": str(anchor),
+           "WARROOM_DEMO_CONTROLS": "1"}     # smoke_access.sh steps the sim (/api/sim/step); the stack default is 0
     compose = ["docker", "compose", "-p", "warroom-accesstest", "--project-directory", str(DEPLOY / "spark")]
     try:
         sh([*compose, "up", "-d", "--no-deps", "--no-build", "app"], env=env, timeout=180)
@@ -567,3 +576,254 @@ def test_live_compose_app_touchscreen_and_phone_can_approve(tmp_path):
         assert re.search(r"ok   touchscreen approves \S+: 200", r.stdout)
     finally:
         sh([*compose, "down"], env=env, check=False, timeout=120)
+
+
+# ---------------------------------------------------------------- Spark hardening (G1 audit key + G19 pinned images)
+SPARK_COMPOSE = DEPLOY / "spark" / "docker-compose.yml"
+EXTERNAL_IMAGES = {"vllm": "VLLM_IMAGE", "vllm-fp8": "VLLM_IMAGE", "qdrant": "QDRANT_IMAGE", "mqtt-init": "MQTT_IMAGE",
+                   "mqtt": "MQTT_IMAGE"}
+
+
+def _lock() -> dict[str, str]:
+    out = {}
+    for ln in (DEPLOY / "spark" / "images.lock").read_text().splitlines():
+        if ln.strip() and not ln.startswith("#"):
+            k, v = ln.split("=", 1)
+            out[k] = v
+    return out
+
+
+def _default(ref: str) -> tuple[str, str]:
+    """'${VAR:-value}' -> (VAR, value)."""
+    m = re.fullmatch(r"\$\{(\w+):-(.+)\}", ref)
+    assert m, ref
+    return m.group(1), m.group(2)
+
+
+def test_spark_images_pinned_no_latest():
+    text = SPARK_COMPOSE.read_text()
+    env_example = (DEPLOY / "spark" / ".env.example").read_text()
+    assert ":latest" not in text
+    assert not re.search(r"^APP_IMAGE=.*latest", env_example, re.M)
+    assert not re.search(r"^(VLLM|QDRANT|MQTT)_IMAGE=", env_example, re.M), \
+        "an unpinned .env image line would override the digest-pinned compose default"
+    lock = _lock()
+    assert set(lock) == {"VLLM_IMAGE", "QDRANT_IMAGE", "MQTT_IMAGE"}
+    for ref in lock.values():
+        assert re.fullmatch(r"[\w./-]+:[\w.-]+@sha256:[0-9a-f]{64}", ref), ref
+        assert not ref.split("@")[0].endswith(":latest")
+    s = yaml.safe_load(text)["services"]
+    for svc, var in EXTERNAL_IMAGES.items():
+        name, default = _default(s[svc]["image"])
+        assert name == var and default == lock[var], (svc, s[svc]["image"])
+    # the app is built/loaded locally (no registry digest): a required version tag, written by install / offline update
+    assert s["app"]["image"].startswith("${APP_IMAGE:?") and "build" in s["app"]
+
+
+def test_spark_compose_audit_key_outside_data_and_required():
+    s = yaml.safe_load(SPARK_COMPOSE.read_text())["services"]
+    app = s["app"]
+    env = app["environment"]
+    assert env["WARROOM_AUDIT_REQUIRE_KEY"] == "1"
+    data_mount = "/app/data/runtime"
+    assert env["AUDIT_PATH"].startswith(data_mount + "/")
+    key_in, anchor = env["WARROOM_AUDIT_KEY_FILE"], env["WARROOM_AUDIT_ANCHOR"]
+    assert not key_in.startswith(data_mount) and not anchor.startswith(data_mount)
+    binds = {v["target"]: v for v in app["volumes"] if isinstance(v, dict)}
+    kv = binds[key_in]
+    assert kv["type"] == "bind" and kv["read_only"] is True and kv["bind"]["create_host_path"] is False
+    assert kv["source"] == "${AUDIT_KEY_FILE:-/opt/warroom/secrets/audit.key}"
+    av = binds[str(Path(anchor).parent)]
+    assert av["source"] == "${AUDIT_ANCHOR_DIR:-/opt/warroom/audit-anchor}" and av["bind"]["create_host_path"] is False
+    assert not av.get("read_only")
+    for name, svc in s.items():                      # only the app ever sees the key
+        if name != "app":
+            mounts = yaml.safe_dump(svc.get("volumes", []))
+            assert "audit.key" not in mounts and "secrets" not in mounts, name
+    unit = (DEPLOY / "systemd" / "warroom-stack.service").read_text()
+    assert "exec /opt/warroom/current/deploy/bin/init-audit-key.sh --check'" in unit
+
+
+def test_spark_demo_controls_default_off():
+    env = yaml.safe_load(SPARK_COMPOSE.read_text())["services"]["app"]["environment"]
+    assert env["WARROOM_DEMO_CONTROLS"] == "${WARROOM_DEMO_CONTROLS:-0}"
+    assert re.search(r"^WARROOM_DEMO_CONTROLS=0$", (DEPLOY / "spark" / ".env.example").read_text(), re.M)
+    assert re.search(r"^WARROOM_DEMO_CONTROLS=1$", (DEPLOY / "spark-demo" / "compose-demo.env").read_text(), re.M)
+
+
+def test_gitignore_keeps_secrets_out():
+    gi = (ROOT / ".gitignore").read_text().splitlines()
+    for pat in ("data/runtime/", ".env", "*.key", "secrets/", "audit-anchor/"):
+        assert pat in gi, pat
+
+
+def _key_env(tmp_path: Path, **extra: str) -> dict[str, str]:
+    return {"WARROOM_ROOT": str(tmp_path), "ENV_FILE": str(tmp_path / "none.env"), "APP_DATA": str(tmp_path / "data"),
+            "AUDIT_KEY_FILE": str(tmp_path / "secrets" / "audit.key"),
+            "AUDIT_ANCHOR_DIR": str(tmp_path / "anchor"), **extra}
+
+
+def _init_key(tmp_path: Path, *args: str, **extra: str):
+    return sh(["bash", str(DEPLOY / "bin" / "init-audit-key.sh"), *args], env=_key_env(tmp_path, **extra), check=False)
+
+
+def _migrate(tmp_path: Path, **extra: str):
+    return sh(["bash", str(DEPLOY / "bin" / "migrate-audit-key.sh")],
+              env=_key_env(tmp_path, DOCKER="no-such-docker", **extra), check=False)
+
+
+def test_init_audit_key_creates_key_then_refuses_bad_permissions(tmp_path):
+    (tmp_path / "data").mkdir()
+    r = _init_key(tmp_path, "--check")
+    assert r.returncode == 1 and "missing" in r.stderr                  # --check never creates
+    r = _init_key(tmp_path)
+    assert r.returncode == 0, r.stderr
+    key = tmp_path / "secrets" / "audit.key"
+    assert re.fullmatch(rb"[0-9a-f]{64}\n", key.read_bytes())
+    assert key.stat().st_mode & 0o777 == 0o400 and (tmp_path / "secrets").stat().st_mode & 0o077 == 0
+    assert (tmp_path / "anchor").is_dir()
+    before = key.read_bytes()
+    assert _init_key(tmp_path).returncode == 0 and key.read_bytes() == before      # idempotent: never re-keys
+    assert _init_key(tmp_path, "--check").returncode == 0
+    key.chmod(0o444)
+    r = _init_key(tmp_path, "--check")
+    assert r.returncode == 1 and "group/others" in r.stderr and "refusing to start" in r.stderr
+    key.chmod(0o400)
+    r = _init_key(tmp_path, "--check", APP_UID=str(os.getuid() + 1))
+    assert r.returncode == 1 and "not the app uid" in r.stderr
+    (tmp_path / "data" / "audit.jsonl.key").write_bytes(b"x" * 32)
+    r = _init_key(tmp_path, "--check")
+    assert r.returncode == 1 and "migrate-audit-key.sh" in r.stderr
+
+
+def test_init_audit_key_refuses_key_inside_data_or_old_key_beside_log(tmp_path):
+    data = tmp_path / "data"
+    data.mkdir()
+    r = _init_key(tmp_path, AUDIT_KEY_FILE=str(data / "k" / "audit.key"))
+    assert r.returncode == 1 and "inside APP_DATA" in r.stderr and not (data / "k").exists()
+    (data / "audit.jsonl.key").write_bytes(b"x" * 32)
+    r = _init_key(tmp_path)
+    assert r.returncode == 1 and "migrate-audit-key.sh" in r.stderr
+    assert not (tmp_path / "secrets" / "audit.key").exists()           # no second key next to an existing chain
+
+
+AUDIT_VARS = ("WARROOM_AUDIT_KEY", "WARROOM_AUDIT_KEY_FILE", "WARROOM_AUDIT_REQUIRE_KEY", "WARROOM_AUDIT_ANCHOR")
+
+
+def _app_env(monkeypatch, tmp_path: Path) -> None:
+    """The app's view after the compose change: key file outside data, key required, mirrored anchor."""
+    monkeypatch.delenv("WARROOM_AUDIT_KEY", raising=False)
+    monkeypatch.setenv("WARROOM_AUDIT_KEY_FILE", str(tmp_path / "secrets" / "audit.key"))
+    monkeypatch.setenv("WARROOM_AUDIT_REQUIRE_KEY", "1")
+    monkeypatch.setenv("WARROOM_AUDIT_ANCHOR", str(tmp_path / "anchor" / "audit.jsonl.head"))
+
+
+def _old_chain(monkeypatch, tmp_path: Path, key: bytes | None = None) -> Path:
+    """A log written the old way: no key env, so the app made <log>.key beside the log."""
+    from warroom.agent.audit import JsonlAuditLog
+    from warroom.contracts import AuditKind
+    for v in AUDIT_VARS:
+        monkeypatch.delenv(v, raising=False)
+    data = tmp_path / "data"
+    data.mkdir()
+    if key is not None:
+        (data / "audit.jsonl.key").write_bytes(key)
+    log = JsonlAuditLog(data / "audit.jsonl")
+    assert log.key_source == "beside_log"
+    for i in range(3):
+        log.append(AuditKind.SYSTEM, "test", {"i": i})
+    return data
+
+
+def test_migrate_audit_key_keeps_the_old_chain_valid(monkeypatch, tmp_path):
+    from warroom.agent.audit import JsonlAuditLog
+    data = _old_chain(monkeypatch, tmp_path, key=b"A" + bytes(range(1, 31)) + b"Z")
+    old_key = (data / "audit.jsonl.key").read_bytes()
+    r = _migrate(tmp_path)
+    assert r.returncode == 0, r.stdout + r.stderr
+    key = tmp_path / "secrets" / "audit.key"
+    assert key.read_bytes() == old_key and key.stat().st_mode & 0o777 == 0o400
+    assert not (data / "audit.jsonl.key").exists()
+    assert (tmp_path / "anchor" / "audit.jsonl.head").read_bytes() == (data / "audit.jsonl.head").read_bytes()
+    _app_env(monkeypatch, tmp_path)
+    log = JsonlAuditLog(data / "audit.jsonl")
+    assert log.key_source == "file" and log.recovery == [] and len(log) == 3 and log.verify_chain()
+    assert not list(data.glob("audit.jsonl.broken-*"))
+    assert log.verify_report()["ok"]
+    assert _migrate(tmp_path).returncode == 0                            # rerun: nothing left to move, still ok
+
+
+def test_without_migration_the_app_refuses_or_archives(monkeypatch, tmp_path):
+    """Why the migrate script exists: REQUIRE_KEY with no key file refuses to start; a fresh key archives the chain."""
+    from warroom.agent.audit import AuditKeyError, JsonlAuditLog
+    data = _old_chain(monkeypatch, tmp_path)
+    monkeypatch.setenv("WARROOM_AUDIT_REQUIRE_KEY", "1")
+    with pytest.raises(AuditKeyError):
+        JsonlAuditLog(data / "audit.jsonl")
+    (data / "audit.jsonl.key").unlink()
+    assert _init_key(tmp_path).returncode == 0      # the old key is already gone, so init makes a new one
+    _app_env(monkeypatch, tmp_path)
+    JsonlAuditLog(data / "audit.jsonl")
+    assert list(data.glob("audit.jsonl.broken-*"))
+
+
+def test_migrate_audit_key_whitespace_edge_refuses_then_rotates(monkeypatch, tmp_path):
+    from warroom.agent.audit import JsonlAuditLog
+    data = _old_chain(monkeypatch, tmp_path, key=b" " + bytes(range(1, 31)) + b"Z")   # bytes.strip() would eat it
+    r = _migrate(tmp_path)
+    assert r.returncode == 1 and "ROTATE=1" in r.stderr
+    assert (data / "audit.jsonl.key").exists() and not (tmp_path / "secrets" / "audit.key").exists()
+    r = _migrate(tmp_path, ROTATE="1")
+    assert r.returncode == 0, r.stdout + r.stderr
+    retired = list((tmp_path / "secrets").glob("retired-*"))
+    assert len(retired) == 1
+    assert {"audit.jsonl", "audit.jsonl.head", "audit.jsonl.key"} <= {p.name for p in retired[0].iterdir()}
+    assert not (data / "audit.jsonl").exists()
+    _app_env(monkeypatch, tmp_path)
+    log = JsonlAuditLog(data / "audit.jsonl")
+    assert log.key_source == "file" and len(log) == 0
+
+
+def test_migrate_refuses_two_different_keys(monkeypatch, tmp_path):
+    _old_chain(monkeypatch, tmp_path)
+    (tmp_path / "secrets").mkdir(mode=0o700)
+    (tmp_path / "secrets" / "audit.key").write_text("f" * 64 + "\n")
+    r = _migrate(tmp_path)
+    assert r.returncode == 1 and "differ" in r.stderr
+
+
+def test_install_writes_app_image_tag_and_audit_key(tmp_path):
+    root, _, r = _install(tmp_path, WARROOM_SUPERVISOR_PIN="Abc123xyz9")
+    assert r.returncode == 0, r.stderr
+    lines = (root / "current" / "deploy" / "spark" / ".env").read_text().splitlines()
+    assert "APP_IMAGE=warroom-app:t1" in lines
+    assert f"AUDIT_KEY_FILE={root}/secrets/audit.key" in lines
+    assert f"AUDIT_ANCHOR_DIR={root}/audit-anchor" in lines
+    assert (root / "secrets" / "audit.key").stat().st_mode & 0o777 == 0o400
+    assert "audit key ok" in r.stdout
+
+
+def test_install_aborts_while_the_old_key_sits_beside_the_log(tmp_path):
+    root = tmp_path / "opt"
+    (root / "data" / "runtime").mkdir(parents=True)
+    (root / "data" / "runtime" / "audit.jsonl.key").write_bytes(b"x" * 32)
+    _, sysd, r = _install(tmp_path, WARROOM_SUPERVISOR_PIN="Abc123xyz9")
+    assert r.returncode != 0 and "migrate-audit-key.sh" in r.stderr and "install aborted" in r.stderr
+    assert not list(sysd.iterdir())
+
+
+def test_rollback_refuses_a_pre_key_release_after_migration(tmp_path, healthy_url):
+    root = tmp_path / "opt"
+    env = {"WARROOM_ROOT": str(root), "RESTART_CMD": "true", "HEALTH_URL": healthy_url, "HEALTH_TIMEOUT_S": "10"}
+    old = root / "releases" / "old" / "deploy" / "spark"
+    old.mkdir(parents=True)
+    (old / "docker-compose.yml").write_text("services: {app: {image: warroom-app:old}}\n")
+    sh(["bash", str(DEPLOY / "update" / "offline_update.sh"), str(make_bundle(tmp_path, "new"))], env=env)
+    data = root / "data" / "runtime"
+    data.mkdir(parents=True)
+    (data / "audit.jsonl").write_text('{"seq": 1}\n')
+    r = sh(["bash", str(DEPLOY / "update" / "rollback.sh"), "old"], env=env, check=False)
+    assert r.returncode == 6 and "ALLOW_AUDIT_RESTART" in r.stderr
+    assert os.readlink(root / "current") == str(root / "releases" / "new")
+    (data / "audit.jsonl.key").write_bytes(b"x" * 32)          # not migrated yet: the old release still has its key
+    assert sh(["bash", str(DEPLOY / "update" / "rollback.sh"), "old"], env=env, check=False).returncode == 0

@@ -6,6 +6,13 @@ dist/
 qdrant_db/
 .DS_Store
 data/runtime/
+# secrets: never committed (CLAUDE.md). deploy/bin/init-audit-key.sh writes the audit key OUTSIDE the repo
+# (/opt/warroom/secrets); these catch a copy or a test run that lands inside a checkout.
+.env
+*.key
+secrets/
+audit-anchor/
+deploy/spark/images.installed
 *.egg-info/
 .pytest_cache/
 .ruff_cache/

@@ -19,6 +19,13 @@
 #      HF_CACHE (default ${ROOT}/hf).
 # OS quiet: LAN_NTP=<factory NTP host(s)> (timesyncd target), QUIET_OS=0 (leave DGX OS online housekeeping
 #      alone), ETC_DIR=/etc (tests).
+# Audit key (G1): deploy/bin/init-audit-key.sh creates AUDIT_KEY_FILE (default $ROOT/secrets/audit.key) and
+#      AUDIT_ANCHOR_DIR (default $ROOT/audit-anchor) outside data/runtime and refuses wrong permissions; an old
+#      install with data/runtime/audit.jsonl.key aborts here until deploy/bin/migrate-audit-key.sh has moved it.
+#      APP_UID=10001 (tests: their own uid).
+# Images (G19): APP_IMAGE=warroom-app:<ver> is written into .env (never :latest); the other images come from the
+#      digest-pinned compose defaults (= deploy/spark/images.lock). Each image's ID is recorded in
+#      deploy/spark/images.installed of the release.
 set -euo pipefail
 ROOT="${WARROOM_ROOT:-/opt/warroom}"
 SRC="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -58,7 +65,30 @@ if [[ -n "${HF_CACHE:-}" && "$HF_CACHE" != "$env_hf" ]]; then
   { grep -v '^HF_CACHE=' "$envf" || true; echo "HF_CACHE=$HF_CACHE"; } >"$envf.tmp" && mv "$envf.tmp" "$envf"
 fi
 HF_CACHE="${HF_CACHE:-${env_hf:-$ROOT/hf}}"
-chown -R 10001 "$ROOT/data/runtime" 2>/dev/null || true   # app container user
+chown -R "${APP_UID:-10001}" "$ROOT/data/runtime" 2>/dev/null || true   # app container user
+# The app image is this release's tag, never :latest (compose builds and runs exactly this tag).
+app_image="${APP_IMAGE:-warroom-app:$VER}"
+{ grep -v '^APP_IMAGE=' "$envf" || true; echo "APP_IMAGE=$app_image"; } >"$envf.tmp" && mv "$envf.tmp" "$envf"
+chmod 600 "$envf" 2>/dev/null || true
+for var in VLLM_IMAGE QDRANT_IMAGE MQTT_IMAGE; do
+  ref="$(sed -n "s/^$var=//p" "$envf" | tail -1)"
+  if [[ -n "$ref" && "$ref" != *@sha256:* ]]; then
+    echo "WARNING: $envf sets $var=$ref without @sha256:<digest>; remove the line to use the pinned default" \
+         "from deploy/spark/images.lock, or pin it" >&2
+  fi
+done
+# Audit HMAC key outside the data volume; the compose app refuses to start without it. The paths go into .env
+# (kept when already set there) so compose mounts exactly what init-audit-key.sh created.
+for kv in "AUDIT_KEY_FILE=$ROOT/secrets/audit.key" "AUDIT_ANCHOR_DIR=$ROOT/audit-anchor"; do
+  var="${kv%%=*}"; want="${!var:-${kv#*=}}"
+  if [[ -n "${!var:-}" || -z "$(sed -n "s/^$var=//p" "$envf" | tail -1)" ]]; then
+    { grep -v "^$var=" "$envf" || true; echo "$var=$want"; } >"$envf.tmp" && mv "$envf.tmp" "$envf"
+  fi
+done
+chmod 600 "$envf" 2>/dev/null || true
+WARROOM_ROOT="$ROOT" ENV_FILE="$envf" APP_DATA="${APP_DATA:-$ROOT/data/runtime}" AUDIT_KEY_FILE= AUDIT_ANCHOR_DIR= \
+  bash "$ROOT/current/deploy/bin/init-audit-key.sh" \
+  || { echo "install aborted: audit key not ready (see above)" >&2; exit 1; }
 
 if [[ "${NO_IMAGES:-0}" != 1 ]]; then
   compose=("$DOCKER" compose --project-directory "$ROOT/current/deploy/spark")
@@ -71,9 +101,13 @@ if [[ "${NO_IMAGES:-0}" != 1 ]]; then
   images=$("${compose[@]}" config --images)
   [[ -n "$images" ]] || { echo "install: compose lists no images" >&2; exit 1; }
   missing=0
+  installed="$ROOT/current/deploy/spark/images.installed"
+  echo "# image ref -> local image ID, written by install_spark.sh $(date '+%Y-%m-%dT%H:%M:%S%z')" >"$installed"
   while read -r img; do
     [[ -z "$img" ]] && continue
-    if "$DOCKER" image inspect "$img" >/dev/null 2>&1; then echo "image ok: $img"
+    if "$DOCKER" image inspect "$img" >/dev/null 2>&1; then
+      echo "image ok: $img"
+      echo "$img $("$DOCKER" image inspect --format '{{.Id}}' "$img" 2>/dev/null || true)" >>"$installed"
     else echo "install: image MISSING: $img" >&2; missing=1; fi
   done <<<"$images"
   (( missing == 0 )) || { echo "install aborted: the stack cannot start offline without these images" >&2; exit 1; }

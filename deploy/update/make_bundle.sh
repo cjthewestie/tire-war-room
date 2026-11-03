@@ -4,11 +4,13 @@
 #   deploy/update/make_bundle.sh [version] [out_dir]
 # Bundle = warroom-<ver>.tar containing:
 #   src.tar.gz         git archive of the repo at HEAD (code, deploy/, bench/, web sources)
-#   images.tar         `docker save` of warroom-app:<ver> + IMAGES (default eclipse-mosquitto:2, the small
-#                      broker compose needs; add "vllm/vllm-openai:... qdrant/..." for a first offline install)
-#   MANIFEST           version, git sha, created, image list
+#   images.tar         `docker save` of warroom-app:<ver> + IMAGES (default: MQTT_IMAGE from deploy/spark/images.lock,
+#                      the small broker compose needs, digest-pinned; add the VLLM_IMAGE / QDRANT_IMAGE refs from
+#                      images.lock for a first offline install)
+#   MANIFEST           version, git sha, created, image list, app_image + app_image_id (the built image's ID: the
+#                      app has no registry digest, so this is its pin; offline_update.sh checks it after docker load)
 #   SHA256SUMS         checked by offline_update.sh before anything is touched
-# Env: SKIP_IMAGES=1 (code-only bundle, tests), IMAGES="extra images" (default eclipse-mosquitto:2; IMAGES= for none),
+# Env: SKIP_IMAGES=1 (code-only bundle, tests), IMAGES="extra images" (default images.lock's MQTT_IMAGE; IMAGES= for none),
 #      DOCKER=docker,
 #      FROM_WORKTREE=1 (bundle the working tree instead of git HEAD)
 set -euo pipefail
@@ -27,9 +29,12 @@ else
   git -C "$SRC" archive --format=tar.gz -o "$work/src.tar.gz" HEAD
 fi
 images=()
+app_image_id=""
+lock_mqtt="$(sed -n 's/^MQTT_IMAGE=//p' "$SRC/deploy/spark/images.lock" | tail -1)"
 if [[ "${SKIP_IMAGES:-0}" != 1 ]]; then
   $DOCKER build -f "$SRC/deploy/Dockerfile" -t "warroom-app:$VER" "$SRC"
-  extra=(${IMAGES-eclipse-mosquitto:2})
+  app_image_id="$($DOCKER image inspect --format '{{.Id}}' "warroom-app:$VER")"
+  extra=(${IMAGES-$lock_mqtt})
   for img in ${extra[@]+"${extra[@]}"}; do
     $DOCKER image inspect "$img" >/dev/null 2>&1 || $DOCKER pull "$img"
   done
@@ -41,6 +46,8 @@ fi
   echo "git_sha=$(git -C "$SRC" rev-parse HEAD)"
   echo "created=$(date '+%Y-%m-%dT%H:%M:%S%z')"
   echo "images=${images[*]:-}"
+  echo "app_image=warroom-app:$VER"
+  echo "app_image_id=$app_image_id"
 } >"$work/MANIFEST"
 ( cd "$work" && sha256 $(ls | grep -v SHA256SUMS) >SHA256SUMS )
 tar -C "$work" -cf "$OUT/warroom-$VER.tar" .
