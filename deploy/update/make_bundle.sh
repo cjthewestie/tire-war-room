@@ -23,7 +23,7 @@ work="$(mktemp -d)"; trap 'rm -rf "$work"' EXIT
 mkdir -p "$OUT"
 
 if [[ "${FROM_WORKTREE:-0}" == 1 ]]; then   # hot-fix bundle from uncommitted tree (also used by tests)
-  tar -C "$SRC" --exclude=.git --exclude=node_modules --exclude=.venv --exclude=data/runtime \
+  tar -C "$SRC" --exclude=.git --exclude=.claude --exclude=node_modules --exclude=.venv --exclude=data/runtime \
       --exclude=deploy/releases --exclude=bench/results -czf "$work/src.tar.gz" .
 else
   git -C "$SRC" archive --format=tar.gz -o "$work/src.tar.gz" HEAD
