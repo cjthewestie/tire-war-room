@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import timedelta
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from scripts import record_plans as RP
+from tests.agent_fakes import T0
+from tests.fakes import team_scenarios as TS
 from tests.fakes.replay_commander import (
+    FIXTURES,
     ReplayCommander,
     StaleFixture,
     check_hashes,
@@ -24,8 +31,19 @@ from tests.fakes.replay_commander import (
 from tests.test_agent import auto_approve, make_sm
 from tests.test_agent_page11 import page11_anomaly
 from warroom.agent import plant
+from warroom.agent.commander import MockCommander, parse_plan
 from warroom.agent.orchestrator import ModelQueue, QueuedCommander
-from warroom.contracts import AuditKind, EventState, GateVerdict, HypothesisStatus, MachineStatus
+from warroom.agent.strict import failure_cause
+from warroom.contracts import (
+    AnomalyKind,
+    AuditKind,
+    EventState,
+    GateVerdict,
+    HypothesisStatus,
+    LLMCallInfo,
+    LLMMode,
+    MachineStatus,
+)
 
 OK_END = (EventState.CLOSED, EventState.AWAIT_APPROVAL)
 
@@ -172,9 +190,9 @@ def test_stale_prompt_hash_says_rerecord():
 
 def test_every_fixture_is_pinned_to_todays_prompt():
     """One clear failure per stale scenario (instead of a confusing state-machine assertion further down)."""
-    from tests.fakes.replay_commander import FIXTURES
     names = sorted(p.parent.name for p in FIXTURES.glob("*/manifest.json"))
-    assert names == ["cmd_m201", "p11"]
+    assert [n for n in names if not n.startswith("team_")] == ["cmd_m201", "p11"]
+    assert set(TEAM_FIXTURES) <= set(TS.SCENARIOS), "a team_* fixture with no scenario in tests/fakes/team_scenarios.py"
     for n in names:
         check_hashes(load_scenario(n))
 
@@ -187,3 +205,129 @@ def test_request_key():
     h = Hypothesis(id="H1", statement="x", cause_code="steam_pressure_low", status=HypothesisStatus.REJECTED)
     assert request_key(req.model_copy(update={"phase": "replan", "rejected": [h]})) == ("replan", "steam_pressure_low")
     assert request_key(req.model_copy(update={"phase": "replan"})) == ("replan", "-")
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# 建議 3b: team-dataset scenarios (tests/fakes/team_scenarios.py), recorded live by scripts/record_plans.py, and the
+# plan-evaluation counts bench/full_event.py --label pools.
+TEAM_FIXTURES = sorted(p.parent.name for p in FIXTURES.glob("team_*/manifest.json"))
+
+
+def test_team_scenarios_come_from_the_dataset_through_team_ids():
+    from warroom.data import team_ids
+    ev1, ev2 = TS.world("team_ev1"), TS.world("team_ev2")
+    assert ev1.machine_id == team_ids.machine_id("A03") == "A-BIGOPEN"
+    assert ev2.machine_id == team_ids.machine_id("V07") == "CURE-07"
+    a1, a2 = ev1.anomaly(), ev2.anomaly()
+    assert (a1.kind, a2.kind) == (AnomalyKind.OVERHEAT, AnomalyKind.TEMP_DROP)
+    # events.csv: EV-1 A03 膠溫 112 °C at 14:26; EV-2 V07 128 -> 122 -> 119.5 °C
+    assert a1.value == 112.0 and a1.baseline < 100 and a1.prediction.trend_per_min > 0
+    assert a2.baseline == 128.0 and a2.value <= 123.0
+    # the harness reads the dataset's own curve, time-shifted onto the harness clock
+    assert ev2.temp("CURE-07", T0) == a2.value
+    assert ev2.temp("CURE-07", T0 + timedelta(minutes=40)) < 121.0          # settles near 119.5
+    assert ev2.temp("CURE-06", T0) > 126.0 and ev2.temp("CURE-01", T0) == 128.0
+    assert ev1.flow("A-BIGOPEN", T0) < 30.0 and ev1.flow("CURE-07", T0) is None   # cooling water low on EV-1
+
+
+@pytest.mark.parametrize("name", TEAM_FIXTURES or [pytest.param("-", marks=pytest.mark.skip(
+    reason="no team scenario recorded yet: run scripts/record_plans.py --label mac on the Mac"))])
+async def test_recorded_team_scenario_replays(tmp_path, name):
+    """Every recorded team scenario replays offline: same questions, no SAFE_STOP, no gate REJECT, plans from the
+    commander, and the same anomaly the recording started from (a changed dataset or harness is a re-record)."""
+    scn = load_scenario(name)
+    assert scn["anomaly"] == TS.world(name).anomaly().model_dump(mode="json"), \
+        f"{name}: the anomaly rebuilt from data/team_dataset differs from the recorded one; re-record"
+    cmd = ReplayCommander(scn)
+    ev, audit, _sim, _dec = await TS.run_event(name, QueuedCommander(cmd, ModelQueue()), tmp_path)
+    assert replay_failures(ev, audit, cmd) == []
+    assert ev.state.value == scn["recorded"]["final_state"]
+    assert [list(s[:3]) for s in cmd.served] == [[r["phase"], r["cause_code"], r["round"]] for r in scn["responses"]]
+
+
+class ScriptedLive:
+    """Stands in for OpenAICommander offline: answers with the rule commander's plan as raw JSON text, through the
+    same strict parse. Only for testing the record -> replay loop: it is not a model and nothing it records is
+    committed."""
+    mode = LLMMode.LLM
+
+    def __init__(self, broken: bool = False):
+        self.mock, self.broken = MockCommander(), broken
+        self.settings = SimpleNamespace(llm_fallback_to_mock=False, base_url="scripted://", model="scripted")
+        self.last_raw, self.last_error, self.last_cause, self.last_intercepted = "", None, None, []
+
+    async def plan(self, req, on_alert=None):
+        plan, _ = await self.mock.plan(req)
+        text = plan.model_dump_json()
+        self.last_raw = text[:-40] if self.broken else text
+        self.last_error = self.last_cause = None
+        try:
+            parsed, self.last_intercepted = parse_plan(self.last_raw, [])
+        except Exception as e:
+            self.last_error, self.last_cause = f"{type(e).__name__}: {e}", failure_cause(e)
+            raise
+        if on_alert:
+            on_alert(parsed.alert_card)
+        return parsed, LLMCallInfo(mode=LLMMode.LLM, model="scripted", base_url="scripted://", valid_json=True,
+                                   total_ms=0.0)
+
+
+@pytest.mark.parametrize("name", sorted(TS.SCENARIOS))
+async def test_record_then_replay_offline(tmp_path, name):
+    """scripts/record_plans.py: a passing live run is written in the 3a fixture format and replays offline."""
+    out = tmp_path / "fixtures"
+    r = await RP.record(name, ScriptedLive(), out, label="mac", model="scripted", base_url="scripted://",
+                        workdir=tmp_path / "work")
+    assert r["ok"], r["failures"]
+    man = json.loads((out / name / "manifest.json").read_text(encoding="utf-8"))
+    assert man["system_prompt_sha256"] == system_prompt_sha() and man["plant_sha256"] == plant.active_sha()
+    assert man["team_event"] == TS.SCENARIOS[name].event_id and man["recorded"]["label"] == "mac"
+    assert man["anomaly"] == TS.world(name).anomaly().model_dump(mode="json")
+    for e in man["responses"]:
+        body = json.loads((out / name / e["file"]).read_text(encoding="utf-8"))
+        assert body["source"].startswith("recorded: scripts/record_plans.py, mac") and body["output"].startswith("{")
+    # the written fixture replays through ReplayCommander like a committed one
+    cmd = ReplayCommander(load_scenario(name, root=out))
+    ev, audit, _sim, _dec = await TS.run_event(name, QueuedCommander(cmd, ModelQueue()), tmp_path / "again")
+    assert replay_failures(ev, audit, cmd) == [] and ev.state.value == man["recorded"]["final_state"]
+    assert len(cmd.served) == len(man["responses"]) >= 1
+
+
+async def test_record_refuses_a_failing_run(tmp_path, monkeypatch):
+    """A live answer that does not parse safe-stops the event (--strict): no fixture, the raw answer kept aside."""
+    monkeypatch.setattr(RP, "FAILED_DIR", tmp_path / "failed")
+    out = tmp_path / "fixtures"
+    r = await RP.record("team_ev1", ScriptedLive(broken=True), out, label="mac", model="scripted",
+                        base_url="scripted://", workdir=tmp_path / "work")
+    assert not r["ok"] and r["final_state"] == "safe_stop"
+    assert any("SAFE_STOP" in f for f in r["failures"]), r["failures"]
+    assert not (out / "team_ev1").exists()
+    kept = json.loads(Path(r["failed_raw"]).read_text(encoding="utf-8"))
+    assert kept["raw_calls"][0]["output"] and not kept["raw_calls"][0]["ok"]
+    with pytest.raises(ValueError, match="--label"):
+        await RP.record("team_ev1", ScriptedLive(), out, label="laptop", model="m", base_url="u")
+
+
+async def test_plan_counts_from_a_replayed_event(tmp_path):
+    """bench/full_event.py --label: the per-run counts come from the event's own audit rows."""
+    from bench.full_event import plan_counts, planeval_summary, write_planeval
+    ev, audit, _sim, _cmd = await _p11(tmp_path / "good")
+    good = plan_counts([e for e in audit.tail(0, 0) if e.event_id == ev.id], ev)
+    assert good["schema"] == [2, 2] and good["safe_stop"] == 0 and good["replans"] == 1
+    assert good["gate"][1] > 0 and good["gate"][0] == good["gate"][1]          # nothing rejected
+    assert good["sim"][1] > 0 and good["final_state"] == "closed"
+    ev2, audit2, _s, _c = await _p11(tmp_path / "bad", "repeat_h1")
+    bad = plan_counts([e for e in audit2.tail(0, 0) if e.event_id == ev2.id], ev2)
+    assert bad["safe_stop"] == 1 and bad["final_state"] == "safe_stop"
+
+    pe = planeval_summary([{"planeval": good}, {"planeval": bad}, {"skipped": "endpoint down"}])
+    assert (pe["runs"], pe["runs_measured"], pe["runs_skipped"]) == (3, 2, 1)
+    assert pe["safe_stop_runs"] == 1 and pe["closed"] == {"ok": 1, "total": 2, "rate": 0.5}
+    assert pe["schema_valid"]["total"] == good["schema"][1] + bad["schema"][1]
+    d = write_planeval("mac", {"planeval": pe, "endpoint": {"model": "m", "base_url": "u"}, "saved_to": "x.json"},
+                       root=tmp_path / "results")
+    assert d.name.endswith("-mac-planeval")
+    assert json.loads((d / "planeval.json").read_text(encoding="utf-8"))["machine"] == "Mac"
+    assert "Mac" in (d / "README.md").read_text(encoding="utf-8")
+    with pytest.raises(ValueError):
+        write_planeval("laptop", {"planeval": pe}, root=tmp_path / "results")
